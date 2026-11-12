@@ -824,7 +824,6 @@ async fn run(command: Command) -> Result<()> {
                 None
             };
             execution_profile.task_artifact_inputs = workspace.is_some()
-                && remote_provider.is_none()
                 && shared_execution.is_none()
                 && supertag_protocol::task_artifact_inputs::supports_harness(harness);
             let options = HostOptions {

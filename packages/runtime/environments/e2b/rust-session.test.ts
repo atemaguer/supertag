@@ -161,7 +161,7 @@ async function fixture() {
   };
 }
 
-async function bundle(linkTarget = "a.txt") {
+async function bundle(linkTarget = "a.txt", inputParentLink = false) {
   const root = await mkdtemp(join(tmpdir(), "supertag-e2b-bundle-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const git = async (...args: string[]) => {
@@ -175,6 +175,7 @@ async function bundle(linkTarget = "a.txt") {
   await writeFile(join(root, "runner"), "#!/bin/sh\nexit 0\n");
   await chmod(join(root, "runner"), 0o755);
   await symlink(linkTarget, join(root, "link"));
+  if (inputParentLink) await symlink("a.txt", join(root, "inputs"));
   await git("add", ".");
   await git(
     "-c",
@@ -204,6 +205,69 @@ async function bundle(linkTarget = "a.txt") {
     },
   };
 }
+
+it("stages verified private inputs and excludes them from the return tree", async () => {
+  const input = Buffer.from("exact remote evidence\n");
+  const attempt = createHash("sha256").update(owner.attemptId).digest("hex");
+  const operation = "a".repeat(64);
+  const path = `inputs/${attempt}/artifact-${operation}/evidence.txt`;
+  const { session } = await fixture();
+  const { header, bytes } = await bundle(path);
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  const inputFiles = [
+    {
+      path,
+      blob: {
+        sha256: createHash("sha256").update(input).digest("hex"),
+        byteLength: BigInt(input.length),
+      },
+    },
+  ];
+  const corrupt = Buffer.from(input);
+  corrupt[0] = 0;
+  await expect(session.stage({ ...header, inputFiles }, bytes, undefined, corrupt)).rejects.toThrow(
+    /differ from the receipt/i,
+  );
+  await session.stage({ ...header, inputFiles }, bytes, undefined, input);
+  const read = await session.execute({ kind: "read", path });
+  expect(read.isError).toBe(false);
+  expect(read.text).toContain("exact remote evidence");
+  await expect(session.execute({ kind: "write", path, content: "mutated" })).rejects.toThrow(
+    /read-only/i,
+  );
+  await expect(
+    session.execute({ kind: "edit", path: "link", oldText: "exact", newText: "mutated" }),
+  ).rejects.toThrow(/read-only/i);
+  expect(unpack((await session.capture()).bytes).map((entry) => entry.path)).not.toContain(path);
+  await session.stop({ owner });
+}, 15_000);
+
+it("rejects an input root redirected by the repository", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle("a.txt", true);
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  const attempt = createHash("sha256").update(owner.attemptId).digest("hex");
+  await expect(
+    session.stage(
+      {
+        ...header,
+        inputFiles: [
+          {
+            path: `inputs/${attempt}/artifact-${"a".repeat(64)}/empty.txt`,
+            blob: { sha256: createHash("sha256").update("").digest("hex"), byteLength: 0n },
+          },
+        ],
+      },
+      bytes,
+    ),
+  ).rejects.toThrow(/could not be staged/i);
+  await expect(session.execute({ kind: "read", path: "a.txt" })).rejects.toThrow(/not staged/i);
+  await session.stop({ owner });
+}, 15_000);
 
 function unpack(bytes: Uint8Array) {
   const input = Buffer.from(bytes);

@@ -106,6 +106,8 @@ async function runFixture() {
         "remote-output-tracked",
         "remote-output-git-capture",
         "remote-output-git-reference",
+        "remote-input-producer",
+        "remote-input-consumer",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -118,7 +120,9 @@ async function runFixture() {
     const sharedCommand = mode === "shared-command";
     const output = mode.startsWith("remote-output-");
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
-    const writable = writes || shared || (output && mode !== "remote-output-readonly");
+    const remoteInputs = mode.startsWith("remote-input-");
+    const writable =
+      writes || shared || remoteInputs || (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
@@ -146,13 +150,17 @@ async function runFixture() {
     assert.match(agentId, /^agent-[\w-]+$/u);
     const agentsFile = join(request.storeDirectory, "agents.ndjson");
     let restoredFrom;
-    if (resumes || ["cancel", "after-cancel"].includes(mode)) {
+    if (resumes || mode === "remote-input-consumer" || ["cancel", "after-cancel"].includes(mode)) {
       assert.ok(request.resumeAgentId, "expected native Session restore");
       const agents = (await readFile(agentsFile, "utf8")).trim().split("\n").map(JSON.parse);
       const agent = agents.find((entry) => entry.agentId === agentId);
       assert.equal(agent?.cwd, cwd, "restored agent was not retargeted to this native cwd");
       restoredFrom = agent?.fixtureTurn;
-      assert.equal(restoredFrom, resumes ? mode.replace("resume", "first") : "baseline");
+      if (mode === "remote-input-consumer") {
+        assert.ok(["remote-input-producer", mode].includes(restoredFrom));
+      } else {
+        assert.equal(restoredFrom, resumes ? mode.replace("resume", "first") : "baseline");
+      }
     } else {
       assert.equal(request.resumeAgentId, undefined);
     }
@@ -197,7 +205,26 @@ async function runFixture() {
       });
       assert.equal(blocked.isError, true);
     }
-    if (output) {
+    if (mode === "remote-input-consumer") {
+      const evidence =
+        /inputs\/[0-9a-f]{64}\/artifact-[0-9a-f]{64}\/(?:[\w-]+\/)*evidence\.txt/u.exec(
+          request.prompt,
+        )?.[0];
+      assert.ok(evidence, "accepted artifact path is missing from the native prompt");
+      const read = await call("read", { file_path: evidence });
+      assert.equal(read.isError, false);
+      assert.equal(read.text, "remote staged evidence\n");
+      const write = await call("write", { file_path: evidence, content: "must not overwrite" });
+      assert.equal(write.isError, true);
+    } else if (mode === "remote-input-producer") {
+      const directory = /Task output directory: ([\w/-]+)/u.exec(request.prompt)?.[1];
+      assert.ok(directory);
+      const write = await call("write", {
+        file_path: `${directory}/evidence.txt`,
+        content: "remote staged evidence\n",
+      });
+      assert.equal(write.isError, false);
+    } else if (output) {
       const directory = /Task output directory: ([\w/-]+)/u.exec(request.prompt)?.[1];
       assert.ok(directory, "the remote output path did not reach the model");
       assert.equal(process.env.SUPERTAG_OUTPUT_DIR, undefined);

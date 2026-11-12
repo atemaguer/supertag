@@ -1216,12 +1216,14 @@ class RemoteWorkspaceAllocation(_message.Message):
     def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceStageHeader(_message.Message):
-    __slots__ = ("start_commit", "bundle")
+    __slots__ = ("start_commit", "bundle", "input_files")
     START_COMMIT_FIELD_NUMBER: _ClassVar[int]
     BUNDLE_FIELD_NUMBER: _ClassVar[int]
+    INPUT_FILES_FIELD_NUMBER: _ClassVar[int]
     start_commit: str
     bundle: BlobReference
-    def __init__(self, start_commit: _Optional[str] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+    input_files: _containers.RepeatedCompositeFieldContainer[ArtifactInputFile]
+    def __init__(self, start_commit: _Optional[str] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., input_files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
 
 class RemoteWorkspaceStageChunk(_message.Message):
     __slots__ = ("header", "payload")
@@ -1232,8 +1234,10 @@ class RemoteWorkspaceStageChunk(_message.Message):
     def __init__(self, header: _Optional[_Union[RemoteWorkspaceStageHeader, _Mapping]] = ..., payload: _Optional[bytes] = ...) -> None: ...
 
 class RemoteWorkspaceStageResponse(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("input_files",)
+    INPUT_FILES_FIELD_NUMBER: _ClassVar[int]
+    input_files: _containers.RepeatedCompositeFieldContainer[ArtifactInputFile]
+    def __init__(self, input_files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
 
 class RemoteWorkspaceCaptureRequest(_message.Message):
     __slots__ = ()

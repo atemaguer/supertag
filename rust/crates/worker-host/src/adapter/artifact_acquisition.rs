@@ -225,7 +225,7 @@ impl AcquisitionClient<'_> {
         }
         Ok(result)
     }
-    async fn settle_acquisition(
+    pub(crate) async fn settle_acquisition(
         &self,
         acquisition: &ArtifactAcquisition,
         state: ArtifactAcquisitionState,
@@ -261,7 +261,7 @@ impl AcquisitionClient<'_> {
         }
         Ok(receipt)
     }
-    async fn acquired_bytes(
+    pub(crate) async fn acquired_bytes(
         &self,
         acquisition: &ArtifactAcquisition,
         file: &ArtifactFile,

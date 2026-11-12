@@ -303,6 +303,7 @@ impl RemoteProvider {
         &self,
         bundle: &TransferArtifact,
         start_commit: &str,
+        inputs: &[(ArtifactInputFile, Vec<u8>)],
         cancel: &CancellationToken,
     ) -> Result<()> {
         ensure!(
@@ -313,6 +314,24 @@ impl RemoteProvider {
             "invalid prepared commit"
         );
         validate_blob(bundle.byte_length, &bundle.sha256)?;
+        let mut total = bundle.byte_length;
+        for (input, bytes) in inputs {
+            let blob = input
+                .blob
+                .as_ref()
+                .context("Workspace input receipt is missing")?;
+            ensure!(
+                blob.byte_length == bytes.len() as u64
+                    && format!("{:x}", Sha256::digest(bytes)) == blob.sha256,
+                "Workspace input differs from its receipt"
+            );
+            total = total.saturating_add(blob.byte_length);
+        }
+        ensure!(
+            total <= MAX_WORKSPACE_BLOB_BYTES as u64,
+            "Workspace stage exceeds the transfer limit"
+        );
+        let manifest: Vec<_> = inputs.iter().map(|(file, _)| file.clone()).collect();
         bounded(TRANSFER_TIMEOUT, cancel, async {
             let mut file = open_artifact(bundle).await?;
             let (sender, receiver) = mpsc::channel(2);
@@ -328,6 +347,7 @@ impl RemoteProvider {
                                     sha256: bundle.sha256.clone(),
                                     byte_length: bundle.byte_length,
                                 }),
+                                input_files: manifest.clone(),
                             },
                         )),
                     })
@@ -361,11 +381,27 @@ impl RemoteProvider {
                         && format!("{:x}", hash.finalize()) == bundle.sha256,
                     "workspace bundle changed during upload"
                 );
+                for (_, bytes) in inputs {
+                    for bytes in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
+                        sender
+                            .send(RemoteWorkspaceStageChunk {
+                                part: Some(remote_workspace_stage_chunk::Part::Payload(
+                                    bytes.to_vec(),
+                                )),
+                            })
+                            .await
+                            .map_err(|_| anyhow!("provider closed Workspace input upload"))?;
+                    }
+                }
                 drop(sender);
                 Ok::<(), anyhow::Error>(())
             };
             let receive = async {
-                client.stage(request).await?;
+                let receipt = client.stage(request).await?.into_inner();
+                ensure!(
+                    receipt.input_files == manifest,
+                    "Workspace staging receipt differs from the accepted input files"
+                );
                 Ok::<(), anyhow::Error>(())
             };
             tokio::try_join!(send, receive)?;
@@ -796,7 +832,7 @@ mod tests {
             assert_eq!(bytes.len() as u64, reference.byte_length);
             assert_eq!(format!("{:x}", Sha256::digest(&bytes)), reference.sha256);
             *self.staged.lock().unwrap() = bytes;
-            Ok(Response::new(RemoteWorkspaceStageResponse {}))
+            Ok(Response::new(RemoteWorkspaceStageResponse::default()))
         }
         type CaptureStream = ReceiverStream<Result<RemoteWorkspaceCaptureChunk, Status>>;
         async fn capture(
@@ -975,7 +1011,7 @@ mod tests {
         };
         std::fs::write(&bundle.path, &bytes).unwrap();
         provider
-            .stage(&bundle, &"a".repeat(40), &CancellationToken::new())
+            .stage(&bundle, &"a".repeat(40), &[], &CancellationToken::new())
             .await
             .unwrap();
         assert_eq!(*mock.staged.lock().unwrap(), bytes);
@@ -1177,7 +1213,7 @@ mod tests {
         std::fs::write(&artifact.path, "fixture").unwrap();
         assert!(
             provider
-                .stage(&artifact, &"a".repeat(40), &CancellationToken::new())
+                .stage(&artifact, &"a".repeat(40), &[], &CancellationToken::new())
                 .await
                 .is_err()
         );
@@ -1188,7 +1224,7 @@ mod tests {
         artifact.path = link;
         assert!(
             provider
-                .stage(&artifact, &"a".repeat(40), &CancellationToken::new())
+                .stage(&artifact, &"a".repeat(40), &[], &CancellationToken::new())
                 .await
                 .is_err()
         );

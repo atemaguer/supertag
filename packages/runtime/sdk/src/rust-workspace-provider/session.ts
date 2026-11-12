@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import type { ExecutionEnvironment } from "../index.js";
+import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 
 export const MAX_TRANSFER = 256 * 1024 * 1024;
@@ -49,6 +50,7 @@ function cleanCommand(...args: string[]): string[] {
 interface StageHeader {
   readonly startCommit: string;
   readonly bundle: { readonly sha256: string; readonly byteLength: bigint };
+  readonly inputFiles?: readonly InputFile[];
 }
 
 interface CapturedTree {
@@ -162,6 +164,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let sandboxId: string | undefined;
   let root: string | undefined;
   let allowedActions: readonly string[] = [];
+  let stagedInputRoot = "";
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
   let uncertain = false;
@@ -235,7 +238,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("allocation could not be verified");
       }
     },
-    async stage(header: StageHeader, bytes: Uint8Array, caller?: AbortSignal): Promise<void> {
+    async stage(
+      header: StageHeader,
+      bytes: Uint8Array,
+      caller?: AbortSignal,
+      inputs: Uint8Array = new Uint8Array(),
+    ): Promise<void> {
       if (phase !== "allocated" || !sandbox || !root)
         throw workspaceError("must be allocated before staging");
       if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(header.startCommit))
@@ -248,6 +256,24 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         digest(bytes) !== header.bundle.sha256
       )
         throw workspaceError("bundle length or digest differs from its receipt");
+      const files = header.inputFiles ?? [];
+      if (
+        inputManifest(files) !== inputs.byteLength ||
+        bytes.byteLength + inputs.byteLength > MAX_TRANSFER ||
+        (files.length > 0 && (!owner || !allowedActions.includes("files:read")))
+      )
+        throw workspaceError("input manifest does not match the transfer");
+      const expectedRoot = files.length && owner ? inputRoot(owner.attemptId) : "";
+      let offset = 0;
+      for (const file of files) {
+        const end = offset + Number(file.blob?.byteLength);
+        if (
+          !file.path.startsWith(`${expectedRoot}/`) ||
+          digest(inputs.subarray(offset, end)) !== file.blob?.sha256
+        )
+          throw workspaceError("input bytes or destination differ from the receipt");
+        offset = end;
+      }
       const signal = signalFor(caller);
       signal.throwIfAborted();
       phase = "staging";
@@ -276,14 +302,28 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
           throw new Error("Private sandbox root could not be created");
         root = physicalRoot;
         await sandbox.writeTransfer(`${root}/source.bundle`, bytes, signal);
+        if (files.length > 0) {
+          const manifest = Buffer.from(
+            JSON.stringify(
+              files.map(({ path, blob }) => ({
+                path,
+                sha256: blob?.sha256,
+                size: Number(blob?.byteLength),
+              })),
+            ),
+          );
+          await sandbox.writeTransfer(`${root}/input-manifest.json`, manifest, signal);
+          await sandbox.writeTransfer(`${root}/input-files.bin`, inputs, signal);
+        }
         const result = await runTransfer(
           "stage",
-          [header.startCommit, header.bundle.sha256, bytes.byteLength.toString()],
+          [header.startCommit, header.bundle.sha256, bytes.byteLength.toString(), expectedRoot],
           signal,
         );
         if (result.exitCode !== 0 || result.stdout.trim() !== "staged")
           throw new Error("Pinned bundle could not be materialized");
         signal.throwIfAborted();
+        stagedInputRoot = expectedRoot;
         const environment = sandbox.environment(root);
         tools = createWorkspaceOperations({
           environment: observedEnvironment(
@@ -294,6 +334,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
             provider.label,
           ),
           workspaceRoot: "checkout",
+          readOnlyRoots: stagedInputRoot ? [`checkout/${stagedInputRoot}`] : [],
           allowedActions,
         });
         phase = "staged";
@@ -336,7 +377,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         await tools.dispose();
         if (uncertain) throw workspaceError("was modified by an unsettled operation");
         signal.throwIfAborted();
-        const result = await runTransfer("capture", [], signal);
+        const result = await runTransfer("capture", [stagedInputRoot], signal);
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
         if (result.exitCode !== 0 || !receipt?.[1] || !receipt[2])
           throw workspaceError("capture did not produce a receipt");
@@ -436,7 +477,7 @@ def git_command(args, bound=0):
             if process.poll() is None:
                 process.kill()
 
-def stage(commit, expected_hash, expected_length):
+def stage(commit, expected_hash, expected_length, input_root):
     bundle = os.path.join(root, "source.bundle")
     check(file_hash(bundle) == (int(expected_length), expected_hash))
     object_format = "sha1" if len(commit) == 40 else "sha256"
@@ -493,6 +534,8 @@ def stage(commit, expected_hash, expected_length):
             if objects.poll() is None:
                 objects.kill()
     os.unlink(bundle)
+    if input_root:
+        stage_inputs(input_root)
     print("staged")
 
 @contextlib.contextmanager
@@ -508,7 +551,62 @@ def fingerprint(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
-def capture():
+def stage_inputs(input_root):
+    parent, attempt = components(input_root)
+    check(parent == "inputs" and len(attempt) == 64 and all(c in "0123456789abcdef" for c in attempt))
+    manifest_path = os.path.join(root, "input-manifest.json")
+    body_path = os.path.join(root, "input-files.bin")
+    with open(manifest_path, "rb") as source:
+        raw = source.read(128 * 1024 + 1)
+        check(len(raw) <= 128 * 1024)
+        files = json.loads(raw)
+    check(0 < len(files) <= 100)
+    with contextlib.ExitStack() as opened:
+        checkout_fd = os.open(checkout, DIR_FLAGS)
+        opened.callback(os.close, checkout_fd)
+        try:
+            os.mkdir(parent, dir_fd=checkout_fd)
+        except FileExistsError:
+            pass
+        root_parent = opened.enter_context(open_dir(checkout_fd, (parent,)))
+        os.mkdir(attempt, dir_fd=root_parent)
+        input_fd = opened.enter_context(open_dir(root_parent, (attempt,)))
+        body = opened.enter_context(open(body_path, "rb"))
+        total = 0
+        for entry in files:
+            parts = components(entry["path"])
+            check(tuple(parts[:2]) == (parent, attempt) and len(parts) >= 4)
+            check(parts[2].startswith("artifact-") and len(parts[2]) == 73)
+            check(all(c in "0123456789abcdef" for c in parts[2][9:]))
+            check(all(part.lower() != ".supertag" for part in parts))
+            remaining = entry["size"]
+            check(type(remaining) is int and 0 <= remaining <= 32 * 1024 * 1024)
+            total += remaining
+            check(total <= 64 * 1024 * 1024)
+            with contextlib.ExitStack() as dirs:
+                destination = input_fd
+                for part in parts[2:-1]:
+                    try:
+                        os.mkdir(part, dir_fd=destination)
+                    except FileExistsError:
+                        pass
+                    destination = dirs.enter_context(open_dir(destination, (part,)))
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
+                fd = os.open(parts[-1], flags, 0o400, dir_fd=destination)
+                digest = hashlib.sha256()
+                with os.fdopen(fd, "wb") as file:
+                    while remaining:
+                        data = body.read(min(CHUNK, remaining))
+                        check(bool(data))
+                        file.write(data)
+                        digest.update(data)
+                        remaining -= len(data)
+                    check(digest.hexdigest() == entry["sha256"])
+        check(not body.read(1))
+    os.unlink(manifest_path)
+    os.unlink(body_path)
+
+def capture(input_root):
     entries = []
     directories = []
     body_length = 0
@@ -522,6 +620,8 @@ def capture():
         with os.scandir(directory_fd) as children:
             for child in children:
                 path = "/".join((*prefix, child.name))
+                if input_root and path == input_root:
+                    continue
                 parts = components(path)
                 info = child.stat(follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):
@@ -597,7 +697,7 @@ try:
     if mode == "stage":
         stage(*sys.argv[3:])
     elif mode == "capture":
-        capture()
+        capture(*sys.argv[3:])
     else:
         raise ValueError("unknown transfer")
 except Exception:

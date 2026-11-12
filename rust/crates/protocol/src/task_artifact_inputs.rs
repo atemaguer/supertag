@@ -13,6 +13,10 @@ pub fn operation_id(artifact_id: &str) -> String {
     )
 }
 
+pub fn input_root(attempt_id: &str) -> String {
+    format!("inputs/{:x}", Sha256::digest(attempt_id.as_bytes()))
+}
+
 pub fn supports_harness(harness: HarnessKind) -> bool {
     matches!(
         harness,
@@ -27,7 +31,7 @@ pub fn supports_harness(harness: HarnessKind) -> bool {
 pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionProfile) -> bool {
     task.input_artifacts.is_empty()
         || (profile.task_artifact_inputs
-            && !profile.remote_file_workspace
+            && (!profile.remote_file_workspace || harness == HarnessKind::Cursor)
             && profile.shared_execution.is_none()
             && supports_harness(harness)
             && task.workspace.is_some()

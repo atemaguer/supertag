@@ -37,6 +37,8 @@ const TAG: &str = "cursor-fixture";
 const SESSION: &str = "cursor-session";
 const WORKSPACE: &str = "cursor-project";
 
+#[path = "support/remote_input_runtime.rs"]
+mod remote_input_runtime;
 #[path = "support/remote_output_runtime.rs"]
 mod remote_output_runtime;
 

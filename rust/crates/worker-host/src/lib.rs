@@ -1117,7 +1117,7 @@ async fn run_assignment(
             );
         }
     };
-    if !task.input_artifacts.is_empty() {
+    if !task.input_artifacts.is_empty() && options.remote_provider.is_none() {
         let prepared = workspace
             .as_ref()
             .context("Task artifact input Workspace is missing")?;
@@ -1224,21 +1224,31 @@ async fn run_assignment(
             .as_ref()
             .context("remote Attempt has no prepared Workspace")?;
         let cancel = shutdown.child_token();
-        let prepared = with_authority(host, &attempt, token, shutdown, &cancel, async {
-            remote::prepare(
-                options,
-                journal,
-                workspaces,
-                (&attempt, workspace, &task),
-                registration,
-                &cancel,
-            )
-            .await
-            .map_err(|_| Status::failed_precondition("Remote Workspace could not be prepared"))
-        })
+        let prepared = Box::pin(with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            async {
+                remote::prepare(
+                    options,
+                    journal,
+                    workspaces,
+                    (&attempt, workspace, &task),
+                    (registration, coordination, token),
+                    &cancel,
+                )
+                .await
+                .map_err(|_| Status::failed_precondition("Remote Workspace could not be prepared"))
+            },
+        ))
         .await;
         match prepared {
-            Ok((provider, expires)) => {
+            Ok(((provider, instructions), expires)) => {
+                if let Some(instructions) = instructions {
+                    task.instructions.push_str(&instructions);
+                }
                 valid_until = expires;
                 Some(provider)
             }
@@ -1341,6 +1351,7 @@ async fn run_assignment(
             directory.display(),
         ));
     }
+    let has_inputs = !task.input_artifacts.is_empty();
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -1386,7 +1397,7 @@ async fn run_assignment(
                 remote::capture(
                     provider,
                     journal,
-                    (workspace, workspaces),
+                    (workspace, workspaces, has_inputs),
                     outputs.take(),
                     &options.state_directory,
                     (transfers, &attempt, token),

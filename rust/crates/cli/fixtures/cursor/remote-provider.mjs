@@ -75,6 +75,7 @@ let allocation;
 let directory;
 let actions = [];
 let staged = false;
+const inputPaths = [];
 const enabled = (name) =>
   access(join(root, name)).then(
     () => true,
@@ -121,7 +122,7 @@ const implementation = {
       if (await enabled("lose-allocate-ack")) process.exit(7);
       return { sandboxId: allocation.sandboxId };
     },
-    async stage(stream) {
+    async stage(stream, context) {
       assert.ok(allocation && !staged);
       const chunks = [];
       let header;
@@ -134,8 +135,8 @@ const implementation = {
           chunks.push(part.value);
         }
       }
-      const bundle = Buffer.concat(chunks);
-      assert.equal(BigInt(bundle.length), header.bundle.byteLength);
+      const body = Buffer.concat(chunks);
+      const bundle = body.subarray(0, Number(header.bundle.byteLength));
       assert.equal(hash(bundle), header.bundle.sha256);
       const bundlePath = join(directory, "prepared.bundle");
       await writeFile(bundlePath, bundle, { mode: 0o600 });
@@ -153,14 +154,38 @@ const implementation = {
       );
       await git(checkout, "checkout", "--quiet", "--detach", header.startCommit);
       assert.equal(await git(checkout, "rev-parse", "HEAD"), header.startCommit);
+      let offset = bundle.length;
+      for (const { path, blob } of header.inputFiles) {
+        const attempt = hash(allocation.owner.attemptId);
+        assert.match(
+          path,
+          new RegExp(`^inputs/${attempt}/artifact-[0-9a-f]{64}/(?:[^/]+/)*evidence\\.txt$`, "u"),
+        );
+        const bytes = body.subarray(offset, offset + Number(blob.byteLength));
+        assert.equal(hash(bytes), blob.sha256);
+        offset += bytes.length;
+        const destination = join(checkout, path);
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+        await writeFile(destination, bytes, { mode: 0o400, flag: "wx" });
+        inputPaths.push(path);
+      }
+      assert.equal(offset, body.length);
       staged = true;
       await trace({
         type: "stage",
         allocationId: allocation.owner.allocationId,
         startCommit: header.startCommit,
         before: await readFile(join(checkout, "workspace.txt"), "utf8"),
+        inputPaths,
       });
-      return {};
+      if (inputPaths.length && (await enabled("hold-input-stage"))) {
+        await trace({ type: "input-stage-wait", owner: allocation.owner, inputPaths });
+        while (await enabled("hold-input-stage")) {
+          context.signal.throwIfAborted();
+          await delay(20);
+        }
+      }
+      return { inputFiles: header.inputFiles };
     },
     async *capture() {
       assert.ok(staged && !allocation.stopped);
@@ -179,6 +204,7 @@ const implementation = {
         for (const entry of await readdir(folder, { withFileTypes: true })) {
           if (entry.name === ".git") continue;
           const path = prefix + entry.name;
+          if (inputPaths.includes(path) && !(await enabled("return-private-input"))) continue;
           const physical = join(folder, entry.name);
           if (entry.isDirectory()) await files(physical, `${path}/`);
           else {
@@ -243,6 +269,7 @@ const implementation = {
       const requested = operation.value?.path ?? "";
       if (
         requested !== "workspace.txt" &&
+        !inputPaths.includes(requested) &&
         !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
           requested,
         )
@@ -254,7 +281,11 @@ const implementation = {
         await trace({ type: "read", allocationId: allocation.owner.allocationId });
         return { text: await readFile(path, "utf8") };
       }
-      if (operation.case === "write" && actions.includes("files:write")) {
+      if (
+        operation.case === "write" &&
+        actions.includes("files:write") &&
+        !inputPaths.includes(requested)
+      ) {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await writeFile(path, operation.value.content);
         await trace({ type: "write", allocationId: allocation.owner.allocationId });

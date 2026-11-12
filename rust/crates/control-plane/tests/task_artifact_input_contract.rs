@@ -32,10 +32,11 @@ async fn start(store: &Store, host: &HostAuthority, operation: &str) -> InspectA
             host,
             operation,
             &["repo".into()],
-            HarnessKind::OpenaiAgents,
+            HarnessKind::Cursor,
             &[],
             Some(&HarnessExecutionProfile {
                 task_artifact_inputs: true,
+                remote_file_workspace: true,
                 ..Default::default()
             }),
         )
@@ -101,7 +102,7 @@ async fn exercise(url: &str) {
         .put_tag_spec(PutTagRequest {
             tag_id: "research".into(),
             instructions: "Use only admitted files".into(),
-            harness_kind: HarnessKind::OpenaiAgents.into(),
+            harness_kind: HarnessKind::Cursor.into(),
             allowed_actions: vec!["files:read".into()],
             workspace: Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
@@ -217,7 +218,7 @@ async fn exercise(url: &str) {
                 &host,
                 "host-without-input-capability",
                 &["repo".into()],
-                HarnessKind::OpenaiAgents,
+                HarnessKind::Cursor,
                 &[],
                 None
             )
@@ -241,6 +242,21 @@ async fn exercise(url: &str) {
             ),
         ),
     };
+    let ordinary = AcquireArtifactRequest {
+        operation_id: "ordinary-remote-attachment".into(),
+        destination: Some(
+            supertag_protocol::artifacts::materialized_artifact_directory(
+                &consumer.attempt_id,
+                "ordinary-remote-attachment",
+            ),
+        ),
+        paths: vec!["report.txt".into()],
+        ..acquire.clone()
+    };
+    assert!(matches!(
+        store.acquire_artifact(&host, &ordinary).await,
+        Err(StoreError::PermissionDenied)
+    ));
     assert!(store.acquire_artifact(&host, &acquire).await.is_err());
     acquire.paths = vec!["report.txt".into()];
     let receipt = store.acquire_artifact(&host, &acquire).await.unwrap();

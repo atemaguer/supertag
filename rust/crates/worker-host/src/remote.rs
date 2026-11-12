@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     output_policy::REQUIRED_OUTPUT_MISSING,
+    task_artifact_inputs::input_root,
     v2::{HostRecord, Task},
 };
 use supertag_workspaces::TransferArtifact;
@@ -10,9 +11,11 @@ use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 use crate::{
-    HostOptions,
+    CoordinationClients, HostOptions,
+    adapter::artifact_acquisition::AcquisitionClient,
     journal::{Attempt, Journal, RemoteSandboxState},
     remote_provider::RemoteProvider,
+    task_artifact_inputs::RemoteInputs,
     task_outputs::PendingOutputs,
     workspaces::{PreparedWorkspace, Workspaces},
 };
@@ -25,9 +28,9 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
-    registration: &HostRecord,
+    (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
-) -> Result<RemoteProvider> {
+) -> Result<(RemoteProvider, Option<String>)> {
     let config = options
         .remote_provider
         .as_ref()
@@ -46,6 +49,12 @@ pub(crate) async fn prepare(
         .cloned()
         .collect::<Vec<_>>();
     let export = workspaces.export_remote(workspace, cancel).await?;
+    let acquisition = AcquisitionClient {
+        coordination,
+        host_token: token,
+        attempt: attempt.inspect(),
+    };
+    let inputs = RemoteInputs::download(&acquisition, task, cancel).await?;
     let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
     ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
     let record = journal.begin_remote_sandbox(
@@ -63,15 +72,21 @@ pub(crate) async fn prepare(
         .await?;
     journal.record_sandbox_active(&record, sandbox)?;
     provider
-        .stage(&export.bundle, &export.checkout.start_commit, cancel)
+        .stage(
+            &export.bundle,
+            &export.checkout.start_commit,
+            &inputs.files,
+            cancel,
+        )
         .await?;
-    Ok(provider)
+    let instructions = inputs.delivered(&acquisition, cancel).await?;
+    Ok((provider, instructions))
 }
 
 pub(crate) async fn capture(
     provider: &RemoteProvider,
     journal: &Journal,
-    (workspace, workspaces): (&PreparedWorkspace, &Workspaces),
+    (workspace, workspaces, has_inputs): (&PreparedWorkspace, &Workspaces, bool),
     outputs: Option<Box<PendingOutputs>>,
     state: &std::path::Path,
     authority: (&crate::checkpoints::Transfers, &Attempt, &str),
@@ -84,6 +99,17 @@ pub(crate) async fn capture(
         .capture(&directory, cancel)
         .await
         .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    if has_inputs {
+        let archive = tree.clone();
+        let root = input_root(&authority.1.attempt_id);
+        let cancel = cancel.clone();
+        tokio::task::spawn_blocking(move || {
+            supertag_workspaces::verify_return_excludes(&archive, &root, &cancel)
+        })
+        .await
+        .map_err(|_| Status::internal(CAPTURE_FAILED))?
+        .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    }
     let outputs = if let Some(outputs) = outputs {
         Some(Box::new(
             outputs

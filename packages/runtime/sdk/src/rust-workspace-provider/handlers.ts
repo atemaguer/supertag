@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { type HarnessWorkspaceRequest, WorkspaceGrepMode } from "../rust-harness/index.js";
+import { inputManifest } from "./input-files.js";
 import type { WorkspaceOperation } from "./operations.js";
 import { type createSandboxWorkspaceSession, MAX_TRANSFER } from "./session.js";
 import type { RemoteWorkspaceHandlers } from "./transport.js";
@@ -83,10 +84,11 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
         try {
           let header: Parameters<Session["stage"]>[0] | undefined;
           let bytes: Uint8Array | undefined;
+          let bundleLength = 0;
           let offset = 0;
           for await (const { part } of stream) {
             if (part.case === "header" && !header) {
-              const { bundle, startCommit } = part.value;
+              const { bundle, startCommit, inputFiles } = part.value;
               if (
                 !bundle ||
                 bundle.byteLength < 1n ||
@@ -95,8 +97,16 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
                 !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(startCommit)
               )
                 throw invalidBundle();
-              header = { startCommit, bundle };
-              bytes = new Uint8Array(Number(bundle.byteLength));
+              let inputLength: number;
+              try {
+                inputLength = inputManifest(inputFiles);
+              } catch {
+                throw invalidBundle();
+              }
+              bundleLength = Number(bundle.byteLength);
+              if (bundleLength + inputLength > MAX_TRANSFER) throw invalidBundle();
+              header = { startCommit, bundle, inputFiles };
+              bytes = new Uint8Array(bundleLength + inputLength);
             } else if (part.case === "payload" && bytes) {
               const payload = part.value;
               if (payload.byteLength === 0 || payload.byteLength > bytes.byteLength - offset)
@@ -108,8 +118,13 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
             }
           }
           if (!header || !bytes || bytes.byteLength !== offset) throw invalidBundle();
-          await session.stage(header, bytes, context.signal);
-          return {};
+          await session.stage(
+            header,
+            bytes.subarray(0, bundleLength),
+            context.signal,
+            bytes.subarray(bundleLength),
+          );
+          return { inputFiles: [...(header.inputFiles ?? [])] };
         } finally {
           stageInFlight = false;
         }

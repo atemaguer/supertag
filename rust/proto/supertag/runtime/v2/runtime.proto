@@ -786,6 +786,8 @@ message RemoteWorkspaceAllocation {
 message RemoteWorkspaceStageHeader {
   string start_commit = 1;
   BlobReference bundle = 2;
+  // Bodies follow the bundle bytes, in this exact manifest order.
+  repeated ArtifactInputFile input_files = 3;
 }
 
 message RemoteWorkspaceStageChunk {
@@ -795,7 +797,10 @@ message RemoteWorkspaceStageChunk {
   }
 }
 
-message RemoteWorkspaceStageResponse {}
+message RemoteWorkspaceStageResponse {
+  // Echoed only after the provider verifies the files in its private checkout.
+  repeated ArtifactInputFile input_files = 1;
+}
 
 message RemoteWorkspaceCaptureRequest {}
 

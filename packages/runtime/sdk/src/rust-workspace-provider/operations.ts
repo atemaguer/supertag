@@ -34,6 +34,7 @@ export interface WorkspaceOperationsOptions {
   /** A trusted, Attempt-exclusive sandbox. Its lifetime is owned by the caller. */
   readonly environment: ExecutionEnvironment;
   readonly workspaceRoot: string;
+  readonly readOnlyRoots?: readonly string[];
   readonly allowedActions: readonly string[];
   readonly limits?: {
     readonly maxOutputBytes?: number;
@@ -295,6 +296,7 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
             ),
         },
         workspaceRoot,
+        ...(options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {}),
         permissions,
         limits,
       });

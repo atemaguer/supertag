@@ -241,9 +241,10 @@ impl Store {
         let now = self.execution_now_ms();
         crate::artifact_captures::running(&row, now)?;
         let task = task_row(&row)?;
-        if input
+        let preselected = input
             .operation_id
-            .starts_with(supertag_protocol::task_artifact_inputs::OPERATION_PREFIX)
+            .starts_with(supertag_protocol::task_artifact_inputs::OPERATION_PREFIX);
+        if preselected
             && !task
                 .attempt_execution
                 .as_ref()
@@ -253,10 +254,11 @@ impl Store {
         }
         if input.delivery() == ArtifactDelivery::Materialize
             && (task.workspace.is_none()
-                || task
-                    .attempt_execution
-                    .as_ref()
-                    .is_some_and(|execution| execution.remote_file_workspace)
+                || (!preselected
+                    && task
+                        .attempt_execution
+                        .as_ref()
+                        .is_some_and(|execution| execution.remote_file_workspace))
                 || !task
                     .allowed_actions
                     .iter()

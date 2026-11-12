@@ -9,7 +9,9 @@ pub mod packages;
 mod paths;
 pub mod source;
 mod transfer;
-pub use transfer::{PreparedExport, TransferArtifact, materialize_returned_files};
+pub use transfer::{
+    PreparedExport, TransferArtifact, materialize_returned_files, verify_return_excludes,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};

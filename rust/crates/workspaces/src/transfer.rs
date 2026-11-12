@@ -327,6 +327,27 @@ pub fn materialize_returned_files(
     Ok(paths)
 }
 
+/// Refuse a provider return containing the private input directory before
+/// publishing Task outputs or restoring the Workspace.
+pub fn verify_return_excludes(
+    archive: &TransferArtifact,
+    directory: &str,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    check_cancelled(cancel)?;
+    let bytes = read_artifact(archive)?;
+    let tree = parse_tree(&bytes)?;
+    let prefix = format!("{directory}/");
+    for (entry, _) in tree.entries {
+        check_cancelled(cancel)?;
+        ensure!(
+            entry.path != directory && !entry.path.starts_with(&prefix),
+            "remote Workspace return contains private Task inputs"
+        );
+    }
+    Ok(())
+}
+
 fn materialize(root: &Path, tree: &ParsedTree<'_>, cancel: &CancellationToken) -> Result<()> {
     for (entry, body) in &tree.entries {
         check_cancelled(cancel)?;
