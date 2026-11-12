@@ -209,6 +209,8 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch() -> Re
 struct LanguageServices {
     control: Child,
     gateway: Child,
+    private: String,
+    gateway_token: String,
     public: String,
     operator_token: String,
     host_token: String,
@@ -241,6 +243,8 @@ impl LanguageServices {
         Ok(Self {
             control,
             gateway,
+            private,
+            gateway_token,
             public,
             operator_token,
             host_token,
