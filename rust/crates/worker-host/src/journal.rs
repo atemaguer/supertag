@@ -16,6 +16,10 @@ pub(crate) struct Attempt {
     pub task_id: String,
     pub attempt_id: String,
     pub lease_token: String,
+    #[serde(default)]
+    pub execution_selection: Option<Vec<u8>>,
+    #[serde(default)]
+    pub requires_unsandboxed_commands: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -31,6 +35,8 @@ pub(crate) struct PendingCheckpoint {
 pub(crate) enum Entry {
     Claim {
         operation_id: String,
+        #[serde(default)]
+        request: Vec<u8>,
     },
     Starting {
         #[serde(flatten)]
@@ -290,17 +296,60 @@ mod tests {
 
     #[test]
     fn journal_is_exclusive_and_persists_execution_intent() -> Result<()> {
+        use prost::Message;
+        use supertag_protocol::v2::{
+            AttemptExecutionSelection, ClaimTaskRequest, ExecutionSelection,
+            HarnessExecutionProfile, HarnessKind, ModelSource,
+        };
+
         let state = tempfile::tempdir()?;
         let journal = Journal::open(state.path())?;
         assert!(Journal::open(state.path()).is_err());
-        journal.save(&Entry::Claim {
+        let prior: Entry = serde_json::from_str(r#"{"stage":"claim","operation_id":"old"}"#)?;
+        assert!(matches!(prior, Entry::Claim { request, .. } if request.is_empty()));
+        let claim = ClaimTaskRequest {
             operation_id: "claim".into(),
+            harness_kind: HarnessKind::Codex as i32,
+            workspace_ids: vec!["repository".into()],
+            execution_profile: Some(HarnessExecutionProfile {
+                model_ids: vec!["primary".into(), "secondary".into()],
+                default_model: Some("primary".into()),
+                allow_unsandboxed_commands: false,
+            }),
+            ..Default::default()
+        };
+        journal.save(&Entry::Claim {
+            operation_id: claim.operation_id.clone(),
+            request: claim.encode_to_vec(),
         })?;
+        let Some(Entry::Claim {
+            operation_id,
+            request,
+        }) = journal.load()?
+        else {
+            anyhow::bail!("Claim intent was not restored");
+        };
+        assert_eq!(operation_id, claim.operation_id);
+        assert_eq!(ClaimTaskRequest::decode(request.as_slice())?, claim);
+        let execution_selection = Some(
+            AttemptExecutionSelection {
+                selection: Some(ExecutionSelection {
+                    model: Some("secondary".into()),
+                    effort: Some("high".into()),
+                }),
+                model_source: ModelSource::Task as i32,
+                harness_kind: HarnessKind::Codex as i32,
+                effort_applied: Some(true),
+            }
+            .encode_to_vec(),
+        );
         journal.save(&Entry::Executing {
             attempt: Attempt {
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),
                 lease_token: "lease".into(),
+                execution_selection: execution_selection.clone(),
+                requires_unsandboxed_commands: false,
             },
             prepared: None,
         })?;
@@ -310,6 +359,7 @@ mod tests {
             reopened.load()?,
             Some(Entry::Executing { attempt, .. })
                 if attempt.task_id == "task" && attempt.attempt_id == "attempt"
+                    && attempt.execution_selection == execution_selection
         ));
         reopened.clear()?;
         assert!(reopened.load()?.is_none());

@@ -40,6 +40,13 @@ def main() -> None:
             "max_reported_cost": {"currency": "USD", "amount_minor": 0},
             "max_native_agents": 0,
         },
+        execution_selection={"model": "fixture-model", "effort": "high"},
+        attempt_execution={
+            "selection": {"model": "fixture-model", "effort": "high"},
+            "model_source": wire.MODEL_SOURCE_TASK,
+            "harness_kind": wire.HARNESS_KIND_CODEX,
+            "effort_applied": True,
+        },
     )
     go_bytes = subprocess.run(
         ["go", "-C", str(BINDINGS / "go"), "run", "./conformance"],
@@ -62,7 +69,7 @@ def main() -> None:
     actual = wire.Task.FromString(typescript_bytes)
     if actual != task:
         raise AssertionError(f"protobuf Task changed unexpectedly: {actual}")
-    print("Python, Go, and TypeScript preserved the Task, policy, limits, and optional fields.")
+    print("Python, Go, and TypeScript preserved the Task, policy, limits, execution selection, and optional fields.")
 
 
 if __name__ == "__main__":

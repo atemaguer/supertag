@@ -3,7 +3,9 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
-use supertag_protocol::v2::{HostReadiness, HostReadinessReason, ReportHostRequest};
+use supertag_protocol::v2::{
+    HarnessExecutionProfile, HostReadiness, HostReadinessReason, ReportHostRequest,
+};
 use tokio::{sync::watch, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -19,7 +21,13 @@ pub(crate) enum State {
 }
 
 impl State {
-    fn report(self, sequence: u64, harness: i32, workspaces: &[String]) -> ReportHostRequest {
+    fn report(
+        self,
+        sequence: u64,
+        harness: i32,
+        workspaces: &[String],
+        profile: &HarnessExecutionProfile,
+    ) -> ReportHostRequest {
         let (readiness, reason, available_slots) = match self {
             Self::Pending => (HostReadiness::Pending, HostReadinessReason::Starting, 0),
             Self::Ready => (HostReadiness::Ready, HostReadinessReason::Unspecified, 1),
@@ -39,6 +47,7 @@ impl State {
             reason: reason as i32,
             harness_kind: harness,
             workspace_ids: workspaces.to_vec(),
+            execution_profile: Some(profile.clone()),
         }
     }
 }
@@ -52,6 +61,7 @@ pub(crate) struct Presence {
     token: String,
     harness: i32,
     workspaces: Vec<String>,
+    profile: HarnessExecutionProfile,
 }
 
 impl Presence {
@@ -61,6 +71,7 @@ impl Presence {
         token: String,
         harness: i32,
         workspaces: Vec<String>,
+        profile: HarnessExecutionProfile,
         shutdown: CancellationToken,
     ) -> Self {
         let cancel = shutdown.child_token();
@@ -74,6 +85,7 @@ impl Presence {
             token: token.clone(),
             harness,
             workspaces: workspaces.clone(),
+            profile: profile.clone(),
         };
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
@@ -94,7 +106,7 @@ impl Presence {
                         return Err(error);
                     }
                 };
-                let report = state.report(sequence, harness, &workspaces);
+                let report = state.report(sequence, harness, &workspaces, &profile);
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
@@ -133,6 +145,7 @@ impl Presence {
             self.journal.next_report_sequence()?,
             self.harness,
             &self.workspaces,
+            &self.profile,
         );
         // Best effort: on a partition the last observation naturally expires. Never
         // prevent journal cleanup or treat a presence reply as execution authority.

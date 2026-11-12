@@ -348,12 +348,13 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
-                .claim_task_with_context(
+                .claim_task_with_profile(
                     &principal,
                     &input.operation_id,
                     &input.workspace_ids,
                     harness,
                     &input.context_contracts,
+                    input.execution_profile.as_ref(),
                 )
                 .await?,
         }))
@@ -727,6 +728,7 @@ mod tests {
             workspace_ids: vec![],
             operation_id: "claim".into(),
             context_contracts: vec![],
+            execution_profile: None,
         };
         assert_eq!(
             cp.claim_task(

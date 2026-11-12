@@ -456,6 +456,12 @@ fn normalize_execution(
     let mut models = vec![];
     for model in execution.models {
         let model = bounded(&model, "model name", 200, false)?;
+        if model
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+        {
+            return Err(invalid("execution models must be identifiers"));
+        }
         if !seen.insert(model.clone()) {
             return Err(invalid("execution models must not repeat"));
         }

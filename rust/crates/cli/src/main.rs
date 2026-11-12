@@ -563,6 +563,7 @@ async fn run(command: Command) -> Result<()> {
                 "this Worker Host's selected harness does not load Skills"
             );
             let provider_model = adapter.provider_model();
+            let execution_profile = adapter.execution_profile()?;
             let workspace = adapter.workspace_mapping();
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
@@ -574,6 +575,7 @@ async fn run(command: Command) -> Result<()> {
                 adapter_args,
                 harness,
                 provider_model,
+                execution_profile,
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,

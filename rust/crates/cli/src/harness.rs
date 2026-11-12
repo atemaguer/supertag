@@ -60,6 +60,9 @@ pub struct AdapterOptions {
     harness_entrypoint: Option<PathBuf>,
     #[arg(long, requires = "harness")]
     harness_model: Option<String>,
+    /// Additional model IDs this Worker Host can run.
+    #[arg(long, requires = "harness", value_delimiter = ',')]
+    harness_models: Vec<String>,
     /// Node interpreter for the Cursor SDK adapter application.
     #[arg(long, requires = "harness", conflicts_with = "harness_runtime")]
     cursor_node: Option<PathBuf>,
@@ -120,6 +123,44 @@ impl AdapterOptions {
         } else {
             None
         }
+    }
+
+    pub fn execution_profile(&self) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
+        let default_model = self
+            .codex_model
+            .clone()
+            .or_else(|| self.harness_model.clone());
+        let mut model_ids = self.harness_models.clone();
+        model_ids.extend(default_model.iter().cloned());
+        model_ids.sort_unstable();
+        model_ids.dedup();
+        ensure!(
+            model_ids.len() <= 128
+                && model_ids.iter().all(|model| !model.is_empty()
+                    && model.len() <= 256
+                    && !model
+                        .chars()
+                        .any(|value| value.is_control() || value.is_whitespace())),
+            "Worker Host model IDs must be bounded identifiers"
+        );
+        if matches!(self.harness, Some(Harness::Opencode)) {
+            let provider = supertag_worker_host::validate_opencode_model(
+                default_model
+                    .as_deref()
+                    .context("OpenCode requires --harness-model")?,
+            )?;
+            for model in &model_ids {
+                ensure!(
+                    supertag_worker_host::validate_opencode_model(model)? == provider,
+                    "OpenCode model IDs must use the Worker Host's selected provider"
+                );
+            }
+        }
+        Ok(supertag_protocol::v2::HarnessExecutionProfile {
+            model_ids,
+            default_model,
+            allow_unsandboxed_commands: self.allow_unsandboxed_commands,
+        })
     }
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {
         supertag_worker_host::provider_environment_for(
@@ -195,6 +236,9 @@ impl AdapterOptions {
         }
         if self.allow_unsandboxed_commands {
             args.push("--allow-unsandboxed-commands".into());
+        }
+        for model in &self.harness_models {
+            args.extend(["--harness-models".into(), model.into()]);
         }
         if let Some(path) = &self.codex_path {
             args.extend([OsString::from("--codex-path"), path.as_os_str().to_owned()]);

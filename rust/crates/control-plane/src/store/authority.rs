@@ -5,13 +5,14 @@ use std::{
 
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
-    AttemptAuthority, AttemptDecision, AttemptResolution, HarnessKind, InspectAttemptRequest,
-    ResolveAttemptRequest, Task, TaskState,
+    AttemptAuthority, AttemptDecision, AttemptExecutionSelection, AttemptResolution,
+    HarnessExecutionProfile, HarnessKind, InspectAttemptRequest, ResolveAttemptRequest, Task,
+    TaskState,
 };
 
 use super::{
-    HostAuthority, Result, Store, StoreError, hosts::current_scope_in, invalid, name, owned,
-    task_in, task_row, text,
+    HostAuthority, Result, Store, StoreError, execution, hosts::current_scope_in, invalid, name,
+    owned, task_in, task_row, text,
 };
 
 const LEASE_MS: i64 = 30_000;
@@ -294,9 +295,9 @@ pub(super) async fn claim_candidate(
     host_id: &str,
     all_tags: i64,
     workspace_ids: &[String],
-    harness: HarnessKind,
+    (harness, profile): (HarnessKind, &HarnessExecutionProfile),
     context_contracts: &[supertag_protocol::v2::ContextContract],
-) -> Result<Option<String>> {
+) -> Result<Option<(String, AttemptExecutionSelection)>> {
     let context_contracts = if matches!(
         harness,
         HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
@@ -319,7 +320,8 @@ pub(super) async fn claim_candidate(
                 .workspace
                 .as_ref()
                 .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
-            if has_workspace
+            if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
+                && has_workspace
                 && supports_execution_limits(harness, &task)
                 && supports_runtime_actions(harness, &task)
                 && crate::context::task_supported(&task, context_contracts)
@@ -332,7 +334,7 @@ pub(super) async fn claim_candidate(
                 .await?
                 && crate::objectives::objective_task_can_start_in(transaction, &task, now).await?
             {
-                return Ok(Some(id));
+                return Ok(Some((id, attempt_execution)));
             }
             after = candidate.try_get("accepted_order")?;
         }

@@ -51,6 +51,7 @@ impl Policy {
 pub(crate) fn arguments(
     workspace: &Path,
     model: Option<&str>,
+    effort: Option<&str>,
     policy: &Policy,
 ) -> Result<Vec<String>> {
     workspace
@@ -65,6 +66,16 @@ pub(crate) fn arguments(
         args.extend([
             "--config".into(),
             format!("model={}", serde_json::to_string(model)?),
+        ]);
+    }
+    if let Some(effort) = effort {
+        ensure!(
+            matches!(effort, "low" | "medium" | "high"),
+            "invalid Codex reasoning effort"
+        );
+        args.extend([
+            "--config".into(),
+            format!("model_reasoning_effort={}", serde_json::to_string(effort)?),
         ]);
     }
     let mut configuration = vec![

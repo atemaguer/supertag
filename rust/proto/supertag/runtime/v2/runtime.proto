@@ -556,6 +556,7 @@ message ReportHostRequest {
   HostReadinessReason reason = 5;
   HarnessKind harness_kind = 6;
   repeated string workspace_ids = 7;
+  HarnessExecutionProfile execution_profile = 8;
 }
 
 message WorkerHostStatus {
@@ -573,6 +574,7 @@ message WorkerHostStatus {
   optional int64 last_seen_at_ms = 12;
   optional int64 presence_expires_at_ms = 13;
   optional int64 revoked_at_ms = 14;
+  HarnessExecutionProfile execution_profile = 15;
 }
 
 message ListHostsRequest {
@@ -1017,6 +1019,34 @@ message Task {
   TaskPolicySnapshot policy_snapshot = 15;
   // Accepted once when work is queued. Subsequent usage changes later allocations.
   ExecutionLimits execution_limits = 16;
+  ExecutionSelection execution_selection = 17;
+  AttemptExecutionSelection attempt_execution = 18;
+}
+
+// A single choice from the accepted Tag and Role execution policy.
+message ExecutionSelection {
+  optional string model = 1;
+  optional string effort = 2;
+}
+
+message HarnessExecutionProfile {
+  repeated string model_ids = 1;
+  optional string default_model = 2;
+  bool allow_unsandboxed_commands = 3;
+}
+
+enum ModelSource {
+  MODEL_SOURCE_UNSPECIFIED = 0;
+  MODEL_SOURCE_TASK = 1;
+  MODEL_SOURCE_HOST_DEFAULT = 2;
+  MODEL_SOURCE_HARNESS_DEFAULT = 3;
+}
+
+message AttemptExecutionSelection {
+  ExecutionSelection selection = 1;
+  ModelSource model_source = 2;
+  HarnessKind harness_kind = 3;
+  optional bool effort_applied = 4;
 }
 
 message GetTaskRequest {
@@ -1042,6 +1072,7 @@ message ClaimTaskRequest {
   repeated string workspace_ids = 2;
   HarnessKind harness_kind = 3;
   repeated ContextContract context_contracts = 4;
+  HarnessExecutionProfile execution_profile = 5;
 }
 
 message ClaimTaskResponse {

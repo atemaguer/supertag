@@ -1,10 +1,11 @@
 //! Fenced, expiring observations. A presence report is never an execution lease.
 
+use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{v2::*, valid_workspace_id};
 
-use super::{HostAuthority, Result, Store, StoreError, hosts, invalid, name};
+use super::{HostAuthority, Result, Store, StoreError, execution, hosts, invalid, name};
 
 const PRESENCE_MS: i64 = 30_000;
 
@@ -58,17 +59,25 @@ impl Store {
         workspaces.sort_unstable();
         workspaces.dedup();
         let workspaces = serde_json::to_string(&workspaces)?;
-        let digest = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                input.capacity,
-                input.available_slots,
-                input.readiness,
-                input.reason,
-                input.harness_kind,
-                &workspaces
-            ))?)
+        let execution_profile = input
+            .execution_profile
+            .as_ref()
+            .map(|profile| execution::normalize_profile(Some(profile)))
+            .transpose()?
+            .map(|profile| profile.encode_to_vec());
+        let observed = (
+            input.capacity,
+            input.available_slots,
+            input.readiness,
+            input.reason,
+            input.harness_kind,
+            &workspaces,
         );
+        let digest_input = match &execution_profile {
+            Some(profile) => serde_json::to_vec(&(observed, profile))?,
+            None => serde_json::to_vec(&observed)?,
+        };
+        let digest = format!("{:x}", Sha256::digest(digest_input));
         let (mut transaction, _) = self.write().await?;
         hosts::current_scope_in(&mut transaction, host).await?;
         let prior = sqlx::query("SELECT generation,sequence,request_digest FROM supertag_v2_host_readiness WHERE host_id=$1")
@@ -98,10 +107,11 @@ impl Store {
         let expires = now
             .checked_add(PRESENCE_MS)
             .ok_or_else(|| invalid("presence expiry is out of range"))?;
-        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms")
+        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile")
             .bind(host.id()).bind(host.generation).bind(sequence).bind(digest)
             .bind(i64::from(input.capacity)).bind(i64::from(input.available_slots)).bind(i64::from(input.readiness))
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
+            .bind(execution_profile)
             .execute(&mut *transaction).await?;
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;
@@ -214,6 +224,7 @@ async fn status_in(
         view.harness_kind = row.try_get::<i64, _>("harness_kind")? as i32;
         view.reason = row.try_get::<i64, _>("reason")? as i32;
         view.workspace_ids = serde_json::from_str(&row.try_get::<String, _>("workspace_ids")?)?;
+        view.execution_profile = execution::read_profile(row.try_get("execution_profile")?)?;
         view.last_seen_at_ms = Some(row.try_get("last_seen_at_ms")?);
         let expires: i64 = row.try_get("presence_expires_at_ms")?;
         view.presence_expires_at_ms = Some(expires);

@@ -66,7 +66,9 @@ function activeTask(run: HarnessRun) {
 
 export function taskModel(run: HarnessRun, configuration: AdapterOptions) {
   const task = activeTask(run);
-  const model = configuration.model;
+  const model = task.attemptExecution
+    ? task.attemptExecution.selection?.model
+    : configuration.model;
   const accepted = task.policySnapshot?.execution?.models ?? [];
   if (!model || !/^[^\s/]+\/[^\s]+$/u.test(model) || (accepted.length && !accepted.includes(model)))
     throw new SafeOpenCodeFailure("OpenCode Worker Host does not serve an accepted model.");

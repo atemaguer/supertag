@@ -1,0 +1,106 @@
+use prost::Message;
+use supertag_protocol::v2::{
+    AttemptExecutionSelection, ExecutionSelection, HarnessExecutionProfile, HarnessKind,
+    ModelSource, Task, TaskPolicySnapshot,
+};
+
+use super::{Result, invalid};
+
+pub(super) fn normalize_profile(
+    supplied: Option<&HarnessExecutionProfile>,
+) -> Result<HarnessExecutionProfile> {
+    let mut profile = supplied.cloned().unwrap_or_default();
+    if profile.model_ids.len() > 128
+        || profile.model_ids.iter().any(|model| {
+            model.is_empty()
+                || model.len() > 256
+                || model
+                    .chars()
+                    .any(|value| value.is_whitespace() || value.is_control())
+        })
+    {
+        return Err(invalid("invalid Worker Host model capabilities"));
+    }
+    profile.model_ids.sort_unstable();
+    profile.model_ids.dedup();
+    if profile
+        .default_model
+        .as_ref()
+        .is_some_and(|model| profile.model_ids.binary_search(model).is_err())
+    {
+        return Err(invalid(
+            "Worker Host default model must be an advertised model",
+        ));
+    }
+    Ok(profile)
+}
+
+pub(super) fn accepted(snapshot: Option<&TaskPolicySnapshot>) -> ExecutionSelection {
+    let execution = snapshot.and_then(|snapshot| snapshot.execution.as_ref());
+    let model = execution
+        .and_then(|execution| execution.models.first())
+        .cloned();
+    let effort = execution
+        .and_then(|execution| execution.efforts.first())
+        .cloned()
+        .unwrap_or_else(|| "low".into());
+    ExecutionSelection {
+        model,
+        effort: Some(effort),
+    }
+}
+
+pub(super) fn resolve_attempt(
+    task: &Task,
+    harness: HarnessKind,
+    profile: &HarnessExecutionProfile,
+) -> Option<AttemptExecutionSelection> {
+    if matches!(harness, HarnessKind::Opencode | HarnessKind::Cursor)
+        && !profile.allow_unsandboxed_commands
+        && task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+    {
+        return None;
+    }
+    let mut selection = task.execution_selection.clone().unwrap_or_default();
+    let source = if let Some(required) = &selection.model {
+        profile.model_ids.binary_search(required).ok()?;
+        ModelSource::Task
+    } else if let Some(default) = &profile.default_model {
+        selection.model = Some(default.clone());
+        ModelSource::HostDefault
+    } else {
+        ModelSource::HarnessDefault
+    };
+    let effort_applied = selection
+        .effort
+        .as_ref()
+        .filter(|_| harness != HarnessKind::Unspecified)
+        .map(|_| matches!(harness, HarnessKind::Codex | HarnessKind::ClaudeCode));
+    Some(AttemptExecutionSelection {
+        selection: Some(selection),
+        model_source: source as i32,
+        harness_kind: harness as i32,
+        effort_applied,
+    })
+}
+
+pub(super) fn read_attempt(bytes: Option<Vec<u8>>) -> Result<Option<AttemptExecutionSelection>> {
+    bytes
+        .map(|bytes| {
+            AttemptExecutionSelection::decode(bytes.as_slice())
+                .map_err(|_| invalid("stored Attempt execution selection is invalid"))
+        })
+        .transpose()
+}
+
+pub(super) fn read_profile(bytes: Option<Vec<u8>>) -> Result<Option<HarnessExecutionProfile>> {
+    bytes
+        .map(|bytes| {
+            HarnessExecutionProfile::decode(bytes.as_slice())
+                .map_err(|_| invalid("stored Worker Host execution profile is invalid"))
+        })
+        .transpose()
+}

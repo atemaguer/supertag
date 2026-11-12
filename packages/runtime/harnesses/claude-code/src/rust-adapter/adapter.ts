@@ -254,7 +254,13 @@ export async function runAdapter(
       );
     }
     const tools = admittedTools(task.allowedActions);
-    const model = task.policySnapshot?.execution?.models[0] ?? configuration.model;
+    const model = task.attemptExecution
+      ? task.attemptExecution.selection?.model
+      : (task.policySnapshot?.execution?.models[0] ?? configuration.model);
+    const effort = task.attemptExecution?.selection?.effort;
+    const validEffort = effort === "low" || effort === "medium" || effort === "high";
+    if (effort !== undefined && !validEffort)
+      throw new SafeAdapterFailure("Claude received an invalid reasoning effort.");
     const coordination = coordinationTools(harness, run, {
       taskId: task.taskId,
       tagId: task.tagId,
@@ -342,6 +348,7 @@ export async function runAdapter(
       ...(restored ? { resume: restored.nativeSessionId } : {}),
       ...(configuration.executable ? { pathToClaudeCodeExecutable: configuration.executable } : {}),
       ...(model ? { model } : {}),
+      ...(validEffort ? { effort } : {}),
       ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
       spawnClaudeCodeProcess: (spawnOptions) => {
         // Keep the native leader in the Rust Guardian's process group. SDK env may contain

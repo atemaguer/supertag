@@ -230,8 +230,15 @@ async def _execute(
         snapshot = task.policy_snapshot
         if any(item.required for context_set in snapshot.context_sets for item in context_set.items):
             raise _AdapterFailure("a required Context Item has no OpenAI Agents resolver")
-        if snapshot.HasField("execution") and snapshot.execution.models:
+        if (
+            not task.HasField("attempt_execution")
+            and snapshot.HasField("execution")
+            and snapshot.execution.models
+        ):
             model = snapshot.execution.models[0]
+    if task.HasField("attempt_execution"):
+        selection = task.attempt_execution.selection
+        model = selection.model if selection.HasField("model") else None
     actions = set(task.allowed_actions)
     if actions - {"files:read", "workstream:post", "mailbox:send"}:
         raise _AdapterFailure("OpenAI Agents cannot enforce the Task's allowed actions")

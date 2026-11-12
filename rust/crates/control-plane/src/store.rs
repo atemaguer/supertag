@@ -5,6 +5,7 @@
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
 mod authority;
+mod execution;
 #[path = "github_events.rs"]
 mod github_events;
 mod hosts;
@@ -31,9 +32,9 @@ use sqlx::{
 use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
-        ContextContract, ExecutionLimits, FinishTaskRequest, HarnessKind, PutTagRequest, Reply,
-        ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag,
-        Task, TaskEvent, TaskState, WorkspaceSpec,
+        ContextContract, ExecutionLimits, FinishTaskRequest, HarnessExecutionProfile, HarnessKind,
+        PutTagRequest, Reply, ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest,
+        SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -68,7 +69,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 34;
+        const SCHEMA_VERSION: i64 = 35;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -153,6 +154,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0032_attempt_usage.sql"),
                 include_str!("../migrations/sqlite/0033_opencode_harness.sql"),
                 include_str!("../migrations/sqlite/0034_cursor_harness.sql"),
+                include_str!("../migrations/sqlite/0035_execution_selection.sql"),
             ]
         } else {
             [
@@ -190,6 +192,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0032_attempt_usage.sql"),
                 include_str!("../migrations/postgresql/0033_opencode_harness.sql"),
                 include_str!("../migrations/postgresql/0034_cursor_harness.sql"),
+                include_str!("../migrations/postgresql/0035_execution_selection.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -464,7 +467,29 @@ impl Store {
         harness: HarnessKind,
         context_contracts: &[ContextContract],
     ) -> Result<Option<Assignment>> {
+        self.claim_task_with_profile(
+            host,
+            operation_id,
+            workspace_ids,
+            harness,
+            context_contracts,
+            None,
+        )
+        .await
+    }
+
+    pub async fn claim_task_with_profile(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        workspace_ids: &[String],
+        harness: HarnessKind,
+        context_contracts: &[ContextContract],
+        execution_profile: Option<&HarnessExecutionProfile>,
+    ) -> Result<Option<Assignment>> {
         name("operation ID", operation_id)?;
+        let profile = execution::normalize_profile(execution_profile)?;
+        let profile_bytes = profile.encode_to_vec();
         if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_workspace_id(id)) {
             return Err(invalid("invalid Worker Host workspace capabilities"));
         }
@@ -500,13 +525,17 @@ impl Store {
         crate::inputs::sweep_in(&mut transaction, now).await?;
         crate::mailbox::sweep_in(&mut transaction).await?;
         crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
-        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
+        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let previous: Option<String> = prior.try_get("workspace_scope")?;
             if previous.as_deref().unwrap_or("[]") != workspace_scope
                 || prior.try_get::<i64, _>("harness_kind")? != harness as i64
                 || prior.try_get::<String, _>("context_scope")? != context_scope
+                || prior
+                    .try_get::<Option<Vec<u8>>, _>("execution_profile")?
+                    .unwrap_or_default()
+                    != profile_bytes
             {
                 return Err(StoreError::Conflict(
                     "claim operation used different Worker Host capabilities".into(),
@@ -520,6 +549,13 @@ impl Store {
                     if task.attempt_id.as_deref() == Some(attempt_id.as_str())
                         && matches!(task.state(), TaskState::Claimed | TaskState::Running)
                     {
+                        if task.attempt_execution
+                            != execution::read_attempt(prior.try_get("attempt_execution")?)?
+                        {
+                            return Err(invalid(
+                                "Attempt differs from its execution selection receipt",
+                            ));
+                        }
                         Some(Assignment {
                             task: Some(task),
                             attempt_id,
@@ -538,13 +574,13 @@ impl Store {
             transaction.commit().await?;
             return Ok(None);
         }
-        let Some(id) = authority::claim_candidate(
+        let Some((id, attempt_execution)) = authority::claim_candidate(
             &mut transaction,
             now,
             host.id(),
             all_tags,
             &workspace_ids,
-            harness,
+            (harness, &profile),
             &contracts,
         )
         .await?
@@ -555,11 +591,12 @@ impl Store {
         };
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1 WHERE task_id = $7")
+        let attempt_execution = attempt_execution.encode_to_vec();
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7 WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
-            .bind(authority::lease_deadline(now)).bind(&id).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).execute(&mut *transaction).await?;
+            .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
         Ok(Some(Assignment {
@@ -1487,6 +1524,14 @@ pub(crate) async fn owned(
 }
 
 pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
+    let policy_snapshot = crate::policy::snapshot_from_row(row)?;
+    let execution_selection = Some(execution::accepted(policy_snapshot.as_ref()));
+    let attempt_id: Option<String> = row.try_get("attempt_id")?;
+    let attempt_execution = if attempt_id.is_some() {
+        execution::read_attempt(row.try_get("attempt_execution")?)?
+    } else {
+        None
+    };
     Ok(Task {
         execution_limits: crate::budget_pool::from_row(row)?,
         task_id: row.try_get("task_id")?,
@@ -1498,12 +1543,14 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         tag_revision: row.try_get::<i64, _>("tag_revision")? as u64,
         state: row.try_get::<i64, _>("state")? as i32,
         result: row.try_get("result")?,
-        attempt_id: row.try_get("attempt_id")?,
+        attempt_id,
         workspace: crate::workspaces::workspace_from_row(row)?,
         workspace_delivery: crate::workspaces::delivery_from_row(row)?,
         harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
         approval_rules: approval_rules_from_row(row)?,
-        policy_snapshot: crate::policy::snapshot_from_row(row)?,
+        policy_snapshot,
+        execution_selection,
+        attempt_execution,
     })
 }
 

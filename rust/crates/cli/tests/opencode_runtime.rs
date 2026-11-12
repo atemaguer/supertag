@@ -1,5 +1,6 @@
 //! Real Control Plane, Gateway and Worker Host processes with a provider-shaped OpenCode CLI.
 use anyhow::{Context, Result, anyhow, ensure};
+use prost::Message;
 use serde_json::Value;
 use sqlx::Connection;
 use std::{
@@ -15,8 +16,10 @@ use std::{
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        CancelTaskRequest, ExecutionLimits, GetTaskRequest, HarnessKind, ListEventsRequest,
-        PutTagRequest, SubmitTaskRequest, Task, TaskState, operator_client::OperatorClient,
+        AssignRoleRequest, CancelTaskRequest, ClaimTaskRequest, ExecutionLimits, GetTaskRequest,
+        HarnessExecutionProfile, HarnessKind, ListEventsRequest, ModelSource,
+        PolicyExecutionSettings, PutRoleRequest, PutTagRequest, Role, SubmitTaskRequest, Task,
+        TaskState, operator_client::OperatorClient, policy_catalog_client::PolicyCatalogClient,
     },
 };
 use tokio::time::sleep;
@@ -25,6 +28,7 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const WAIT: Duration = Duration::from_secs(25);
+const FIXTURE_MODEL: &str = "openai/fixture-model";
 const NATIVE: &str =
     include_str!("../../../../packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs");
 
@@ -259,6 +263,15 @@ impl Runtime {
         self.host_with_auth_file(directory, None)
     }
     fn host_with_auth_file(&self, directory: &Path, auth_file: Option<&Path>) -> Result<Process> {
+        self.host_with_models(directory, auth_file, FIXTURE_MODEL, &[])
+    }
+    fn host_with_models(
+        &self,
+        directory: &Path,
+        auth_file: Option<&Path>,
+        default_model: &str,
+        models: &[&str],
+    ) -> Result<Process> {
         let home = directory.join("operator-home");
         std::fs::create_dir_all(&home)?;
         let mut host = self.credentials.command();
@@ -270,7 +283,7 @@ impl Runtime {
             "--harness",
             "opencode",
             "--harness-model",
-            "openai/fixture-model",
+            default_model,
         ])
         .arg("--opencode-node")
         .arg(&self.node)
@@ -286,6 +299,9 @@ impl Runtime {
         .env("CLAUDE_CODE_OAUTH_TOKEN", "unused-claude-token")
         .env("NODE_OPTIONS", "--synthetic-disallowed-option")
         .env("PYTHONPATH", "unused-python-path");
+        for model in models {
+            host.args(["--harness-models", model]);
+        }
         if let Some(path) = auth_file {
             host.arg("--opencode-auth-file").arg(path);
         } else {
@@ -667,7 +683,7 @@ async fn opencode_recovers_missing_terminal_from_credential_free_local_export() 
 }
 
 #[tokio::test]
-async fn opencode_leaves_limits_queued_and_refuses_unsandboxed_commands() -> Result<()> {
+async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let mut runtime = Runtime::start(directory.path()).await?;
     runtime
@@ -714,22 +730,125 @@ async fn opencode_leaves_limits_queued_and_refuses_unsandboxed_commands() -> Res
     host.success().await?;
     let task = runtime.task(&commands.task_id).await?;
     ensure!(
-        task.state() == TaskState::Failed,
-        "unapproved unsandboxed commands were not refused: {:?}",
-        task.result
+        task.state() == TaskState::Queued,
+        "unapproved unsandboxed commands were assigned to OpenCode: {:?}",
+        task.state()
     );
     ensure!(
-        task.result
-            .as_deref()
-            .unwrap_or_default()
-            .contains("unsandboxed"),
-        "{:?}",
-        task.result
+        task.attempt_id.is_none() && task.attempt_execution.is_none(),
+        "unapproved unsandboxed commands gained execution authority"
     );
     ensure!(
         runtime.calls()?.is_empty(),
         "native process started despite unsupported commands"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut runtime = Runtime::start(directory.path()).await?;
+    runtime
+        .tag("reviewer", HarnessKind::Opencode, &["files:read"])
+        .await?;
+    let default_model = "openai/host-default";
+    let mut policy = PolicyCatalogClient::new(
+        Channel::from_shared(runtime.endpoint.clone())?
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(3))
+            .connect()
+            .await?,
+    );
+    let role = policy
+        .put_role(runtime.credentials.request(PutRoleRequest {
+            operation_id: "reviewer-model-role".into(),
+            role: Some(Role {
+                role_id: "reviewer-model".into(),
+                name: "Reviewer model".into(),
+                purpose: "Use the selected native model".into(),
+                execution: Some(PolicyExecutionSettings {
+                    harness: Some("opencode".into()),
+                    models: vec![FIXTURE_MODEL.into(), default_model.into()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })?)
+        .await?
+        .into_inner();
+    policy
+        .assign_role(runtime.credentials.request(AssignRoleRequest {
+            operation_id: "assign-reviewer-model".into(),
+            tag_id: "reviewer".into(),
+            role: role.role_id,
+        })?)
+        .await?;
+    let task = runtime
+        .submit("reviewer", "model-choice", "fresh", None)
+        .await?;
+    let selected = task
+        .execution_selection
+        .as_ref()
+        .context("Role model selection was not accepted")?;
+    assert_eq!(selected.model.as_deref(), Some(FIXTURE_MODEL));
+
+    // Simulate a crash after the old host saved an eligible Claim, before sending it.
+    let wrong_directory = directory.path().join("wrong-host");
+    let wrong_state = wrong_directory.join("host");
+    std::fs::create_dir_all(&wrong_state)?;
+    std::fs::set_permissions(&wrong_state, std::fs::Permissions::from_mode(0o700))?;
+    let stale_claim = ClaimTaskRequest {
+        operation_id: Uuid::new_v4().to_string(),
+        harness_kind: HarnessKind::Opencode as i32,
+        execution_profile: Some(HarnessExecutionProfile {
+            model_ids: vec![FIXTURE_MODEL.into()],
+            default_model: Some(FIXTURE_MODEL.into()),
+            allow_unsandboxed_commands: false,
+        }),
+        ..Default::default()
+    };
+    let journal = wrong_state.join("attempt.json");
+    std::fs::write(
+        &journal,
+        serde_json::to_vec(&serde_json::json!({
+            "stage": "claim",
+            "operation_id": stale_claim.operation_id,
+            "request": stale_claim.encode_to_vec(),
+        }))?,
+    )?;
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o600))?;
+    let mut wrong = runtime.host_with_models(&wrong_directory, None, default_model, &[])?;
+    wrong.success().await?;
+    assert!(!journal.try_exists()?);
+    let queued = runtime.task(&task.task_id).await?;
+    assert_eq!(queued.state(), TaskState::Queued);
+    assert!(queued.attempt_id.is_none() && queued.attempt_execution.is_none());
+    assert!(runtime.calls()?.is_empty() && runtime.native_errors().is_empty());
+
+    let mut matching =
+        runtime.host_with_models(directory.path(), None, default_model, &[FIXTURE_MODEL])?;
+    matching.success().await?;
+    let completed = runtime.task(&task.task_id).await?;
+    ensure!(
+        completed.state() == TaskState::Succeeded,
+        "matched host failed: {:?}; native fixture: {}",
+        completed.result,
+        runtime.native_errors()
+    );
+    assert_eq!(completed.execution_selection, task.execution_selection);
+    let attempt = completed
+        .attempt_execution
+        .context("Attempt selection missing")?;
+    assert_eq!(attempt.harness_kind(), HarnessKind::Opencode);
+    assert_eq!(attempt.model_source(), ModelSource::Task);
+    assert_eq!(attempt.selection.as_ref(), Some(selected));
+    let calls = runtime.calls()?;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["args"][3], "--model");
+    assert_eq!(calls[0]["args"][4], FIXTURE_MODEL);
+    gone(calls[0]["pid"].as_i64().context("native PID missing")? as i32).await?;
     Ok(())
 }
 

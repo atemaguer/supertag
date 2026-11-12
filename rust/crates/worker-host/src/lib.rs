@@ -17,13 +17,15 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail, ensure};
 use journal::{Attempt, Entry, Journal};
+use prost::Message;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        Assignment, ClaimTaskRequest, CommitContextResolutionRequest, FinishTaskRequest,
-        HarnessCompleteRequest, HarnessKind, InspectAttemptRequest, RegisterHostRequest,
-        ResolvedSkill, StartTaskRequest, Task, TaskState,
-        attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
+        Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
+        FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
+        InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest, Task,
+        TaskState, attempt_inputs_client::AttemptInputsClient,
+        attempt_mailbox_client::AttemptMailboxClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
@@ -47,6 +49,7 @@ pub struct HostOptions {
     pub adapter_args: Vec<OsString>,
     pub harness: HarnessKind,
     pub provider_model: Option<String>,
+    pub execution_profile: HarnessExecutionProfile,
     pub attempt_timeout: Duration,
     pub wait_for_recovery: bool,
     pub once: bool,
@@ -83,11 +86,41 @@ impl Attempt {
             task.attempt_id.as_deref() == Some(assignment.attempt_id.as_str()),
             "assignment has mismatched Attempt identity"
         );
+        let requires_unsandboxed_commands =
+            task.attempt_execution.as_ref().is_some_and(|attempt| {
+                matches!(
+                    attempt.harness_kind(),
+                    HarnessKind::Opencode | HarnessKind::Cursor
+                ) && task
+                    .allowed_actions
+                    .iter()
+                    .any(|action| action == "commands:execute")
+            });
         Ok(Self {
             task_id: task.task_id,
             attempt_id: assignment.attempt_id,
             lease_token: assignment.lease_token,
+            execution_selection: task
+                .attempt_execution
+                .map(|selection| selection.encode_to_vec()),
+            requires_unsandboxed_commands,
         })
+    }
+
+    fn can_launch(&self, options: &HostOptions) -> Result<bool> {
+        let Some(selection) = &self.execution_selection else {
+            return Ok(false);
+        };
+        let execution = AttemptExecutionSelection::decode(selection.as_slice())
+            .context("stored Attempt execution selection is invalid")?;
+        let model = execution
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.model.as_ref());
+        Ok(execution.harness_kind == options.harness as i32
+            && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
+            && (!self.requires_unsandboxed_commands
+                || options.execution_profile.allow_unsandboxed_commands))
     }
 
     fn inspect(&self) -> InspectAttemptRequest {
@@ -96,6 +129,20 @@ impl Attempt {
             attempt_id: self.attempt_id.clone(),
             lease_token: self.lease_token.clone(),
         }
+    }
+}
+
+fn claim_request(
+    options: &HostOptions,
+    workspaces: &workspaces::Workspaces,
+    operation_id: String,
+) -> ClaimTaskRequest {
+    ClaimTaskRequest {
+        operation_id,
+        workspace_ids: workspaces.ids(),
+        harness_kind: options.harness as i32,
+        context_contracts: options.context_catalog.supported_contracts(),
+        execution_profile: Some(options.execution_profile.clone()),
     }
 }
 
@@ -202,6 +249,7 @@ pub async fn run(
         token.clone(),
         options.harness as i32,
         workspaces.ids(),
+        options.execution_profile.clone(),
         shutdown.clone(),
     );
     let outcome = async {
@@ -210,8 +258,11 @@ pub async fn run(
         let entry = match journal.load()? {
             Some(entry) => entry,
             None => {
+                let operation_id = Uuid::new_v4().to_string();
+                let claim = claim_request(&options, &workspaces, operation_id.clone());
                 let entry = Entry::Claim {
-                    operation_id: Uuid::new_v4().to_string(),
+                    operation_id,
+                    request: claim.encode_to_vec(),
                 };
                 journal.save(&entry)?;
                 entry
@@ -223,17 +274,22 @@ pub async fn run(
             _ => readiness::State::Busy,
         });
         match entry {
-            Entry::Claim { operation_id } => {
+            Entry::Claim { operation_id, request: saved } => {
+                if saved.is_empty() {
+                    journal.clear()?;
+                    continue;
+                }
+                let claim = ClaimTaskRequest::decode(saved.as_slice())
+                    .context("stored Claim is invalid")?;
+                ensure!(claim.operation_id == operation_id, "stored Claim identity differs");
+                if claim != claim_request(&options, &workspaces, operation_id) {
+                    // Never submit an unsent Claim with a superseded profile. A
+                    // previously allocated reservation expires on its existing lease.
+                    journal.clear()?;
+                    continue;
+                }
                 let response = host
-                    .claim_task(request(
-                        ClaimTaskRequest {
-                            operation_id,
-                            workspace_ids: workspaces.ids(),
-                            harness_kind: options.harness as i32,
-                            context_contracts: options.context_catalog.supported_contracts(),
-                        },
-                        &token,
-                    )?)
+                    .claim_task(request(claim, &token)?)
                     .await;
                 let assignment = match response {
                     Ok(response) => response.into_inner().assignment,
@@ -626,8 +682,9 @@ async fn run_assignment(
     let (host, inputs, coordination, transfers, token) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
-    let start = host
-        .start_task(request(
+    let can_launch = attempt.can_launch(options)?;
+    let start = if can_launch {
+        host.start_task(request(
             StartTaskRequest {
                 task_id: attempt.task_id.clone(),
                 attempt_id: attempt.attempt_id.clone(),
@@ -635,7 +692,11 @@ async fn run_assignment(
             },
             token,
         )?)
-        .await;
+        .await
+    } else {
+        host.inspect_attempt(request(attempt.inspect(), token)?)
+            .await
+    };
     let task = match start {
         Ok(response) => response.into_inner(),
         Err(error) if retryable(&error) => {
@@ -664,6 +725,19 @@ async fn run_assignment(
         Err(error) => return Err(error.into()),
     };
     ensure_attempt(&task, &attempt)?;
+    if !can_launch {
+        ready();
+        if task.state() == TaskState::Claimed {
+            // Starting never launched an adapter. Leave an unstarted reservation
+            // for the Control Plane's lease expiry to put back in the queue.
+            return journal.clear();
+        }
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host execution profile changed before launch"),
+        );
+    }
     if task.state() == TaskState::Claimed {
         // A pause can block Start after Claim. No adapter has launched, so
         // retain the intent while the Control Plane retires the reservation.
@@ -902,6 +976,10 @@ fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
         task.task_id == attempt.task_id
             && task.attempt_id.as_deref() == Some(attempt.attempt_id.as_str()),
         "Control Plane returned a different Task Attempt"
+    );
+    ensure!(
+        task.attempt_execution.as_ref().map(Message::encode_to_vec) == attempt.execution_selection,
+        "Control Plane returned a different Attempt execution selection"
     );
     Ok(())
 }

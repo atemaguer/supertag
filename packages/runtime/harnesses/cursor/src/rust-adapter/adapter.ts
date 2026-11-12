@@ -141,7 +141,9 @@ export async function runAdapter(
     if (!apiKey || apiKey.length < 8 || apiKey.length > 4096)
       throw new Error("Cursor requires a valid provider credential");
     const admittedModels = task.policySnapshot?.execution?.models ?? [];
-    const model = configuration.model ?? admittedModels[0] ?? "auto";
+    const model = task.attemptExecution
+      ? (task.attemptExecution.selection?.model ?? "auto")
+      : (configuration.model ?? admittedModels[0] ?? "auto");
     if (admittedModels.length && !admittedModels.includes(model))
       throw new Error("Cursor model is outside the accepted policy");
 

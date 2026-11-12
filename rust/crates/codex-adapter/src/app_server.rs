@@ -1003,7 +1003,7 @@ mod tests {
             )?;
         }
         let policy = Policy::from_actions(&["files:read".into()], false)?;
-        let args = crate::config::arguments(&workspace, None, &policy)?;
+        let args = crate::config::arguments(&workspace, None, None, &policy)?;
         let mut child = Command::new(executable)
             .args(args)
             .current_dir(&workspace)
@@ -1054,7 +1054,7 @@ mod tests {
         let home = directory.path().join("native-home");
         std::fs::create_dir(&home)?;
         let policy = Policy::from_actions(&["files:read".into()], false)?;
-        let args = crate::config::arguments(&workspace, None, &policy)?;
+        let args = crate::config::arguments(&workspace, None, Some("medium"), &policy)?;
         let mut child = Command::new(executable)
             .args(args)
             .current_dir(&workspace)
@@ -1105,7 +1105,7 @@ mod tests {
         // starts a turn, reads native credentials, or calls a model provider.
         let mut params = crate::config::thread_parameters(
             &workspace,
-            &crate::config::arguments(&workspace, None, &policy)?,
+            &crate::config::arguments(&workspace, None, None, &policy)?,
         )?;
         params["dynamicTools"] =
             crate::questions::tool_specs(crate::coordination::Inventory::WorkSessionLifecycle);

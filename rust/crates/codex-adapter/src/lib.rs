@@ -189,19 +189,27 @@ async fn execute(
         .canonicalize()
         .context("Codex workspace is unavailable")?;
     ensure!(workspace.is_dir(), "Codex workspace must be a directory");
-    let accepted_model = task
-        .policy_snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.execution.as_ref())
-        .and_then(|execution| execution.models.first())
-        .map(String::as_str);
+    let model = match &task.attempt_execution {
+        Some(attempt) => attempt
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.model.as_deref()),
+        None => task
+            .policy_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.execution.as_ref())
+            .and_then(|execution| execution.models.first())
+            .map(String::as_str)
+            .or(options.model.as_deref()),
+    };
     let policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
-    let arguments = config::arguments(
-        &workspace,
-        accepted_model.or(options.model.as_deref()),
-        &policy,
-    )?;
+    let effort = task
+        .attempt_execution
+        .as_ref()
+        .and_then(|attempt| attempt.selection.as_ref())
+        .and_then(|selection| selection.effort.as_deref());
+    let arguments = config::arguments(&workspace, model, effort, &policy)?;
     let thread_parameters = config::thread_parameters(&workspace, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;

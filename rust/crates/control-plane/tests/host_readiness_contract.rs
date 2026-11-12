@@ -30,6 +30,11 @@ fn report(sequence: u64) -> ReportHostRequest {
         reason: HostReadinessReason::Unspecified as i32,
         harness_kind: HarnessKind::Codex as i32,
         workspace_ids: vec!["project".into()],
+        execution_profile: Some(HarnessExecutionProfile {
+            model_ids: vec!["codex-alpha".into(), "codex-beta".into()],
+            default_model: Some("codex-alpha".into()),
+            allow_unsandboxed_commands: false,
+        }),
     }
 }
 
@@ -54,8 +59,21 @@ async fn contract(url: &str) {
     assert_eq!(ready.available_slots, 1);
     assert_eq!(ready.last_seen_at_ms, Some(NOW));
     assert_eq!(ready.presence_expires_at_ms, Some(NOW + 30_000));
+    assert_eq!(ready.execution_profile, report(1).execution_profile);
     clock.store(NOW + 5_000, Ordering::SeqCst);
-    assert_eq!(store.report_host(&host, &report(1)).await.unwrap(), ready);
+    let mut replay = report(1);
+    replay
+        .execution_profile
+        .as_mut()
+        .unwrap()
+        .model_ids
+        .reverse();
+    assert_eq!(store.report_host(&host, &replay).await.unwrap(), ready);
+    replay.execution_profile.as_mut().unwrap().default_model = Some("codex-beta".into());
+    assert!(matches!(
+        store.report_host(&host, &replay).await,
+        Err(StoreError::Conflict(_))
+    ));
     let mut conflict = report(1);
     conflict.available_slots = 0;
     assert!(matches!(
@@ -137,9 +155,12 @@ async fn contract(url: &str) {
     assert_eq!(offline.phase(), HostPhase::Offline);
     assert_eq!(offline.available_slots, 0);
     // A delayed exact replay cannot resurrect an expired presence lease.
+    let delayed_replay = store.report_host(&host, &report(2)).await.unwrap();
+    assert_eq!(delayed_replay.phase(), HostPhase::Offline);
+    assert_eq!(delayed_replay.last_seen_at_ms, offline.last_seen_at_ms);
     assert_eq!(
-        store.report_host(&host, &report(2)).await.unwrap().phase(),
-        HostPhase::Offline
+        delayed_replay.presence_expires_at_ms,
+        offline.presence_expires_at_ms
     );
     store.close().await;
 
@@ -166,15 +187,15 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     let replacement = HostAuthority::new("host:host-a", second.generation).unwrap();
-    assert_eq!(
-        store.get_host("host-a").await.unwrap().phase(),
-        HostPhase::Pending
-    );
+    let pending = store.get_host("host-a").await.unwrap();
+    assert_eq!(pending.phase(), HostPhase::Pending);
+    assert!(pending.execution_profile.is_none());
     assert!(matches!(
         store.report_host(&host, &report(4)).await,
         Err(StoreError::PermissionDenied)
     ));
-    store.report_host(&replacement, &report(1)).await.unwrap();
+    let ready = store.report_host(&replacement, &report(1)).await.unwrap();
+    assert_eq!(ready.execution_profile, report(1).execution_profile);
     let host_b = support::register_host(&store, "host-b").await;
     let page = store
         .list_hosts(&ListHostsRequest {

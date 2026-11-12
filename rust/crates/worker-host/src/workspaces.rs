@@ -436,6 +436,8 @@ mod tests {
                 task_id: "task".into(),
                 attempt_id: "attempt".into(),
                 lease_token: "lease".into(),
+                execution_selection: None,
+                requires_unsandboxed_commands: false,
             },
             result: "Change: Capture a checked result".into(),
             succeeded: true,

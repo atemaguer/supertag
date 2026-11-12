@@ -138,6 +138,13 @@ class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HARNESS_KIND_OPENCODE: _ClassVar[HarnessKind]
     HARNESS_KIND_CURSOR: _ClassVar[HarnessKind]
 
+class ModelSource(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    MODEL_SOURCE_UNSPECIFIED: _ClassVar[ModelSource]
+    MODEL_SOURCE_TASK: _ClassVar[ModelSource]
+    MODEL_SOURCE_HOST_DEFAULT: _ClassVar[ModelSource]
+    MODEL_SOURCE_HARNESS_DEFAULT: _ClassVar[ModelSource]
+
 class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     ATTEMPT_DECISION_UNSPECIFIED: _ClassVar[AttemptDecision]
@@ -296,6 +303,10 @@ HARNESS_KIND_CLAUDE_CODE: HarnessKind
 HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 HARNESS_KIND_OPENCODE: HarnessKind
 HARNESS_KIND_CURSOR: HarnessKind
+MODEL_SOURCE_UNSPECIFIED: ModelSource
+MODEL_SOURCE_TASK: ModelSource
+MODEL_SOURCE_HOST_DEFAULT: ModelSource
+MODEL_SOURCE_HARNESS_DEFAULT: ModelSource
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
@@ -956,7 +967,7 @@ class ReadMailboxRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class ReportHostRequest(_message.Message):
-    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids")
+    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     CAPACITY_FIELD_NUMBER: _ClassVar[int]
     AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
@@ -964,6 +975,7 @@ class ReportHostRequest(_message.Message):
     REASON_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     capacity: int
     available_slots: int
@@ -971,10 +983,11 @@ class ReportHostRequest(_message.Message):
     reason: HostReadinessReason
     harness_kind: HarnessKind
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    execution_profile: HarnessExecutionProfile
+    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ...) -> None: ...
 
 class WorkerHostStatus(_message.Message):
-    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms")
+    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
@@ -989,6 +1002,7 @@ class WorkerHostStatus(_message.Message):
     LAST_SEEN_AT_MS_FIELD_NUMBER: _ClassVar[int]
     PRESENCE_EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
     REVOKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     generation: int
     phase: HostPhase
@@ -1003,7 +1017,8 @@ class WorkerHostStatus(_message.Message):
     last_seen_at_ms: int
     presence_expires_at_ms: int
     revoked_at_ms: int
-    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ...) -> None: ...
+    execution_profile: HarnessExecutionProfile
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ...) -> None: ...
 
 class ListHostsRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -1472,7 +1487,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1489,6 +1504,8 @@ class Task(_message.Message):
     APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     POLICY_SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_SELECTION_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -1505,7 +1522,39 @@ class Task(_message.Message):
     approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
     policy_snapshot: _policy_pb2.TaskPolicySnapshot
     execution_limits: ExecutionLimits
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ...) -> None: ...
+    execution_selection: ExecutionSelection
+    attempt_execution: AttemptExecutionSelection
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ...) -> None: ...
+
+class ExecutionSelection(_message.Message):
+    __slots__ = ("model", "effort")
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    EFFORT_FIELD_NUMBER: _ClassVar[int]
+    model: str
+    effort: str
+    def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
+
+class HarnessExecutionProfile(_message.Message):
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands")
+    MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
+    ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
+    model_ids: _containers.RepeatedScalarFieldContainer[str]
+    default_model: str
+    allow_unsandboxed_commands: bool
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ...) -> None: ...
+
+class AttemptExecutionSelection(_message.Message):
+    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied")
+    SELECTION_FIELD_NUMBER: _ClassVar[int]
+    MODEL_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    EFFORT_APPLIED_FIELD_NUMBER: _ClassVar[int]
+    selection: ExecutionSelection
+    model_source: ModelSource
+    harness_kind: HarnessKind
+    effort_applied: bool
+    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -1536,16 +1585,18 @@ class CancelTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class ClaimTaskRequest(_message.Message):
-    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts")
+    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts", "execution_profile")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_CONTRACTS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
     harness_kind: HarnessKind
     context_contracts: _containers.RepeatedCompositeFieldContainer[ContextContract]
-    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ...) -> None: ...
+    execution_profile: HarnessExecutionProfile
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ...) -> None: ...
 
 class ClaimTaskResponse(_message.Message):
     __slots__ = ("assignment",)

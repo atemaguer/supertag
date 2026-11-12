@@ -56,6 +56,11 @@ async fn contract(url: &str) {
     let old_head = version33(url).await;
     let store = Store::open(url).await.unwrap().with_execution_clock(|| NOW);
     let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    let version: i64 = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(version, 35);
     let head: i64 = sqlx::query_scalar("SELECT head FROM supertag_v2_watch_state")
         .fetch_one(&mut connection)
         .await
@@ -348,15 +353,34 @@ async fn contract(url: &str) {
         r#type: "supertag/skill".into(),
         version: 1,
     }];
+    let profile = HarnessExecutionProfile {
+        model_ids: vec!["fixture-model".into()],
+        default_model: Some("fixture-model".into()),
+        allow_unsandboxed_commands: true,
+    };
     let claim = store
-        .claim_task_with_context(&host, "claim", &[], HarnessKind::Cursor, &contracts)
+        .claim_task_with_profile(
+            &host,
+            "claim",
+            &[],
+            HarnessKind::Cursor,
+            &contracts,
+            Some(&profile),
+        )
         .await
         .unwrap()
         .unwrap();
     assert_eq!(claim.task.as_ref().unwrap().task_id, ready.task_id);
     assert_eq!(
         store
-            .claim_task_with_context(&host, "claim", &[], HarnessKind::Cursor, &contracts)
+            .claim_task_with_profile(
+                &host,
+                "claim",
+                &[],
+                HarnessKind::Cursor,
+                &contracts,
+                Some(&profile),
+            )
             .await
             .unwrap(),
         Some(claim.clone())
