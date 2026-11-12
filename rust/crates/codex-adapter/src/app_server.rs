@@ -200,7 +200,7 @@ struct Stream {
     sequence: u64,
     turn_requested: bool,
     resumed: bool,
-    inventory: crate::coordination::Inventory,
+    inventory: crate::questions::Tools,
 }
 
 impl Stream {
@@ -209,7 +209,7 @@ impl Stream {
         thread: String,
         expected_thread: Option<String>,
         baseline: Option<UsageCounters>,
-        inventory: crate::coordination::Inventory,
+        inventory: crate::questions::Tools,
         max_reported_tokens: Option<u64>,
         configured_model: Option<String>,
     ) -> Result<Self> {
@@ -514,10 +514,10 @@ impl Stream {
                     }
                     Some("dynamicToolCall") => {
                         ensure!(
-                            self.inventory != crate::coordination::Inventory::None,
+                            self.inventory.enabled(),
                             "Codex emitted an unregistered coordination tool item"
                         );
-                        crate::coordination::arguments(&item, self.inventory)?;
+                        self.inventory.arguments(&item)?;
                         return Ok(());
                     }
                     Some("webSearch") => item["type"] = json!("web_search"),

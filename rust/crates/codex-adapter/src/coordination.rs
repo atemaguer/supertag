@@ -24,6 +24,7 @@ const DEFAULT_LIMIT: u32 = 8;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Arguments {
+    Capture(crate::artifact::Capture),
     Ask(String),
     Post(Post),
     ReadWorkstream(WorkstreamPage),
@@ -1035,7 +1036,7 @@ fn history(value: Value) -> Value {
     )
 }
 
-fn response(text: impl Into<String>, success: bool) -> Value {
+pub(crate) fn response(text: impl Into<String>, success: bool) -> Value {
     json!({"success":success,"contentItems":[{"type":"inputText","text":text.into()}]})
 }
 

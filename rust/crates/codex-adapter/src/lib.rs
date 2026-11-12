@@ -1,5 +1,6 @@
 //! Native Codex execution through the supervising Worker Host's private Harness API.
 mod app_server;
+mod artifact;
 mod auth;
 mod checkpoint;
 mod config;
@@ -65,6 +66,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 .is_ok_and(|ip| ip.is_loopback()),
         "Harness endpoint must be loopback HTTP"
     );
+    let artifact_channel = endpoint.clone().connect_timeout(RPC_TIMEOUT).connect_lazy();
     let channel = endpoint
         .connect_timeout(RPC_TIMEOUT)
         .timeout(RPC_TIMEOUT)
@@ -87,10 +89,12 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 may_ask_objective_question: attached.may_ask_objective_question,
                 ..Default::default()
             });
-    let inventory = if let Some(previous) = &attached.checkpoint
-        && let Some(inventory) = checkpoint::coordination_inventory(previous)
-    {
-        inventory
+    let previous_tools = attached
+        .checkpoint
+        .as_ref()
+        .and_then(checkpoint::coordination_inventory);
+    let inventory = if let Some(tools) = previous_tools {
+        tools.coordination
     } else if capabilities.may_ask_work_session_question && attached.checkpoint.is_none() {
         coordination::Inventory::ChildQuestions
     } else if capabilities.may_continue_work_session && attached.checkpoint.is_none() {
@@ -109,13 +113,18 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     } else {
         coordination::Inventory::None
     };
+    let tools = previous_tools.unwrap_or(questions::Tools {
+        coordination: inventory,
+        capture_artifact: attached.checkpoint.is_none() && attached.may_capture_artifacts,
+    });
     let mut questions = questions::Bridge::new(
-        channel,
+        (channel, artifact_channel),
         &bootstrap.token,
         &task,
         &attached.attempt_id,
         capabilities,
-        inventory,
+        tools,
+        attached.may_capture_artifacts,
     );
     let outcome = execute(
         &options,
@@ -227,7 +236,7 @@ async fn execute(
             checkpoint::restore(
                 checkpoint,
                 task,
-                questions.manifest(),
+                &questions.manifest(),
                 authentication.home(),
                 &workspace,
                 &secrets,
@@ -296,7 +305,7 @@ async fn execute(
         );
         let checkpoint = checkpoint::capture(
             task,
-            questions.manifest(),
+            &questions.manifest(),
             authentication.home(),
             &workspace,
             thread,

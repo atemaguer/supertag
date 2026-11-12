@@ -407,6 +407,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
     },
+    /// Inspect or download files captured by a Task.
+    Artifact {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: artifacts::CaptureCommand,
+    },
     /// Download the patch or Git bundle published by a successful workspace Task.
     WorkspaceArtifact {
         #[command(flatten)]
@@ -1016,6 +1023,12 @@ async fn run(command: Command) -> Result<()> {
             output,
         } => {
             artifacts::download(connection, task_id, kind, &output).await?;
+        }
+        Command::Artifact {
+            connection,
+            command,
+        } => {
+            artifacts::run_capture(connection, command).await?;
         }
         Command::TaskEvents {
             connection,

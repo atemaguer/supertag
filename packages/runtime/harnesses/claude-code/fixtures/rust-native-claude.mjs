@@ -127,6 +127,33 @@ async function coordinationCall(tool, input) {
   return (await sdkMcp("tools/call", { name: tool, arguments: input })).result;
 }
 
+async function captureArtifact() {
+  const tool = "capture_artifact";
+  const name = `mcp__supertag__${tool}`;
+  const source = { mcp_server: { name: "supertag", source: "sdk" } };
+  const paths = ["report.txt", "empty.txt"];
+  const input = {
+    title: `Release evidence ${process.env.ANTHROPIC_API_KEY}`,
+    kind: "report",
+    paths,
+  };
+  const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  if (!tools?.some((entry) => entry.name === tool))
+    throw new Error("Unexpected artifact tool inventory");
+  if (
+    (await hook(name, input, { ...source, agent_id: "unowned-child" })) ||
+    (await hook(name, input, { mcp_server: { name: "supertag", source: "user" } }))
+  )
+    throw new Error("Artifact capture accepted forged tool provenance");
+  const denied = await coordinationCall(tool, { ...input, paths: ["../outside.txt"] });
+  if (!denied?.isError) throw new Error("Artifact capture accepted a path outside the checkout");
+  const stored = await coordinationCall(tool, input);
+  const receipt = JSON.parse(stored?.content?.[0]?.text ?? "{}");
+  if (stored?.isError || receipt.fileCount !== 2 || !receipt.artifactId)
+    throw new Error("Artifact capture did not return its receipt");
+  return `Captured artifact ${receipt.artifactId}`;
+}
+
 async function directMailbox() {
   const tools = (await sdkMcp("tools/list", {})).result?.tools;
   if (tools?.map(({ name }) => name).join() !== "send_message")
@@ -614,6 +641,13 @@ async function turn(message) {
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
   if (prompt === "scoped-http-mcp") result = await httpCatalog();
+  if (prompt === "capture-evidence") {
+    try {
+      result = await captureArtifact();
+    } catch (error) {
+      result = `Artifact fixture failed: ${error.message}`;
+    }
+  }
   if (prompt === "commit-review-request") result = await commitReview("request");
   if (prompt === "commit-review-verdict") result = await commitReview("verdict");
   if (prompt === "start-work-session") result = await workSessionTools();

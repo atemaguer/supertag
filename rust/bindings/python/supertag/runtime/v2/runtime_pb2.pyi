@@ -2074,7 +2074,7 @@ class AttemptHistory(_message.Message):
     def __init__(self, entries: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace", "may_capture_artifacts")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
@@ -2083,6 +2083,7 @@ class HarnessRun(_message.Message):
     RESOLVED_SKILLS_FIELD_NUMBER: _ClassVar[int]
     HISTORY_FIELD_NUMBER: _ClassVar[int]
     REMOTE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    MAY_CAPTURE_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
@@ -2091,7 +2092,8 @@ class HarnessRun(_message.Message):
     resolved_skills: _containers.RepeatedCompositeFieldContainer[ResolvedSkill]
     history: _containers.RepeatedCompositeFieldContainer[AttemptHistoryEntry]
     remote_workspace: bool
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ...) -> None: ...
+    may_capture_artifacts: bool
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ..., may_capture_artifacts: _Optional[bool] = ...) -> None: ...
 
 class ContextContract(_message.Message):
     __slots__ = ("type", "version")

@@ -58,6 +58,12 @@ const afterSequence = z
   ])
   .optional();
 const schemas = {
+  capture_artifact: z.strictObject({
+    title: nonblankText(200),
+    kind: nonblankText(64),
+    summary: z.string().max(4096).optional(),
+    paths: z.array(nonblankText(1024)).min(1).max(100),
+  }),
   ask: z.strictObject({ text: nonblankText(16_000) }),
   start_session: z.strictObject({
     title: nonblankText(120),
@@ -99,6 +105,7 @@ export interface CoordinationScope {
   secrets: readonly string[];
   signal: AbortSignal;
   active(): boolean;
+  nativeSessionId?(): string | undefined;
 }
 
 function response(text: string, failed = false) {
@@ -142,8 +149,16 @@ function verifiedWorkSession(
 
 export function registerCoordinationTools(
   server: Pick<McpServer, "registerTool">,
-  { questions, workstreams, mailbox, workSessions, options }: ReturnType<typeof harnessClient>,
-  run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination">,
+  {
+    artifacts,
+    questions,
+    workstreams,
+    mailbox,
+    workSessions,
+    options,
+  }: ReturnType<typeof harnessClient>,
+  run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination"> &
+    Partial<Pick<HarnessRun, "mayCaptureArtifacts">>,
   scope: CoordinationScope,
   configuration: { questionOperationPrefix: string; meta?: Record<string, unknown> },
 ) {
@@ -176,6 +191,60 @@ export function registerCoordinationTools(
     return next;
   }
   const parentSession = run.task?.sessionId;
+  if (run.mayCaptureArtifacts) {
+    tools.push("capture_artifact");
+    server.registerTool(
+      "capture_artifact",
+      {
+        description: "Save selected workspace files as an immutable artifact for the operator.",
+        inputSchema: schemas.capture_artifact,
+        _meta: meta,
+      },
+      async (input, extra) =>
+        write(async () => {
+          if (asked || input.paths.some((path) => safeText(path) !== path)) {
+            return response("The selected artifact files are unavailable.", true);
+          }
+          const nativeSessionId = scope.nativeSessionId?.();
+          const capture = {
+            operationId: randomUUID(),
+            description: {
+              title: safeText(input.title),
+              kind: safeText(input.kind),
+              summary: input.summary === undefined ? undefined : safeText(input.summary),
+            },
+            paths: input.paths,
+            nativeSessionId:
+              nativeSessionId && safeText(nativeSessionId) === nativeSessionId
+                ? nativeSessionId
+                : undefined,
+          };
+          try {
+            const stored = await call(extra.signal, (configuration) =>
+              artifacts.capture(capture, { ...configuration, timeoutMs: 65_000 }),
+            );
+            const summary = stored.summary;
+            if (
+              !summary?.artifactId ||
+              safeText(summary.artifactId) !== summary.artifactId ||
+              summary.producer?.taskId !== scope.taskId ||
+              summary.producer.attemptId !== scope.attemptId ||
+              summary.producer.tagId !== scope.tagId
+            ) {
+              return response("Artifact capture could not be verified.", true);
+            }
+            return response(
+              JSON.stringify({
+                artifactId: summary.artifactId,
+                fileCount: summary.fileCount,
+              }),
+            );
+          } catch {
+            return response("Artifact capture could not be confirmed.", true);
+          }
+        }),
+    );
+  }
   const asksChild = run.coordination?.mayAskWorkSessionQuestion === true;
   if (asksChild || (run.coordination?.mayAskObjectiveQuestion ?? run.mayAskObjectiveQuestion)) {
     const askSchema = asksChild ? childQuestionSchema : schemas.ask;

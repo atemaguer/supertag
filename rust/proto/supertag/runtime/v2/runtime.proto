@@ -1410,6 +1410,8 @@ message HarnessRun {
   // Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
   repeated AttemptHistoryEntry history = 7;
   bool remote_workspace = 8;
+  // The supervising Worker Host can capture selected files from this checkout.
+  bool may_capture_artifacts = 9;
 }
 
 message ContextContract {

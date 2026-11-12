@@ -24,13 +24,14 @@ export function validCoordinationArguments(name: string, input: unknown): boolea
 
 export function coordinationTools(
   bridge: ReturnType<typeof harnessClient>,
-  run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination">,
+  run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination"> &
+    Partial<Pick<HarnessRun, "mayCaptureArtifacts">>,
   scope: CoordinationScope,
 ) {
   const server = createSdkMcpServer({
     name: COORDINATION_SERVER,
     version: "1",
-    timeout: 16_000,
+    timeout: run.mayCaptureArtifacts ? 70_000 : 16_000,
     tools: [],
   });
   const { tools, waitingApprovalIds } = registerCoordinationTools(

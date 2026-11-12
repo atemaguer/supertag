@@ -27,6 +27,11 @@ use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// Freeze the bytes of one selected regular file in an owned checkout.
+pub fn capture_artifact_file(root: &Path, path: &str, maximum: usize) -> Result<Vec<u8>> {
+    paths::read_artifact_file(root, path, maximum)
+}
+
 #[derive(Clone, Debug)]
 pub struct WorkspaceConfig {
     pub state_dir: PathBuf,

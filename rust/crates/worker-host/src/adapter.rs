@@ -1,3 +1,4 @@
+mod artifact_capture;
 mod inputs;
 mod limits;
 mod mcp;
@@ -12,7 +13,7 @@ use std::{
     collections::HashSet,
     ffi::OsStr,
     io,
-    path::Path,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     sync::{
         Arc,
@@ -41,7 +42,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::TcpListener,
     process::{Child, Command},
-    sync::Mutex,
+    sync::{Mutex, Semaphore},
     time::{self, Instant},
 };
 use tokio_stream::wrappers::TcpListenerStream;
@@ -70,6 +71,8 @@ struct Bridge {
     workspace: Option<workspace::RemoteWorkspace>,
     mcp: Option<Arc<crate::mcp::AttemptMcp>>,
     mcp_lane: Arc<Mutex<()>>,
+    artifact_checkout: Option<PathBuf>,
+    artifact_capacity: Arc<Semaphore>,
 }
 
 #[derive(Default)]
@@ -156,6 +159,12 @@ impl Harness for Bridge {
             resolved_skills: self.resolved_skills.clone(),
             history,
             remote_workspace: self.workspace.is_some(),
+            may_capture_artifacts: self.artifact_checkout.is_some()
+                && self.assignment.task.as_ref().is_some_and(|task| {
+                    task.allowed_actions
+                        .iter()
+                        .any(|action| action == "files:read")
+                }),
         }))
     }
 
@@ -403,6 +412,8 @@ pub(crate) async fn execute(
         workspace: remote_workspace,
         mcp,
         mcp_lane: Arc::default(),
+        artifact_checkout: workspace.map(Path::to_owned),
+        artifact_capacity: Arc::new(Semaphore::new(1)),
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -418,6 +429,7 @@ pub(crate) async fn execute(
             .add_service(bridge.work_sessions_service())
             .add_service(bridge.workspace_service())
             .add_service(bridge.mcp_service())
+            .add_service(bridge.artifact_capture_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

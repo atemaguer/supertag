@@ -29,8 +29,8 @@ use supertag_protocol::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
         HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest,
-        Task, TaskState, attempt_inputs_client::AttemptInputsClient,
-        attempt_mailbox_client::AttemptMailboxClient,
+        Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
@@ -81,6 +81,7 @@ pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channe
 #[derive(Clone)]
 pub(crate) struct CoordinationClients {
     transfers: checkpoints::Transfers,
+    artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
@@ -250,6 +251,12 @@ pub async fn run(
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let coordination = CoordinationClients {
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
+        artifacts: ArtifactTransfersClient::with_interceptor(
+            options.gateway.clone().connect_lazy(),
+            headers.clone(),
+        )
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES),
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),

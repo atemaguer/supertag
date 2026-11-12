@@ -14,14 +14,15 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_codex_adapter::{CodexOptions, run};
 use supertag_protocol::v2::{
-    Approval, ApprovalState, AttemptCapabilities, BlobReference, CommitReview,
-    CommitReviewDecision, CommitReviewVerdict, HarnessPostWorkstreamRequest,
-    HarnessReadMailboxRequest, HarnessReadReviewPatchRequest, HarnessReadWorkstreamRequest,
-    HarnessReviewPatch, HarnessSendTagMessageRequest, ListMailboxMessagesResponse,
-    ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse,
-    SendTagMessageResponse, TagMessage, TagMessageOrigin, Team, WorkspaceDeliveryReference,
-    WorkstreamPost,
+    Approval, ApprovalState, ArtifactProducer, ArtifactSummary, AttemptCapabilities, BlobReference,
+    CapturedArtifact, CommitReview, CommitReviewDecision, CommitReviewVerdict,
+    HarnessCaptureArtifactRequest, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
+    HarnessReadReviewPatchRequest, HarnessReadWorkstreamRequest, HarnessReviewPatch,
+    HarnessSendTagMessageRequest, ListMailboxMessagesResponse, ListWorkstreamPostsResponse,
+    PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse, SendTagMessageResponse,
+    TagMessage, TagMessageOrigin, Team, WorkspaceDeliveryReference, WorkstreamPost,
     commit_review_submission::Kind as ReviewKind,
+    harness_artifacts_server::{HarnessArtifacts, HarnessArtifactsServer},
     harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
@@ -84,6 +85,8 @@ struct Observed {
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     pending_post: bool,
     lose_post_response: bool,
+    may_capture_artifacts: bool,
+    captures: Vec<HarnessCaptureArtifactRequest>,
 }
 
 #[derive(Clone)]
@@ -101,6 +104,35 @@ impl HarnessFixture {
             return Err(Status::unauthenticated("test credential required"));
         }
         Ok(())
+    }
+}
+
+#[tonic::async_trait]
+impl HarnessArtifacts for HarnessFixture {
+    async fn capture(
+        &self,
+        request: Request<HarnessCaptureArtifactRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        if !observed.may_capture_artifacts {
+            return Err(Status::permission_denied("capture was not admitted"));
+        }
+        let input = request.into_inner();
+        observed.captures.push(input.clone());
+        Ok(Response::new(CapturedArtifact {
+            summary: Some(ArtifactSummary {
+                artifact_id: "artifact-fixture".into(),
+                file_count: input.paths.len() as u32,
+                producer: Some(ArtifactProducer {
+                    task_id: self.task.task_id.clone(),
+                    attempt_id: "native-attempt".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
     }
 }
 
@@ -126,6 +158,7 @@ impl Harness for HarnessFixture {
             resolved_skills: observed.resolved_skills.clone(),
             history: vec![],
             remote_workspace: false,
+            may_capture_artifacts: observed.may_capture_artifacts,
         }))
     }
     async fn confirm_execution_limits(
@@ -668,6 +701,7 @@ impl HarnessProcess {
                 .add_service(HarnessQuestionsServer::new(fixture.clone()))
                 .add_service(HarnessWorkstreamsServer::new(fixture.clone()))
                 .add_service(HarnessWorkSessionsServer::new(fixture.clone()))
+                .add_service(HarnessArtifactsServer::new(fixture.clone()))
                 .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
@@ -677,6 +711,46 @@ impl HarnessProcess {
             server,
         })
     }
+}
+
+#[tokio::test]
+async fn native_artifact_tool_keeps_its_manifest_and_checks_current_turn_authority() -> Result<()> {
+    let mut checkpoint = None;
+    for allowed in [true, false] {
+        let native = NativeFixture::new(&successful("Reviewed evidence"), "exit 0")?;
+        std::fs::write(native.directory.path().join("artifact-mode"), "")?;
+        let server = HarnessProcess::configured(
+            &["files:read"],
+            checkpoint,
+            "Capture the release report",
+            false,
+        )
+        .await?;
+        server.observed.lock().await.may_capture_artifacts = allowed;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome missing")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        let saved = outcome.checkpoint.clone().context("checkpoint missing")?;
+        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-capture-v1"));
+        checkpoint = Some(saved);
+        let requests = native.read("requests.jsonl")?;
+        assert_eq!(observed.captures.len(), usize::from(allowed));
+        if let Some(capture) = observed.captures.first() {
+            assert!(capture.operation_id.starts_with("codex-"));
+            assert_eq!(capture.paths, ["report.txt"]);
+            assert_eq!(
+                capture.description.as_ref().unwrap().title,
+                "Release report [REDACTED]"
+            );
+            assert_eq!(capture.native_session_id.as_deref(), Some("native-thread"));
+            assert!(requests.contains("dynamicTools") && requests.contains("artifact-fixture"));
+        } else {
+            assert!(requests.contains("thread/resume") && !requests.contains("dynamicTools"));
+            assert!(!requests.contains("artifact-fixture"));
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]

@@ -554,6 +554,135 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host() -> Result<()> {
 
 #[tokio::test]
 #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<()> {
+    let interpreter =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let source = directory.path().join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("user.name=SuperTag Fixture")
+            .arg("-c")
+            .arg("user.email=fixture@example.invalid")
+            .args(args);
+        command
+    };
+    success(git(&["init", "--quiet"])).await?;
+    let report = b"durable engineering evidence from the source checkout\n";
+    std::fs::write(source.join("report.txt"), report)?;
+    std::fs::write(source.join("empty.txt"), [])?;
+    success(git(&["add", "report.txt", "empty.txt"])).await?;
+    success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
+    let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
+    let services = LanguageServices::start(directory.path()).await?;
+    services
+        .operator(&[
+            "put-tag",
+            "producer",
+            "--instructions",
+            "Save evidence.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--workspace-id",
+            "evidence",
+            "--workspace-base",
+            base.trim(),
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "producer",
+            "--session",
+            "evidence",
+            "capture-evidence",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let mut host = services.worker(
+        "claude-code",
+        &directory.path().join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .arg("--workspace-id")
+        .arg("evidence")
+        .arg("--workspace-source")
+        .arg(&source)
+        .env("ANTHROPIC_API_KEY", "fixture-artifact-provider-key");
+    success(host).await?;
+    let task = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let page = services
+        .operator(&["artifact", "list", "--task", task_id])
+        .await?;
+    assert!(
+        task["result"]
+            .as_str()
+            .is_some_and(|result| result.starts_with("Captured artifact ")),
+        "{task}"
+    );
+    let records = page["artifacts"]
+        .as_array()
+        .context("artifact list missing")?;
+    assert_eq!(records.len(), 1);
+    let artifact_id = records[0]["artifact_id"]
+        .as_str()
+        .context("artifact ID missing")?;
+    assert_eq!(task["result"], format!("Captured artifact {artifact_id}"));
+    assert_eq!(records[0]["producer"]["tag_id"], "producer");
+    assert_eq!(
+        records[0]["producer"]["harness"],
+        "HARNESS_KIND_CLAUDE_CODE"
+    );
+    assert_eq!(
+        records[0]["description"]["title"],
+        "Release evidence [REDACTED]"
+    );
+    Uuid::parse_str(
+        records[0]["producer"]["native_session_id"]
+            .as_str()
+            .context("native Session ID missing")?,
+    )?;
+    let artifact = services.operator(&["artifact", "get", artifact_id]).await?;
+    assert_eq!(artifact["files"][0]["path"], "empty.txt");
+    assert_eq!(artifact["files"][1]["path"], "report.txt");
+    let destination = directory.path().join("download.txt");
+    let output = destination.to_str().context("fixture path is not UTF-8")?;
+    let download = [
+        "artifact",
+        "download",
+        artifact_id,
+        "--path",
+        "report.txt",
+        "--output",
+        output,
+    ];
+    services.operator(&download).await?;
+    assert_eq!(std::fs::read(&destination)?, report);
+    assert!(services.operator(&download).await.is_err());
+    assert_eq!(std::fs::read(&destination)?, report);
+    assert!(success(git(&["status", "--porcelain"])).await?.is_empty());
+    services.stop().await
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
 async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn() -> Result<()> {
     let interpreter =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;

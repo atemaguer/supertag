@@ -11632,8 +11632,10 @@ type HarnessRun struct {
 	// Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
 	History         []*AttemptHistoryEntry `protobuf:"bytes,7,rep,name=history,proto3" json:"history,omitempty"`
 	RemoteWorkspace bool                   `protobuf:"varint,8,opt,name=remote_workspace,json=remoteWorkspace,proto3" json:"remote_workspace,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The supervising Worker Host can capture selected files from this checkout.
+	MayCaptureArtifacts bool `protobuf:"varint,9,opt,name=may_capture_artifacts,json=mayCaptureArtifacts,proto3" json:"may_capture_artifacts,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HarnessRun) Reset() {
@@ -11718,6 +11720,13 @@ func (x *HarnessRun) GetHistory() []*AttemptHistoryEntry {
 func (x *HarnessRun) GetRemoteWorkspace() bool {
 	if x != nil {
 		return x.RemoteWorkspace
+	}
+	return false
+}
+
+func (x *HarnessRun) GetMayCaptureArtifacts() bool {
+	if x != nil {
+		return x.MayCaptureArtifacts
 	}
 	return false
 }
@@ -17939,7 +17948,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06result\x18\x03 \x01(\tH\x00R\x06result\x88\x01\x01B\t\n" +
 	"\a_result\"T\n" +
 	"\x0eAttemptHistory\x12B\n" +
-	"\aentries\x18\x01 \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\aentries\"\xe9\x03\n" +
+	"\aentries\x18\x01 \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\aentries\"\x9d\x04\n" +
 	"\n" +
 	"HarnessRun\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\x12\x1d\n" +
@@ -17952,7 +17961,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\fcoordination\x18\x05 \x01(\v2(.supertag.runtime.v2.AttemptCapabilitiesR\fcoordination\x12K\n" +
 	"\x0fresolved_skills\x18\x06 \x03(\v2\".supertag.runtime.v2.ResolvedSkillR\x0eresolvedSkills\x12B\n" +
 	"\ahistory\x18\a \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\ahistory\x12)\n" +
-	"\x10remote_workspace\x18\b \x01(\bR\x0fremoteWorkspace\"?\n" +
+	"\x10remote_workspace\x18\b \x01(\bR\x0fremoteWorkspace\x122\n" +
+	"\x15may_capture_artifacts\x18\t \x01(\bR\x13mayCaptureArtifacts\"?\n" +
 	"\x0fContextContract\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\rR\aversion\"\xa7\x01\n" +

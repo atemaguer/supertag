@@ -57,6 +57,12 @@ if root.joinpath("work-session-mode").exists():
     coordination_tools.append(("start_session", {"title": "  Review   release ", "instruction": "Inspect release logs synthetic-codex-provider-secret."}))
 if root.joinpath("continue-session-mode").exists():
     coordination_tools.append(("continue_session", {"sessionId": "work/codex-child", "message": "Use staging synthetic-codex-provider-secret."}))
+if root.joinpath("artifact-mode").exists():
+    coordination_tools.append(("capture_artifact", {
+        "title": "Release report synthetic-codex-provider-secret",
+        "kind": "report",
+        "paths": ["report.txt"],
+    }))
 
 def emit(value):
     print(json.dumps(value), flush=True)

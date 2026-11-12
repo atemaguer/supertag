@@ -276,6 +276,7 @@ export async function runAdapter(
       secrets,
       signal: controller.signal,
       active: () => !finalSeen,
+      nativeSessionId: () => nativeSessionId,
     });
     phase = "MCP tool preparation";
     const mcp = await taskMcpTools(harness, task, controller.signal, () => !finalSeen, secrets);

@@ -8,6 +8,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
         AttemptCapabilities, HarnessAskQuestionRequest,
+        harness_artifacts_client::HarnessArtifactsClient,
         harness_questions_client::HarnessQuestionsClient,
     },
 };
@@ -25,16 +26,38 @@ pub(crate) const DIRECT_REVIEW: &str = "coordination-v2-review-v1";
 pub(crate) const WORK_SESSIONS_REVIEW: &str = "coordination-v3-review-v1";
 pub(crate) const WORK_SESSION_LIFECYCLE_REVIEW: &str = "coordination-v4-review-v1";
 pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
+pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
+
+#[derive(Clone, Copy)]
+pub(crate) struct Tools {
+    pub(crate) coordination: Inventory,
+    pub(crate) capture_artifact: bool,
+}
+
+impl Tools {
+    pub(crate) fn enabled(self) -> bool {
+        self.coordination != Inventory::None || self.capture_artifact
+    }
+
+    pub(crate) fn arguments(self, params: &Value) -> Result<Arguments> {
+        if params["tool"] == "capture_artifact" && self.capture_artifact {
+            return Ok(Arguments::Capture(crate::artifact::Capture::parse(params)?));
+        }
+        coordination::arguments(params, self.coordination)
+    }
+}
 
 pub(crate) struct Bridge {
     client: HarnessQuestionsClient<Channel>,
+    artifacts: HarnessArtifactsClient<Channel>,
     token: String,
     task_id: String,
     tag_id: String,
     session_id: String,
     attempt_id: String,
     capabilities: AttemptCapabilities,
-    inventory: Inventory,
+    tools: Tools,
+    may_capture_artifacts: bool,
     coordination: coordination::Client,
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
@@ -42,15 +65,19 @@ pub(crate) struct Bridge {
 }
 impl Bridge {
     pub(crate) fn new(
-        channel: Channel,
+        (channel, artifact_channel): (Channel, Channel),
         token: &str,
         task: &supertag_protocol::v2::Task,
         attempt_id: &str,
         capabilities: AttemptCapabilities,
-        inventory: Inventory,
+        tools: Tools,
+        may_capture_artifacts: bool,
     ) -> Self {
         Self {
             client: HarnessQuestionsClient::new(channel.clone())
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES),
+            artifacts: HarnessArtifactsClient::new(artifact_channel)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES),
             token: token.into(),
@@ -59,7 +86,8 @@ impl Bridge {
             session_id: task.session_id.clone(),
             attempt_id: attempt_id.into(),
             capabilities,
-            inventory,
+            tools,
+            may_capture_artifacts,
             coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
             secrets: vec![],
@@ -67,11 +95,11 @@ impl Bridge {
         }
     }
     pub(crate) fn enabled(&self) -> bool {
-        self.inventory != Inventory::None
+        self.tools.enabled()
     }
 
-    pub(crate) fn inventory(&self) -> Inventory {
-        self.inventory
+    pub(crate) fn inventory(&self) -> Tools {
+        self.tools
     }
     pub(crate) fn set_secrets(&mut self, secrets: &[String]) {
         self.secrets = secrets.to_vec();
@@ -82,8 +110,8 @@ impl Bridge {
         ids.dedup();
         ids
     }
-    pub(crate) fn manifest(&self) -> &'static str {
-        match self.inventory {
+    pub(crate) fn manifest(&self) -> String {
+        let base = match self.tools.coordination {
             Inventory::None => NONE,
             Inventory::Ask => OBJECTIVE_ASK,
             Inventory::ChildQuestions => CHILD_QUESTIONS,
@@ -94,17 +122,29 @@ impl Bridge {
             Inventory::WorkSessionsReview => WORK_SESSIONS_REVIEW,
             Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
             Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
+        };
+        if self.tools.capture_artifact {
+            format!("{base}{ARTIFACT_CAPTURE_SUFFIX}")
+        } else {
+            base.into()
         }
     }
     pub(crate) fn tools(&self) -> Value {
-        tool_specs(self.inventory)
+        let mut specs = tool_specs(self.tools.coordination);
+        if self.tools.capture_artifact {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .push(crate::artifact::spec());
+        }
+        specs
     }
     pub(crate) async fn call(&mut self, params: &Value) -> Result<Value> {
         ensure!(
             self.enabled(),
             "Codex coordination tools were not admitted for this Task"
         );
-        let arguments = coordination::arguments(params, self.inventory)?;
+        let arguments = self.tools.arguments(params)?;
         let call_id = params["callId"]
             .as_str()
             .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
@@ -130,8 +170,20 @@ impl Bridge {
             ))?)
         );
         let result = match &arguments {
+            Arguments::Capture(capture) if self.may_capture_artifacts && !self.asked => {
+                capture
+                    .invoke(
+                        &mut self.artifacts,
+                        operation_id,
+                        (&self.task_id, &self.attempt_id),
+                        params["threadId"].as_str(),
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
             Arguments::Ask(text)
-                if self.inventory == Inventory::ChildQuestions
+                if self.tools.coordination == Inventory::ChildQuestions
                     && self.capabilities.may_ask_work_session_question
                     && self.coordination.pending.is_empty() =>
             {
@@ -306,14 +358,17 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Value {
             16000,
         )
     };
-    let mut tools = vec![json!({
+    let mut tools = Vec::new();
+    if inventory != Inventory::None {
+        tools.push(json!({
         "type":"function", "name":"ask",
         "description":description,
         "inputSchema":{
             "type":"object", "properties":{"text":{"type":"string","minLength":1,"maxLength":max}},
             "required":["text"], "additionalProperties":false
         }
-    })];
+        }));
+    }
     if inventory >= Inventory::Workstream {
         tools.extend(coordination::tool_specs(inventory));
     }

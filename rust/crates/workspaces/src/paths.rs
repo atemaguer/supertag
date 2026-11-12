@@ -3,12 +3,15 @@
 use anyhow::{Context, Result, bail, ensure};
 use std::{
     collections::BTreeMap,
-    ffi::{CStr, CString},
+    ffi::{CStr, CString, OsStr},
     fs::{self, DirBuilder, File, OpenOptions},
     io::Read,
     os::{
         fd::{AsRawFd, FromRawFd},
-        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+        unix::{
+            ffi::OsStrExt,
+            fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+        },
     },
     path::{Component, Path, PathBuf},
 };
@@ -168,8 +171,8 @@ pub(crate) fn validate_link(path: &str, target: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn open_dir_at(parent: &File, name: &str) -> Result<File> {
-    let name = CString::new(name)?;
+fn open_dir_at(parent: &File, name: impl AsRef<OsStr>) -> Result<File> {
+    let name = CString::new(name.as_ref().as_bytes())?;
     let descriptor = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -184,11 +187,59 @@ fn open_dir_at(parent: &File, name: &str) -> Result<File> {
 }
 
 fn open_root(path: &Path) -> Result<File> {
-    verify_directory(path)?;
-    Ok(OpenOptions::new()
+    ensure!(
+        !path.as_os_str().is_empty(),
+        "workspace directory is required"
+    );
+    let start = if path.is_absolute() { "/" } else { "." };
+    let mut directory = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?)
+        .open(start)?;
+    for part in path.components() {
+        match part {
+            Component::Normal(name) => directory = open_dir_at(&directory, name)?,
+            Component::RootDir | Component::CurDir => {}
+            _ => bail!("unsafe workspace directory"),
+        }
+    }
+    Ok(directory)
+}
+
+fn open_file_at(parent: &File, name: &str) -> Result<File> {
+    let name = CString::new(name)?;
+    let descriptor = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(unsafe { File::from_raw_fd(descriptor) })
+}
+
+fn checkout_parent(root: &Path, path: &str) -> Result<File> {
+    let mut directory = open_root(root)?;
+    if let Some((parents, _)) = path.rsplit_once('/') {
+        for name in parents.split('/') {
+            directory = open_dir_at(&directory, name)?;
+        }
+    }
+    Ok(directory)
+}
+
+pub(crate) fn read_artifact_file(root: &Path, path: &str, maximum: usize) -> Result<Vec<u8>> {
+    validate_repo_path(path)?;
+    let directory = checkout_parent(root, path)?;
+    let name = path.rsplit('/').next().context("missing filename")?;
+    ensure!(
+        metadata_at(&directory, name)?.st_mode & libc::S_IFMT == libc::S_IFREG,
+        "artifact capture requires a regular file"
+    );
+    read_file(open_file_at(&directory, name)?, maximum)
 }
 
 fn metadata_at(parent: &File, name: &str) -> Result<libc::stat> {
@@ -380,12 +431,8 @@ pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<S
 
 pub(crate) fn read_checkout_file(root: &Path, path: &str) -> Result<CapturedFile> {
     validate_repo_path(path)?;
-    let mut directory = open_root(root)?;
-    let parts: Vec<_> = path.split('/').collect();
-    for name in &parts[..parts.len() - 1] {
-        directory = open_dir_at(&directory, name)?;
-    }
-    let name = parts.last().context("missing filename")?;
+    let directory = checkout_parent(root, path)?;
+    let name = path.rsplit('/').next().context("missing filename")?;
     let metadata = metadata_at(&directory, name)?;
     match metadata.st_mode & libc::S_IFMT {
         libc::S_IFLNK => {
@@ -397,18 +444,7 @@ pub(crate) fn read_checkout_file(root: &Path, path: &str) -> Result<CapturedFile
             })
         }
         libc::S_IFREG => {
-            let name = CString::new(*name)?;
-            let descriptor = unsafe {
-                libc::openat(
-                    directory.as_raw_fd(),
-                    name.as_ptr(),
-                    libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-                )
-            };
-            if descriptor < 0 {
-                return Err(std::io::Error::last_os_error().into());
-            }
-            let file = unsafe { File::from_raw_fd(descriptor) };
+            let file = open_file_at(&directory, name)?;
             let mode = if file.metadata()?.mode() & 0o111 != 0 {
                 "100755"
             } else {
@@ -420,5 +456,33 @@ pub(crate) fn read_checkout_file(root: &Path, path: &str) -> Result<CapturedFile
             })
         }
         _ => bail!("workspace file changed type during capture: {path}"),
+    }
+}
+
+#[cfg(test)]
+mod artifact_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn captures_only_bounded_regular_files_under_the_owned_checkout() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().canonicalize()?.join("checkout");
+        let outside = root.with_file_name("outside");
+        fs::create_dir(&root)?;
+        fs::create_dir(&outside)?;
+        fs::write(outside.join("secret"), b"private")?;
+        fs::write(root.join("report"), b"report")?;
+        symlink(&outside, root.join("link"))?;
+        symlink(outside.join("secret"), root.join("file-link"))?;
+        fs::hard_link(outside.join("secret"), root.join("hard-link"))?;
+
+        assert_eq!(read_artifact_file(&root, "report", 6)?, b"report");
+        assert!(read_artifact_file(&root, "report", 5).is_err());
+        for path in ["link/secret", "file-link", "hard-link", "../outside/secret"] {
+            assert!(read_artifact_file(&root, path, 16).is_err(), "{path}");
+        }
+        assert!(read_artifact_file(&root.join("link"), "secret", 16).is_err());
+        Ok(())
     }
 }

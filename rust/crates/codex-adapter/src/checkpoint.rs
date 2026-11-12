@@ -277,7 +277,7 @@ fn transform(
 
 pub(crate) fn coordination_inventory(
     checkpoint: &SessionCheckpoint,
-) -> Option<crate::coordination::Inventory> {
+) -> Option<crate::questions::Tools> {
     #[derive(Deserialize)]
     struct Manifest {
         tool_manifest: String,
@@ -285,11 +285,15 @@ pub(crate) fn coordination_inventory(
     if checkpoint.payload.len() > MAX_ENCODED_BYTES {
         return None;
     }
-    match serde_json::from_slice::<Manifest>(&checkpoint.payload)
+    let manifest = serde_json::from_slice::<Manifest>(&checkpoint.payload)
         .ok()?
-        .tool_manifest
-        .as_str()
-    {
+        .tool_manifest;
+    let capture = manifest.strip_suffix(crate::questions::ARTIFACT_CAPTURE_SUFFIX);
+    let coordination = match capture.unwrap_or(&manifest) {
+        crate::questions::NONE if capture.is_some() => Some(crate::coordination::Inventory::None),
+        crate::questions::OBJECTIVE_ASK if capture.is_some() => {
+            Some(crate::coordination::Inventory::Ask)
+        }
         crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
         crate::questions::DIRECT_COORDINATION => Some(crate::coordination::Inventory::Direct),
         crate::questions::DIRECT_REVIEW => Some(crate::coordination::Inventory::DirectReview),
@@ -305,7 +309,11 @@ pub(crate) fn coordination_inventory(
         }
         crate::questions::CHILD_QUESTIONS => Some(crate::coordination::Inventory::ChildQuestions),
         _ => None,
-    }
+    }?;
+    Some(crate::questions::Tools {
+        coordination,
+        capture_artifact: capture.is_some(),
+    })
 }
 
 pub(crate) fn restore(
