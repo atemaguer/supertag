@@ -141,6 +141,9 @@ const (
 	// ConnectorAcceptSlackEventProcedure is the fully-qualified name of the Connector's
 	// AcceptSlackEvent RPC.
 	ConnectorAcceptSlackEventProcedure = "/supertag.runtime.v2.Connector/AcceptSlackEvent"
+	// ConnectorAcceptGithubEventProcedure is the fully-qualified name of the Connector's
+	// AcceptGithubEvent RPC.
+	ConnectorAcceptGithubEventProcedure = "/supertag.runtime.v2.Connector/AcceptGithubEvent"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
@@ -1391,6 +1394,7 @@ func (UnimplementedHostDirectoryHandler) Authenticate(context.Context, *connect.
 type ConnectorClient interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
+	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1418,6 +1422,12 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("AcceptSlackEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		acceptGithubEvent: connect.NewClient[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse](
+			httpClient,
+			baseURL+ConnectorAcceptGithubEventProcedure,
+			connect.WithSchema(connectorMethods.ByName("AcceptGithubEvent")),
+			connect.WithClientOptions(opts...),
+		),
 		claimReply: connect.NewClient[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse](
 			httpClient,
 			baseURL+ConnectorClaimReplyProcedure,
@@ -1435,10 +1445,11 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // connectorClient implements ConnectorClient.
 type connectorClient struct {
-	acceptEvent      *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
-	acceptSlackEvent *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
-	claimReply       *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
-	settleReply      *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
+	acceptEvent       *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
+	acceptSlackEvent  *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
+	acceptGithubEvent *connect.Client[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse]
+	claimReply        *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
+	settleReply       *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
 
 // AcceptEvent calls supertag.runtime.v2.Connector.AcceptEvent.
@@ -1449,6 +1460,11 @@ func (c *connectorClient) AcceptEvent(ctx context.Context, req *connect.Request[
 // AcceptSlackEvent calls supertag.runtime.v2.Connector.AcceptSlackEvent.
 func (c *connectorClient) AcceptSlackEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error) {
 	return c.acceptSlackEvent.CallUnary(ctx, req)
+}
+
+// AcceptGithubEvent calls supertag.runtime.v2.Connector.AcceptGithubEvent.
+func (c *connectorClient) AcceptGithubEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error) {
+	return c.acceptGithubEvent.CallUnary(ctx, req)
 }
 
 // ClaimReply calls supertag.runtime.v2.Connector.ClaimReply.
@@ -1465,6 +1481,7 @@ func (c *connectorClient) SettleReply(ctx context.Context, req *connect.Request[
 type ConnectorHandler interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
+	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1488,6 +1505,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("AcceptSlackEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorAcceptGithubEventHandler := connect.NewUnaryHandler(
+		ConnectorAcceptGithubEventProcedure,
+		svc.AcceptGithubEvent,
+		connect.WithSchema(connectorMethods.ByName("AcceptGithubEvent")),
+		connect.WithHandlerOptions(opts...),
+	)
 	connectorClaimReplyHandler := connect.NewUnaryHandler(
 		ConnectorClaimReplyProcedure,
 		svc.ClaimReply,
@@ -1506,6 +1529,8 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorAcceptEventHandler.ServeHTTP(w, r)
 		case ConnectorAcceptSlackEventProcedure:
 			connectorAcceptSlackEventHandler.ServeHTTP(w, r)
+		case ConnectorAcceptGithubEventProcedure:
+			connectorAcceptGithubEventHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
@@ -1525,6 +1550,10 @@ func (UnimplementedConnectorHandler) AcceptEvent(context.Context, *connect.Reque
 
 func (UnimplementedConnectorHandler) AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptSlackEvent is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptGithubEvent is not implemented"))
 }
 
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {

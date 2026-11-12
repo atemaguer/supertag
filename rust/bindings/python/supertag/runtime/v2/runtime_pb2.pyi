@@ -44,6 +44,13 @@ class TaskState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TASK_STATE_CLAIMED: _ClassVar[TaskState]
     TASK_STATE_UNCERTAIN: _ClassVar[TaskState]
 
+class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    HARNESS_KIND_UNSPECIFIED: _ClassVar[HarnessKind]
+    HARNESS_KIND_CODEX: _ClassVar[HarnessKind]
+    HARNESS_KIND_CLAUDE_CODE: _ClassVar[HarnessKind]
+    HARNESS_KIND_OPENAI_AGENTS: _ClassVar[HarnessKind]
+
 class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     ATTEMPT_DECISION_UNSPECIFIED: _ClassVar[AttemptDecision]
@@ -72,6 +79,20 @@ class ObjectiveSignal(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     OBJECTIVE_SIGNAL_READY_FOR_REVIEW: _ClassVar[ObjectiveSignal]
     OBJECTIVE_SIGNAL_COMPLETED: _ClassVar[ObjectiveSignal]
     OBJECTIVE_SIGNAL_BLOCKED: _ClassVar[ObjectiveSignal]
+
+class GithubEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    GITHUB_EVENT_KIND_UNSPECIFIED: _ClassVar[GithubEventKind]
+    GITHUB_EVENT_KIND_ISSUE_COMMENT: _ClassVar[GithubEventKind]
+    GITHUB_EVENT_KIND_ISSUE: _ClassVar[GithubEventKind]
+    GITHUB_EVENT_KIND_PULL_REQUEST: _ClassVar[GithubEventKind]
+
+class GithubEventAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    GITHUB_EVENT_ACTION_UNSPECIFIED: _ClassVar[GithubEventAction]
+    GITHUB_EVENT_ACTION_CREATED: _ClassVar[GithubEventAction]
+    GITHUB_EVENT_ACTION_EDITED: _ClassVar[GithubEventAction]
+    GITHUB_EVENT_ACTION_OPENED: _ClassVar[GithubEventAction]
 
 class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -106,6 +127,10 @@ TASK_STATE_FAILED: TaskState
 TASK_STATE_CANCELLED: TaskState
 TASK_STATE_CLAIMED: TaskState
 TASK_STATE_UNCERTAIN: TaskState
+HARNESS_KIND_UNSPECIFIED: HarnessKind
+HARNESS_KIND_CODEX: HarnessKind
+HARNESS_KIND_CLAUDE_CODE: HarnessKind
+HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
@@ -123,6 +148,14 @@ OBJECTIVE_SIGNAL_PROGRESS: ObjectiveSignal
 OBJECTIVE_SIGNAL_READY_FOR_REVIEW: ObjectiveSignal
 OBJECTIVE_SIGNAL_COMPLETED: ObjectiveSignal
 OBJECTIVE_SIGNAL_BLOCKED: ObjectiveSignal
+GITHUB_EVENT_KIND_UNSPECIFIED: GithubEventKind
+GITHUB_EVENT_KIND_ISSUE_COMMENT: GithubEventKind
+GITHUB_EVENT_KIND_ISSUE: GithubEventKind
+GITHUB_EVENT_KIND_PULL_REQUEST: GithubEventKind
+GITHUB_EVENT_ACTION_UNSPECIFIED: GithubEventAction
+GITHUB_EVENT_ACTION_CREATED: GithubEventAction
+GITHUB_EVENT_ACTION_EDITED: GithubEventAction
+GITHUB_EVENT_ACTION_OPENED: GithubEventAction
 REPLY_STATE_UNSPECIFIED: ReplyState
 REPLY_STATE_PENDING: ReplyState
 REPLY_STATE_CLAIMED: ReplyState
@@ -287,30 +320,34 @@ class AuthenticateHostRequest(_message.Message):
     def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     workspace: WorkspaceSpec
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ...) -> None: ...
+    harness_kind: HarnessKind
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     revision: int
     workspace: WorkspaceSpec
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ...) -> None: ...
+    harness_kind: HarnessKind
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
     __slots__ = ("tag_id", "session_id", "operation_id", "prompt")
@@ -325,7 +362,7 @@ class SubmitTaskRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -338,6 +375,7 @@ class Task(_message.Message):
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -350,7 +388,8 @@ class Task(_message.Message):
     attempt_id: str
     workspace: WorkspaceSpec
     workspace_delivery: WorkspaceDeliveryReference
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
+    harness_kind: HarnessKind
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -381,12 +420,14 @@ class CancelTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class ClaimTaskRequest(_message.Message):
-    __slots__ = ("operation_id", "workspace_ids")
+    __slots__ = ("operation_id", "workspace_ids", "harness_kind")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    harness_kind: HarnessKind
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
 
 class ClaimTaskResponse(_message.Message):
     __slots__ = ("assignment",)
@@ -905,6 +946,38 @@ class AcceptSlackEventRequest(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ...) -> None: ...
 
 class AcceptSlackEventResponse(_message.Message):
+    __slots__ = ("task",)
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class AcceptGithubEventRequest(_message.Message):
+    __slots__ = ("account_id", "delivery_id", "repository_id", "repository", "number", "source_id", "kind", "action", "prompt", "tag_id", "is_pull_request")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_ID_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_FIELD_NUMBER: _ClassVar[int]
+    NUMBER_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    IS_PULL_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    delivery_id: str
+    repository_id: int
+    repository: str
+    number: int
+    source_id: int
+    kind: GithubEventKind
+    action: GithubEventAction
+    prompt: str
+    tag_id: str
+    is_pull_request: bool
+    def __init__(self, account_id: _Optional[str] = ..., delivery_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., repository: _Optional[str] = ..., number: _Optional[int] = ..., source_id: _Optional[int] = ..., kind: _Optional[_Union[GithubEventKind, str]] = ..., action: _Optional[_Union[GithubEventAction, str]] = ..., prompt: _Optional[str] = ..., tag_id: _Optional[str] = ..., is_pull_request: _Optional[bool] = ...) -> None: ...
+
+class AcceptGithubEventResponse(_message.Message):
     __slots__ = ("task",)
     TASK_FIELD_NUMBER: _ClassVar[int]
     task: Task

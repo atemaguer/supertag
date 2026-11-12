@@ -24,15 +24,18 @@ classifiers = [
 dependencies = ["websockets>=13,<17"]
 
 [project.optional-dependencies]
-agents = ["openai-agents>=0.8,<0.9"]
+# Agents 0.8 initializes input token details without the field required by OpenAI 2.45.
+agents = ["openai-agents>=0.8,<0.9", "openai<2.45"]
 codex = ["openai-codex>=0.144.4,<0.145"]
 operator = ["connect-python>=0.9,<0.10", "protobuf>=7.35.1,<8"]
+runtime = ["grpcio>=1.85.1,<2", "protobuf>=7.36.2,<8"]
 dev = [
   "connect-python>=0.9,<0.10",
   "grpcio-tools==1.85.1",
+  "openai<2.45",
   "openai-agents>=0.8,<0.9",
   "openai-codex>=0.144.4,<0.145",
-  "protobuf>=7.35.1,<8",
+  "protobuf>=7.36.2,<8",
   "protoc-gen-connect-python==0.9.0",
   "pytest>=8,<9",
   "pytest-asyncio>=0.24,<2",
@@ -56,7 +59,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-extend-exclude = ["src/supertag/operator/v1"]
+extend-exclude = ["src/supertag/operator/v1", "src/supertag/_runtime_v2"]
 
 [tool.ruff.lint]
 select = ["B", "C4", "E", "F", "I"]

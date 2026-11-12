@@ -337,17 +337,18 @@ async fn supervise(
             .current_dir(workspace)
             .env(crate::WORKSPACE_DIRECTORY, workspace);
     }
-    if options.forward_codex_credentials {
-        command.env(
-            crate::guardian::CODEX_SCRATCH_PARENT,
-            &options.state_directory,
-        );
-        command.envs(
-            crate::CODEX_ENVIRONMENT
-                .iter()
-                .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
-        );
-    }
+    command.env(
+        crate::guardian::ADAPTER_SCRATCH_PARENT,
+        options
+            .state_directory
+            .canonicalize()
+            .context("resolve private Worker Host state")?,
+    );
+    command.envs(
+        crate::provider_environment(options.harness)
+            .iter()
+            .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
+    );
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return Ok(failed("Harness adapter could not start")),

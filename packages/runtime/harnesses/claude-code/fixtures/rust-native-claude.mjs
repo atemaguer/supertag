@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+// Protocol fixture for the REAL Anthropic Agent SDK. No model or provider is contacted.
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+
+const args = process.argv.slice(2);
+const arg = (name) => {
+  const index = args.indexOf(name);
+  return index < 0
+    ? args.find((value) => value.startsWith(`${name}=`))?.slice(name.length + 1)
+    : args[index + 1];
+};
+const resumed = arg("--resume");
+const sessionId = resumed ?? randomUUID();
+const config = process.env.CLAUDE_CONFIG_DIR;
+const cwd = process.cwd();
+const responses = new Map();
+let hooks = [];
+let started = false;
+let waiting = false;
+let waitingForInput = false;
+let nativeChild;
+const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+async function hook(tool, input) {
+  let denied = false;
+  for (const callbackId of hooks) {
+    const requestId = randomUUID();
+    const promise = new Promise((resolve) => responses.set(requestId, resolve));
+    send({
+      type: "control_request",
+      request_id: requestId,
+      request: {
+        subtype: "hook_callback",
+        callback_id: callbackId,
+        tool_use_id: requestId,
+        input: {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          cwd,
+          tool_name: tool,
+          tool_input: input,
+          tool_use_id: requestId,
+        },
+      },
+    });
+    const response = await promise;
+    if (
+      response.subtype !== "success" ||
+      response.response?.hookSpecificOutput?.permissionDecision === "deny"
+    )
+      denied = true;
+  }
+  return !denied;
+}
+async function histories(path) {
+  const files = [];
+  for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) {
+    const next = join(path, entry.name);
+    if (entry.isDirectory()) files.push(...(await histories(next)));
+    else if (entry.name.endsWith(".jsonl")) files.push(await readFile(next, "utf8"));
+  }
+  return files;
+}
+const usage = {
+  input_tokens: 10,
+  cache_creation_input_tokens: 2,
+  cache_read_input_tokens: 3,
+  output_tokens: 4,
+};
+async function turn(message) {
+  const prompt =
+    typeof message.message.content === "string"
+      ? message.message.content
+      : message.message.content.map((part) => part.text ?? "").join("");
+  if (
+    process.env.SUPERTAG_CONTROLPLANE_TOKEN ||
+    process.env.NODE_OPTIONS ||
+    process.env.AWS_SECRET_ACCESS_KEY
+  )
+    throw new Error("Ambient service environment leaked");
+  let previous = [];
+  if (resumed) {
+    previous = await histories(join(config, "projects"));
+    if (!previous.some((text) => text.includes("fixture first turn")))
+      throw new Error("Approved transcript was not materialized by the SDK");
+  }
+  send({
+    type: "system",
+    subtype: "init",
+    session_id: sessionId,
+    cwd,
+    tools: [],
+    mcp_servers: [],
+    model: "fixture-claude",
+    permissionMode: "dontAsk",
+    slash_commands: [],
+    apiKeySource: "none",
+    uuid: randomUUID(),
+  });
+  if (prompt.includes("live-input")) {
+    waitingForInput = true;
+    return;
+  }
+  if (prompt.includes("wait")) {
+    nativeChild = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+    nativeChild.unref();
+    await writeFile(join(cwd, "native-child.pid"), `${nativeChild.pid}`);
+    waiting = true;
+    send({
+      type: "assistant",
+      session_id: sessionId,
+      parent_tool_use_id: null,
+      uuid: randomUUID(),
+      message: {
+        id: "waiting",
+        type: "message",
+        role: "assistant",
+        model: "fixture-claude",
+        content: [{ type: "text", text: "fixture waiting" }],
+        usage,
+      },
+    });
+    return;
+  }
+  let result = resumed ? "fixture resumed turn" : "fixture first turn";
+  if (message.uuid) result += `; input: ${prompt}`;
+  if (prompt.includes("write")) {
+    if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))
+      throw new Error("Admitted write was denied");
+    await writeFile(join(cwd, "answer.txt"), `${result}\n`);
+  }
+  if (prompt.includes("denied")) {
+    if (await hook("Bash", { command: "touch escaped" }))
+      throw new Error("Unadmitted Bash was allowed");
+    if (await hook("Write", { file_path: join(cwd, "..", "escaped"), content: "escape" }))
+      throw new Error("Outside write was allowed");
+    result += "; unadmitted tools denied";
+  }
+  if (prompt.includes("secret")) result += ` ${process.env.ANTHROPIC_API_KEY}`;
+  const entry = {
+    type: "assistant",
+    uuid: randomUUID(),
+    sessionId,
+    cwd,
+    message: { role: "assistant", content: [{ type: "text", text: result }] },
+  };
+  const projectKey = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  const project = join(config, "projects", projectKey);
+  await mkdir(project, { recursive: true });
+  send({
+    type: "transcript_mirror",
+    filePath: join(project, `${sessionId}.jsonl`),
+    entries: [entry],
+  });
+  send({
+    type: "assistant",
+    ...(message.uuid ? { user_message_uuid: message.uuid } : {}),
+    session_id: sessionId,
+    parent_tool_use_id: null,
+    uuid: entry.uuid,
+    message: {
+      id: "fixture-message",
+      type: "message",
+      role: "assistant",
+      model: "fixture-claude",
+      content: [{ type: "text", text: result }],
+      usage,
+    },
+  });
+  if (prompt.includes("mirror-failure"))
+    send({
+      type: "system",
+      subtype: "mirror_error",
+      session_id: sessionId,
+      error: "fixture mirror failed",
+    });
+  send({
+    type: "result",
+    subtype: "success",
+    result,
+    is_error: false,
+    session_id: sessionId,
+    uuid: randomUUID(),
+    duration_ms: 1,
+    duration_api_ms: 1,
+    num_turns: 1,
+    total_cost_usd: 0.01,
+    usage,
+    modelUsage: {},
+    permission_denials: [],
+  });
+}
+
+const lines = createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.type === "control_response") {
+    const callback = responses.get(message.response.request_id);
+    responses.delete(message.response.request_id);
+    callback?.(message.response);
+  } else if (message.type === "control_request") {
+    if (message.request.subtype === "initialize")
+      hooks = (message.request.hooks?.PreToolUse ?? []).flatMap(
+        (matcher) => matcher.hookCallbackIds,
+      );
+    send({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: message.request_id,
+        response: { commands: [], models: [], account: {}, output_style: "default" },
+      },
+    });
+    if (message.request.subtype === "interrupt" && waiting) {
+      // Deliberately leave the detached child for the adapter's process identity cleanup.
+      setTimeout(() => process.exit(0), 10);
+    }
+  } else if (message.type === "user" && (!started || waitingForInput)) {
+    started = true;
+    waitingForInput = false;
+    void turn(message).catch(async (error) => {
+      await writeFile(join(cwd, "fixture-error.txt"), String(error));
+      process.exitCode = 2;
+      lines.close();
+      process.stdin.destroy();
+    });
+  }
+});
+lines.on("close", () => {
+  if (!waiting) process.exit(0);
+});

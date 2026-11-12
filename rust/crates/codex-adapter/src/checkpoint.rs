@@ -442,6 +442,7 @@ mod tests {
 
     fn task() -> Task {
         Task {
+            harness_kind: 0,
             workspace: None,
             workspace_delivery: None,
             tag_id: "tag".into(),

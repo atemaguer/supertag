@@ -1729,6 +1729,11 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.FromString,
                 _registered_method=True)
+        self.AcceptGithubEvent = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/AcceptGithubEvent',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventResponse.FromString,
+                _registered_method=True)
         self.ClaimReply = channel.unary_unary(
                 '/supertag.runtime.v2.Connector/ClaimReply',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
@@ -1758,6 +1763,12 @@ class ConnectorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AcceptGithubEvent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ClaimReply(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1782,6 +1793,11 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.AcceptSlackEvent,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.SerializeToString,
+            ),
+            'AcceptGithubEvent': grpc.unary_unary_rpc_method_handler(
+                    servicer.AcceptGithubEvent,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventResponse.SerializeToString,
             ),
             'ClaimReply': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimReply,
@@ -1850,6 +1866,33 @@ class Connector:
             '/supertag.runtime.v2.Connector/AcceptSlackEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AcceptGithubEvent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/AcceptGithubEvent',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptGithubEventResponse.FromString,
             options,
             channel_credentials,
             insecure,

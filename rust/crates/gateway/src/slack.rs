@@ -100,7 +100,7 @@ impl Slack {
         let principal = format!("connector:{}", config.account_id);
         authenticated_request((), &gateway_token, Some(&principal))
             .context("invalid private Slack connector credential")?;
-        let journal = Journal::open(&config.state_directory, &config.account_id)?;
+        let journal = Journal::open(&config.state_directory, &config.account_id, "slack")?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(DELIVERY_TIMEOUT)

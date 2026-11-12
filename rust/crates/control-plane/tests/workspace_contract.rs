@@ -274,6 +274,61 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
 
+    store
+        .put_tag_configured(
+            "engineer",
+            "Select the accepted harness",
+            vec![],
+            None,
+            HarnessKind::ClaudeCode,
+        )
+        .await
+        .unwrap();
+    let selected = submit(&store, "selected-harness").await.unwrap();
+    assert_eq!(selected.harness_kind(), HarnessKind::ClaudeCode);
+    store
+        .put_tag_configured(
+            "engineer",
+            "Select the next harness",
+            vec![],
+            None,
+            HarnessKind::OpenaiAgents,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_task(&selected.task_id)
+            .await
+            .unwrap()
+            .harness_kind(),
+        HarnessKind::ClaudeCode
+    );
+    assert!(matches!(
+        submit(&store, "selected-harness").await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    let next_harness = submit(&store, "new-harness").await.unwrap();
+    assert_eq!(next_harness.harness_kind(), HarnessKind::OpenaiAgents);
+    let python = store
+        .claim_task_for_host(&owner, "python-capability", &[], HarnessKind::OpenaiAgents)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(python.task.unwrap().task_id, next_harness.task_id);
+    assert!(matches!(
+        store
+            .claim_task_for_host(&owner, "python-capability", &[], HarnessKind::ClaudeCode)
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    let claude = store
+        .claim_task_for_host(&other, "claude-capability", &[], HarnessKind::ClaudeCode)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claude.task.unwrap().task_id, selected.task_id);
+
     store.put_tag("engineer", "Updated", vec![]).await.unwrap();
     assert!(matches!(
         submit(&store, "engineering").await,

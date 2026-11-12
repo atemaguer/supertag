@@ -9,19 +9,20 @@ use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use harness::{AdapterOptions, CodexAdapterArgs};
+use harness::{AdapterOptions, CodexAdapterArgs, Harness};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
     Gateway,
+    github::{Github, GithubConfig},
     slack::{Slack, SlackConfig},
     transfers::GatewayTransfers,
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest,
+        AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest, HarnessKind,
         ListEventsRequest, ListNativeUsageRequest, PutTagRequest, ResolveAttemptRequest,
         RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
         attempt_inputs_server::AttemptInputsServer,
@@ -93,6 +94,10 @@ enum Command {
         slack_listen: Option<SocketAddr>,
         #[arg(long, requires = "slack_listen")]
         slack_state_directory: Option<PathBuf>,
+        #[arg(long, requires = "github_state_directory")]
+        github_listen: Option<SocketAddr>,
+        #[arg(long, requires = "github_listen")]
+        github_state_directory: Option<PathBuf>,
     },
     /// Connect a Worker Host and run accepted Tasks through an adapter.
     WorkerHost {
@@ -166,6 +171,9 @@ enum Command {
         /// Full Git object ID from which new Sessions start.
         #[arg(long, requires = "workspace_id")]
         workspace_base: Option<String>,
+        /// Required harness for Tasks accepted from this Tag.
+        #[arg(long)]
+        harness: Option<Harness>,
     },
     /// Accept one turn of work in a Tag's Session.
     Submit {
@@ -290,12 +298,15 @@ async fn run(command: Command) -> Result<()> {
             checkpoint_directory,
             slack_listen,
             slack_state_directory,
+            github_listen,
+            github_state_directory,
         } => {
             gateway(
                 listen,
                 control_plane,
                 checkpoint_directory,
                 slack_listen.zip(slack_state_directory),
+                github_listen.zip(github_state_directory),
             )
             .await?
         }
@@ -307,7 +318,7 @@ async fn run(command: Command) -> Result<()> {
             once,
             wait_for_recovery,
         } => {
-            let forward_codex_credentials = adapter.uses_codex();
+            let harness = adapter.harness_kind();
             let workspace = adapter.workspace_mapping();
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
@@ -317,7 +328,7 @@ async fn run(command: Command) -> Result<()> {
                 adapter_guardian: std::env::current_exe()?,
                 adapter,
                 adapter_args,
-                forward_codex_credentials,
+                harness,
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,
@@ -422,6 +433,7 @@ async fn run(command: Command) -> Result<()> {
             allow,
             workspace_id,
             workspace_base,
+            harness,
         } => {
             let workspace = workspace_id
                 .zip(workspace_base)
@@ -437,6 +449,8 @@ async fn run(command: Command) -> Result<()> {
                         instructions,
                         allowed_actions: allow,
                         workspace,
+                        harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
+                            as i32,
                     },
                     &token,
                 )?)
@@ -713,6 +727,7 @@ async fn gateway(
     control_plane: String,
     checkpoint_directory: Option<PathBuf>,
     slack_options: Option<(SocketAddr, PathBuf)>,
+    github_options: Option<(SocketAddr, PathBuf)>,
 ) -> Result<()> {
     let mut builder = network::server(listen, false).await?;
     let channel = network::endpoint(control_plane, true)
@@ -728,6 +743,18 @@ async fn gateway(
             );
             let connector =
                 slack_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+            Some((connector, TcpListener::bind(address).await?))
+        }
+        None => None,
+    };
+    let github = match github_options {
+        Some((address, state_directory)) => {
+            ensure!(
+                address.ip().is_loopback(),
+                "GitHub webhook listener must use loopback"
+            );
+            let connector =
+                github_connector(channel.clone(), gateway_token.clone(), state_directory)?;
             Some((connector, TcpListener::bind(address).await?))
         }
         None => None,
@@ -752,6 +779,9 @@ async fn gateway(
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
+        println!("{}", listener.local_addr()?);
+    }
+    if let Some((_, listener)) = &github {
         println!("{}", listener.local_addr()?);
     }
     let shutdown = CancellationToken::new();
@@ -784,10 +814,21 @@ async fn gateway(
             Ok(())
         }
     };
+    let github_webhook = async {
+        if let Some((github, listener)) = github {
+            let result = github.serve(listener, shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, webhook) = tokio::join!(grpc, webhook);
+        let (grpc, slack, github) = tokio::join!(grpc, webhook, github_webhook);
         grpc?;
-        webhook
+        slack?;
+        github
     };
     tokio::pin!(services);
     tokio::select! {
@@ -825,6 +866,38 @@ fn slack_connector(
     #[cfg(feature = "test-fixtures")]
     if let Ok(url) = std::env::var("SUPERTAG_TEST_SLACK_API_URL") {
         return connector.with_test_reply_url(&url);
+    }
+    Ok(connector)
+}
+
+fn github_connector(
+    channel: Channel,
+    gateway_token: String,
+    state_directory: PathBuf,
+) -> Result<Github> {
+    let connector = Github::new(
+        GithubConfig {
+            account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
+            repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
+                .parse()
+                .context("invalid GitHub repository ID")?,
+            repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
+            tag_id: required_env("SUPERTAG_GITHUB_TAG_ID")?,
+            allowed_users: required_env("SUPERTAG_GITHUB_ALLOWED_USERS")?
+                .split(',')
+                .map(|user| user.trim().parse())
+                .collect::<std::result::Result<Vec<u64>, _>>()
+                .context("invalid GitHub user ID")?,
+            webhook_secret: required_env("SUPERTAG_GITHUB_WEBHOOK_SECRET")?,
+            token: required_env("SUPERTAG_GITHUB_TOKEN")?,
+            state_directory,
+        },
+        channel,
+        gateway_token,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(url) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
+        return connector.with_test_api_url(&url);
     }
     Ok(connector)
 }
@@ -900,6 +973,7 @@ fn print_task(task: &Task) {
         json!({
             "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
             "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
+            "harness": task.harness_kind().as_str_name(),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
             })),

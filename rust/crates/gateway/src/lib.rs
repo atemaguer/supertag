@@ -1,5 +1,7 @@
 //! Public gRPC ingress for operators and Worker Hosts.
 
+mod delivery_journal;
+pub mod github;
 mod inputs;
 pub mod slack;
 pub mod transfers;

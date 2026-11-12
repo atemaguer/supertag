@@ -5,6 +5,8 @@
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
 mod authority;
+#[path = "github_events.rs"]
+mod github_events;
 mod hosts;
 #[path = "slack_threads.rs"]
 mod slack_threads;
@@ -21,7 +23,7 @@ use sqlx::{
 use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, Assignment, ClaimReplyResponse, FinishTaskRequest,
-        Reply, ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest,
+        HarnessKind, Reply, ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest,
         SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
@@ -56,7 +58,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 9;
+        const SCHEMA_VERSION: i64 = 11;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -116,6 +118,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0007_workspace_delivery.sql"),
                 include_str!("../migrations/sqlite/0008_live_input.sql"),
                 include_str!("../migrations/sqlite/0009_slack_threads.sql"),
+                include_str!("../migrations/sqlite/0010_github_events.sql"),
+                include_str!("../migrations/sqlite/0011_harness_selection.sql"),
             ]
         } else {
             [
@@ -128,6 +132,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0007_workspace_delivery.sql"),
                 include_str!("../migrations/postgresql/0008_live_input.sql"),
                 include_str!("../migrations/postgresql/0009_slack_threads.sql"),
+                include_str!("../migrations/postgresql/0010_github_events.sql"),
+                include_str!("../migrations/postgresql/0011_harness_selection.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -176,8 +182,26 @@ impl Store {
         &self,
         tag_id: &str,
         instructions: &str,
+        allowed_actions: Vec<String>,
+        workspace: Option<WorkspaceSpec>,
+    ) -> Result<Tag> {
+        self.put_tag_configured(
+            tag_id,
+            instructions,
+            allowed_actions,
+            workspace,
+            HarnessKind::Unspecified,
+        )
+        .await
+    }
+
+    pub async fn put_tag_configured(
+        &self,
+        tag_id: &str,
+        instructions: &str,
         mut allowed_actions: Vec<String>,
         workspace: Option<WorkspaceSpec>,
+        harness: HarnessKind,
     ) -> Result<Tag> {
         name("Tag ID", tag_id)?;
         if let Some(spec) = &workspace
@@ -196,10 +220,11 @@ impl Store {
         allowed_actions.dedup();
         let actions = serde_json::to_string(&allowed_actions)?;
         let (mut transaction, _) = self.write().await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit) VALUES ($1,$2,$3,1,$4,$5) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit RETURNING revision")
+        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind) VALUES ($1,$2,$3,1,$4,$5,$6) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
+            .bind(harness as i64)
             .fetch_one(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(Tag {
@@ -208,6 +233,7 @@ impl Store {
             allowed_actions,
             revision: revision as u64,
             workspace,
+            harness_kind: harness as i32,
         })
     }
 
@@ -308,6 +334,17 @@ impl Store {
         operation_id: &str,
         workspace_ids: &[String],
     ) -> Result<Option<Assignment>> {
+        self.claim_task_for_host(host, operation_id, workspace_ids, HarnessKind::Unspecified)
+            .await
+    }
+
+    pub async fn claim_task_for_host(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        workspace_ids: &[String],
+        harness: HarnessKind,
+    ) -> Result<Option<Assignment>> {
         name("operation ID", operation_id)?;
         if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_workspace_id(id)) {
             return Err(invalid("invalid Worker Host workspace capabilities"));
@@ -322,13 +359,15 @@ impl Store {
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         authority::expire_due_attempts(&mut transaction, now).await?;
         crate::inputs::sweep_in(&mut transaction, now).await?;
-        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
+        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let previous: Option<String> = prior.try_get("workspace_scope")?;
-            if previous.as_deref().unwrap_or("[]") != workspace_scope {
+            if previous.as_deref().unwrap_or("[]") != workspace_scope
+                || prior.try_get::<i64, _>("harness_kind")? != harness as i64
+            {
                 return Err(StoreError::Conflict(
-                    "claim operation used different workspace capabilities".into(),
+                    "claim operation used different Worker Host capabilities".into(),
                 ));
             }
             let id: Option<String> = prior.try_get("task_id")?;
@@ -353,9 +392,15 @@ impl Store {
             transaction.commit().await?;
             return Ok(assignment);
         }
-        let Some(id) =
-            authority::claim_candidate(&mut transaction, now, host.id(), all_tags, &workspace_ids)
-                .await?
+        let Some(id) = authority::claim_candidate(
+            &mut transaction,
+            now,
+            host.id(),
+            all_tags,
+            &workspace_ids,
+            harness,
+        )
+        .await?
         else {
             // Commit maintenance transitions. An empty poll retains no claim receipt.
             transaction.commit().await?;
@@ -366,8 +411,8 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1 WHERE task_id = $7")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&id).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
         Ok(Some(Assignment {
@@ -800,26 +845,28 @@ pub(crate) async fn insert_task(
     prompt: &str,
 ) -> Result<Task> {
     let tag = sqlx::query(
-        "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit FROM supertag_v2_tags WHERE tag_id = $1",
+        "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind FROM supertag_v2_tags WHERE tag_id = $1",
     )
     .bind(tag_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| StoreError::NotFound("Tag was not found".into()))?;
     let workspace = crate::workspaces::workspace_from_row(&tag)?;
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+    let harness: i64 = tag.try_get("harness_kind")?;
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
-        && crate::workspaces::workspace_from_row(&previous)? != workspace
+        && (crate::workspaces::workspace_from_row(&previous)? != workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
     {
-        return Err(StoreError::FailedPrecondition("workspace changed; start a new Session".into()));
+        return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
     }
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(tag.try_get::<String, _>("instructions")?).bind(tag.try_get::<String, _>("allowed_actions")?)
         .bind(tag.try_get::<i64, _>("revision")?).bind(TaskState::Queued as i64).bind(order)
         .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
         .bind(workspace.as_ref().map(|spec| &spec.base_commit))
+        .bind(harness)
         .execute(&mut **transaction).await?;
     task_in(transaction, &id).await
 }
@@ -934,6 +981,7 @@ fn task_row(row: &AnyRow) -> Result<Task> {
         attempt_id: row.try_get("attempt_id")?,
         workspace: crate::workspaces::workspace_from_row(row)?,
         workspace_delivery: crate::workspaces::delivery_from_row(row)?,
+        harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
     })
 }
 

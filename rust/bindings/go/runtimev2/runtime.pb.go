@@ -256,6 +256,58 @@ func (TaskState) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{3}
 }
 
+type HarnessKind int32
+
+const (
+	HarnessKind_HARNESS_KIND_UNSPECIFIED   HarnessKind = 0
+	HarnessKind_HARNESS_KIND_CODEX         HarnessKind = 1
+	HarnessKind_HARNESS_KIND_CLAUDE_CODE   HarnessKind = 2
+	HarnessKind_HARNESS_KIND_OPENAI_AGENTS HarnessKind = 3
+)
+
+// Enum value maps for HarnessKind.
+var (
+	HarnessKind_name = map[int32]string{
+		0: "HARNESS_KIND_UNSPECIFIED",
+		1: "HARNESS_KIND_CODEX",
+		2: "HARNESS_KIND_CLAUDE_CODE",
+		3: "HARNESS_KIND_OPENAI_AGENTS",
+	}
+	HarnessKind_value = map[string]int32{
+		"HARNESS_KIND_UNSPECIFIED":   0,
+		"HARNESS_KIND_CODEX":         1,
+		"HARNESS_KIND_CLAUDE_CODE":   2,
+		"HARNESS_KIND_OPENAI_AGENTS": 3,
+	}
+)
+
+func (x HarnessKind) Enum() *HarnessKind {
+	p := new(HarnessKind)
+	*p = x
+	return p
+}
+
+func (x HarnessKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HarnessKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[4].Descriptor()
+}
+
+func (HarnessKind) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[4]
+}
+
+func (x HarnessKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HarnessKind.Descriptor instead.
+func (HarnessKind) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{4}
+}
+
 type AttemptDecision int32
 
 const (
@@ -289,11 +341,11 @@ func (x AttemptDecision) String() string {
 }
 
 func (AttemptDecision) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[4].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[5].Descriptor()
 }
 
 func (AttemptDecision) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[4]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[5]
 }
 
 func (x AttemptDecision) Number() protoreflect.EnumNumber {
@@ -302,7 +354,7 @@ func (x AttemptDecision) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AttemptDecision.Descriptor instead.
 func (AttemptDecision) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{5}
 }
 
 type WorkspaceArtifactKind int32
@@ -338,11 +390,11 @@ func (x WorkspaceArtifactKind) String() string {
 }
 
 func (WorkspaceArtifactKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[5].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[6].Descriptor()
 }
 
 func (WorkspaceArtifactKind) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[5]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[6]
 }
 
 func (x WorkspaceArtifactKind) Number() protoreflect.EnumNumber {
@@ -351,7 +403,7 @@ func (x WorkspaceArtifactKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WorkspaceArtifactKind.Descriptor instead.
 func (WorkspaceArtifactKind) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{6}
 }
 
 type ObjectiveStatus int32
@@ -399,11 +451,11 @@ func (x ObjectiveStatus) String() string {
 }
 
 func (ObjectiveStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[6].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[7].Descriptor()
 }
 
 func (ObjectiveStatus) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[6]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[7]
 }
 
 func (x ObjectiveStatus) Number() protoreflect.EnumNumber {
@@ -412,7 +464,7 @@ func (x ObjectiveStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ObjectiveStatus.Descriptor instead.
 func (ObjectiveStatus) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{7}
 }
 
 type ObjectiveSignal int32
@@ -451,11 +503,11 @@ func (x ObjectiveSignal) String() string {
 }
 
 func (ObjectiveSignal) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[7].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[8].Descriptor()
 }
 
 func (ObjectiveSignal) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[7]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[8]
 }
 
 func (x ObjectiveSignal) Number() protoreflect.EnumNumber {
@@ -464,7 +516,111 @@ func (x ObjectiveSignal) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ObjectiveSignal.Descriptor instead.
 func (ObjectiveSignal) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{8}
+}
+
+type GithubEventKind int32
+
+const (
+	GithubEventKind_GITHUB_EVENT_KIND_UNSPECIFIED   GithubEventKind = 0
+	GithubEventKind_GITHUB_EVENT_KIND_ISSUE_COMMENT GithubEventKind = 1
+	GithubEventKind_GITHUB_EVENT_KIND_ISSUE         GithubEventKind = 2
+	GithubEventKind_GITHUB_EVENT_KIND_PULL_REQUEST  GithubEventKind = 3
+)
+
+// Enum value maps for GithubEventKind.
+var (
+	GithubEventKind_name = map[int32]string{
+		0: "GITHUB_EVENT_KIND_UNSPECIFIED",
+		1: "GITHUB_EVENT_KIND_ISSUE_COMMENT",
+		2: "GITHUB_EVENT_KIND_ISSUE",
+		3: "GITHUB_EVENT_KIND_PULL_REQUEST",
+	}
+	GithubEventKind_value = map[string]int32{
+		"GITHUB_EVENT_KIND_UNSPECIFIED":   0,
+		"GITHUB_EVENT_KIND_ISSUE_COMMENT": 1,
+		"GITHUB_EVENT_KIND_ISSUE":         2,
+		"GITHUB_EVENT_KIND_PULL_REQUEST":  3,
+	}
+)
+
+func (x GithubEventKind) Enum() *GithubEventKind {
+	p := new(GithubEventKind)
+	*p = x
+	return p
+}
+
+func (x GithubEventKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (GithubEventKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[9].Descriptor()
+}
+
+func (GithubEventKind) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[9]
+}
+
+func (x GithubEventKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use GithubEventKind.Descriptor instead.
+func (GithubEventKind) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{9}
+}
+
+type GithubEventAction int32
+
+const (
+	GithubEventAction_GITHUB_EVENT_ACTION_UNSPECIFIED GithubEventAction = 0
+	GithubEventAction_GITHUB_EVENT_ACTION_CREATED     GithubEventAction = 1
+	GithubEventAction_GITHUB_EVENT_ACTION_EDITED      GithubEventAction = 2
+	GithubEventAction_GITHUB_EVENT_ACTION_OPENED      GithubEventAction = 3
+)
+
+// Enum value maps for GithubEventAction.
+var (
+	GithubEventAction_name = map[int32]string{
+		0: "GITHUB_EVENT_ACTION_UNSPECIFIED",
+		1: "GITHUB_EVENT_ACTION_CREATED",
+		2: "GITHUB_EVENT_ACTION_EDITED",
+		3: "GITHUB_EVENT_ACTION_OPENED",
+	}
+	GithubEventAction_value = map[string]int32{
+		"GITHUB_EVENT_ACTION_UNSPECIFIED": 0,
+		"GITHUB_EVENT_ACTION_CREATED":     1,
+		"GITHUB_EVENT_ACTION_EDITED":      2,
+		"GITHUB_EVENT_ACTION_OPENED":      3,
+	}
+)
+
+func (x GithubEventAction) Enum() *GithubEventAction {
+	p := new(GithubEventAction)
+	*p = x
+	return p
+}
+
+func (x GithubEventAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (GithubEventAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[10].Descriptor()
+}
+
+func (GithubEventAction) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[10]
+}
+
+func (x GithubEventAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use GithubEventAction.Descriptor instead.
+func (GithubEventAction) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{10}
 }
 
 type ReplyState int32
@@ -509,11 +665,11 @@ func (x ReplyState) String() string {
 }
 
 func (ReplyState) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[8].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[11].Descriptor()
 }
 
 func (ReplyState) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[8]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[11]
 }
 
 func (x ReplyState) Number() protoreflect.EnumNumber {
@@ -522,7 +678,7 @@ func (x ReplyState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplyState.Descriptor instead.
 func (ReplyState) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{11}
 }
 
 type QueueInputRequest struct {
@@ -1495,6 +1651,7 @@ type PutTagRequest struct {
 	Instructions   string                 `protobuf:"bytes,2,opt,name=instructions,proto3" json:"instructions,omitempty"`
 	AllowedActions []string               `protobuf:"bytes,3,rep,name=allowed_actions,json=allowedActions,proto3" json:"allowed_actions,omitempty"`
 	Workspace      *WorkspaceSpec         `protobuf:"bytes,4,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	HarnessKind    HarnessKind            `protobuf:"varint,5,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1557,6 +1714,13 @@ func (x *PutTagRequest) GetWorkspace() *WorkspaceSpec {
 	return nil
 }
 
+func (x *PutTagRequest) GetHarnessKind() HarnessKind {
+	if x != nil {
+		return x.HarnessKind
+	}
+	return HarnessKind_HARNESS_KIND_UNSPECIFIED
+}
+
 type Tag struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	TagId          string                 `protobuf:"bytes,1,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
@@ -1564,6 +1728,7 @@ type Tag struct {
 	AllowedActions []string               `protobuf:"bytes,3,rep,name=allowed_actions,json=allowedActions,proto3" json:"allowed_actions,omitempty"`
 	Revision       uint64                 `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
 	Workspace      *WorkspaceSpec         `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	HarnessKind    HarnessKind            `protobuf:"varint,6,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1631,6 +1796,13 @@ func (x *Tag) GetWorkspace() *WorkspaceSpec {
 		return x.Workspace
 	}
 	return nil
+}
+
+func (x *Tag) GetHarnessKind() HarnessKind {
+	if x != nil {
+		return x.HarnessKind
+	}
+	return HarnessKind_HARNESS_KIND_UNSPECIFIED
 }
 
 type SubmitTaskRequest struct {
@@ -1715,6 +1887,7 @@ type Task struct {
 	AttemptId         *string                     `protobuf:"bytes,10,opt,name=attempt_id,json=attemptId,proto3,oneof" json:"attempt_id,omitempty"`
 	Workspace         *WorkspaceSpec              `protobuf:"bytes,11,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	WorkspaceDelivery *WorkspaceDeliveryReference `protobuf:"bytes,12,opt,name=workspace_delivery,json=workspaceDelivery,proto3" json:"workspace_delivery,omitempty"`
+	HarnessKind       HarnessKind                 `protobuf:"varint,13,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1831,6 +2004,13 @@ func (x *Task) GetWorkspaceDelivery() *WorkspaceDeliveryReference {
 		return x.WorkspaceDelivery
 	}
 	return nil
+}
+
+func (x *Task) GetHarnessKind() HarnessKind {
+	if x != nil {
+		return x.HarnessKind
+	}
+	return HarnessKind_HARNESS_KIND_UNSPECIFIED
 }
 
 type GetTaskRequest struct {
@@ -2029,6 +2209,7 @@ type ClaimTaskRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	WorkspaceIds  []string               `protobuf:"bytes,2,rep,name=workspace_ids,json=workspaceIds,proto3" json:"workspace_ids,omitempty"`
+	HarnessKind   HarnessKind            `protobuf:"varint,3,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2075,6 +2256,13 @@ func (x *ClaimTaskRequest) GetWorkspaceIds() []string {
 		return x.WorkspaceIds
 	}
 	return nil
+}
+
+func (x *ClaimTaskRequest) GetHarnessKind() HarnessKind {
+	if x != nil {
+		return x.HarnessKind
+	}
+	return HarnessKind_HARNESS_KIND_UNSPECIFIED
 }
 
 type ClaimTaskResponse struct {
@@ -5273,6 +5461,174 @@ func (x *AcceptSlackEventResponse) GetTask() *Task {
 	return nil
 }
 
+type AcceptGithubEventRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	DeliveryId    string                 `protobuf:"bytes,2,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	RepositoryId  uint64                 `protobuf:"varint,3,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	Repository    string                 `protobuf:"bytes,4,opt,name=repository,proto3" json:"repository,omitempty"`
+	Number        uint64                 `protobuf:"varint,5,opt,name=number,proto3" json:"number,omitempty"`
+	SourceId      uint64                 `protobuf:"varint,6,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	Kind          GithubEventKind        `protobuf:"varint,7,opt,name=kind,proto3,enum=supertag.runtime.v2.GithubEventKind" json:"kind,omitempty"`
+	Action        GithubEventAction      `protobuf:"varint,8,opt,name=action,proto3,enum=supertag.runtime.v2.GithubEventAction" json:"action,omitempty"`
+	Prompt        string                 `protobuf:"bytes,9,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	TagId         string                 `protobuf:"bytes,10,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	IsPullRequest bool                   `protobuf:"varint,11,opt,name=is_pull_request,json=isPullRequest,proto3" json:"is_pull_request,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptGithubEventRequest) Reset() {
+	*x = AcceptGithubEventRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[75]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptGithubEventRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptGithubEventRequest) ProtoMessage() {}
+
+func (x *AcceptGithubEventRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[75]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptGithubEventRequest.ProtoReflect.Descriptor instead.
+func (*AcceptGithubEventRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{75}
+}
+
+func (x *AcceptGithubEventRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *AcceptGithubEventRequest) GetDeliveryId() string {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return ""
+}
+
+func (x *AcceptGithubEventRequest) GetRepositoryId() uint64 {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return 0
+}
+
+func (x *AcceptGithubEventRequest) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+func (x *AcceptGithubEventRequest) GetNumber() uint64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *AcceptGithubEventRequest) GetSourceId() uint64 {
+	if x != nil {
+		return x.SourceId
+	}
+	return 0
+}
+
+func (x *AcceptGithubEventRequest) GetKind() GithubEventKind {
+	if x != nil {
+		return x.Kind
+	}
+	return GithubEventKind_GITHUB_EVENT_KIND_UNSPECIFIED
+}
+
+func (x *AcceptGithubEventRequest) GetAction() GithubEventAction {
+	if x != nil {
+		return x.Action
+	}
+	return GithubEventAction_GITHUB_EVENT_ACTION_UNSPECIFIED
+}
+
+func (x *AcceptGithubEventRequest) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *AcceptGithubEventRequest) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *AcceptGithubEventRequest) GetIsPullRequest() bool {
+	if x != nil {
+		return x.IsPullRequest
+	}
+	return false
+}
+
+type AcceptGithubEventResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptGithubEventResponse) Reset() {
+	*x = AcceptGithubEventResponse{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptGithubEventResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptGithubEventResponse) ProtoMessage() {}
+
+func (x *AcceptGithubEventResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptGithubEventResponse.ProtoReflect.Descriptor instead.
+func (*AcceptGithubEventResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *AcceptGithubEventResponse) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
 type Reply struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	ReplyId         string                 `protobuf:"bytes,1,opt,name=reply_id,json=replyId,proto3" json:"reply_id,omitempty"`
@@ -5288,7 +5644,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[75]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5300,7 +5656,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[75]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5313,7 +5669,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{75}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *Reply) GetReplyId() string {
@@ -5374,7 +5730,7 @@ type ClaimReplyRequest struct {
 
 func (x *ClaimReplyRequest) Reset() {
 	*x = ClaimReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[76]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5386,7 +5742,7 @@ func (x *ClaimReplyRequest) String() string {
 func (*ClaimReplyRequest) ProtoMessage() {}
 
 func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[76]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5399,7 +5755,7 @@ func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyRequest.ProtoReflect.Descriptor instead.
 func (*ClaimReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{76}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ClaimReplyRequest) GetOperationId() string {
@@ -5419,7 +5775,7 @@ type ClaimReplyResponse struct {
 
 func (x *ClaimReplyResponse) Reset() {
 	*x = ClaimReplyResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[77]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5431,7 +5787,7 @@ func (x *ClaimReplyResponse) String() string {
 func (*ClaimReplyResponse) ProtoMessage() {}
 
 func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[77]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5444,7 +5800,7 @@ func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyResponse.ProtoReflect.Descriptor instead.
 func (*ClaimReplyResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{77}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *ClaimReplyResponse) GetReply() *Reply {
@@ -5473,7 +5829,7 @@ type SettleReplyRequest struct {
 
 func (x *SettleReplyRequest) Reset() {
 	*x = SettleReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[78]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5485,7 +5841,7 @@ func (x *SettleReplyRequest) String() string {
 func (*SettleReplyRequest) ProtoMessage() {}
 
 func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[78]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5498,7 +5854,7 @@ func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettleReplyRequest.ProtoReflect.Descriptor instead.
 func (*SettleReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{78}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *SettleReplyRequest) GetReplyId() string {
@@ -5603,24 +5959,26 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
 	"key_digest\x18\x02 \x01(\fR\tkeyDigest\"<\n" +
 	"\x17AuthenticateHostRequest\x12!\n" +
-	"\ftoken_digest\x18\x01 \x01(\fR\vtokenDigest\"\xb5\x01\n" +
+	"\ftoken_digest\x18\x01 \x01(\fR\vtokenDigest\"\xfa\x01\n" +
 	"\rPutTagRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
 	"\x0fallowed_actions\x18\x03 \x03(\tR\x0eallowedActions\x12@\n" +
-	"\tworkspace\x18\x04 \x01(\v2\".supertag.runtime.v2.WorkspaceSpecR\tworkspace\"\xc7\x01\n" +
+	"\tworkspace\x18\x04 \x01(\v2\".supertag.runtime.v2.WorkspaceSpecR\tworkspace\x12C\n" +
+	"\fharness_kind\x18\x05 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\"\x8c\x02\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
 	"\x0fallowed_actions\x18\x03 \x03(\tR\x0eallowedActions\x12\x1a\n" +
 	"\brevision\x18\x04 \x01(\x04R\brevision\x12@\n" +
-	"\tworkspace\x18\x05 \x01(\v2\".supertag.runtime.v2.WorkspaceSpecR\tworkspace\"\x84\x01\n" +
+	"\tworkspace\x18\x05 \x01(\v2\".supertag.runtime.v2.WorkspaceSpecR\tworkspace\x12C\n" +
+	"\fharness_kind\x18\x06 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\"\x84\x01\n" +
 	"\x11SubmitTaskRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12!\n" +
 	"\foperation_id\x18\x03 \x01(\tR\voperationId\x12\x16\n" +
-	"\x06prompt\x18\x04 \x01(\tR\x06prompt\"\x90\x04\n" +
+	"\x06prompt\x18\x04 \x01(\tR\x06prompt\"\xd5\x04\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
@@ -5636,7 +5994,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"attempt_id\x18\n" +
 	" \x01(\tH\x01R\tattemptId\x88\x01\x01\x12@\n" +
 	"\tworkspace\x18\v \x01(\v2\".supertag.runtime.v2.WorkspaceSpecR\tworkspace\x12^\n" +
-	"\x12workspace_delivery\x18\f \x01(\v2/.supertag.runtime.v2.WorkspaceDeliveryReferenceR\x11workspaceDeliveryB\t\n" +
+	"\x12workspace_delivery\x18\f \x01(\v2/.supertag.runtime.v2.WorkspaceDeliveryReferenceR\x11workspaceDelivery\x12C\n" +
+	"\fharness_kind\x18\r \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKindB\t\n" +
 	"\a_resultB\r\n" +
 	"\v_attempt_id\")\n" +
 	"\x0eGetTaskRequest\x12\x17\n" +
@@ -5648,10 +6007,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12ListEventsResponse\x126\n" +
 	"\x06events\x18\x01 \x03(\v2\x1e.supertag.runtime.v2.TaskEventR\x06events\",\n" +
 	"\x11CancelTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\"Z\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\x9f\x01\n" +
 	"\x10ClaimTaskRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12#\n" +
-	"\rworkspace_ids\x18\x02 \x03(\tR\fworkspaceIds\"T\n" +
+	"\rworkspace_ids\x18\x02 \x03(\tR\fworkspaceIds\x12C\n" +
+	"\fharness_kind\x18\x03 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\"T\n" +
 	"\x11ClaimTaskResponse\x12?\n" +
 	"\n" +
 	"assignment\x18\x01 \x01(\v2\x1f.supertag.runtime.v2.AssignmentR\n" +
@@ -5934,6 +6294,25 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0emention_tag_id\x18\b \x01(\tH\x00R\fmentionTagId\x88\x01\x01B\x11\n" +
 	"\x0f_mention_tag_id\"I\n" +
 	"\x18AcceptSlackEventResponse\x12-\n" +
+	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\"\xa5\x03\n" +
+	"\x18AcceptGithubEventRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12\x1f\n" +
+	"\vdelivery_id\x18\x02 \x01(\tR\n" +
+	"deliveryId\x12#\n" +
+	"\rrepository_id\x18\x03 \x01(\x04R\frepositoryId\x12\x1e\n" +
+	"\n" +
+	"repository\x18\x04 \x01(\tR\n" +
+	"repository\x12\x16\n" +
+	"\x06number\x18\x05 \x01(\x04R\x06number\x12\x1b\n" +
+	"\tsource_id\x18\x06 \x01(\x04R\bsourceId\x128\n" +
+	"\x04kind\x18\a \x01(\x0e2$.supertag.runtime.v2.GithubEventKindR\x04kind\x12>\n" +
+	"\x06action\x18\b \x01(\x0e2&.supertag.runtime.v2.GithubEventActionR\x06action\x12\x16\n" +
+	"\x06prompt\x18\t \x01(\tR\x06prompt\x12\x15\n" +
+	"\x06tag_id\x18\n" +
+	" \x01(\tR\x05tagId\x12&\n" +
+	"\x0fis_pull_request\x18\v \x01(\bR\risPullRequest\"J\n" +
+	"\x19AcceptGithubEventResponse\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\"\xb3\x02\n" +
 	"\x05Reply\x12\x19\n" +
 	"\breply_id\x18\x01 \x01(\tR\areplyId\x12\x17\n" +
@@ -5986,7 +6365,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x11TASK_STATE_FAILED\x10\x04\x12\x18\n" +
 	"\x14TASK_STATE_CANCELLED\x10\x05\x12\x16\n" +
 	"\x12TASK_STATE_CLAIMED\x10\x06\x12\x18\n" +
-	"\x14TASK_STATE_UNCERTAIN\x10\a*l\n" +
+	"\x14TASK_STATE_UNCERTAIN\x10\a*\x81\x01\n" +
+	"\vHarnessKind\x12\x1c\n" +
+	"\x18HARNESS_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12HARNESS_KIND_CODEX\x10\x01\x12\x1c\n" +
+	"\x18HARNESS_KIND_CLAUDE_CODE\x10\x02\x12\x1e\n" +
+	"\x1aHARNESS_KIND_OPENAI_AGENTS\x10\x03*l\n" +
 	"\x0fAttemptDecision\x12 \n" +
 	"\x1cATTEMPT_DECISION_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ATTEMPT_DECISION_FAILED\x10\x01\x12\x1a\n" +
@@ -6007,7 +6391,17 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x19OBJECTIVE_SIGNAL_PROGRESS\x10\x00\x12%\n" +
 	"!OBJECTIVE_SIGNAL_READY_FOR_REVIEW\x10\x01\x12\x1e\n" +
 	"\x1aOBJECTIVE_SIGNAL_COMPLETED\x10\x02\x12\x1c\n" +
-	"\x18OBJECTIVE_SIGNAL_BLOCKED\x10\x03*\xa9\x01\n" +
+	"\x18OBJECTIVE_SIGNAL_BLOCKED\x10\x03*\x9a\x01\n" +
+	"\x0fGithubEventKind\x12!\n" +
+	"\x1dGITHUB_EVENT_KIND_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fGITHUB_EVENT_KIND_ISSUE_COMMENT\x10\x01\x12\x1b\n" +
+	"\x17GITHUB_EVENT_KIND_ISSUE\x10\x02\x12\"\n" +
+	"\x1eGITHUB_EVENT_KIND_PULL_REQUEST\x10\x03*\x99\x01\n" +
+	"\x11GithubEventAction\x12#\n" +
+	"\x1fGITHUB_EVENT_ACTION_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bGITHUB_EVENT_ACTION_CREATED\x10\x01\x12\x1e\n" +
+	"\x1aGITHUB_EVENT_ACTION_EDITED\x10\x02\x12\x1e\n" +
+	"\x1aGITHUB_EVENT_ACTION_OPENED\x10\x03*\xa9\x01\n" +
 	"\n" +
 	"ReplyState\x12\x1b\n" +
 	"\x17REPLY_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
@@ -6066,10 +6460,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"EnrollHost\x12&.supertag.runtime.v2.EnrollHostRequest\x1a\x1f.supertag.runtime.v2.HostRecord2\xc8\x01\n" +
 	"\rHostDirectory\x12X\n" +
 	"\x06Enroll\x12-.supertag.runtime.v2.PrivateEnrollHostRequest\x1a\x1f.supertag.runtime.v2.HostRecord\x12]\n" +
-	"\fAuthenticate\x12,.supertag.runtime.v2.AuthenticateHostRequest\x1a\x1f.supertag.runtime.v2.HostRecord2\x82\x03\n" +
+	"\fAuthenticate\x12,.supertag.runtime.v2.AuthenticateHostRequest\x1a\x1f.supertag.runtime.v2.HostRecord2\xf6\x03\n" +
 	"\tConnector\x12Q\n" +
 	"\vAcceptEvent\x12'.supertag.runtime.v2.AcceptEventRequest\x1a\x19.supertag.runtime.v2.Task\x12o\n" +
-	"\x10AcceptSlackEvent\x12,.supertag.runtime.v2.AcceptSlackEventRequest\x1a-.supertag.runtime.v2.AcceptSlackEventResponse\x12]\n" +
+	"\x10AcceptSlackEvent\x12,.supertag.runtime.v2.AcceptSlackEventRequest\x1a-.supertag.runtime.v2.AcceptSlackEventResponse\x12r\n" +
+	"\x11AcceptGithubEvent\x12-.supertag.runtime.v2.AcceptGithubEventRequest\x1a..supertag.runtime.v2.AcceptGithubEventResponse\x12]\n" +
 	"\n" +
 	"ClaimReply\x12&.supertag.runtime.v2.ClaimReplyRequest\x1a'.supertag.runtime.v2.ClaimReplyResponse\x12R\n" +
 	"\vSettleReply\x12'.supertag.runtime.v2.SettleReplyRequest\x1a\x1a.supertag.runtime.v2.Reply2\xaf\x04\n" +
@@ -6108,267 +6503,281 @@ func file_supertag_runtime_v2_runtime_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_runtime_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
+var file_supertag_runtime_v2_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
+var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 81)
 var file_supertag_runtime_v2_runtime_proto_goTypes = []any{
 	(LiveInputState)(0),                   // 0: supertag.runtime.v2.LiveInputState
 	(LiveInputDecision)(0),                // 1: supertag.runtime.v2.LiveInputDecision
 	(LiveInputReceipt)(0),                 // 2: supertag.runtime.v2.LiveInputReceipt
 	(TaskState)(0),                        // 3: supertag.runtime.v2.TaskState
-	(AttemptDecision)(0),                  // 4: supertag.runtime.v2.AttemptDecision
-	(WorkspaceArtifactKind)(0),            // 5: supertag.runtime.v2.WorkspaceArtifactKind
-	(ObjectiveStatus)(0),                  // 6: supertag.runtime.v2.ObjectiveStatus
-	(ObjectiveSignal)(0),                  // 7: supertag.runtime.v2.ObjectiveSignal
-	(ReplyState)(0),                       // 8: supertag.runtime.v2.ReplyState
-	(*QueueInputRequest)(nil),             // 9: supertag.runtime.v2.QueueInputRequest
-	(*GetInputRequest)(nil),               // 10: supertag.runtime.v2.GetInputRequest
-	(*ResolveInputRequest)(nil),           // 11: supertag.runtime.v2.ResolveInputRequest
-	(*LiveInput)(nil),                     // 12: supertag.runtime.v2.LiveInput
-	(*TakeInputRequest)(nil),              // 13: supertag.runtime.v2.TakeInputRequest
-	(*TakeInputResponse)(nil),             // 14: supertag.runtime.v2.TakeInputResponse
-	(*HarnessTakeLiveInputRequest)(nil),   // 15: supertag.runtime.v2.HarnessTakeLiveInputRequest
-	(*HarnessSettleLiveInputRequest)(nil), // 16: supertag.runtime.v2.HarnessSettleLiveInputRequest
-	(*SettleInputRequest)(nil),            // 17: supertag.runtime.v2.SettleInputRequest
-	(*CreateAuthKeyRequest)(nil),          // 18: supertag.runtime.v2.CreateAuthKeyRequest
-	(*AuthKey)(nil),                       // 19: supertag.runtime.v2.AuthKey
-	(*RevokeHostRequest)(nil),             // 20: supertag.runtime.v2.RevokeHostRequest
-	(*RegisterHostRequest)(nil),           // 21: supertag.runtime.v2.RegisterHostRequest
-	(*HostRecord)(nil),                    // 22: supertag.runtime.v2.HostRecord
-	(*EnrollHostRequest)(nil),             // 23: supertag.runtime.v2.EnrollHostRequest
-	(*PrivateEnrollHostRequest)(nil),      // 24: supertag.runtime.v2.PrivateEnrollHostRequest
-	(*AuthenticateHostRequest)(nil),       // 25: supertag.runtime.v2.AuthenticateHostRequest
-	(*PutTagRequest)(nil),                 // 26: supertag.runtime.v2.PutTagRequest
-	(*Tag)(nil),                           // 27: supertag.runtime.v2.Tag
-	(*SubmitTaskRequest)(nil),             // 28: supertag.runtime.v2.SubmitTaskRequest
-	(*Task)(nil),                          // 29: supertag.runtime.v2.Task
-	(*GetTaskRequest)(nil),                // 30: supertag.runtime.v2.GetTaskRequest
-	(*ListEventsRequest)(nil),             // 31: supertag.runtime.v2.ListEventsRequest
-	(*ListEventsResponse)(nil),            // 32: supertag.runtime.v2.ListEventsResponse
-	(*CancelTaskRequest)(nil),             // 33: supertag.runtime.v2.CancelTaskRequest
-	(*ClaimTaskRequest)(nil),              // 34: supertag.runtime.v2.ClaimTaskRequest
-	(*ClaimTaskResponse)(nil),             // 35: supertag.runtime.v2.ClaimTaskResponse
-	(*Assignment)(nil),                    // 36: supertag.runtime.v2.Assignment
-	(*StartTaskRequest)(nil),              // 37: supertag.runtime.v2.StartTaskRequest
-	(*InspectAttemptRequest)(nil),         // 38: supertag.runtime.v2.InspectAttemptRequest
-	(*AttemptAuthority)(nil),              // 39: supertag.runtime.v2.AttemptAuthority
-	(*ResolveAttemptRequest)(nil),         // 40: supertag.runtime.v2.ResolveAttemptRequest
-	(*AttemptResolution)(nil),             // 41: supertag.runtime.v2.AttemptResolution
-	(*GetAttemptResolutionResponse)(nil),  // 42: supertag.runtime.v2.GetAttemptResolutionResponse
-	(*ReportAttemptUsageRequest)(nil),     // 43: supertag.runtime.v2.ReportAttemptUsageRequest
-	(*ReportAttemptUsageResponse)(nil),    // 44: supertag.runtime.v2.ReportAttemptUsageResponse
-	(*NativeTokenUsage)(nil),              // 45: supertag.runtime.v2.NativeTokenUsage
-	(*ListNativeUsageRequest)(nil),        // 46: supertag.runtime.v2.ListNativeUsageRequest
-	(*ListNativeUsageResponse)(nil),       // 47: supertag.runtime.v2.ListNativeUsageResponse
-	(*HarnessUsageRequest)(nil),           // 48: supertag.runtime.v2.HarnessUsageRequest
-	(*AppendEventRequest)(nil),            // 49: supertag.runtime.v2.AppendEventRequest
-	(*TaskEvent)(nil),                     // 50: supertag.runtime.v2.TaskEvent
-	(*FinishTaskRequest)(nil),             // 51: supertag.runtime.v2.FinishTaskRequest
-	(*HarnessAttachRequest)(nil),          // 52: supertag.runtime.v2.HarnessAttachRequest
-	(*AdapterBootstrap)(nil),              // 53: supertag.runtime.v2.AdapterBootstrap
-	(*HarnessRun)(nil),                    // 54: supertag.runtime.v2.HarnessRun
-	(*SessionCheckpoint)(nil),             // 55: supertag.runtime.v2.SessionCheckpoint
-	(*CheckpointReference)(nil),           // 56: supertag.runtime.v2.CheckpointReference
-	(*GetCheckpointResponse)(nil),         // 57: supertag.runtime.v2.GetCheckpointResponse
-	(*CommitCheckpointRequest)(nil),       // 58: supertag.runtime.v2.CommitCheckpointRequest
-	(*CheckpointUpload)(nil),              // 59: supertag.runtime.v2.CheckpointUpload
-	(*CheckpointDownload)(nil),            // 60: supertag.runtime.v2.CheckpointDownload
-	(*WorkspaceSpec)(nil),                 // 61: supertag.runtime.v2.WorkspaceSpec
-	(*BlobReference)(nil),                 // 62: supertag.runtime.v2.BlobReference
-	(*WorkspaceDeliveryReference)(nil),    // 63: supertag.runtime.v2.WorkspaceDeliveryReference
-	(*WorkspaceDeliveryRequest)(nil),      // 64: supertag.runtime.v2.WorkspaceDeliveryRequest
-	(*WorkspaceContinuation)(nil),         // 65: supertag.runtime.v2.WorkspaceContinuation
-	(*WorkspaceUpload)(nil),               // 66: supertag.runtime.v2.WorkspaceUpload
-	(*WorkspaceDownload)(nil),             // 67: supertag.runtime.v2.WorkspaceDownload
-	(*GetWorkspaceArtifactRequest)(nil),   // 68: supertag.runtime.v2.GetWorkspaceArtifactRequest
-	(*HarnessPublishRequest)(nil),         // 69: supertag.runtime.v2.HarnessPublishRequest
-	(*HarnessCompleteRequest)(nil),        // 70: supertag.runtime.v2.HarnessCompleteRequest
-	(*HarnessCompleteResponse)(nil),       // 71: supertag.runtime.v2.HarnessCompleteResponse
-	(*CreateObjectiveRequest)(nil),        // 72: supertag.runtime.v2.CreateObjectiveRequest
-	(*Objective)(nil),                     // 73: supertag.runtime.v2.Objective
-	(*GetObjectiveRequest)(nil),           // 74: supertag.runtime.v2.GetObjectiveRequest
-	(*ListObjectivesRequest)(nil),         // 75: supertag.runtime.v2.ListObjectivesRequest
-	(*ListObjectivesResponse)(nil),        // 76: supertag.runtime.v2.ListObjectivesResponse
-	(*SetObjectiveLimitsRequest)(nil),     // 77: supertag.runtime.v2.SetObjectiveLimitsRequest
-	(*ObjectiveActionRequest)(nil),        // 78: supertag.runtime.v2.ObjectiveActionRequest
-	(*ReviewObjectiveRequest)(nil),        // 79: supertag.runtime.v2.ReviewObjectiveRequest
-	(*ReplyDestination)(nil),              // 80: supertag.runtime.v2.ReplyDestination
-	(*AcceptEventRequest)(nil),            // 81: supertag.runtime.v2.AcceptEventRequest
-	(*AcceptSlackEventRequest)(nil),       // 82: supertag.runtime.v2.AcceptSlackEventRequest
-	(*AcceptSlackEventResponse)(nil),      // 83: supertag.runtime.v2.AcceptSlackEventResponse
-	(*Reply)(nil),                         // 84: supertag.runtime.v2.Reply
-	(*ClaimReplyRequest)(nil),             // 85: supertag.runtime.v2.ClaimReplyRequest
-	(*ClaimReplyResponse)(nil),            // 86: supertag.runtime.v2.ClaimReplyResponse
-	(*SettleReplyRequest)(nil),            // 87: supertag.runtime.v2.SettleReplyRequest
+	(HarnessKind)(0),                      // 4: supertag.runtime.v2.HarnessKind
+	(AttemptDecision)(0),                  // 5: supertag.runtime.v2.AttemptDecision
+	(WorkspaceArtifactKind)(0),            // 6: supertag.runtime.v2.WorkspaceArtifactKind
+	(ObjectiveStatus)(0),                  // 7: supertag.runtime.v2.ObjectiveStatus
+	(ObjectiveSignal)(0),                  // 8: supertag.runtime.v2.ObjectiveSignal
+	(GithubEventKind)(0),                  // 9: supertag.runtime.v2.GithubEventKind
+	(GithubEventAction)(0),                // 10: supertag.runtime.v2.GithubEventAction
+	(ReplyState)(0),                       // 11: supertag.runtime.v2.ReplyState
+	(*QueueInputRequest)(nil),             // 12: supertag.runtime.v2.QueueInputRequest
+	(*GetInputRequest)(nil),               // 13: supertag.runtime.v2.GetInputRequest
+	(*ResolveInputRequest)(nil),           // 14: supertag.runtime.v2.ResolveInputRequest
+	(*LiveInput)(nil),                     // 15: supertag.runtime.v2.LiveInput
+	(*TakeInputRequest)(nil),              // 16: supertag.runtime.v2.TakeInputRequest
+	(*TakeInputResponse)(nil),             // 17: supertag.runtime.v2.TakeInputResponse
+	(*HarnessTakeLiveInputRequest)(nil),   // 18: supertag.runtime.v2.HarnessTakeLiveInputRequest
+	(*HarnessSettleLiveInputRequest)(nil), // 19: supertag.runtime.v2.HarnessSettleLiveInputRequest
+	(*SettleInputRequest)(nil),            // 20: supertag.runtime.v2.SettleInputRequest
+	(*CreateAuthKeyRequest)(nil),          // 21: supertag.runtime.v2.CreateAuthKeyRequest
+	(*AuthKey)(nil),                       // 22: supertag.runtime.v2.AuthKey
+	(*RevokeHostRequest)(nil),             // 23: supertag.runtime.v2.RevokeHostRequest
+	(*RegisterHostRequest)(nil),           // 24: supertag.runtime.v2.RegisterHostRequest
+	(*HostRecord)(nil),                    // 25: supertag.runtime.v2.HostRecord
+	(*EnrollHostRequest)(nil),             // 26: supertag.runtime.v2.EnrollHostRequest
+	(*PrivateEnrollHostRequest)(nil),      // 27: supertag.runtime.v2.PrivateEnrollHostRequest
+	(*AuthenticateHostRequest)(nil),       // 28: supertag.runtime.v2.AuthenticateHostRequest
+	(*PutTagRequest)(nil),                 // 29: supertag.runtime.v2.PutTagRequest
+	(*Tag)(nil),                           // 30: supertag.runtime.v2.Tag
+	(*SubmitTaskRequest)(nil),             // 31: supertag.runtime.v2.SubmitTaskRequest
+	(*Task)(nil),                          // 32: supertag.runtime.v2.Task
+	(*GetTaskRequest)(nil),                // 33: supertag.runtime.v2.GetTaskRequest
+	(*ListEventsRequest)(nil),             // 34: supertag.runtime.v2.ListEventsRequest
+	(*ListEventsResponse)(nil),            // 35: supertag.runtime.v2.ListEventsResponse
+	(*CancelTaskRequest)(nil),             // 36: supertag.runtime.v2.CancelTaskRequest
+	(*ClaimTaskRequest)(nil),              // 37: supertag.runtime.v2.ClaimTaskRequest
+	(*ClaimTaskResponse)(nil),             // 38: supertag.runtime.v2.ClaimTaskResponse
+	(*Assignment)(nil),                    // 39: supertag.runtime.v2.Assignment
+	(*StartTaskRequest)(nil),              // 40: supertag.runtime.v2.StartTaskRequest
+	(*InspectAttemptRequest)(nil),         // 41: supertag.runtime.v2.InspectAttemptRequest
+	(*AttemptAuthority)(nil),              // 42: supertag.runtime.v2.AttemptAuthority
+	(*ResolveAttemptRequest)(nil),         // 43: supertag.runtime.v2.ResolveAttemptRequest
+	(*AttemptResolution)(nil),             // 44: supertag.runtime.v2.AttemptResolution
+	(*GetAttemptResolutionResponse)(nil),  // 45: supertag.runtime.v2.GetAttemptResolutionResponse
+	(*ReportAttemptUsageRequest)(nil),     // 46: supertag.runtime.v2.ReportAttemptUsageRequest
+	(*ReportAttemptUsageResponse)(nil),    // 47: supertag.runtime.v2.ReportAttemptUsageResponse
+	(*NativeTokenUsage)(nil),              // 48: supertag.runtime.v2.NativeTokenUsage
+	(*ListNativeUsageRequest)(nil),        // 49: supertag.runtime.v2.ListNativeUsageRequest
+	(*ListNativeUsageResponse)(nil),       // 50: supertag.runtime.v2.ListNativeUsageResponse
+	(*HarnessUsageRequest)(nil),           // 51: supertag.runtime.v2.HarnessUsageRequest
+	(*AppendEventRequest)(nil),            // 52: supertag.runtime.v2.AppendEventRequest
+	(*TaskEvent)(nil),                     // 53: supertag.runtime.v2.TaskEvent
+	(*FinishTaskRequest)(nil),             // 54: supertag.runtime.v2.FinishTaskRequest
+	(*HarnessAttachRequest)(nil),          // 55: supertag.runtime.v2.HarnessAttachRequest
+	(*AdapterBootstrap)(nil),              // 56: supertag.runtime.v2.AdapterBootstrap
+	(*HarnessRun)(nil),                    // 57: supertag.runtime.v2.HarnessRun
+	(*SessionCheckpoint)(nil),             // 58: supertag.runtime.v2.SessionCheckpoint
+	(*CheckpointReference)(nil),           // 59: supertag.runtime.v2.CheckpointReference
+	(*GetCheckpointResponse)(nil),         // 60: supertag.runtime.v2.GetCheckpointResponse
+	(*CommitCheckpointRequest)(nil),       // 61: supertag.runtime.v2.CommitCheckpointRequest
+	(*CheckpointUpload)(nil),              // 62: supertag.runtime.v2.CheckpointUpload
+	(*CheckpointDownload)(nil),            // 63: supertag.runtime.v2.CheckpointDownload
+	(*WorkspaceSpec)(nil),                 // 64: supertag.runtime.v2.WorkspaceSpec
+	(*BlobReference)(nil),                 // 65: supertag.runtime.v2.BlobReference
+	(*WorkspaceDeliveryReference)(nil),    // 66: supertag.runtime.v2.WorkspaceDeliveryReference
+	(*WorkspaceDeliveryRequest)(nil),      // 67: supertag.runtime.v2.WorkspaceDeliveryRequest
+	(*WorkspaceContinuation)(nil),         // 68: supertag.runtime.v2.WorkspaceContinuation
+	(*WorkspaceUpload)(nil),               // 69: supertag.runtime.v2.WorkspaceUpload
+	(*WorkspaceDownload)(nil),             // 70: supertag.runtime.v2.WorkspaceDownload
+	(*GetWorkspaceArtifactRequest)(nil),   // 71: supertag.runtime.v2.GetWorkspaceArtifactRequest
+	(*HarnessPublishRequest)(nil),         // 72: supertag.runtime.v2.HarnessPublishRequest
+	(*HarnessCompleteRequest)(nil),        // 73: supertag.runtime.v2.HarnessCompleteRequest
+	(*HarnessCompleteResponse)(nil),       // 74: supertag.runtime.v2.HarnessCompleteResponse
+	(*CreateObjectiveRequest)(nil),        // 75: supertag.runtime.v2.CreateObjectiveRequest
+	(*Objective)(nil),                     // 76: supertag.runtime.v2.Objective
+	(*GetObjectiveRequest)(nil),           // 77: supertag.runtime.v2.GetObjectiveRequest
+	(*ListObjectivesRequest)(nil),         // 78: supertag.runtime.v2.ListObjectivesRequest
+	(*ListObjectivesResponse)(nil),        // 79: supertag.runtime.v2.ListObjectivesResponse
+	(*SetObjectiveLimitsRequest)(nil),     // 80: supertag.runtime.v2.SetObjectiveLimitsRequest
+	(*ObjectiveActionRequest)(nil),        // 81: supertag.runtime.v2.ObjectiveActionRequest
+	(*ReviewObjectiveRequest)(nil),        // 82: supertag.runtime.v2.ReviewObjectiveRequest
+	(*ReplyDestination)(nil),              // 83: supertag.runtime.v2.ReplyDestination
+	(*AcceptEventRequest)(nil),            // 84: supertag.runtime.v2.AcceptEventRequest
+	(*AcceptSlackEventRequest)(nil),       // 85: supertag.runtime.v2.AcceptSlackEventRequest
+	(*AcceptSlackEventResponse)(nil),      // 86: supertag.runtime.v2.AcceptSlackEventResponse
+	(*AcceptGithubEventRequest)(nil),      // 87: supertag.runtime.v2.AcceptGithubEventRequest
+	(*AcceptGithubEventResponse)(nil),     // 88: supertag.runtime.v2.AcceptGithubEventResponse
+	(*Reply)(nil),                         // 89: supertag.runtime.v2.Reply
+	(*ClaimReplyRequest)(nil),             // 90: supertag.runtime.v2.ClaimReplyRequest
+	(*ClaimReplyResponse)(nil),            // 91: supertag.runtime.v2.ClaimReplyResponse
+	(*SettleReplyRequest)(nil),            // 92: supertag.runtime.v2.SettleReplyRequest
 }
 var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	1,   // 0: supertag.runtime.v2.ResolveInputRequest.decision:type_name -> supertag.runtime.v2.LiveInputDecision
 	0,   // 1: supertag.runtime.v2.LiveInput.state:type_name -> supertag.runtime.v2.LiveInputState
-	38,  // 2: supertag.runtime.v2.TakeInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	12,  // 3: supertag.runtime.v2.TakeInputResponse.input:type_name -> supertag.runtime.v2.LiveInput
+	41,  // 2: supertag.runtime.v2.TakeInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	15,  // 3: supertag.runtime.v2.TakeInputResponse.input:type_name -> supertag.runtime.v2.LiveInput
 	2,   // 4: supertag.runtime.v2.HarnessSettleLiveInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
-	38,  // 5: supertag.runtime.v2.SettleInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	41,  // 5: supertag.runtime.v2.SettleInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	2,   // 6: supertag.runtime.v2.SettleInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
-	23,  // 7: supertag.runtime.v2.PrivateEnrollHostRequest.enrollment:type_name -> supertag.runtime.v2.EnrollHostRequest
-	61,  // 8: supertag.runtime.v2.PutTagRequest.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	61,  // 9: supertag.runtime.v2.Tag.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	3,   // 10: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
-	61,  // 11: supertag.runtime.v2.Task.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	63,  // 12: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	50,  // 13: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
-	36,  // 14: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
-	29,  // 15: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
-	29,  // 16: supertag.runtime.v2.AttemptAuthority.task:type_name -> supertag.runtime.v2.Task
-	4,   // 17: supertag.runtime.v2.ResolveAttemptRequest.decision:type_name -> supertag.runtime.v2.AttemptDecision
-	4,   // 18: supertag.runtime.v2.AttemptResolution.decision:type_name -> supertag.runtime.v2.AttemptDecision
-	41,  // 19: supertag.runtime.v2.GetAttemptResolutionResponse.resolution:type_name -> supertag.runtime.v2.AttemptResolution
-	38,  // 20: supertag.runtime.v2.ReportAttemptUsageRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	45,  // 21: supertag.runtime.v2.ReportAttemptUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
-	48,  // 22: supertag.runtime.v2.ListNativeUsageResponse.reports:type_name -> supertag.runtime.v2.HarnessUsageRequest
-	45,  // 23: supertag.runtime.v2.HarnessUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
-	7,   // 24: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	63,  // 25: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	29,  // 26: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
-	55,  // 27: supertag.runtime.v2.HarnessRun.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
-	56,  // 28: supertag.runtime.v2.GetCheckpointResponse.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	38,  // 29: supertag.runtime.v2.CommitCheckpointRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	56,  // 30: supertag.runtime.v2.CommitCheckpointRequest.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	58,  // 31: supertag.runtime.v2.CheckpointUpload.begin:type_name -> supertag.runtime.v2.CommitCheckpointRequest
-	56,  // 32: supertag.runtime.v2.CheckpointDownload.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	62,  // 33: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
-	62,  // 34: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
-	38,  // 35: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	63,  // 36: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	63,  // 37: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	64,  // 38: supertag.runtime.v2.WorkspaceUpload.begin:type_name -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	63,  // 39: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	5,   // 40: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
-	7,   // 41: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	55,  // 42: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
-	6,   // 43: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
-	73,  // 44: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
-	80,  // 45: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	29,  // 46: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
-	80,  // 47: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	8,   // 48: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
-	84,  // 49: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
-	8,   // 50: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	18,  // 51: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
-	20,  // 52: supertag.runtime.v2.Operator.RevokeHost:input_type -> supertag.runtime.v2.RevokeHostRequest
-	26,  // 53: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
-	28,  // 54: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
-	30,  // 55: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
-	46,  // 56: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
-	31,  // 57: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
-	33,  // 58: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
-	40,  // 59: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
-	72,  // 60: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
-	74,  // 61: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
-	75,  // 62: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
-	77,  // 63: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
-	78,  // 64: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	78,  // 65: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	78,  // 66: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	79,  // 67: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
-	21,  // 68: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
-	34,  // 69: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
-	37,  // 70: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
-	38,  // 71: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	38,  // 72: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	38,  // 73: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	43,  // 74: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
-	49,  // 75: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
-	51,  // 76: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
-	9,   // 77: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
-	10,  // 78: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
-	11,  // 79: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
-	13,  // 80: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
-	17,  // 81: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
-	23,  // 82: supertag.runtime.v2.HostEnrollment.EnrollHost:input_type -> supertag.runtime.v2.EnrollHostRequest
-	24,  // 83: supertag.runtime.v2.HostDirectory.Enroll:input_type -> supertag.runtime.v2.PrivateEnrollHostRequest
-	25,  // 84: supertag.runtime.v2.HostDirectory.Authenticate:input_type -> supertag.runtime.v2.AuthenticateHostRequest
-	81,  // 85: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
-	82,  // 86: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
-	85,  // 87: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
-	87,  // 88: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
-	59,  // 89: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
-	38,  // 90: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	66,  // 91: supertag.runtime.v2.Transfers.UploadWorkspace:input_type -> supertag.runtime.v2.WorkspaceUpload
-	38,  // 92: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	68,  // 93: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	38,  // 94: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	58,  // 95: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	58,  // 96: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	38,  // 97: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	64,  // 98: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	64,  // 99: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	68,  // 100: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	52,  // 101: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
-	15,  // 102: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
-	16,  // 103: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
-	69,  // 104: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
-	48,  // 105: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
-	70,  // 106: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
-	19,  // 107: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	22,  // 108: supertag.runtime.v2.Operator.RevokeHost:output_type -> supertag.runtime.v2.HostRecord
-	27,  // 109: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
-	29,  // 110: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
-	29,  // 111: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
-	47,  // 112: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
-	32,  // 113: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
-	29,  // 114: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
-	41,  // 115: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
-	73,  // 116: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
-	73,  // 117: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
-	76,  // 118: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
-	73,  // 119: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
-	73,  // 120: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
-	73,  // 121: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
-	73,  // 122: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
-	73,  // 123: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
-	22,  // 124: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
-	35,  // 125: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
-	29,  // 126: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
-	29,  // 127: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
-	39,  // 128: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
-	42,  // 129: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
-	44,  // 130: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	50,  // 131: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
-	29,  // 132: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
-	12,  // 133: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
-	12,  // 134: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
-	12,  // 135: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
-	14,  // 136: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	12,  // 137: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
-	22,  // 138: supertag.runtime.v2.HostEnrollment.EnrollHost:output_type -> supertag.runtime.v2.HostRecord
-	22,  // 139: supertag.runtime.v2.HostDirectory.Enroll:output_type -> supertag.runtime.v2.HostRecord
-	22,  // 140: supertag.runtime.v2.HostDirectory.Authenticate:output_type -> supertag.runtime.v2.HostRecord
-	29,  // 141: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
-	83,  // 142: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
-	86,  // 143: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
-	84,  // 144: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
-	56,  // 145: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	60,  // 146: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
-	63,  // 147: supertag.runtime.v2.Transfers.UploadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	67,  // 148: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
-	67,  // 149: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
-	57,  // 150: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
-	56,  // 151: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	56,  // 152: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	65,  // 153: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
-	63,  // 154: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	63,  // 155: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	63,  // 156: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	54,  // 157: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
-	14,  // 158: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	12,  // 159: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
-	50,  // 160: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
-	44,  // 161: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	71,  // 162: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
-	107, // [107:163] is the sub-list for method output_type
-	51,  // [51:107] is the sub-list for method input_type
-	51,  // [51:51] is the sub-list for extension type_name
-	51,  // [51:51] is the sub-list for extension extendee
-	0,   // [0:51] is the sub-list for field type_name
+	26,  // 7: supertag.runtime.v2.PrivateEnrollHostRequest.enrollment:type_name -> supertag.runtime.v2.EnrollHostRequest
+	64,  // 8: supertag.runtime.v2.PutTagRequest.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	4,   // 9: supertag.runtime.v2.PutTagRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	64,  // 10: supertag.runtime.v2.Tag.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	4,   // 11: supertag.runtime.v2.Tag.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	3,   // 12: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
+	64,  // 13: supertag.runtime.v2.Task.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	66,  // 14: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	4,   // 15: supertag.runtime.v2.Task.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	53,  // 16: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
+	4,   // 17: supertag.runtime.v2.ClaimTaskRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	39,  // 18: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
+	32,  // 19: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
+	32,  // 20: supertag.runtime.v2.AttemptAuthority.task:type_name -> supertag.runtime.v2.Task
+	5,   // 21: supertag.runtime.v2.ResolveAttemptRequest.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	5,   // 22: supertag.runtime.v2.AttemptResolution.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	44,  // 23: supertag.runtime.v2.GetAttemptResolutionResponse.resolution:type_name -> supertag.runtime.v2.AttemptResolution
+	41,  // 24: supertag.runtime.v2.ReportAttemptUsageRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	48,  // 25: supertag.runtime.v2.ReportAttemptUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
+	51,  // 26: supertag.runtime.v2.ListNativeUsageResponse.reports:type_name -> supertag.runtime.v2.HarnessUsageRequest
+	48,  // 27: supertag.runtime.v2.HarnessUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
+	8,   // 28: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	66,  // 29: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	32,  // 30: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
+	58,  // 31: supertag.runtime.v2.HarnessRun.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
+	59,  // 32: supertag.runtime.v2.GetCheckpointResponse.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	41,  // 33: supertag.runtime.v2.CommitCheckpointRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	59,  // 34: supertag.runtime.v2.CommitCheckpointRequest.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	61,  // 35: supertag.runtime.v2.CheckpointUpload.begin:type_name -> supertag.runtime.v2.CommitCheckpointRequest
+	59,  // 36: supertag.runtime.v2.CheckpointDownload.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	65,  // 37: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
+	65,  // 38: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
+	41,  // 39: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	66,  // 40: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	66,  // 41: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	67,  // 42: supertag.runtime.v2.WorkspaceUpload.begin:type_name -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	66,  // 43: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	6,   // 44: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
+	8,   // 45: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	58,  // 46: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
+	7,   // 47: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
+	76,  // 48: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
+	83,  // 49: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	32,  // 50: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
+	9,   // 51: supertag.runtime.v2.AcceptGithubEventRequest.kind:type_name -> supertag.runtime.v2.GithubEventKind
+	10,  // 52: supertag.runtime.v2.AcceptGithubEventRequest.action:type_name -> supertag.runtime.v2.GithubEventAction
+	32,  // 53: supertag.runtime.v2.AcceptGithubEventResponse.task:type_name -> supertag.runtime.v2.Task
+	83,  // 54: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	11,  // 55: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
+	89,  // 56: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
+	11,  // 57: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	21,  // 58: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
+	23,  // 59: supertag.runtime.v2.Operator.RevokeHost:input_type -> supertag.runtime.v2.RevokeHostRequest
+	29,  // 60: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
+	31,  // 61: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
+	33,  // 62: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
+	49,  // 63: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
+	34,  // 64: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
+	36,  // 65: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
+	43,  // 66: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
+	75,  // 67: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
+	77,  // 68: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
+	78,  // 69: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
+	80,  // 70: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
+	81,  // 71: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	81,  // 72: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	81,  // 73: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	82,  // 74: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
+	24,  // 75: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
+	37,  // 76: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
+	40,  // 77: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
+	41,  // 78: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	41,  // 79: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	41,  // 80: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	46,  // 81: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
+	52,  // 82: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
+	54,  // 83: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
+	12,  // 84: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
+	13,  // 85: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
+	14,  // 86: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
+	16,  // 87: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
+	20,  // 88: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
+	26,  // 89: supertag.runtime.v2.HostEnrollment.EnrollHost:input_type -> supertag.runtime.v2.EnrollHostRequest
+	27,  // 90: supertag.runtime.v2.HostDirectory.Enroll:input_type -> supertag.runtime.v2.PrivateEnrollHostRequest
+	28,  // 91: supertag.runtime.v2.HostDirectory.Authenticate:input_type -> supertag.runtime.v2.AuthenticateHostRequest
+	84,  // 92: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
+	85,  // 93: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
+	87,  // 94: supertag.runtime.v2.Connector.AcceptGithubEvent:input_type -> supertag.runtime.v2.AcceptGithubEventRequest
+	90,  // 95: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
+	92,  // 96: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
+	62,  // 97: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
+	41,  // 98: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	69,  // 99: supertag.runtime.v2.Transfers.UploadWorkspace:input_type -> supertag.runtime.v2.WorkspaceUpload
+	41,  // 100: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	71,  // 101: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	41,  // 102: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	61,  // 103: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	61,  // 104: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	41,  // 105: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	67,  // 106: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	67,  // 107: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	71,  // 108: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	55,  // 109: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
+	18,  // 110: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
+	19,  // 111: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
+	72,  // 112: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
+	51,  // 113: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
+	73,  // 114: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
+	22,  // 115: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	25,  // 116: supertag.runtime.v2.Operator.RevokeHost:output_type -> supertag.runtime.v2.HostRecord
+	30,  // 117: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
+	32,  // 118: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
+	32,  // 119: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
+	50,  // 120: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
+	35,  // 121: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
+	32,  // 122: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
+	44,  // 123: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
+	76,  // 124: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
+	76,  // 125: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
+	79,  // 126: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
+	76,  // 127: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
+	76,  // 128: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
+	76,  // 129: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
+	76,  // 130: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
+	76,  // 131: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
+	25,  // 132: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
+	38,  // 133: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
+	32,  // 134: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
+	32,  // 135: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
+	42,  // 136: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
+	45,  // 137: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
+	47,  // 138: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	53,  // 139: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
+	32,  // 140: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
+	15,  // 141: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
+	15,  // 142: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
+	15,  // 143: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
+	17,  // 144: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	15,  // 145: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
+	25,  // 146: supertag.runtime.v2.HostEnrollment.EnrollHost:output_type -> supertag.runtime.v2.HostRecord
+	25,  // 147: supertag.runtime.v2.HostDirectory.Enroll:output_type -> supertag.runtime.v2.HostRecord
+	25,  // 148: supertag.runtime.v2.HostDirectory.Authenticate:output_type -> supertag.runtime.v2.HostRecord
+	32,  // 149: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
+	86,  // 150: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
+	88,  // 151: supertag.runtime.v2.Connector.AcceptGithubEvent:output_type -> supertag.runtime.v2.AcceptGithubEventResponse
+	91,  // 152: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
+	89,  // 153: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
+	59,  // 154: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	63,  // 155: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
+	66,  // 156: supertag.runtime.v2.Transfers.UploadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	70,  // 157: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
+	70,  // 158: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
+	60,  // 159: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
+	59,  // 160: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	59,  // 161: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	68,  // 162: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
+	66,  // 163: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	66,  // 164: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	66,  // 165: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	57,  // 166: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
+	17,  // 167: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	15,  // 168: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
+	53,  // 169: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
+	47,  // 170: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	74,  // 171: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
+	115, // [115:172] is the sub-list for method output_type
+	58,  // [58:115] is the sub-list for method input_type
+	58,  // [58:58] is the sub-list for extension type_name
+	58,  // [58:58] is the sub-list for extension extendee
+	0,   // [0:58] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_runtime_proto_init() }
@@ -6402,15 +6811,15 @@ func file_supertag_runtime_v2_runtime_proto_init() {
 	file_supertag_runtime_v2_runtime_proto_msgTypes[68].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[71].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[73].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[75].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[78].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[77].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[80].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_runtime_proto_rawDesc), len(file_supertag_runtime_v2_runtime_proto_rawDesc)),
-			NumEnums:      9,
-			NumMessages:   79,
+			NumEnums:      12,
+			NumMessages:   81,
 			NumExtensions: 0,
 			NumServices:   12,
 		},

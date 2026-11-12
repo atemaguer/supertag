@@ -202,6 +202,15 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.280
         version: 0.3.280(@anthropic-ai/sdk@0.115.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(zod@4.4.3)
+      '@bufbuild/protobuf':
+        specifier: 2.15.0
+        version: 2.15.0
+      '@connectrpc/connect':
+        specifier: 2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.15.0)
+      '@connectrpc/connect-node':
+        specifier: 2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.15.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.15.0))
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)

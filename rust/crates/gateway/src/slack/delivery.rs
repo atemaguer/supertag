@@ -1,154 +1,17 @@
-use std::{
-    fs::{self, DirBuilder, File, OpenOptions},
-    future::Future,
-    io::{self, Read as _, Write as _},
-    os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
-    path::{Path, PathBuf},
-    time::Duration,
-};
-
-use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
+use super::{Connector, DELIVERY_TIMEOUT, slack_ts};
+pub(super) use crate::delivery_journal::Journal;
+use crate::delivery_journal::{Claim, Entry, Outcome, private_call};
+use anyhow::{Result, ensure};
+use serde::Deserialize;
 use serde_json::json;
+use std::time::Duration;
 use supertag_protocol::v2::{ClaimReplyRequest, Reply, ReplyState, SettleReplyRequest};
-use tempfile::NamedTempFile;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-use super::{Connector, DELIVERY_TIMEOUT, slack_ts};
-
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
-const REPLY_FILE: &str = "reply.json";
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_MESSAGE_CHARS: usize = 4_000;
-
-#[derive(Clone, Deserialize, Serialize)]
-struct Claim {
-    reply_id: String,
-    lease_token: String,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-enum Outcome {
-    Delivered { provider_receipt: String },
-    Failed,
-    Uncertain,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(tag = "stage", rename_all = "snake_case")]
-enum Entry {
-    Claim { operation_id: String },
-    Sending { target: Claim },
-    Settle { target: Claim, outcome: Outcome },
-}
-
-#[derive(Deserialize, Serialize)]
-struct Record {
-    account_id: String,
-    entry: Entry,
-}
-
-pub(super) struct Journal {
-    directory: PathBuf,
-    account_id: String,
-    _lock: File,
-}
-
-impl Journal {
-    pub(super) fn open(directory: &Path, account_id: &str) -> Result<Self> {
-        DirBuilder::new()
-            .mode(0o700)
-            .recursive(true)
-            .create(directory)?;
-        let metadata = fs::symlink_metadata(directory)?;
-        ensure!(
-            metadata.is_dir() && private(&metadata),
-            "Slack state must be an owner-only directory"
-        );
-        let lock = open_private(&directory.join("slack.lock"), true)?;
-        lock.try_lock()
-            .context("Slack delivery state is already in use")?;
-        let journal = Self {
-            directory: directory.canonicalize()?,
-            account_id: account_id.into(),
-            _lock: lock,
-        };
-        journal.load()?;
-        Ok(journal)
-    }
-
-    fn load(&self) -> Result<Option<Entry>> {
-        let file = match open_private(&self.directory.join(REPLY_FILE), false) {
-            Ok(file) => file,
-            Err(error)
-                if error
-                    .downcast_ref::<io::Error>()
-                    .is_some_and(|e| e.kind() == io::ErrorKind::NotFound) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(error).context("open Slack delivery journal"),
-        };
-        let mut bytes = Vec::new();
-        file.take(8193).read_to_end(&mut bytes)?;
-        ensure!(bytes.len() <= 8192, "Slack delivery journal is too large");
-        let record: Record = serde_json::from_slice(&bytes)
-            .map_err(|_| anyhow::anyhow!("invalid Slack delivery journal"))?;
-        ensure!(
-            record.account_id == self.account_id,
-            "Slack delivery journal belongs to another account"
-        );
-        Ok(Some(record.entry))
-    }
-
-    fn save(&self, entry: &Entry) -> Result<()> {
-        let mut staged = NamedTempFile::new_in(&self.directory)?;
-        serde_json::to_writer(
-            staged.as_file_mut(),
-            &Record {
-                account_id: self.account_id.clone(),
-                entry: entry.clone(),
-            },
-        )?;
-        staged.flush()?;
-        staged.as_file().sync_all()?;
-        staged.persist(self.directory.join(REPLY_FILE))?;
-        File::open(&self.directory)?.sync_all()?;
-        Ok(())
-    }
-
-    fn clear(&self) -> Result<()> {
-        fs::remove_file(self.directory.join(REPLY_FILE))?;
-        File::open(&self.directory)?.sync_all()?;
-        Ok(())
-    }
-}
-
-fn open_private(path: &Path, create: bool) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(create)
-        .create(create)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    ensure!(
-        metadata.is_file() && metadata.nlink() == 1 && private(&metadata),
-        "Slack state file must be private"
-    );
-    Ok(file)
-}
-
-fn private(metadata: &fs::Metadata) -> bool {
-    // SAFETY: geteuid reads the current process's effective user ID.
-    metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o077 == 0
-}
-
 impl Connector {
     pub(super) async fn deliver(&self, shutdown: &CancellationToken) -> Result<()> {
         while !shutdown.is_cancelled() {
@@ -302,25 +165,6 @@ impl Connector {
             }
         }
         provider_outcome(&bytes, &config.channel_id)
-    }
-}
-
-async fn private_call<T>(
-    call: impl Future<Output = Result<T, tonic::Status>>,
-    operation: &str,
-) -> Result<Option<T>> {
-    match time::timeout(DELIVERY_TIMEOUT, call).await {
-        Ok(Ok(value)) => Ok(Some(value)),
-        Ok(Err(error))
-            if matches!(
-                error.code(),
-                tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-            ) =>
-        {
-            Ok(None)
-        }
-        Ok(Err(error)) => anyhow::bail!("{operation} rejected by Control Plane ({})", error.code()),
-        Err(_) => Ok(None),
     }
 }
 

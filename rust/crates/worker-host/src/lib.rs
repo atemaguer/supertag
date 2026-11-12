@@ -6,7 +6,7 @@ mod journal;
 mod workspaces;
 
 pub use enrollment::enroll;
-pub use guardian::{CODEX_ATTEMPT_DIRECTORY, guard_adapter};
+pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
 
 use std::{ffi::OsString, path::PathBuf, time::Duration};
@@ -16,7 +16,7 @@ use journal::{Attempt, Entry, Journal};
 use supertag_protocol::{
     HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest,
+        Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest, HarnessKind,
         InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
         attempt_inputs_client::AttemptInputsClient, worker_host_client::WorkerHostClient,
     },
@@ -31,8 +31,21 @@ use tonic::{
 };
 use uuid::Uuid;
 
-/// Local sign-in and model provider settings accepted by the built-in Codex adapter.
-pub const CODEX_ENVIRONMENT: &[&str] = &["HOME", "CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"];
+/// Model provider environment accepted by each first-party adapter.
+pub fn provider_environment(harness: HarnessKind) -> &'static [&'static str] {
+    match harness {
+        HarnessKind::Codex => &["HOME", "CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"],
+        HarnessKind::ClaudeCode => &[
+            "HOME",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+        ],
+        HarnessKind::OpenaiAgents => &["OPENAI_API_KEY"],
+        HarnessKind::Unspecified => &[],
+    }
+}
 
 pub struct HostOptions {
     pub gateway: Endpoint,
@@ -41,7 +54,7 @@ pub struct HostOptions {
     pub adapter_guardian: PathBuf,
     pub adapter: PathBuf,
     pub adapter_args: Vec<OsString>,
-    pub forward_codex_credentials: bool,
+    pub harness: HarnessKind,
     pub attempt_timeout: Duration,
     pub wait_for_recovery: bool,
     pub once: bool,
@@ -172,6 +185,7 @@ pub async fn run(
                         ClaimTaskRequest {
                             operation_id,
                             workspace_ids: workspaces.ids(),
+                            harness_kind: options.harness as i32,
                         },
                         &token,
                     )?)

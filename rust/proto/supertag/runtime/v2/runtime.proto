@@ -68,6 +68,7 @@ service HostDirectory {
 service Connector {
   rpc AcceptEvent(AcceptEventRequest) returns (Task);
   rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
+  rpc AcceptGithubEvent(AcceptGithubEventRequest) returns (AcceptGithubEventResponse);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
@@ -238,11 +239,19 @@ enum TaskState {
   TASK_STATE_UNCERTAIN = 7;
 }
 
+enum HarnessKind {
+  HARNESS_KIND_UNSPECIFIED = 0;
+  HARNESS_KIND_CODEX = 1;
+  HARNESS_KIND_CLAUDE_CODE = 2;
+  HARNESS_KIND_OPENAI_AGENTS = 3;
+}
+
 message PutTagRequest {
   string tag_id = 1;
   string instructions = 2;
   repeated string allowed_actions = 3;
   WorkspaceSpec workspace = 4;
+  HarnessKind harness_kind = 5;
 }
 
 message Tag {
@@ -251,6 +260,7 @@ message Tag {
   repeated string allowed_actions = 3;
   uint64 revision = 4;
   WorkspaceSpec workspace = 5;
+  HarnessKind harness_kind = 6;
 }
 
 message SubmitTaskRequest {
@@ -273,6 +283,7 @@ message Task {
   optional string attempt_id = 10;
   WorkspaceSpec workspace = 11;
   WorkspaceDeliveryReference workspace_delivery = 12;
+  HarnessKind harness_kind = 13;
 }
 
 message GetTaskRequest {
@@ -296,6 +307,7 @@ message CancelTaskRequest {
 message ClaimTaskRequest {
   string operation_id = 1;
   repeated string workspace_ids = 2;
+  HarnessKind harness_kind = 3;
 }
 
 message ClaimTaskResponse {
@@ -639,6 +651,38 @@ message AcceptSlackEventRequest {
 }
 
 message AcceptSlackEventResponse {
+  Task task = 1;
+}
+
+enum GithubEventKind {
+  GITHUB_EVENT_KIND_UNSPECIFIED = 0;
+  GITHUB_EVENT_KIND_ISSUE_COMMENT = 1;
+  GITHUB_EVENT_KIND_ISSUE = 2;
+  GITHUB_EVENT_KIND_PULL_REQUEST = 3;
+}
+
+enum GithubEventAction {
+  GITHUB_EVENT_ACTION_UNSPECIFIED = 0;
+  GITHUB_EVENT_ACTION_CREATED = 1;
+  GITHUB_EVENT_ACTION_EDITED = 2;
+  GITHUB_EVENT_ACTION_OPENED = 3;
+}
+
+message AcceptGithubEventRequest {
+  string account_id = 1;
+  string delivery_id = 2;
+  uint64 repository_id = 3;
+  string repository = 4;
+  uint64 number = 5;
+  uint64 source_id = 6;
+  GithubEventKind kind = 7;
+  GithubEventAction action = 8;
+  string prompt = 9;
+  string tag_id = 10;
+  bool is_pull_request = 11;
+}
+
+message AcceptGithubEventResponse {
   Task task = 1;
 }
 

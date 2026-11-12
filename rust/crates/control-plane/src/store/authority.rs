@@ -253,12 +253,13 @@ pub(super) async fn claim_candidate(
     host_id: &str,
     all_tags: i64,
     workspace_ids: &[String],
+    harness: supertag_protocol::v2::HarnessKind,
 ) -> Result<Option<String>> {
     let mut after = 0_i64;
     loop {
-        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
+        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
             .bind(TaskState::Queued as i64).bind(after).bind(TaskState::Claimed as i64)
-            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(all_tags).bind(host_id)
+            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(all_tags).bind(host_id).bind(harness as i64)
             .fetch_all(&mut **transaction).await?;
         let last_page = candidates.len() < 32;
         for candidate in candidates {

@@ -406,6 +406,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
 
     let edited = client
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "New responsibility".into(),
@@ -755,6 +756,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
     let mut client = services.client().await?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Require explicit recovery".into(),
@@ -935,6 +937,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "after-supervisor-death".into(),
             instructions: "Local startup is live".into(),
@@ -965,6 +968,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Resume safely".into(),
@@ -1447,6 +1451,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     let mut operator = services.client().await?;
     operator
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "slack-engineer".into(),
             instructions: "Respond carefully".into(),
@@ -1647,7 +1652,7 @@ test "$1" = exec
 case " $* " in *" --model fixture-model "*) ;; *) exit 10 ;; esac
 case " $* " in *" --sandbox read-only "*) ;; *) exit 10 ;; esac
 test -z "${SUPERTAG_HOST_TOKEN:-}${SUPERTAG_OPERATOR_TOKEN:-}${SUPERTAG_GATEWAY_TOKEN:-}"
-test -z "${SUPERTAG_CODEX_ATTEMPT_DIRECTORY:-}${SUPERTAG_CODEX_SCRATCH_PARENT:-}"
+test -z "${SUPERTAG_ADAPTER_STATE_DIRECTORY:-}${SUPERTAG_ADAPTER_SCRATCH_PARENT:-}"
 test -f "$CODEX_HOME/auth.json"
 grep -q fixture-native-sign-in "$CODEX_HOME/auth.json"
 prompt=$(cat)
@@ -1838,7 +1843,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_
             .all(|entry| !entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with("codex-attempt-")),
+                .starts_with("adapter-attempt-")),
         "guardian retained the disposable Codex state after completion",
     );
     supervisor.terminate()?;
@@ -1875,6 +1880,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let mut operator = services.client().await?;
     operator
         .put_tag(credentials.request(PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Retry only with evidence".into(),

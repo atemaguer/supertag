@@ -38,6 +38,7 @@
       "**",
       "!packages/runtime/environments/shared-execution/src/gen",
       "!packages/runtime/transport/src/gen",
+      "!packages/runtime/harnesses/claude-code/src/rust-adapter/gen",
       "!packages/operator-api/src/gen",
       "!rust/bindings/typescript/supertag/runtime/v2",
       "!spec/manifests"

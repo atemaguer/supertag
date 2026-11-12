@@ -421,6 +421,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
                 instructions: instructions.into(),
                 allowed_actions: vec!["files:read".into()],
                 workspace: None,
+                harness_kind: 0,
             })?)
             .await?;
     }

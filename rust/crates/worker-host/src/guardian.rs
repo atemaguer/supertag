@@ -4,7 +4,10 @@ use std::{
     mem::MaybeUninit,
     os::{
         fd::{AsFd, AsRawFd, RawFd},
-        unix::{fs::PermissionsExt, process::CommandExt},
+        unix::{
+            fs::{DirBuilderExt, PermissionsExt},
+            process::CommandExt,
+        },
     },
     path::Path,
     process::{Child, Command, Stdio},
@@ -15,8 +18,8 @@ use std::{
 use anyhow::{Context, Result, ensure};
 
 pub(crate) const MAX_BOOTSTRAP_BYTES: usize = 4096;
-pub(crate) const CODEX_SCRATCH_PARENT: &str = "SUPERTAG_CODEX_SCRATCH_PARENT";
-pub const CODEX_ATTEMPT_DIRECTORY: &str = "SUPERTAG_CODEX_ATTEMPT_DIRECTORY";
+pub(crate) const ADAPTER_SCRATCH_PARENT: &str = "SUPERTAG_ADAPTER_SCRATCH_PARENT";
+pub const ADAPTER_STATE_DIRECTORY: &str = "SUPERTAG_ADAPTER_STATE_DIRECTORY";
 
 pub(crate) fn monotonic_now_ns() -> io::Result<u64> {
     let mut time = MaybeUninit::<libc::timespec>::uninit();
@@ -98,10 +101,10 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
         })
         .context("start Worker Host lifeline watcher")?;
 
-    let mut scratch = std::env::var_os(CODEX_SCRATCH_PARENT)
+    let mut scratch = std::env::var_os(ADAPTER_SCRATCH_PARENT)
         .map(|parent| {
             tempfile::Builder::new()
-                .prefix("codex-attempt-")
+                .prefix("adapter-attempt-")
                 .permissions(std::fs::Permissions::from_mode(0o700))
                 .tempdir_in(parent)
         })
@@ -110,10 +113,27 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
     command
         .args(args)
         .stdin(Stdio::piped())
-        .env_remove(CODEX_SCRATCH_PARENT)
-        .env_remove(CODEX_ATTEMPT_DIRECTORY);
+        .env_remove(ADAPTER_SCRATCH_PARENT)
+        .env_remove(ADAPTER_STATE_DIRECTORY);
     if let Some(directory) = &scratch {
-        command.env(CODEX_ATTEMPT_DIRECTORY, directory.path());
+        let temporary = directory.path().join("tmp");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&temporary)
+            .context("create adapter temporary directory")?;
+        command
+            .env(ADAPTER_STATE_DIRECTORY, directory.path())
+            .env("TMPDIR", temporary);
+        if std::env::var_os(crate::WORKSPACE_DIRECTORY).is_none() {
+            let workspace = directory.path().join("workspace");
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&workspace)
+                .context("create disposable adapter workspace")?;
+            command
+                .current_dir(&workspace)
+                .env(crate::WORKSPACE_DIRECTORY, workspace);
+        }
     }
     check_launch_authority(libc::STDIN_FILENO, launch_deadline)
         .context("adapter launch authority ended before spawn")?;
@@ -152,7 +172,7 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
     if let Some(directory) = scratch {
         directory
             .close()
-            .context("remove disposable Codex Attempt state")?;
+            .context("remove disposable adapter Attempt state")?;
     }
     ensure!(status.success(), "harness adapter exited unsuccessfully");
     Ok(())

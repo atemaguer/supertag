@@ -108,13 +108,16 @@ impl operator_server::Operator for ControlPlane {
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
         self.principal(&request, "operator:")?;
         let input = request.into_inner();
+        let harness = HarnessKind::try_from(input.harness_kind)
+            .map_err(|_| Status::invalid_argument("unknown harness kind"))?;
         Ok(Response::new(
             self.store
-                .put_tag_with_workspace(
+                .put_tag_configured(
                     &input.tag_id,
                     &input.instructions,
                     input.allowed_actions,
                     input.workspace,
+                    harness,
                 )
                 .await?,
         ))
@@ -212,10 +215,17 @@ impl worker_host_server::WorkerHost for ControlPlane {
     ) -> Result<Response<ClaimTaskResponse>, Status> {
         let principal = self.host_authority(&request)?;
         let input = request.into_inner();
+        let harness = HarnessKind::try_from(input.harness_kind)
+            .map_err(|_| Status::invalid_argument("unknown harness kind"))?;
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
-                .claim_task_with_workspaces(&principal, &input.operation_id, &input.workspace_ids)
+                .claim_task_for_host(
+                    &principal,
+                    &input.operation_id,
+                    &input.workspace_ids,
+                    harness,
+                )
                 .await?,
         }))
     }
@@ -368,6 +378,18 @@ impl connector_server::Connector for ControlPlane {
         ))
     }
 
+    async fn accept_github_event(
+        &self,
+        request: Request<AcceptGithubEventRequest>,
+    ) -> Result<Response<AcceptGithubEventResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_github_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn claim_reply(
         &self,
         request: Request<ClaimReplyRequest>,
@@ -471,6 +493,7 @@ mod tests {
             .await
             .unwrap();
         let tag = PutTagRequest {
+            harness_kind: 0,
             workspace: None,
             tag_id: "tag".into(),
             instructions: String::new(),
@@ -516,6 +539,7 @@ mod tests {
                 .is_ok()
         );
         let claim = ClaimTaskRequest {
+            harness_kind: 0,
             workspace_ids: vec![],
             operation_id: "claim".into(),
         };

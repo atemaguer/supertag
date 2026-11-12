@@ -151,6 +151,7 @@ impl HarnessProcess {
         let observed = Arc::new(Mutex::new(Observed::default()));
         let fixture = HarnessFixture {
             task: Task {
+                harness_kind: 0,
                 workspace: None,
                 workspace_delivery: None,
                 task_id: "native-task".into(),

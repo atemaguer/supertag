@@ -158,13 +158,11 @@ impl Children {
             .arg("--wait-for-recovery")
             .args(options.adapter.worker_args())
             .env("SUPERTAG_HOST_TOKEN", &credentials.host);
-        if options.adapter.uses_codex() {
-            host.envs(
-                supertag_worker_host::CODEX_ENVIRONMENT
-                    .iter()
-                    .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
-            );
-        }
+        host.envs(
+            supertag_worker_host::provider_environment(options.adapter.harness_kind())
+                .iter()
+                .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
+        );
         let ready = start_child(&mut self.worker_host, &mut host, "Worker Host").await?;
         ensure!(ready == "ready", "invalid Worker Host readiness signal");
         Ok(endpoint)

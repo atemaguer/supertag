@@ -59,6 +59,11 @@ path = "tests/slack_threads.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "github_runtime"
+path = "tests/github_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "workspace_runtime"
 path = "tests/workspace_runtime.rs"
 required-features = ["test-fixtures"]
@@ -66,4 +71,9 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "live_input_runtime"
 path = "tests/live_input_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "language_runtime"
+path = "tests/language_runtime.rs"
 required-features = ["test-fixtures"]

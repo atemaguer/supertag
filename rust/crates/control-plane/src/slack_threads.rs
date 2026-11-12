@@ -10,7 +10,7 @@ impl Store {
         input: &AcceptSlackEventRequest,
     ) -> Result<AcceptSlackEventResponse> {
         let account = connector_account(principal)?;
-        if account != input.account_id {
+        if account.contains('/') || account != input.account_id {
             return Err(StoreError::PermissionDenied);
         }
         name("event ID", &input.event_id)?;

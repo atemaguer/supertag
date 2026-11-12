@@ -4,14 +4,35 @@ use anyhow::{Context, Result, ensure};
 use clap::{Args, ValueEnum};
 use prost::Message;
 use supertag_codex_adapter::CodexOptions;
-use supertag_protocol::v2::AdapterBootstrap;
+use supertag_protocol::v2::{AdapterBootstrap, HarnessKind};
 use supertag_worker_host::{
-    CODEX_ATTEMPT_DIRECTORY, CODEX_ENVIRONMENT, WORKSPACE_DIRECTORY, WorkspaceMapping,
+    ADAPTER_STATE_DIRECTORY, WORKSPACE_DIRECTORY, WorkspaceMapping, provider_environment,
 };
 
 #[derive(Clone, Copy, ValueEnum)]
-enum Harness {
+pub enum Harness {
     Codex,
+    ClaudeCode,
+    #[value(name = "openai-agents")]
+    OpenaiAgents,
+}
+
+impl Harness {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::ClaudeCode => "claude-code",
+            Self::OpenaiAgents => "openai-agents",
+        }
+    }
+
+    pub fn kind(self) -> HarnessKind {
+        match self {
+            Self::Codex => HarnessKind::Codex,
+            Self::ClaudeCode => HarnessKind::ClaudeCode,
+            Self::OpenaiAgents => HarnessKind::OpenaiAgents,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -24,6 +45,17 @@ pub struct AdapterOptions {
     /// Built-in harness to use for Tasks on this host.
     #[arg(long)]
     harness: Option<Harness>,
+    /// Node or Python interpreter used by a language adapter.
+    #[arg(long, requires = "harness")]
+    harness_runtime: Option<PathBuf>,
+    /// JavaScript or Python application entrypoint.
+    #[arg(long, requires = "harness")]
+    harness_entrypoint: Option<PathBuf>,
+    #[arg(long, requires = "harness")]
+    harness_model: Option<String>,
+    /// Claude executable used by the Agent SDK.
+    #[arg(long, requires = "harness")]
+    claude_path: Option<PathBuf>,
     #[arg(long, requires = "harness")]
     codex_path: Option<PathBuf>,
     #[arg(long, requires = "harness")]
@@ -50,8 +82,8 @@ impl AdapterOptions {
             })
     }
 
-    pub fn uses_codex(&self) -> bool {
-        matches!(self.harness, Some(Harness::Codex))
+    pub fn harness_kind(&self) -> HarnessKind {
+        self.harness.map_or(HarnessKind::Unspecified, Harness::kind)
     }
 
     pub fn worker_args(&self) -> Vec<OsString> {
@@ -65,7 +97,40 @@ impl AdapterOptions {
             self.mapping_args(&mut args);
             return args;
         }
-        let mut args = vec![OsString::from("--harness"), OsString::from("codex")];
+        let mut args = vec![
+            OsString::from("--harness"),
+            OsString::from(
+                self.harness
+                    .expect("Clap requires a harness or adapter")
+                    .name(),
+            ),
+        ];
+        for (flag, value) in [
+            (
+                "--harness-runtime",
+                self.harness_runtime
+                    .as_deref()
+                    .map(std::path::Path::as_os_str),
+            ),
+            (
+                "--harness-entrypoint",
+                self.harness_entrypoint
+                    .as_deref()
+                    .map(std::path::Path::as_os_str),
+            ),
+            (
+                "--harness-model",
+                self.harness_model.as_deref().map(std::ffi::OsStr::new),
+            ),
+            (
+                "--claude-path",
+                self.claude_path.as_deref().map(std::path::Path::as_os_str),
+            ),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.to_owned()]);
+            }
+        }
         if let Some(path) = &self.codex_path {
             args.extend([OsString::from("--codex-path"), path.as_os_str().to_owned()]);
         }
@@ -97,21 +162,97 @@ impl AdapterOptions {
         if let Some(path) = self.adapter {
             return Ok((executable_path(path)?, self.adapter_arg));
         }
-        let mut args = vec![
-            OsString::from("__codex-adapter"),
-            OsString::from("--executable"),
-            executable_path(self.codex_path.unwrap_or_else(|| PathBuf::from("codex")))?
-                .into_os_string(),
-            OsString::from("--timeout-seconds"),
-            OsString::from(timeout_seconds.to_string()),
-        ];
-        if let Some(model) = self.codex_model {
-            args.extend([OsString::from("--model"), OsString::from(model)]);
+        match self.harness.context("select a harness or an adapter")? {
+            Harness::Codex => {
+                ensure!(
+                    self.harness_runtime.is_none()
+                        && self.harness_entrypoint.is_none()
+                        && self.claude_path.is_none(),
+                    "use --codex-path to configure the Codex executable"
+                );
+                ensure!(
+                    self.codex_model.is_none() || self.harness_model.is_none(),
+                    "select one Codex model"
+                );
+                let mut args = vec![
+                    "__codex-adapter".into(),
+                    "--executable".into(),
+                    executable_path(self.codex_path.unwrap_or_else(|| "codex".into()))?
+                        .into_os_string(),
+                    "--timeout-seconds".into(),
+                    timeout_seconds.to_string().into(),
+                ];
+                if let Some(model) = self.codex_model.or(self.harness_model) {
+                    args.extend(["--model".into(), model.into()]);
+                }
+                if let Some(workspace) = self.codex_workspace {
+                    args.extend([
+                        "--workspace".into(),
+                        workspace.canonicalize()?.into_os_string(),
+                    ]);
+                }
+                Ok((std::env::current_exe()?, args))
+            }
+            harness => {
+                ensure!(
+                    self.codex_path.is_none()
+                        && self.codex_model.is_none()
+                        && self.codex_workspace.is_none(),
+                    "Codex-specific options require --harness codex"
+                );
+                let mut args = Vec::new();
+                let runtime = match harness {
+                    Harness::ClaudeCode => {
+                        let entrypoint = self
+                            .harness_entrypoint
+                            .context("--harness-entrypoint is required for Claude Code")?;
+                        args.push(
+                            entrypoint
+                                .canonicalize()
+                                .context("resolve Claude Code adapter entrypoint")?
+                                .into_os_string(),
+                        );
+                        if let Some(path) = self.claude_path {
+                            args.extend([
+                                "--executable".into(),
+                                executable_path(path)?.into_os_string(),
+                            ]);
+                        }
+                        "node"
+                    }
+                    Harness::OpenaiAgents => {
+                        ensure!(
+                            self.claude_path.is_none(),
+                            "--claude-path requires --harness claude-code"
+                        );
+                        args.push("-I".into());
+                        if let Some(entrypoint) = self.harness_entrypoint {
+                            args.push(
+                                entrypoint
+                                    .canonicalize()
+                                    .context("resolve OpenAI Agents adapter entrypoint")?
+                                    .into_os_string(),
+                            );
+                        } else {
+                            args.extend(["-m".into(), "supertag.openai_agents_adapter".into()]);
+                        }
+                        "python3"
+                    }
+                    Harness::Codex => unreachable!(),
+                };
+                if let Some(model) = self.harness_model {
+                    args.extend(["--model".into(), model.into()]);
+                }
+                args.extend([
+                    "--timeout-seconds".into(),
+                    timeout_seconds.to_string().into(),
+                ]);
+                Ok((
+                    interpreter_path(self.harness_runtime.unwrap_or_else(|| runtime.into()))?,
+                    args,
+                ))
+            }
         }
-        if let Some(workspace) = self.codex_workspace {
-            args.extend([OsString::from("--workspace"), workspace.into_os_string()]);
-        }
-        Ok((std::env::current_exe()?, args))
     }
 }
 
@@ -121,6 +262,17 @@ fn executable_path(path: PathBuf) -> Result<PathBuf> {
     if path.components().count() > 1 || path.is_absolute() || path.exists() {
         path.canonicalize()
             .context("adapter executable is unavailable")
+    } else {
+        Ok(path)
+    }
+}
+
+// Retain the executable leaf for Python virtual environments. Resolving the
+// symlink would select the system interpreter and bypass the venv packages.
+fn interpreter_path(path: PathBuf) -> Result<PathBuf> {
+    if path.components().count() > 1 || path.is_absolute() || path.exists() {
+        ensure!(path.is_file(), "adapter interpreter is unavailable");
+        Ok(std::path::absolute(path)?)
     } else {
         Ok(path)
     }
@@ -150,24 +302,19 @@ pub async fn run_codex(args: CodexAdapterArgs) -> Result<()> {
     );
     let bootstrap =
         AdapterBootstrap::decode(bytes.as_slice()).context("decode adapter bootstrap")?;
-    let state_directory = std::env::var_os(CODEX_ATTEMPT_DIRECTORY)
+    let state_directory = std::env::var_os(ADAPTER_STATE_DIRECTORY)
         .map(PathBuf::from)
         .context("guarded Codex Attempt state is required")?;
-    let isolated = std::env::var_os(WORKSPACE_DIRECTORY).map(PathBuf::from);
+    let isolated = std::env::var_os(WORKSPACE_DIRECTORY)
+        .map(PathBuf::from)
+        .context("guarded Codex workspace is required")?;
     ensure!(
-        isolated.is_none() || args.workspace.is_none(),
+        args.workspace.is_none() || isolated == state_directory.join("workspace"),
         "a prepared Task workspace cannot be overridden"
     );
-    let allow_workspace_write = isolated.is_some() || args.workspace.is_none();
-    let workspace = match isolated.or(args.workspace) {
-        Some(path) => path,
-        None => {
-            let path = state_directory.join("workspace");
-            std::fs::create_dir(&path)?;
-            path
-        }
-    };
-    let environment = CODEX_ENVIRONMENT
+    let allow_workspace_write = args.workspace.is_none();
+    let workspace = args.workspace.unwrap_or(isolated);
+    let environment = provider_environment(HarnessKind::Codex)
         .iter()
         .copied()
         .chain(["PATH", "TMPDIR", "LANG"])
