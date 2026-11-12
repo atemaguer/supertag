@@ -118,7 +118,11 @@ async function runFixture() {
     assert.equal(toolNames.includes("write"), writes || shared);
     assert.equal(toolNames.includes("edit"), writes && !shared);
     assert.equal(toolNames.includes("command"), mode === "first" || sharedCommand);
-    if (shared) assert.deepEqual(toolNames.sort(), sharedCommand ? ["command", "read", "write"] : ["read", "write"]);
+    if (shared)
+      assert.deepEqual(
+        toolNames.sort(),
+        sharedCommand ? ["command", "read", "write"] : ["read", "write"],
+      );
 
     const cwd = await realpath(request.workspace);
     assert.notEqual(cwd, await realpath(process.cwd()));
@@ -137,10 +141,7 @@ async function runFixture() {
       const agent = agents.find((entry) => entry.agentId === agentId);
       assert.equal(agent?.cwd, cwd, "restored agent was not retargeted to this native cwd");
       restoredFrom = agent?.fixtureTurn;
-      assert.equal(
-        restoredFrom,
-        resumes ? mode.replace("resume", "first") : "baseline",
-      );
+      assert.equal(restoredFrom, resumes ? mode.replace("resume", "first") : "baseline");
     } else {
       assert.equal(request.resumeAgentId, undefined);
     }
