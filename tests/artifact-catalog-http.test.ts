@@ -155,10 +155,16 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const address = server.address();
         if (!address || typeof address === "string") throw new Error("No server address");
         const controlPlaneUrl = `http://127.0.0.1:${address.port}`;
+        // One socket per request keeps this fixture independent of pooled socket expiry.
+        const headers = (token: string) => ({
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          connection: "close",
+        });
         const command = async (name: string, input: unknown, token = "reader") => {
           const response = await fetch(`${controlPlaneUrl}/internal/v1/artifacts/catalog/${name}`, {
             method: "POST",
-            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            headers: headers(token),
             body: JSON.stringify(input),
           });
           return { status: response.status, body: await response.json() };
@@ -176,7 +182,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
               `${controlPlaneUrl}/internal/v1/artifacts/catalog/upload`,
               {
                 method: "POST",
-                headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+                headers: headers(token),
                 body: JSON.stringify({ digest, sizeBytes: bytes.byteLength }),
               },
             );
