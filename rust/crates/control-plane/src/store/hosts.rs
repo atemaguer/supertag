@@ -91,14 +91,7 @@ impl Store {
                 return Err(StoreError::Conflict("credential is already in use".into()));
             }
             for tag in &tags {
-                let existing: Option<String> =
-                    sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-                        .bind(tag)
-                        .fetch_optional(&mut *transaction)
-                        .await?;
-                if existing.is_none() {
-                    return Err(StoreError::NotFound("allowed Tag was not found".into()));
-                }
+                crate::tags::require_active(&mut transaction, tag).await?;
             }
             let expires_at_ms = self
                 .execution_now_ms()
@@ -165,6 +158,15 @@ impl Store {
         let all_tags = row.try_get::<i64, _>("all_tags")? == 1;
         let tags: Vec<String> =
             serde_json::from_str(&row.try_get::<String, _>("allowed_tag_ids")?)?;
+        for tag in &tags {
+            match crate::tags::require_active(&mut transaction, tag).await {
+                Ok(()) => {}
+                Err(StoreError::NotFound(_) | StoreError::FailedPrecondition(_)) => {
+                    return Err(StoreError::PermissionDenied);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let host = insert_host_in(&mut transaction, &input.host_id, &token, all_tags, now).await?;
         for tag in tags {
             sqlx::query("INSERT INTO supertag_v2_host_tags (host_id,tag_id) VALUES ($1,$2)")

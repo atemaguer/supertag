@@ -733,6 +733,17 @@ impl Store {
             input.expected_revision,
         )
         .await?;
+        for tag_id in value
+            .approvers
+            .iter()
+            .filter_map(|value| value.strip_prefix("tag:"))
+        {
+            match crate::tags::require_active(&mut tx, tag_id).await {
+                // Declarations may name an identity before it has been created.
+                Ok(()) | Err(StoreError::NotFound(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
         save_resource(&mut tx, &value).await?;
         receipt(&mut tx, principal, &input.operation_id, &hash, &value).await?;
         tx.commit().await?;
@@ -970,14 +981,7 @@ impl Store {
                 "only active Roles can be assigned".into(),
             ));
         }
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-                .bind(&input.tag_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if tag.is_none() {
-            return Err(StoreError::NotFound("Tag was not found".into()));
-        }
+        crate::tags::require_active(&mut tx, &input.tag_id).await?;
         let prior = sqlx::query(
             "SELECT * FROM supertag_v2_role_assignments WHERE role_id=$1 AND tag_id=$2",
         )

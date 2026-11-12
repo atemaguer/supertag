@@ -363,14 +363,7 @@ async fn replace_members(
 
 async fn validate_members(tx: &mut Transaction<'_, Any>, members: &[String]) -> Result<()> {
     for member in members {
-        let known: Option<String> =
-            sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-                .bind(member)
-                .fetch_optional(&mut **tx)
-                .await?;
-        if known.is_none() {
-            return Err(StoreError::NotFound(format!("Tag {member} was not found")));
-        }
+        crate::tags::require_active(tx, member).await?;
     }
     Ok(())
 }

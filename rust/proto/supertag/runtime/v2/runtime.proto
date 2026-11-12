@@ -20,6 +20,8 @@ service Operator {
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
+  rpc GetTag(GetTagRequest) returns (Tag);
+  rpc RetireTag(RetireTagRequest) returns (RetireTagResponse);
   rpc GetReplyDelivery(GetReplyDeliveryRequest) returns (ReplyDelivery);
   rpc ListReplyDeliveries(ListReplyDeliveriesRequest) returns (ListReplyDeliveriesResponse);
   rpc ResolveReply(ResolveReplyRequest) returns (ReplyDelivery);
@@ -1042,6 +1044,8 @@ message PutTagRequest {
   HarnessKind harness_kind = 5;
   repeated ApprovalRule approval_rules = 6;
   PolicyExecutionSettings execution = 7;
+  // A display name can be reused after retirement. The Tag ID is permanent.
+  optional string name = 8;
 }
 
 message Tag {
@@ -1053,16 +1057,37 @@ message Tag {
   HarnessKind harness_kind = 6;
   repeated ApprovalRule approval_rules = 7;
   PolicyExecutionSettings execution = 8;
+  string name = 9;
+  optional int64 retired_at_ms = 10;
 }
 
 message ListTagsRequest {
   uint32 limit = 1;
   string cursor = 2;
+  bool include_retired = 3;
 }
 
 message ListTagsResponse {
   repeated Tag tags = 1;
   string next_cursor = 2;
+}
+
+message GetTagRequest {
+  string tag_id = 1;
+}
+
+message RetireTagRequest {
+  string tag_id = 1;
+  bool dry_run = 2;
+}
+
+message RetireTagResponse {
+  Tag tag = 1;
+  repeated string blockers = 2;
+  uint64 surface_locations = 3;
+  uint64 host_bindings = 4;
+  uint64 mailbox_grants = 5;
+  uint64 role_assignments = 6;
 }
 
 message Conversation {

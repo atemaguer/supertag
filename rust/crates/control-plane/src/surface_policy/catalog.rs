@@ -232,16 +232,7 @@ impl Store {
             return Err(invalid("Surface location and account providers differ"));
         }
         verify_alias(provider, &value.connector_account_id)?;
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-                .bind(&value.tag_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if tag.is_none() {
-            return Err(StoreError::NotFound(
-                "Surface location Tag was not found".into(),
-            ));
-        }
+        crate::tags::require_active(&mut tx, &value.tag_id).await?;
         let prior = location_in(&mut tx, &value.location_id).await?;
         revision(input.expected_revision, prior.as_ref().map(|l| l.revision))?;
         if prior.as_ref().is_some_and(|l| {

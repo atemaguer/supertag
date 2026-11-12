@@ -417,6 +417,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     for (tag, instructions) in [("builder", "Original Tag"), ("another", "Wrong Tag")] {
         operator
             .put_tag(credentials.operator(PutTagRequest {
+                name: None,
                 execution: None,
                 approval_rules: vec![],
                 tag_id: tag.into(),

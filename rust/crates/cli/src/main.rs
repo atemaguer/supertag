@@ -36,10 +36,11 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
-        GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest,
-        PolicyExecutionSettings, PutTagRequest, ReportedCostLimit, ResolveAttemptRequest,
-        RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
-        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
+        GetTagRequest, GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest,
+        ListNativeUsageRequest, ListTagsRequest, PolicyExecutionSettings, PutTagRequest,
+        ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest,
+        SubmitTaskRequest, Tag, Task, WorkspaceSpec, attempt_inputs_server::AttemptInputsServer,
+        attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
@@ -289,6 +290,9 @@ enum Command {
         #[command(flatten)]
         connection: Connection,
         tag_id: String,
+        /// Display name. Defaults to the Tag ID for a new Tag.
+        #[arg(long = "name")]
+        display_name: Option<String>,
         #[arg(long)]
         instructions: String,
         #[arg(long)]
@@ -320,6 +324,32 @@ enum Command {
         /// Allowed reasoning efforts, with the default first. May be repeated.
         #[arg(long = "effort", value_delimiter = ',')]
         efforts: Vec<String>,
+    },
+    /// Inspect a Tag by its permanent ID, including after retirement.
+    GetTag {
+        #[command(flatten)]
+        connection: Connection,
+        tag_id: String,
+    },
+    /// List active Tags and optionally include retired identities.
+    ListTags {
+        #[command(flatten)]
+        connection: Connection,
+        #[arg(long)]
+        include_retired: bool,
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value = "")]
+        cursor: String,
+    },
+    /// Retire a Tag by ID while preserving its work history.
+    RetireTag {
+        #[command(flatten)]
+        connection: Connection,
+        tag_id: String,
+        /// Show blockers and what retirement would detach.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Accept one turn of work in a Tag's Session.
     Submit {
@@ -766,6 +796,7 @@ async fn run(command: Command) -> Result<()> {
         Command::PutTag {
             connection,
             tag_id,
+            display_name,
             instructions,
             mut allow,
             require_workstream_approval,
@@ -808,6 +839,7 @@ async fn run(command: Command) -> Result<()> {
                 .put_tag(request(
                     PutTagRequest {
                         tag_id,
+                        name: display_name,
                         instructions,
                         allowed_actions: allow,
                         workspace,
@@ -828,7 +860,64 @@ async fn run(command: Command) -> Result<()> {
                 .into_inner();
             println!(
                 "{}",
-                json!({ "tag_id": tag.tag_id, "revision": tag.revision })
+                json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision })
+            );
+        }
+        Command::GetTag { connection, tag_id } => {
+            let (mut operator, token) = operator(connection).await?;
+            let tag = operator
+                .get_tag(request(GetTagRequest { tag_id }, &token)?)
+                .await?
+                .into_inner();
+            println!("{}", tag_json(&tag));
+        }
+        Command::ListTags {
+            connection,
+            include_retired,
+            limit,
+            cursor,
+        } => {
+            let (mut operator, token) = operator(connection).await?;
+            let page = operator
+                .list_tags(request(
+                    ListTagsRequest {
+                        limit,
+                        cursor,
+                        include_retired,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({
+                    "tags": page.tags.iter().map(tag_json).collect::<Vec<_>>(),
+                    "next_cursor": page.next_cursor,
+                })
+            );
+        }
+        Command::RetireTag {
+            connection,
+            tag_id,
+            dry_run,
+        } => {
+            let (mut operator, token) = operator(connection).await?;
+            let response = operator
+                .retire_tag(request(RetireTagRequest { tag_id, dry_run }, &token)?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({
+                    "tag": response.tag.as_ref().map(tag_json),
+                    "dry_run": dry_run,
+                    "blockers": response.blockers,
+                    "surface_locations": response.surface_locations,
+                    "host_bindings": response.host_bindings,
+                    "mailbox_grants": response.mailbox_grants,
+                    "role_assignments": response.role_assignments,
+                })
             );
         }
         Command::Submit {
@@ -1680,6 +1769,18 @@ fn request<T>(message: T, token: &str) -> Result<Request<T>> {
     let mut request = authenticated_request(message, token, None)?;
     request.set_timeout(Duration::from_secs(10));
     Ok(request)
+}
+
+fn tag_json(tag: &Tag) -> serde_json::Value {
+    json!({
+        "tag_id": tag.tag_id,
+        "name": tag.name,
+        "revision": tag.revision,
+        "instructions": tag.instructions,
+        "allowed_actions": tag.allowed_actions,
+        "harness": tag.harness_kind().as_str_name(),
+        "retired_at_ms": tag.retired_at_ms,
+    })
 }
 
 fn print_task(task: &Task) {

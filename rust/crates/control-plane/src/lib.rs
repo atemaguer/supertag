@@ -15,6 +15,7 @@ mod replies;
 mod review_artifacts;
 mod store;
 mod surface_policy;
+mod tags;
 mod teams;
 mod usage;
 mod watch;
@@ -200,6 +201,24 @@ impl operator_server::Operator for ControlPlane {
         self.principal(&request, "operator:")?;
         Ok(Response::new(
             self.store.put_tag_spec(request.into_inner()).await?,
+        ))
+    }
+
+    async fn get_tag(&self, request: Request<GetTagRequest>) -> Result<Response<Tag>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.get_tag(&request.into_inner().tag_id).await?,
+        ))
+    }
+
+    async fn retire_tag(
+        &self,
+        request: Request<RetireTagRequest>,
+    ) -> Result<Response<RetireTagResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        Ok(Response::new(
+            self.store.retire_tag(&input.tag_id, input.dry_run).await?,
         ))
     }
 
@@ -727,6 +746,7 @@ mod tests {
             .await
             .unwrap();
         let tag = PutTagRequest {
+            name: None,
             execution: None,
             approval_rules: vec![],
             harness_kind: 0,

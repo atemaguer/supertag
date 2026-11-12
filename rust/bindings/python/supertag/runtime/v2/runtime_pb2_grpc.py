@@ -101,6 +101,16 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
                 _registered_method=True)
+        self.GetTag = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/GetTag',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTagRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.FromString,
+                _registered_method=True)
+        self.RetireTag = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/RetireTag',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.FromString,
+                _registered_method=True)
         self.GetReplyDelivery = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/GetReplyDelivery',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReplyDeliveryRequest.SerializeToString,
@@ -201,6 +211,18 @@ class OperatorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetTag(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RetireTag(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetReplyDelivery(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -286,6 +308,16 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.ResolveAttempt,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.SerializeToString,
+            ),
+            'GetTag': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTag,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTagRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.SerializeToString,
+            ),
+            'RetireTag': grpc.unary_unary_rpc_method_handler(
+                    servicer.RetireTag,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.SerializeToString,
             ),
             'GetReplyDelivery': grpc.unary_unary_rpc_method_handler(
                     servicer.GetReplyDelivery,
@@ -656,6 +688,60 @@ class Operator:
             '/supertag.runtime.v2.Operator/ResolveAttempt',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetTag(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/GetTag',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTagRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Tag.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RetireTag(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/RetireTag',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RetireTagResponse.FromString,
             options,
             channel_credentials,
             insecure,

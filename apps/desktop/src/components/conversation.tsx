@@ -233,7 +233,7 @@ export function ConversationPane({
                 aria-label="Message"
                 value={draft.text}
                 readOnly={draft.sending}
-                placeholder={`Message ${tagId}…`}
+                placeholder={`Message ${tag.name ?? tagId}…`}
                 onChange={(event) => {
                   const text = event.target.value;
                   setDraft({

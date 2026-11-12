@@ -39,6 +39,7 @@ async fn exercise(database: &str) {
         .list_tags(&ListTagsRequest {
             limit: 1,
             cursor: String::new(),
+            include_retired: false,
         })
         .await
         .unwrap();
@@ -47,6 +48,7 @@ async fn exercise(database: &str) {
         .list_tags(&ListTagsRequest {
             limit: 1,
             cursor: page.next_cursor,
+            include_retired: false,
         })
         .await
         .unwrap();

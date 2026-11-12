@@ -75,7 +75,7 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 		case "":
 			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "build"}}, NextCursor: "tags-cursor"}, nil
 		case "tags-cursor":
-			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "lead"}}}, nil
+			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "lead", Name: "Engineering Lead"}}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected Tag cursor %q", req.GetCursor())
 		}
@@ -128,7 +128,8 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	tags, err := c.ListTags(ctx)
-	if err != nil || len(tags) != 2 || tags[0].GetMetadata().GetName() != "build" || tags[1].GetMetadata().GetName() != "lead" {
+	if err != nil || len(tags) != 2 || tags[0].GetMetadata().GetName() != "build" ||
+		tags[1].GetMetadata().GetId() != "lead" || tags[1].GetMetadata().GetName() != "Engineering Lead" {
 		t.Fatalf("ListTags = %v, %v", tags, err)
 	}
 	conversations, err := c.ListConversations(ctx, "lead")

@@ -69,7 +69,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 38;
+        const SCHEMA_VERSION: i64 = 39;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -158,6 +158,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0036_tag_execution.sql"),
                 include_str!("../migrations/sqlite/0037_accepted_execution.sql"),
                 include_str!("../migrations/sqlite/0038_reply_recovery.sql"),
+                include_str!("../migrations/sqlite/0039_tag_retirement.sql"),
             ]
         } else {
             [
@@ -199,6 +200,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0036_tag_execution.sql"),
                 include_str!("../migrations/postgresql/0037_accepted_execution.sql"),
                 include_str!("../migrations/postgresql/0038_reply_recovery.sql"),
+                include_str!("../migrations/postgresql/0039_tag_retirement.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -281,6 +283,7 @@ impl Store {
             harness_kind: harness as i32,
             approval_rules: vec![],
             execution: None,
+            name: None,
         })
         .await
     }
@@ -294,6 +297,7 @@ impl Store {
             harness_kind,
             approval_rules,
             execution,
+            name: display_name,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -301,6 +305,9 @@ impl Store {
             HarnessKind::try_from(harness_kind).map_err(|_| invalid("unknown harness kind"))?;
         let (harness, execution) = crate::policy::normalize_tag_execution(harness, execution)?;
         name("Tag ID", tag_id)?;
+        if let Some(display_name) = &display_name {
+            crate::tags::validate_display_name(display_name)?;
+        }
         if let Some(spec) = &workspace
             && (!valid_workspace_id(&spec.workspace_id) || !valid_git_commit(&spec.base_commit))
         {
@@ -319,13 +326,16 @@ impl Store {
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
         let stored_rules = stored_approval_rules(&approval_rules)?;
         let (mut transaction, _) = self.write().await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution RETURNING revision")
+        let display_name =
+            crate::tags::active_name_in(&mut transaction, tag_id, display_name.as_deref()).await?;
+        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
             .bind(harness as i64)
             .bind(stored_rules)
             .bind(execution.as_ref().map(Message::encode_to_vec))
+            .bind(&display_name)
             .fetch_one(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(Tag {
@@ -337,6 +347,8 @@ impl Store {
             harness_kind: harness as i32,
             approval_rules,
             execution,
+            name: display_name,
+            retired_at_ms: None,
         })
     }
 
@@ -1124,13 +1136,12 @@ async fn tag_policy_in(
     tag_id: &str,
     surface: Option<&crate::surface_policy::AdmissionSurface>,
 ) -> Result<AcceptedTag> {
-    let tag = sqlx::query(
-        "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution FROM supertag_v2_tags WHERE tag_id = $1",
-    )
-    .bind(tag_id)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .ok_or_else(|| StoreError::NotFound("Tag was not found".into()))?;
+    let tag = sqlx::query("SELECT * FROM supertag_v2_tags WHERE tag_id = $1")
+        .bind(tag_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Tag was not found".into()))?;
+    crate::tags::ensure_active(&tag, tag_id)?;
     let workspace = crate::workspaces::workspace_from_row(&tag)?;
     let instructions: String = tag.try_get("instructions")?;
     let allowed_actions: Vec<String> =
@@ -1351,6 +1362,7 @@ pub(crate) async fn insert_task_from_snapshot(
     session_id: &str,
     prompt: &str,
 ) -> Result<Task> {
+    crate::tags::require_active(transaction, &source.tag_id).await?;
     text("Task prompt", prompt, MAX_TASK_PROMPT_BYTES)?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(

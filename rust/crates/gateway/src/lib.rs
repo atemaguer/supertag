@@ -620,6 +620,27 @@ impl Operator for Gateway {
         .await
     }
 
+    async fn get_tag(&self, request: Request<GetTagRequest>) -> Result<Response<Tag>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).get_tag(request).await },
+        )
+        .await
+    }
+
+    async fn retire_tag(
+        &self,
+        request: Request<RetireTagRequest>,
+    ) -> Result<Response<RetireTagResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).retire_tag(request).await },
+        )
+        .await
+    }
+
     async fn list_tags(
         &self,
         request: Request<ListTagsRequest>,

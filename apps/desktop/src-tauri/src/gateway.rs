@@ -93,6 +93,7 @@ impl GatewayState {
             .list_tags(session.request(v2::ListTagsRequest {
                 limit: 1,
                 cursor: String::new(),
+                include_retired: false,
             }))
             .await
             .map_err(rpc_error)?;
@@ -142,6 +143,7 @@ impl GatewayState {
                 .list_tags(session.request(v2::ListTagsRequest {
                     limit: 100,
                     cursor: cursor.clone(),
+                    include_retired: false,
                 }))
                 .await
                 .map_err(rpc_error)?
@@ -366,6 +368,7 @@ fn rpc_error(status: Status) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub tag_id: String,
+    pub name: String,
     pub instructions: String,
     pub allowed_actions: Vec<String>,
     pub revision: u64,
@@ -380,6 +383,11 @@ impl From<v2::Tag> for Tag {
             .trim_start_matches("HARNESS_KIND_")
             .to_ascii_lowercase();
         Self {
+            name: if tag.name.is_empty() {
+                tag.tag_id.clone()
+            } else {
+                tag.name
+            },
             tag_id: tag.tag_id,
             instructions: tag.instructions,
             allowed_actions: tag.allowed_actions,

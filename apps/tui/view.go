@@ -117,7 +117,7 @@ func (m model) renderConversation() string {
 				"For a shared Control Plane, ask its operator to set up a Tag.")
 		}
 	}
-	name := terminalText(tag)
+	name := terminalText(m.tagLabel(tag))
 	width := m.paneWidth()
 	conversation := m.currentConversation(tag)
 	c := m.conversations[convKey(tag, conversation)]
@@ -235,7 +235,8 @@ func (m model) renderRail(height int) string {
 
 	section("Tags", "")
 	for i, tag := range m.tags {
-		open := m.open[convKey(tagName(tag), m.currentConversation(tagName(tag)))]
+		reference := m.tagReference(tag)
+		open := m.open[convKey(reference, m.currentConversation(reference))]
 		add(row{rowTag, i}, terminalText(tagName(tag)), terminalText(railState(tag, open)))
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
@@ -370,7 +371,7 @@ func (m model) paneTitle() string {
 		}
 		return "SuperTag"
 	}
-	return fmt.Sprintf("%s · %s", terminalText(tag), terminalText(m.currentConversation(tag)))
+	return fmt.Sprintf("%s · %s", terminalText(m.tagLabel(tag)), terminalText(m.currentConversation(tag)))
 }
 
 // paneHint ends a pane that has no input line: the keys that act on it.

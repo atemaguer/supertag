@@ -30,26 +30,17 @@ impl Store {
         }
         let limit = page_size(input.limit);
         let rows = sqlx::query(
-            "SELECT * FROM supertag_v2_tags WHERE tag_id > $1 ORDER BY tag_id LIMIT $2",
+            "SELECT * FROM supertag_v2_tags
+             WHERE tag_id > $1 AND ($2=1 OR retired_at_ms IS NULL) ORDER BY tag_id LIMIT $3",
         )
         .bind(&input.cursor)
+        .bind(i64::from(input.include_retired))
         .bind(limit + 1)
         .fetch_all(&self.pool)
         .await?;
         let mut page = Page::new(limit);
         for row in rows {
-            let tag = Tag {
-                tag_id: row.try_get("tag_id")?,
-                instructions: row.try_get("instructions")?,
-                allowed_actions: serde_json::from_str(
-                    &row.try_get::<String, _>("allowed_actions")?,
-                )?,
-                revision: row.try_get::<i64, _>("revision")? as u64,
-                workspace: crate::workspaces::workspace_from_row(&row)?,
-                harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
-                approval_rules: crate::store::approval_rules_from_row(&row)?,
-                execution: crate::store::tag_execution_from_row(&row)?,
-            };
+            let tag = crate::tags::tag_from_row(&row)?;
             let cursor = tag.tag_id.clone();
             if !page.push(tag, cursor)? {
                 break;

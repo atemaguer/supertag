@@ -467,7 +467,25 @@ func (m model) selectedTag() string {
 	if m.selected < 0 || m.selected >= len(m.tags) {
 		return ""
 	}
-	return tagName(m.tags[m.selected])
+	return m.tagReference(m.tags[m.selected])
+}
+
+func (m model) tagReference(tag *operatorv1.Tag) string {
+	if m.client.RuntimeV2() {
+		if id := tag.GetMetadata().GetId(); id != "" {
+			return id
+		}
+	}
+	return tagName(tag)
+}
+
+func (m model) tagLabel(reference string) string {
+	for _, tag := range m.tags {
+		if m.tagReference(tag) == reference {
+			return tagName(tag)
+		}
+	}
+	return reference
 }
 
 // currentConversation names the conversation tag shows.
@@ -545,7 +563,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tags = msg.tags
 		m.selected = 0
 		for i, tag := range m.tags {
-			if tagName(tag) == current {
+			if m.tagReference(tag) == current {
 				m.selected = i
 			}
 		}
@@ -1283,7 +1301,7 @@ func (m model) rowKey(r row) string {
 	case rowTeam:
 		return "team:" + m.teams[r.index].GetId()
 	}
-	return "tag:" + tagName(m.tags[r.index])
+	return "tag:" + m.tagReference(m.tags[r.index])
 }
 
 // paneKey names what the main pane shows, as rowKey names a row.

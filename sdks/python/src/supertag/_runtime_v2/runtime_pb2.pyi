@@ -1496,7 +1496,7 @@ class AuthenticateHostRequest(_message.Message):
     def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -1504,6 +1504,7 @@ class PutTagRequest(_message.Message):
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -1511,10 +1512,11 @@ class PutTagRequest(_message.Message):
     harness_kind: HarnessKind
     approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
     execution: _policy_pb2.PolicyExecutionSettings
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ...) -> None: ...
+    name: str
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -1523,6 +1525,8 @@ class Tag(_message.Message):
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    RETIRED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -1531,15 +1535,19 @@ class Tag(_message.Message):
     harness_kind: HarnessKind
     approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
     execution: _policy_pb2.PolicyExecutionSettings
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ...) -> None: ...
+    name: str
+    retired_at_ms: int
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
-    __slots__ = ("limit", "cursor")
+    __slots__ = ("limit", "cursor", "include_retired")
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     CURSOR_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_RETIRED_FIELD_NUMBER: _ClassVar[int]
     limit: int
     cursor: str
-    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+    include_retired: bool
+    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ..., include_retired: _Optional[bool] = ...) -> None: ...
 
 class ListTagsResponse(_message.Message):
     __slots__ = ("tags", "next_cursor")
@@ -1548,6 +1556,36 @@ class ListTagsResponse(_message.Message):
     tags: _containers.RepeatedCompositeFieldContainer[Tag]
     next_cursor: str
     def __init__(self, tags: _Optional[_Iterable[_Union[Tag, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class GetTagRequest(_message.Message):
+    __slots__ = ("tag_id",)
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    def __init__(self, tag_id: _Optional[str] = ...) -> None: ...
+
+class RetireTagRequest(_message.Message):
+    __slots__ = ("tag_id", "dry_run")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    dry_run: bool
+    def __init__(self, tag_id: _Optional[str] = ..., dry_run: _Optional[bool] = ...) -> None: ...
+
+class RetireTagResponse(_message.Message):
+    __slots__ = ("tag", "blockers", "surface_locations", "host_bindings", "mailbox_grants", "role_assignments")
+    TAG_FIELD_NUMBER: _ClassVar[int]
+    BLOCKERS_FIELD_NUMBER: _ClassVar[int]
+    SURFACE_LOCATIONS_FIELD_NUMBER: _ClassVar[int]
+    HOST_BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    MAILBOX_GRANTS_FIELD_NUMBER: _ClassVar[int]
+    ROLE_ASSIGNMENTS_FIELD_NUMBER: _ClassVar[int]
+    tag: Tag
+    blockers: _containers.RepeatedScalarFieldContainer[str]
+    surface_locations: int
+    host_bindings: int
+    mailbox_grants: int
+    role_assignments: int
+    def __init__(self, tag: _Optional[_Union[Tag, _Mapping]] = ..., blockers: _Optional[_Iterable[str]] = ..., surface_locations: _Optional[int] = ..., host_bindings: _Optional[int] = ..., mailbox_grants: _Optional[int] = ..., role_assignments: _Optional[int] = ...) -> None: ...
 
 class Conversation(_message.Message):
     __slots__ = ("tag_id", "name", "session_id", "latest_task")

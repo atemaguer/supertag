@@ -351,14 +351,6 @@ impl Store {
         if exists.is_some() {
             return Err(StoreError::Conflict("Objective ID already exists".into()));
         }
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-                .bind(&input.owner_tag_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if tag.is_none() {
-            return Err(StoreError::NotFound("owner Tag was not found".into()));
-        }
         let allowed = Box::pin(crate::store::owner_runtime_actions_in(
             &mut tx,
             &input.owner_tag_id,

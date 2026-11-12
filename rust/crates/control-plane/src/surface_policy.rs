@@ -170,6 +170,11 @@ pub(crate) async fn admit_connector_task_in(
     } else {
         None
     };
+    match crate::tags::require_active(tx, verified.tag_id).await {
+        Ok(()) => {}
+        Err(StoreError::FailedPrecondition(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    }
     objectives::objective_admission_in(tx, verified.tag_id, session_id, now_ms).await?;
     let task = insert_task_with_surface(
         tx,

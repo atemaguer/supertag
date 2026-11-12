@@ -576,7 +576,14 @@ pub(crate) async fn resume_wait_in(
 }
 
 pub(crate) async fn task_waits_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
-    let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id WHERE w.task_id=$1 AND w.continuation_task_id IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_continuation_stops stopped WHERE stopped.task_id=w.task_id) AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=t.task_id AND o.status IN (5,6))")
+    let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id WHERE w.task_id=$1 AND w.continuation_task_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM supertag_v2_tags tag
+            WHERE tag.tag_id=t.tag_id AND tag.retired_at_ms IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks child
+            JOIN supertag_v2_work_sessions session ON session.work_session_id=child.work_session_id
+            JOIN supertag_v2_tags parent ON parent.tag_id=session.parent_tag_id
+            WHERE child.task_id=t.task_id AND parent.retired_at_ms IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_continuation_stops stopped WHERE stopped.task_id=w.task_id) AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=t.task_id AND o.status IN (5,6))")
         .bind(task_id).fetch_one(&mut **tx).await?;
     Ok(count > 0)
 }

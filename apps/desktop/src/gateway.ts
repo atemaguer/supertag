@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface Tag {
   tagId: string;
+  name?: string;
   instructions: string;
   allowedActions: string[];
   revision: number;

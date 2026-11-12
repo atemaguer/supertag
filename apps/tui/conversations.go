@@ -197,7 +197,7 @@ func (m *model) startConversation(name string) tea.Cmd {
 func (m *model) switchConversation(name string) tea.Cmd {
 	tag := m.picker.tag
 	for i, t := range m.tags {
-		if tagName(t) == tag {
+		if m.tagReference(t) == tag {
 			m.selected = i
 		}
 	}
@@ -220,7 +220,7 @@ func (m model) renderPicker() string {
 		nameWidth = max(nameWidth, min(lipgloss.Width(terminalText(row.name)), 24))
 	}
 	shown := m.currentConversation(p.tag)
-	lines := []string{faint.Render(wrap.Render("Your conversations with " + terminalText(p.tag) + ", the most recent first.")), ""}
+	lines := []string{faint.Render(wrap.Render("Your conversations with " + terminalText(m.tagLabel(p.tag)) + ", the most recent first.")), ""}
 	if p.err != "" {
 		lines = append(lines, errorStyle.Render(wrap.Render("Could not list the conversations: "+p.err)), "")
 	} else if !p.loaded {
@@ -246,7 +246,7 @@ func (m model) renderPicker() string {
 			text += fmt.Sprintf("  %d open", open)
 		}
 		if last := firstLine(row.conv.GetLastMessageText()); last != "" {
-			author := terminalText(p.tag)
+			author := terminalText(m.tagLabel(p.tag))
 			if row.conv.GetLastMessageAuthor() == operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
 				author = "you"
 			}

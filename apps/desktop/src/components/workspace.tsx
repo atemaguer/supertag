@@ -107,7 +107,7 @@ export function WorkspaceShell({
                     }}
                   >
                     <TagAvatar tagId={entry.tagId} />
-                    <span className="row-title">{entry.tagId}</span>
+                    <span className="row-title">{entry.name ?? entry.tagId}</span>
                   </Button>
                 ))}
               </div>
@@ -166,7 +166,7 @@ export function WorkspaceShell({
                 <>
                   <TagAvatar tagId={tag.tagId} />
                   <div className="identity-heading">
-                    <strong className="tag-name">{tag.tagId}</strong>
+                    <strong className="tag-name">{tag.name ?? tag.tagId}</strong>
                     {conversation && (
                       <h1 className="thread-title" title={conversation}>
                         {label(conversation)}

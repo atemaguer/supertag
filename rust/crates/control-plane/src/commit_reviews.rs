@@ -105,14 +105,7 @@ pub(crate) async fn validate_request_in(
     let objective_id = owner_objective_in(tx, source)
         .await?
         .ok_or(StoreError::PermissionDenied)?;
-    let reviewer: Option<String> =
-        sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE tag_id=$1")
-            .bind(reviewer_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-    if reviewer.is_none() {
-        return Err(StoreError::NotFound("reviewer Tag was not found".into()));
-    }
+    crate::tags::require_active(tx, reviewer_id).await?;
     let commit = commit.to_ascii_lowercase();
     // Each Session contributes only its current successful child Task. A reserved
     // upload, obsolete turn, or late cancelled delivery is not published work.

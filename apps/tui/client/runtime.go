@@ -132,8 +132,12 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*operatorv1.Tag, error)
 			return nil, apiError(err)
 		}
 		for _, tag := range res.Msg.GetTags() {
+			name := tag.GetName()
+			if name == "" {
+				name = tag.GetTagId()
+			}
 			tags = append(tags, &operatorv1.Tag{
-				Metadata: &operatorv1.Metadata{Id: tag.GetTagId(), Name: tag.GetTagId()},
+				Metadata: &operatorv1.Metadata{Id: tag.GetTagId(), Name: name},
 				Status:   &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
 			})
 		}

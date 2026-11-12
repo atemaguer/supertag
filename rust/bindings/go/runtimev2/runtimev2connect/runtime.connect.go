@@ -113,6 +113,10 @@ const (
 	OperatorCancelTaskProcedure = "/supertag.runtime.v2.Operator/CancelTask"
 	// OperatorResolveAttemptProcedure is the fully-qualified name of the Operator's ResolveAttempt RPC.
 	OperatorResolveAttemptProcedure = "/supertag.runtime.v2.Operator/ResolveAttempt"
+	// OperatorGetTagProcedure is the fully-qualified name of the Operator's GetTag RPC.
+	OperatorGetTagProcedure = "/supertag.runtime.v2.Operator/GetTag"
+	// OperatorRetireTagProcedure is the fully-qualified name of the Operator's RetireTag RPC.
+	OperatorRetireTagProcedure = "/supertag.runtime.v2.Operator/RetireTag"
 	// OperatorGetReplyDeliveryProcedure is the fully-qualified name of the Operator's GetReplyDelivery
 	// RPC.
 	OperatorGetReplyDeliveryProcedure = "/supertag.runtime.v2.Operator/GetReplyDelivery"
@@ -415,6 +419,8 @@ type OperatorClient interface {
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
+	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)
 	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
 	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
@@ -509,6 +515,18 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
 			connect.WithClientOptions(opts...),
 		),
+		getTag: connect.NewClient[runtimev2.GetTagRequest, runtimev2.Tag](
+			httpClient,
+			baseURL+OperatorGetTagProcedure,
+			connect.WithSchema(operatorMethods.ByName("GetTag")),
+			connect.WithClientOptions(opts...),
+		),
+		retireTag: connect.NewClient[runtimev2.RetireTagRequest, runtimev2.RetireTagResponse](
+			httpClient,
+			baseURL+OperatorRetireTagProcedure,
+			connect.WithSchema(operatorMethods.ByName("RetireTag")),
+			connect.WithClientOptions(opts...),
+		),
 		getReplyDelivery: connect.NewClient[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery](
 			httpClient,
 			baseURL+OperatorGetReplyDeliveryProcedure,
@@ -545,6 +563,8 @@ type operatorClient struct {
 	listEvents          *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
 	cancelTask          *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
 	resolveAttempt      *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
+	getTag              *connect.Client[runtimev2.GetTagRequest, runtimev2.Tag]
+	retireTag           *connect.Client[runtimev2.RetireTagRequest, runtimev2.RetireTagResponse]
 	getReplyDelivery    *connect.Client[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery]
 	listReplyDeliveries *connect.Client[runtimev2.ListReplyDeliveriesRequest, runtimev2.ListReplyDeliveriesResponse]
 	resolveReply        *connect.Client[runtimev2.ResolveReplyRequest, runtimev2.ReplyDelivery]
@@ -615,6 +635,16 @@ func (c *operatorClient) ResolveAttempt(ctx context.Context, req *connect.Reques
 	return c.resolveAttempt.CallUnary(ctx, req)
 }
 
+// GetTag calls supertag.runtime.v2.Operator.GetTag.
+func (c *operatorClient) GetTag(ctx context.Context, req *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error) {
+	return c.getTag.CallUnary(ctx, req)
+}
+
+// RetireTag calls supertag.runtime.v2.Operator.RetireTag.
+func (c *operatorClient) RetireTag(ctx context.Context, req *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error) {
+	return c.retireTag.CallUnary(ctx, req)
+}
+
 // GetReplyDelivery calls supertag.runtime.v2.Operator.GetReplyDelivery.
 func (c *operatorClient) GetReplyDelivery(ctx context.Context, req *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
 	return c.getReplyDelivery.CallUnary(ctx, req)
@@ -645,6 +675,8 @@ type OperatorHandler interface {
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error)
+	RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error)
 	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
 	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
@@ -735,6 +767,18 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
 		connect.WithHandlerOptions(opts...),
 	)
+	operatorGetTagHandler := connect.NewUnaryHandler(
+		OperatorGetTagProcedure,
+		svc.GetTag,
+		connect.WithSchema(operatorMethods.ByName("GetTag")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorRetireTagHandler := connect.NewUnaryHandler(
+		OperatorRetireTagProcedure,
+		svc.RetireTag,
+		connect.WithSchema(operatorMethods.ByName("RetireTag")),
+		connect.WithHandlerOptions(opts...),
+	)
 	operatorGetReplyDeliveryHandler := connect.NewUnaryHandler(
 		OperatorGetReplyDeliveryProcedure,
 		svc.GetReplyDelivery,
@@ -781,6 +825,10 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorCancelTaskHandler.ServeHTTP(w, r)
 		case OperatorResolveAttemptProcedure:
 			operatorResolveAttemptHandler.ServeHTTP(w, r)
+		case OperatorGetTagProcedure:
+			operatorGetTagHandler.ServeHTTP(w, r)
+		case OperatorRetireTagProcedure:
+			operatorRetireTagHandler.ServeHTTP(w, r)
 		case OperatorGetReplyDeliveryProcedure:
 			operatorGetReplyDeliveryHandler.ServeHTTP(w, r)
 		case OperatorListReplyDeliveriesProcedure:
@@ -846,6 +894,14 @@ func (UnimplementedOperatorHandler) CancelTask(context.Context, *connect.Request
 
 func (UnimplementedOperatorHandler) ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ResolveAttempt is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) GetTag(context.Context, *connect.Request[runtimev2.GetTagRequest]) (*connect.Response[runtimev2.Tag], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.GetTag is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) RetireTag(context.Context, *connect.Request[runtimev2.RetireTagRequest]) (*connect.Response[runtimev2.RetireTagResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.RetireTag is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {

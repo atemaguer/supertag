@@ -133,8 +133,8 @@ impl Store {
             tx.rollback().await?;
             return Ok(ChangeMailboxGrantResponse { changed });
         }
-        exists_in(&mut tx, &input.sender_tag_id).await?;
-        exists_in(&mut tx, &input.recipient_tag_id).await?;
+        crate::tags::require_active(&mut tx, &input.sender_tag_id).await?;
+        crate::tags::require_active(&mut tx, &input.recipient_tag_id).await?;
         let result = if input.granted {
             sqlx::query("INSERT INTO supertag_v2_mailbox_grants (sender_tag_id,recipient_tag_id,granted_by,granted_at_ms) VALUES ($1,$2,$3,$4) ON CONFLICT(sender_tag_id,recipient_tag_id) DO NOTHING")
                 .bind(&input.sender_tag_id).bind(&input.recipient_tag_id).bind(principal).bind(self.execution_now_ms()).execute(&mut *tx).await?
@@ -276,7 +276,7 @@ impl Store {
         if sender == input.recipient_tag_id {
             return Err(invalid("a Tag cannot send a message to itself"));
         }
-        exists_in(&mut tx, &input.recipient_tag_id).await?;
+        crate::tags::require_active(&mut tx, &input.recipient_tag_id).await?;
         if !may_send_in(&mut tx, &sender, &input.recipient_tag_id).await? {
             return Err(StoreError::PermissionDenied);
         }

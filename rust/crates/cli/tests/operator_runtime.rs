@@ -62,6 +62,73 @@ async fn channel(address: &str) -> Result<Channel> {
 }
 
 #[tokio::test]
+async fn retirement_removes_tag_from_roster_and_preserves_identity() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let secret = Uuid::new_v4().to_string();
+    let token = Uuid::new_v4().to_string();
+    let mut control = command(&["control-plane"]);
+    control.env("SUPERTAG_GATEWAY_TOKEN", &secret).env(
+        "SUPERTAG_DATABASE_URL",
+        format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("tags.db").display()
+        ),
+    );
+    let (mut control, private) = service(control).await?;
+    let (mut gateway, public) =
+        service(gateway(&private, &secret, &token, "operator:alice")).await?;
+    let run = |args: &[&str]| {
+        let mut command = command(args);
+        command
+            .args(["--gateway", &public])
+            .env("SUPERTAG_OPERATOR_TOKEN", &token);
+        async move {
+            let output = timeout(WAIT, command.output()).await??;
+            ensure!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok::<Value, anyhow::Error>(serde_json::from_slice(&output.stdout)?)
+        }
+    };
+    let created = run(&[
+        "put-tag",
+        "review-1",
+        "--name",
+        "Reviewer",
+        "--instructions",
+        "Review",
+    ])
+    .await?;
+    assert_eq!(created["name"], "Reviewer");
+    let preview = run(&["retire-tag", "review-1", "--dry-run"]).await?;
+    assert_eq!(preview["dry_run"], true);
+    assert!(preview["tag"]["retired_at_ms"].is_null());
+    assert_eq!(run(&["list-tags"]).await?["tags"][0]["tag_id"], "review-1");
+    let retired = run(&["retire-tag", "review-1"]).await?;
+    assert!(retired["tag"]["retired_at_ms"].as_i64().is_some());
+    assert_eq!(run(&["list-tags"]).await?["tags"], serde_json::json!([]));
+    assert_eq!(run(&["get-tag", "review-1"]).await?, retired["tag"]);
+    run(&[
+        "put-tag",
+        "review-2",
+        "--name",
+        "Reviewer",
+        "--instructions",
+        "Review",
+    ])
+    .await?;
+    let all = run(&["list-tags", "--include-retired"]).await?;
+    assert_eq!(all["tags"][0], retired["tag"]);
+    assert_eq!(all["tags"][1]["tag_id"], "review-2");
+    assert_eq!(all["tags"][1]["name"], "Reviewer");
+    gateway.kill().await?;
+    control.kill().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn conversation_scope_survives_gateway_forwards_and_task_reads() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let secret = Uuid::new_v4().to_string();
