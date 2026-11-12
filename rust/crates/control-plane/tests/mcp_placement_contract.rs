@@ -174,6 +174,11 @@ async fn contract(url: &str) {
         mcp_servers: vec![McpServerCapability {
             name: "catalog".into(),
             mapped_tools: vec!["List_docs".into(), "publish".into()],
+            provider_binding: Some("a".repeat(64)),
+            resource_bindings: vec!["List_docs", "publish"]
+                .into_iter()
+                .map(mapping)
+                .collect(),
         }],
         ..Default::default()
     };
@@ -192,6 +197,9 @@ async fn contract(url: &str) {
             .is_none()
     );
     profile.mcp_servers[0].mapped_tools.push("list_docs".into());
+    profile.mcp_servers[0]
+        .resource_bindings
+        .push(mapping("list_docs"));
     let selected = store
         .claim_task_with_profile(
             &host,
@@ -208,6 +216,18 @@ async fn contract(url: &str) {
     assert_eq!(task.task_id, blocked.task_id);
     assert_eq!(task.policy_snapshot, blocked.policy_snapshot);
     store.close().await;
+}
+
+fn mapping(tool: &str) -> McpResourceBinding {
+    McpResourceBinding {
+        tool: tool.into(),
+        rules: vec![McpResourceRule {
+            components: vec![McpResourceComponent {
+                arguments: vec!["repo".into()],
+            }],
+            ..Default::default()
+        }],
+    }
 }
 
 #[tokio::test]

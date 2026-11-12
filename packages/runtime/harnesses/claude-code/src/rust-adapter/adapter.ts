@@ -269,6 +269,8 @@ export async function runAdapter(
     const validEffort = effort === "low" || effort === "medium" || effort === "high";
     if (effort !== undefined && !validEffort)
       throw new SafeAdapterFailure("Claude received an invalid reasoning effort.");
+    phase = "MCP tool preparation";
+    const mcp = await taskMcpTools(harness, task, controller.signal, () => !finalSeen, secrets);
     const coordination = coordinationTools(harness, run, {
       taskId: task.taskId,
       tagId: task.tagId,
@@ -277,9 +279,8 @@ export async function runAdapter(
       signal: controller.signal,
       active: () => !finalSeen,
       nativeSessionId: () => nativeSessionId,
+      hasPendingExternalApprovals: mcp.hasPendingApprovals,
     });
-    phase = "MCP tool preparation";
-    const mcp = await taskMcpTools(harness, task, controller.signal, () => !finalSeen, secrets);
     const { env, cwd } = await nativeEnvironment(environment, task.outputPolicy?.directory);
     phase = "Skill preparation";
     const { plugins, names, roots } = await stageSkills(
@@ -559,7 +560,12 @@ export async function runAdapter(
       result,
       succeeded: true,
       checkpoint,
-      waitingApprovalIds: await coordination.waitingApprovalIds(),
+      waitingApprovalIds: [
+        ...new Set([
+          ...(await coordination.waitingApprovalIds()),
+          ...(await mcp.waitingApprovalIds()),
+        ]),
+      ].sort(),
     };
     completionProposed = true;
     await receipt(() => client.complete(outcome, options()));

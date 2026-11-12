@@ -1275,7 +1275,40 @@ message AttemptExecutionSelection {
   optional bool effort_applied = 4;
   bool remote_file_workspace = 5;
   SharedExecutionCapability shared_execution = 6;
+  repeated McpServerCapability mcp_servers = 7;
 }
+
+service AttemptMcpEffects {
+  rpc Reserve(ReserveMcpEffectRequest) returns (ReserveMcpEffectResponse);
+  rpc Settle(SettleMcpEffectRequest) returns (SettleMcpEffectResponse);
+}
+
+message ReserveMcpEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string server = 3;
+  string tool = 4;
+  string arguments_json = 5;
+  string provider_binding = 6;
+  string tool_schema_sha256 = 7;
+}
+message ReserveMcpEffectResponse {
+  Approval approval = 1;
+  optional string dispatch_id = 2;
+  optional string result_json = 3;
+  bool unconfirmed = 4;
+  uint64 dispatch_valid_for_ms = 5;
+  optional string canonical_arguments_json = 6;
+  bool ungated = 7;
+}
+message SettleMcpEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string dispatch_id = 3;
+  // A missing result records an effect whose provider receipt is unconfirmed.
+  optional string result_json = 4;
+}
+message SettleMcpEffectResponse {}
 
 message GetTaskRequest {
   string task_id = 1;

@@ -75,6 +75,8 @@ const (
 	HarnessMailboxName = "supertag.runtime.v2.HarnessMailbox"
 	// HarnessWorkSessionsName is the fully-qualified name of the HarnessWorkSessions service.
 	HarnessWorkSessionsName = "supertag.runtime.v2.HarnessWorkSessions"
+	// AttemptMcpEffectsName is the fully-qualified name of the AttemptMcpEffects service.
+	AttemptMcpEffectsName = "supertag.runtime.v2.AttemptMcpEffects"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -408,6 +410,12 @@ const (
 	HarnessWorkSessionsContinueProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Continue"
 	// HarnessWorkSessionsAskProcedure is the fully-qualified name of the HarnessWorkSessions's Ask RPC.
 	HarnessWorkSessionsAskProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Ask"
+	// AttemptMcpEffectsReserveProcedure is the fully-qualified name of the AttemptMcpEffects's Reserve
+	// RPC.
+	AttemptMcpEffectsReserveProcedure = "/supertag.runtime.v2.AttemptMcpEffects/Reserve"
+	// AttemptMcpEffectsSettleProcedure is the fully-qualified name of the AttemptMcpEffects's Settle
+	// RPC.
+	AttemptMcpEffectsSettleProcedure = "/supertag.runtime.v2.AttemptMcpEffects/Settle"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -4933,4 +4941,101 @@ func (UnimplementedHarnessWorkSessionsHandler) Continue(context.Context, *connec
 
 func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Ask is not implemented"))
+}
+
+// AttemptMcpEffectsClient is a client for the supertag.runtime.v2.AttemptMcpEffects service.
+type AttemptMcpEffectsClient interface {
+	Reserve(context.Context, *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error)
+}
+
+// NewAttemptMcpEffectsClient constructs a client for the supertag.runtime.v2.AttemptMcpEffects
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptMcpEffectsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptMcpEffectsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptMcpEffectsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptMcpEffects").Methods()
+	return &attemptMcpEffectsClient{
+		reserve: connect.NewClient[runtimev2.ReserveMcpEffectRequest, runtimev2.ReserveMcpEffectResponse](
+			httpClient,
+			baseURL+AttemptMcpEffectsReserveProcedure,
+			connect.WithSchema(attemptMcpEffectsMethods.ByName("Reserve")),
+			connect.WithClientOptions(opts...),
+		),
+		settle: connect.NewClient[runtimev2.SettleMcpEffectRequest, runtimev2.SettleMcpEffectResponse](
+			httpClient,
+			baseURL+AttemptMcpEffectsSettleProcedure,
+			connect.WithSchema(attemptMcpEffectsMethods.ByName("Settle")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptMcpEffectsClient implements AttemptMcpEffectsClient.
+type attemptMcpEffectsClient struct {
+	reserve *connect.Client[runtimev2.ReserveMcpEffectRequest, runtimev2.ReserveMcpEffectResponse]
+	settle  *connect.Client[runtimev2.SettleMcpEffectRequest, runtimev2.SettleMcpEffectResponse]
+}
+
+// Reserve calls supertag.runtime.v2.AttemptMcpEffects.Reserve.
+func (c *attemptMcpEffectsClient) Reserve(ctx context.Context, req *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error) {
+	return c.reserve.CallUnary(ctx, req)
+}
+
+// Settle calls supertag.runtime.v2.AttemptMcpEffects.Settle.
+func (c *attemptMcpEffectsClient) Settle(ctx context.Context, req *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error) {
+	return c.settle.CallUnary(ctx, req)
+}
+
+// AttemptMcpEffectsHandler is an implementation of the supertag.runtime.v2.AttemptMcpEffects
+// service.
+type AttemptMcpEffectsHandler interface {
+	Reserve(context.Context, *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error)
+}
+
+// NewAttemptMcpEffectsHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptMcpEffectsHandler(svc AttemptMcpEffectsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptMcpEffectsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptMcpEffects").Methods()
+	attemptMcpEffectsReserveHandler := connect.NewUnaryHandler(
+		AttemptMcpEffectsReserveProcedure,
+		svc.Reserve,
+		connect.WithSchema(attemptMcpEffectsMethods.ByName("Reserve")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptMcpEffectsSettleHandler := connect.NewUnaryHandler(
+		AttemptMcpEffectsSettleProcedure,
+		svc.Settle,
+		connect.WithSchema(attemptMcpEffectsMethods.ByName("Settle")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptMcpEffects/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptMcpEffectsReserveProcedure:
+			attemptMcpEffectsReserveHandler.ServeHTTP(w, r)
+		case AttemptMcpEffectsSettleProcedure:
+			attemptMcpEffectsSettleHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptMcpEffectsHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptMcpEffectsHandler struct{}
+
+func (UnimplementedAttemptMcpEffectsHandler) Reserve(context.Context, *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMcpEffects.Reserve is not implemented"))
+}
+
+func (UnimplementedAttemptMcpEffectsHandler) Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMcpEffects.Settle is not implemented"))
 }

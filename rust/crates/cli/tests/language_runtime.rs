@@ -410,16 +410,19 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
     assert_eq!(pending["state"], "TASK_STATE_QUEUED");
     assert!(pending["attempt_id"].is_null());
     assert!(!journal.exists());
-    let mut host = worker("catalog-host");
-    host.arg("--mcp-catalog")
-        .arg(&catalog)
-        .env("CATALOG_MCP_AUTH", "Bearer synthetic-catalog-credential")
-        .env("CATALOG_MCP_URL", &endpoint);
-    success(host).await?;
+    let catalog_worker = |state: &str| {
+        let mut host = worker(state);
+        host.arg("--mcp-catalog")
+            .arg(&catalog)
+            .env("CATALOG_MCP_AUTH", "Bearer synthetic-catalog-credential")
+            .env("CATALOG_MCP_URL", &endpoint);
+        host
+    };
+    success(catalog_worker("catalog-host")).await?;
     let completed = services.operator(&["get-task", task_id]).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     assert_eq!(completed["result"], "fixture used one scoped MCP tool");
-    let provider_receipts = std::fs::read_to_string(journal)?;
+    let provider_receipts = std::fs::read_to_string(&journal)?;
     let receipts = provider_receipts
         .lines()
         .map(serde_json::from_str)
@@ -432,6 +435,72 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
             serde_json::json!({"closed":true}),
         ]
     );
+    let waiting = services
+        .operator(&["inbox", "list", "--kind", "approval"])
+        .await?;
+    let approvals = waiting["items"].as_array().context("MCP approvals")?;
+    assert_eq!(approvals.len(), 2);
+    let id_for = |resource| -> Result<&str> {
+        approvals
+            .iter()
+            .find(|item| item["approval"]["resource"] == resource)
+            .and_then(|item| item["approval"]["approval_id"].as_str())
+            .context("MCP approval for the expected resource")
+    };
+    let missing_id = id_for("")?;
+    let exact_id = id_for("repository:acme/docs")?;
+    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    assert_eq!(
+        exact["arguments"],
+        serde_json::json!({"owner":"acme","repo":"docs"})
+    );
+    assert_eq!(exact["action"], "mcp:catalog/publish");
+    services
+        .operator(&[
+            "inbox",
+            "deny",
+            missing_id,
+            "--operation-id",
+            "reject-missing-mcp",
+            "--reason",
+            "The repository was not specified.",
+        ])
+        .await?;
+    let decision = services
+        .operator(&[
+            "inbox",
+            "approve",
+            exact_id,
+            "--operation-id",
+            "approve-exact-mcp",
+        ])
+        .await?;
+    let resumed_id = decision["continuation_task_id"]
+        .as_str()
+        .context("MCP continuation Task")?;
+    success(catalog_worker("catalog-resume")).await?;
+    let resumed = services.operator(&["get-task", resumed_id]).await?;
+    assert_eq!(resumed["state"], "TASK_STATE_SUCCEEDED", "{resumed}");
+    assert_eq!(resumed["session_id"], completed["session_id"]);
+    assert_eq!(
+        resumed["result"],
+        "fixture resumed and dispatched one approved MCP effect",
+        "provider journal: {}",
+        std::fs::read_to_string(&journal)?
+    );
+    let receipts = std::fs::read_to_string(journal)?;
+    let effects = receipts
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(effects.len(), 5);
+    assert_eq!(
+        effects[3],
+        serde_json::json!({"tool":"publish","arguments":{"owner":"acme","repo":"docs"}})
+    );
+    assert_eq!(effects[4], serde_json::json!({"closed":true}));
+    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    assert!(exact["consumed_at_ms"].is_i64());
     provider.kill().await?;
     services.stop().await
 }

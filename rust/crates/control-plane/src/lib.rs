@@ -13,6 +13,7 @@ mod history;
 mod inbox;
 mod inputs;
 mod mailbox;
+mod mcp_effects;
 pub mod objective_limits;
 mod objectives;
 mod policy;

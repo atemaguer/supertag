@@ -264,7 +264,7 @@ enum Command {
 
 Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
-Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval are refused. Endpoints must use HTTPS or literal loopback HTTP."#
+Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
         mcp_catalog: Option<PathBuf>,
         /// gRPC origin of a standalone shared execution provider for Cursor.
@@ -1361,6 +1361,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.work_sessions_service())
         .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
+        .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
@@ -1558,6 +1559,7 @@ async fn gateway(
         .add_service(gateway.work_sessions_service())
         .add_service(gateway.attempt_work_sessions_service())
         .add_service(gateway.attempt_mailbox_service())
+        .add_service(gateway.attempt_mcp_effects_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router

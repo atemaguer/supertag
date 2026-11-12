@@ -167,6 +167,7 @@ pub(super) fn resolve_attempt(
         effort_applied,
         remote_file_workspace: profile.remote_file_workspace,
         shared_execution: profile.shared_execution.clone(),
+        mcp_servers: supertag_protocol::mcp::selected_servers(task, profile),
     })
 }
 

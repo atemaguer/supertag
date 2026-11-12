@@ -1864,20 +1864,74 @@ class SharedExecutionAccessSummary(_message.Message):
     def __init__(self, environment_id: _Optional[str] = ..., incarnation_id: _Optional[str] = ...) -> None: ...
 
 class AttemptExecutionSelection(_message.Message):
-    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace", "shared_execution")
+    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace", "shared_execution", "mcp_servers")
     SELECTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_SOURCE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     EFFORT_APPLIED_FIELD_NUMBER: _ClassVar[int]
     REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
     selection: ExecutionSelection
     model_source: ModelSource
     harness_kind: HarnessKind
     effort_applied: bool
     remote_file_workspace: bool
     shared_execution: SharedExecutionCapability
-    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ...) -> None: ...
+    mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
+    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ...) -> None: ...
+
+class ReserveMcpEffectRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "server", "tool", "arguments_json", "provider_binding", "tool_schema_sha256")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    SERVER_FIELD_NUMBER: _ClassVar[int]
+    TOOL_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_BINDING_FIELD_NUMBER: _ClassVar[int]
+    TOOL_SCHEMA_SHA256_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    server: str
+    tool: str
+    arguments_json: str
+    provider_binding: str
+    tool_schema_sha256: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., server: _Optional[str] = ..., tool: _Optional[str] = ..., arguments_json: _Optional[str] = ..., provider_binding: _Optional[str] = ..., tool_schema_sha256: _Optional[str] = ...) -> None: ...
+
+class ReserveMcpEffectResponse(_message.Message):
+    __slots__ = ("approval", "dispatch_id", "result_json", "unconfirmed", "dispatch_valid_for_ms", "canonical_arguments_json", "ungated")
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
+    DISPATCH_ID_FIELD_NUMBER: _ClassVar[int]
+    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    UNCONFIRMED_FIELD_NUMBER: _ClassVar[int]
+    DISPATCH_VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    CANONICAL_ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    UNGATED_FIELD_NUMBER: _ClassVar[int]
+    approval: Approval
+    dispatch_id: str
+    result_json: str
+    unconfirmed: bool
+    dispatch_valid_for_ms: int
+    canonical_arguments_json: str
+    ungated: bool
+    def __init__(self, approval: _Optional[_Union[Approval, _Mapping]] = ..., dispatch_id: _Optional[str] = ..., result_json: _Optional[str] = ..., unconfirmed: _Optional[bool] = ..., dispatch_valid_for_ms: _Optional[int] = ..., canonical_arguments_json: _Optional[str] = ..., ungated: _Optional[bool] = ...) -> None: ...
+
+class SettleMcpEffectRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "dispatch_id", "result_json")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    DISPATCH_ID_FIELD_NUMBER: _ClassVar[int]
+    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    dispatch_id: str
+    result_json: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., dispatch_id: _Optional[str] = ..., result_json: _Optional[str] = ...) -> None: ...
+
+class SettleMcpEffectResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)

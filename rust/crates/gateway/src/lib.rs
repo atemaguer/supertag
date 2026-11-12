@@ -10,6 +10,7 @@ mod inputs;
 pub mod lark;
 pub mod linear;
 mod mailbox;
+mod mcp_effects;
 pub mod microsoft_teams;
 mod policy;
 #[cfg(test)]

@@ -686,6 +686,7 @@ mod tests {
                 effort_applied: Some(true),
                 remote_file_workspace: false,
                 shared_execution: None,
+                mcp_servers: vec![],
             }
             .encode_to_vec(),
         );

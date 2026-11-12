@@ -37,6 +37,7 @@ use supertag_protocol::{
         Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
+        attempt_mcp_effects_client::AttemptMcpEffectsClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
@@ -93,6 +94,7 @@ pub(crate) struct CoordinationClients {
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
+    mcp_effects: AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
 }
 
 impl Attempt {
@@ -137,6 +139,10 @@ impl Attempt {
         Ok(execution.harness_kind == options.harness as i32
             && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
             && execution.shared_execution == options.execution_profile.shared_execution
+            && execution
+                .mcp_servers
+                .iter()
+                .all(|server| options.execution_profile.mcp_servers.contains(server))
             && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
             && (!self.requires_unsandboxed_commands
                 || options.execution_profile.allow_unsandboxed_commands))
@@ -296,6 +302,9 @@ pub async fn run(
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        mcp_effects: AttemptMcpEffectsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
     };
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)

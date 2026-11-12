@@ -6380,3 +6380,118 @@ class HarnessWorkSessions:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class AttemptMcpEffectsStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Reserve = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMcpEffects/Reserve',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectResponse.FromString,
+                _registered_method=True)
+        self.Settle = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMcpEffects/Settle',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.FromString,
+                _registered_method=True)
+
+
+class AttemptMcpEffectsServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def Reserve(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Settle(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptMcpEffectsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Reserve': grpc.unary_unary_rpc_method_handler(
+                    servicer.Reserve,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectResponse.SerializeToString,
+            ),
+            'Settle': grpc.unary_unary_rpc_method_handler(
+                    servicer.Settle,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptMcpEffects', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptMcpEffects', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptMcpEffects:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Reserve(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMcpEffects/Reserve',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReserveMcpEffectResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Settle(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMcpEffects/Settle',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

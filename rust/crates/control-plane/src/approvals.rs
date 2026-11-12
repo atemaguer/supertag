@@ -128,12 +128,26 @@ pub(crate) async fn gate_in(
     if !actions.contains(&input.action) {
         return Err(StoreError::PermissionDenied);
     }
-    name("approval operation ID", &input.operation_id)?;
     name("approval resource", &input.resource)?;
+    gate_effect_in(tx, input, &task, rule.operator_ids, None, now, order).await
+}
+
+/// The caller has already fenced the effect and its Attempt. Persist consumption
+/// in the same transaction as either the in-store mutation or external dispatch intent.
+pub(crate) async fn gate_effect_in(
+    tx: &mut Transaction<'_, Any>,
+    input: &RequestApprovalRequest,
+    task: &AnyRow,
+    mut operators: Vec<String>,
+    authority: Option<&str>,
+    now: i64,
+    order: i64,
+) -> Result<RequestApprovalResponse> {
+    let attempt = input.attempt.as_ref().expect("validated effect Attempt");
+    name("approval operation ID", &input.operation_id)?;
     let summary = summary(&input.summary, 500)?;
     let canonical = canonical_arguments(&input.arguments_json)?;
     let arguments_digest = format!("sha256:{:x}", Sha256::digest(canonical.as_bytes()));
-    let mut operators = rule.operator_ids;
     operators.sort_unstable();
     operators.dedup();
     let conversation_owner = crate::conversations::task_owner_in(tx, &attempt.task_id)
@@ -145,8 +159,13 @@ pub(crate) async fn gate_in(
             return Err(StoreError::PermissionDenied);
         }
     }
-    let rule_digest = digest(&(&rule.action, &operators))?;
-    let request_digest = effect_request_digest(input)?;
+    let mut request_digest = effect_request_digest(input)?;
+    let rule_digest = if let Some(authority) = authority {
+        request_digest = digest(&(&request_digest, authority))?;
+        digest(&(&input.action, &operators, authority))?
+    } else {
+        digest(&(&input.action, &operators))?
+    };
     let tag: String = task.try_get("tag_id")?;
     let session: String = task.try_get("session_id")?;
     let objective: Option<String> =
@@ -813,7 +832,7 @@ pub(crate) async fn pending_in(
     Ok(items)
 }
 
-async fn load_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Approval> {
+pub(crate) async fn load_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Approval> {
     let row = sqlx::query(&format!("{VIEW} WHERE a.approval_id=$1"))
         .bind(id)
         .fetch_optional(&mut **tx)

@@ -132,6 +132,7 @@ export interface CoordinationScope {
   signal: AbortSignal;
   active(): boolean;
   nativeSessionId?(): string | undefined;
+  hasPendingExternalApprovals?(): boolean;
 }
 
 function response(text: string, failed = false) {
@@ -443,7 +444,7 @@ export function registerCoordinationTools(
       },
       ({ text }, tool) =>
         write(async () => {
-          if (pending.size)
+          if (pending.size || scope.hasPendingExternalApprovals?.())
             return response(
               "Finish this turn and wait for the Workstream approval decision first.",
               true,
@@ -508,7 +509,7 @@ export function registerCoordinationTools(
       },
       ({ title, instruction, workspace, tag }, tool) =>
         write(async () => {
-          if (asked || pending.size)
+          if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
               "Finish this turn and wait for the operator before starting work.",
               true,
@@ -569,7 +570,7 @@ export function registerCoordinationTools(
       },
       ({ sessionId, message }, tool) =>
         write(async () => {
-          if (asked || pending.size)
+          if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
               "Finish this turn and wait for the operator before continuing work.",
               true,

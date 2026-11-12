@@ -120,6 +120,20 @@ async function httpCatalog() {
   return "fixture used one scoped MCP tool";
 }
 
+async function approvedHttpCatalog() {
+  if (!resumed || !sdkServers.includes("catalog"))
+    throw new Error("Approved MCP continuation lost its native Session or catalog");
+  const call = async (arguments_) =>
+    (await sdkMcp("tools/call", { name: "publish", arguments: arguments_ }, "catalog")).result;
+  const missing = await call({});
+  if (!missing?.isError || !missing.content[0].text.includes("denied or expired"))
+    throw new Error("An earlier MCP denial did not fence the continuation");
+  const result = await call({ repo: "docs", owner: "acme" });
+  if (result?.isError || result?.content[0].text !== "fixture release record")
+    throw new Error("The canonical approved MCP effect did not dispatch");
+  return "fixture resumed and dispatched one approved MCP effect";
+}
+
 async function coordinationCall(tool, input) {
   const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
   if (!(await hook(`mcp__supertag__${tool}`, input, metadata)))
@@ -596,7 +610,10 @@ async function turn(message) {
   let previous = [];
   if (resumed) {
     previous = await histories(join(config, "projects"));
-    if (!previous.some((text) => text.includes("fixture first turn")))
+    const marker = sdkServers.includes("catalog")
+      ? "fixture used one scoped MCP tool"
+      : "fixture first turn";
+    if (!previous.some((text) => text.includes(marker)))
       throw new Error("Approved transcript was not materialized by the SDK");
   }
   send({
@@ -699,8 +716,19 @@ async function turn(message) {
   if (prompt.startsWith("mixed-tools-"))
     result = await approvalAndQuestion(prompt.slice("mixed-tools-".length));
   if (
+    prompt.startsWith("The operator decided the approval requests") &&
+    sdkServers.includes("catalog")
+  ) {
+    try {
+      result = await approvedHttpCatalog();
+    } catch (error) {
+      result = `MCP continuation fixture failed: ${error.message}`;
+    }
+  }
+  if (
     prompt === "Process fixture Workstream approval" ||
-    prompt.startsWith("The operator decided the approval requests") ||
+    (prompt.startsWith("The operator decided the approval requests") &&
+      !sdkServers.includes("catalog")) ||
     prompt.startsWith("This is this Tag's inbox.")
   )
     result = await processCoordination(prompt);

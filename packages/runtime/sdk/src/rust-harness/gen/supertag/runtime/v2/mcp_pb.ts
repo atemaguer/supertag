@@ -2,15 +2,15 @@
 // @generated from file supertag/runtime/v2/mcp.proto (package supertag.runtime.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file supertag/runtime/v2/mcp.proto.
  */
 export const file_supertag_runtime_v2_mcp: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zdXBlcnRhZy9ydW50aW1lL3YyL21jcC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiI5ChNNY3BTZXJ2ZXJDYXBhYmlsaXR5EgwKBG5hbWUYASABKAkSFAoMbWFwcGVkX3Rvb2xzGAIgAygJIl4KDkhhcm5lc3NNY3BUb29sEg4KBnNlcnZlchgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhkKEWlucHV0X3NjaGVtYV9qc29uGAQgASgJIhwKGkxpc3RIYXJuZXNzTWNwVG9vbHNSZXF1ZXN0IlEKG0xpc3RIYXJuZXNzTWNwVG9vbHNSZXNwb25zZRIyCgV0b29scxgBIAMoCzIjLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc01jcFRvb2wiUQoZQ2FsbEhhcm5lc3NNY3BUb29sUmVxdWVzdBIOCgZzZXJ2ZXIYASABKAkSDAoEdG9vbBgCIAEoCRIWCg5hcmd1bWVudHNfanNvbhgDIAEoCSIxChpDYWxsSGFybmVzc01jcFRvb2xSZXNwb25zZRITCgtyZXN1bHRfanNvbhgBIAEoCTLgAQoKSGFybmVzc01jcBJpCgRMaXN0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0SGFybmVzc01jcFRvb2xzUmVxdWVzdBowLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEhhcm5lc3NNY3BUb29sc1Jlc3BvbnNlEmcKBENhbGwSLi5zdXBlcnRhZy5ydW50aW1lLnYyLkNhbGxIYXJuZXNzTWNwVG9vbFJlcXVlc3QaLy5zdXBlcnRhZy5ydW50aW1lLnYyLkNhbGxIYXJuZXNzTWNwVG9vbFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Ch1zdXBlcnRhZy9ydW50aW1lL3YyL21jcC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiKxAQoTTWNwU2VydmVyQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhQKDG1hcHBlZF90b29scxgCIAMoCRIdChBwcm92aWRlcl9iaW5kaW5nGAMgASgJSACIAQESQgoRcmVzb3VyY2VfYmluZGluZ3MYBCADKAsyJy5zdXBlcnRhZy5ydW50aW1lLnYyLk1jcFJlc291cmNlQmluZGluZ0ITChFfcHJvdmlkZXJfYmluZGluZyJXChJNY3BSZXNvdXJjZUJpbmRpbmcSDAoEdG9vbBgBIAEoCRIzCgVydWxlcxgCIAMoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuTWNwUmVzb3VyY2VSdWxlIqwBCg9NY3BSZXNvdXJjZVJ1bGUSDgoGcHJlZml4GAEgASgJEhEKCXNlcGFyYXRvchgCIAEoCRI9Cgpjb21wb25lbnRzGAMgAygLMikuc3VwZXJ0YWcucnVudGltZS52Mi5NY3BSZXNvdXJjZUNvbXBvbmVudBI3CgR3aGVuGAQgASgLMikuc3VwZXJ0YWcucnVudGltZS52Mi5NY3BSZXNvdXJjZUNvbmRpdGlvbiIpChRNY3BSZXNvdXJjZUNvbXBvbmVudBIRCglhcmd1bWVudHMYASADKAkiOAoUTWNwUmVzb3VyY2VDb25kaXRpb24SEAoIYXJndW1lbnQYASABKAkSDgoGZXF1YWxzGAIgASgJIl4KDkhhcm5lc3NNY3BUb29sEg4KBnNlcnZlchgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhkKEWlucHV0X3NjaGVtYV9qc29uGAQgASgJIhwKGkxpc3RIYXJuZXNzTWNwVG9vbHNSZXF1ZXN0IlEKG0xpc3RIYXJuZXNzTWNwVG9vbHNSZXNwb25zZRIyCgV0b29scxgBIAMoCzIjLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc01jcFRvb2wiZwoZQ2FsbEhhcm5lc3NNY3BUb29sUmVxdWVzdBIOCgZzZXJ2ZXIYASABKAkSDAoEdG9vbBgCIAEoCRIWCg5hcmd1bWVudHNfanNvbhgDIAEoCRIUCgxvcGVyYXRpb25faWQYBCABKAkioQEKGkNhbGxIYXJuZXNzTWNwVG9vbFJlc3BvbnNlEhMKC3Jlc3VsdF9qc29uGAEgASgJEhgKC2FwcHJvdmFsX2lkGAIgASgJSACIAQESRAoOYXBwcm92YWxfc3RhdGUYAyABKA4yLC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NNY3BBcHByb3ZhbFN0YXRlQg4KDF9hcHByb3ZhbF9pZCq8AQoXSGFybmVzc01jcEFwcHJvdmFsU3RhdGUSKgomSEFSTkVTU19NQ1BfQVBQUk9WQUxfU1RBVEVfVU5TUEVDSUZJRUQQABImCiJIQVJORVNTX01DUF9BUFBST1ZBTF9TVEFURV9QRU5ESU5HEAESJQohSEFSTkVTU19NQ1BfQVBQUk9WQUxfU1RBVEVfREVOSUVEEAISJgoiSEFSTkVTU19NQ1BfQVBQUk9WQUxfU1RBVEVfR1JBTlRFRBADMuABCgpIYXJuZXNzTWNwEmkKBExpc3QSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RIYXJuZXNzTWNwVG9vbHNSZXF1ZXN0GjAuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0SGFybmVzc01jcFRvb2xzUmVzcG9uc2USZwoEQ2FsbBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FsbEhhcm5lc3NNY3BUb29sUmVxdWVzdBovLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FsbEhhcm5lc3NNY3BUb29sUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message supertag.runtime.v2.McpServerCapability
@@ -25,6 +25,16 @@ export type McpServerCapability = Message<"supertag.runtime.v2.McpServerCapabili
    * @generated from field: repeated string mapped_tools = 2;
    */
   mappedTools: string[];
+
+  /**
+   * @generated from field: optional string provider_binding = 3;
+   */
+  providerBinding?: string | undefined;
+
+  /**
+   * @generated from field: repeated supertag.runtime.v2.McpResourceBinding resource_bindings = 4;
+   */
+  resourceBindings: McpResourceBinding[];
 };
 
 /**
@@ -33,6 +43,99 @@ export type McpServerCapability = Message<"supertag.runtime.v2.McpServerCapabili
  */
 export const McpServerCapabilitySchema: GenMessage<McpServerCapability> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_mcp, 0);
+
+/**
+ * @generated from message supertag.runtime.v2.McpResourceBinding
+ */
+export type McpResourceBinding = Message<"supertag.runtime.v2.McpResourceBinding"> & {
+  /**
+   * @generated from field: string tool = 1;
+   */
+  tool: string;
+
+  /**
+   * @generated from field: repeated supertag.runtime.v2.McpResourceRule rules = 2;
+   */
+  rules: McpResourceRule[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.McpResourceBinding.
+ * Use `create(McpResourceBindingSchema)` to create a new message.
+ */
+export const McpResourceBindingSchema: GenMessage<McpResourceBinding> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_mcp, 1);
+
+/**
+ * @generated from message supertag.runtime.v2.McpResourceRule
+ */
+export type McpResourceRule = Message<"supertag.runtime.v2.McpResourceRule"> & {
+  /**
+   * @generated from field: string prefix = 1;
+   */
+  prefix: string;
+
+  /**
+   * @generated from field: string separator = 2;
+   */
+  separator: string;
+
+  /**
+   * @generated from field: repeated supertag.runtime.v2.McpResourceComponent components = 3;
+   */
+  components: McpResourceComponent[];
+
+  /**
+   * @generated from field: supertag.runtime.v2.McpResourceCondition when = 4;
+   */
+  when?: McpResourceCondition | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.McpResourceRule.
+ * Use `create(McpResourceRuleSchema)` to create a new message.
+ */
+export const McpResourceRuleSchema: GenMessage<McpResourceRule> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_mcp, 2);
+
+/**
+ * @generated from message supertag.runtime.v2.McpResourceComponent
+ */
+export type McpResourceComponent = Message<"supertag.runtime.v2.McpResourceComponent"> & {
+  /**
+   * @generated from field: repeated string arguments = 1;
+   */
+  arguments: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.McpResourceComponent.
+ * Use `create(McpResourceComponentSchema)` to create a new message.
+ */
+export const McpResourceComponentSchema: GenMessage<McpResourceComponent> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_mcp, 3);
+
+/**
+ * @generated from message supertag.runtime.v2.McpResourceCondition
+ */
+export type McpResourceCondition = Message<"supertag.runtime.v2.McpResourceCondition"> & {
+  /**
+   * @generated from field: string argument = 1;
+   */
+  argument: string;
+
+  /**
+   * @generated from field: string equals = 2;
+   */
+  equals: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.McpResourceCondition.
+ * Use `create(McpResourceConditionSchema)` to create a new message.
+ */
+export const McpResourceConditionSchema: GenMessage<McpResourceCondition> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_mcp, 4);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessMcpTool
@@ -64,7 +167,7 @@ export type HarnessMcpTool = Message<"supertag.runtime.v2.HarnessMcpTool"> & {
  * Use `create(HarnessMcpToolSchema)` to create a new message.
  */
 export const HarnessMcpToolSchema: GenMessage<HarnessMcpTool> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_mcp, 1);
+  messageDesc(file_supertag_runtime_v2_mcp, 5);
 
 /**
  * @generated from message supertag.runtime.v2.ListHarnessMcpToolsRequest
@@ -77,7 +180,7 @@ export type ListHarnessMcpToolsRequest = Message<"supertag.runtime.v2.ListHarnes
  * Use `create(ListHarnessMcpToolsRequestSchema)` to create a new message.
  */
 export const ListHarnessMcpToolsRequestSchema: GenMessage<ListHarnessMcpToolsRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_mcp, 2);
+  messageDesc(file_supertag_runtime_v2_mcp, 6);
 
 /**
  * @generated from message supertag.runtime.v2.ListHarnessMcpToolsResponse
@@ -94,7 +197,7 @@ export type ListHarnessMcpToolsResponse = Message<"supertag.runtime.v2.ListHarne
  * Use `create(ListHarnessMcpToolsResponseSchema)` to create a new message.
  */
 export const ListHarnessMcpToolsResponseSchema: GenMessage<ListHarnessMcpToolsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_mcp, 3);
+  messageDesc(file_supertag_runtime_v2_mcp, 7);
 
 /**
  * @generated from message supertag.runtime.v2.CallHarnessMcpToolRequest
@@ -114,6 +217,11 @@ export type CallHarnessMcpToolRequest = Message<"supertag.runtime.v2.CallHarness
    * @generated from field: string arguments_json = 3;
    */
   argumentsJson: string;
+
+  /**
+   * @generated from field: string operation_id = 4;
+   */
+  operationId: string;
 };
 
 /**
@@ -121,7 +229,7 @@ export type CallHarnessMcpToolRequest = Message<"supertag.runtime.v2.CallHarness
  * Use `create(CallHarnessMcpToolRequestSchema)` to create a new message.
  */
 export const CallHarnessMcpToolRequestSchema: GenMessage<CallHarnessMcpToolRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_mcp, 4);
+  messageDesc(file_supertag_runtime_v2_mcp, 8);
 
 /**
  * @generated from message supertag.runtime.v2.CallHarnessMcpToolResponse
@@ -131,6 +239,16 @@ export type CallHarnessMcpToolResponse = Message<"supertag.runtime.v2.CallHarnes
    * @generated from field: string result_json = 1;
    */
   resultJson: string;
+
+  /**
+   * @generated from field: optional string approval_id = 2;
+   */
+  approvalId?: string | undefined;
+
+  /**
+   * @generated from field: supertag.runtime.v2.HarnessMcpApprovalState approval_state = 3;
+   */
+  approvalState: HarnessMcpApprovalState;
 };
 
 /**
@@ -138,7 +256,38 @@ export type CallHarnessMcpToolResponse = Message<"supertag.runtime.v2.CallHarnes
  * Use `create(CallHarnessMcpToolResponseSchema)` to create a new message.
  */
 export const CallHarnessMcpToolResponseSchema: GenMessage<CallHarnessMcpToolResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_mcp, 5);
+  messageDesc(file_supertag_runtime_v2_mcp, 9);
+
+/**
+ * @generated from enum supertag.runtime.v2.HarnessMcpApprovalState
+ */
+export enum HarnessMcpApprovalState {
+  /**
+   * @generated from enum value: HARNESS_MCP_APPROVAL_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: HARNESS_MCP_APPROVAL_STATE_PENDING = 1;
+   */
+  PENDING = 1,
+
+  /**
+   * @generated from enum value: HARNESS_MCP_APPROVAL_STATE_DENIED = 2;
+   */
+  DENIED = 2,
+
+  /**
+   * @generated from enum value: HARNESS_MCP_APPROVAL_STATE_GRANTED = 3;
+   */
+  GRANTED = 3,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.HarnessMcpApprovalState.
+ */
+export const HarnessMcpApprovalStateSchema: GenEnum<HarnessMcpApprovalState> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_mcp, 0);
 
 /**
  * Execution-local interface. The Worker Host owns the provider session and credentials.

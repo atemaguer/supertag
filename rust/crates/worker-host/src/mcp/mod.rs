@@ -8,9 +8,10 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, mcp,
-    v2::{HarnessMcpTool, PolicyPermission, Task},
+    v2::{HarnessMcpTool, McpResourceRule, PolicyPermission, Task},
 };
 use tokio::time::{self, Instant};
 use tokio::{sync::Mutex, task::JoinSet};
@@ -20,14 +21,12 @@ use tonic::Status;
 pub use catalog::McpCatalog;
 
 const SCHEMA_BYTES: usize = 16 * 1024;
-const ARGUMENT_BYTES: usize = 64 * 1024;
 const DISCOVERY_PAGES: usize = 16;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Failure {
     Denied,
-    ApprovalRequired,
     InvalidArguments,
     InvalidResponse,
     ResponseTooLarge,
@@ -41,9 +40,6 @@ impl From<Failure> for Status {
         match failure {
             Failure::Denied => {
                 Self::permission_denied("MCP tool or resource is outside accepted Task permissions")
-            }
-            Failure::ApprovalRequired => {
-                Self::failed_precondition("MCP call requires approval and was not sent")
             }
             Failure::InvalidArguments => Self::invalid_argument("invalid MCP tool arguments"),
             Failure::InvalidResponse => {
@@ -68,8 +64,15 @@ pub(crate) struct AttemptMcp {
 
 struct AttemptServer {
     session: Arc<Mutex<http::Session>>,
-    resources: BTreeMap<String, Vec<catalog::ResourceRule>>,
+    resources: BTreeMap<String, Vec<McpResourceRule>>,
     tools: BTreeMap<String, HarnessMcpTool>,
+    provider_binding: String,
+}
+
+pub(crate) struct AdmittedCall {
+    pub(crate) provider_binding: String,
+    pub(crate) tool_schema_sha256: String,
+    pub(crate) requires_approval: bool,
 }
 
 impl AttemptMcp {
@@ -98,6 +101,14 @@ impl AttemptMcp {
                 attempt.close().await;
                 return Err(Failure::Denied.into());
             };
+            if !task
+                .attempt_execution
+                .as_ref()
+                .is_some_and(|execution| execution.mcp_servers.contains(&config.capability))
+            {
+                attempt.close().await;
+                return Err(Failure::Denied.into());
+            }
             let mut session = http::Session::new(client.clone(), config.clone());
             let tools = tokio::select! {
                 biased;
@@ -132,6 +143,11 @@ impl AttemptMcp {
                     session: Arc::new(Mutex::new(session)),
                     resources: config.resources.clone(),
                     tools,
+                    provider_binding: config
+                        .capability
+                        .provider_binding
+                        .clone()
+                        .expect("verified provider binding"),
                 },
             );
             if bytes > MAX_MESSAGE_BYTES / 2 || count > mcp::MAX_TOOLS {
@@ -165,13 +181,10 @@ impl AttemptMcp {
         server: &str,
         tool: &str,
         arguments: &str,
-    ) -> Result<Value, Status> {
-        let server_config = self
-            .servers
-            .get(server)
-            .filter(|config| config.tools.contains_key(tool))
-            .ok_or(Failure::Denied)?;
-        if arguments.len() > ARGUMENT_BYTES {
+    ) -> Result<AdmittedCall, Status> {
+        let server_config = self.servers.get(server).ok_or(Failure::Denied)?;
+        let discovered = server_config.tools.get(tool).ok_or(Failure::Denied)?;
+        if arguments.len() > mcp::MAX_ARGUMENT_BYTES {
             return Err(Failure::InvalidArguments.into());
         }
         // Only the parsed object reaches the provider, so it sees exactly the arguments checked here.
@@ -185,8 +198,16 @@ impl AttemptMcp {
             .get(tool)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        authorize(task, server, tool, mapping, &parsed)?;
-        Ok(parsed)
+        let authority =
+            mcp::authorize(task, server, tool, mapping, &parsed).map_err(|_| Failure::Denied)?;
+        Ok(AdmittedCall {
+            provider_binding: server_config.provider_binding.clone(),
+            tool_schema_sha256: format!(
+                "{:x}",
+                Sha256::digest(discovered.input_schema_json.as_bytes())
+            ),
+            requires_approval: !authority.gates.is_empty(),
+        })
     }
 
     pub(crate) async fn call(
@@ -257,28 +278,6 @@ fn matches<'a>(
         let (name, pattern) = mcp::parse_action(&grant.action)?;
         (name == server && mcp::tool_matches(pattern, tool)).then_some(grant)
     })
-}
-
-fn authorize(
-    task: &Task,
-    server: &str,
-    tool: &str,
-    mapping: &[catalog::ResourceRule],
-    arguments: &Value,
-) -> Result<(), Failure> {
-    let resource = catalog::resource(mapping, arguments).map_err(|_| Failure::Denied)?;
-    let mut allowed = false;
-    for grant in matches(task, server, tool) {
-        let covers = grant.resource.is_empty() || resource.as_deref() == Some(&grant.resource);
-        if grant.approval_required && (covers || resource.is_none()) {
-            return Err(Failure::ApprovalRequired);
-        }
-        allowed |= covers;
-    }
-    if !allowed {
-        return Err(Failure::Denied);
-    }
-    Ok(())
 }
 
 async fn discover(

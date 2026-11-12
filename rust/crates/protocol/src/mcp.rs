@@ -1,10 +1,15 @@
+use prost::Message;
+use serde_json::Value;
+
 use crate::v2::{
-    HarnessExecutionProfile, HarnessKind, McpServerCapability, PermissionSet, PolicyPermission,
-    PolicyPermissionTarget, Task,
+    HarnessExecutionProfile, HarnessKind, McpResourceRule, McpServerCapability, PermissionSet,
+    PolicyPermission, PolicyPermissionTarget, Task,
 };
 
 pub const MAX_SERVERS: usize = 16;
 pub const MAX_TOOLS: usize = 128;
+pub const MAX_ARGUMENT_BYTES: usize = 64 * 1024;
+pub const MAX_RESULT_BYTES: usize = 256 * 1024;
 
 /// The MCP grants frozen when the Control Plane accepted this Task.
 pub fn grants(task: &Task) -> impl Iterator<Item = (&PermissionSet, &PolicyPermission)> {
@@ -79,7 +84,9 @@ pub fn tool_matches(pattern: &str, tool: &str) -> bool {
 }
 
 pub fn normalize_capabilities(servers: &mut [McpServerCapability]) -> bool {
-    if servers.len() > MAX_SERVERS {
+    if servers.len() > MAX_SERVERS
+        || servers.iter().map(Message::encoded_len).sum::<usize>() > 128 * 1024
+    {
         return false;
     }
     for server in servers.iter_mut() {
@@ -91,6 +98,26 @@ pub fn normalize_capabilities(servers: &mut [McpServerCapability]) -> bool {
         }
         server.mapped_tools.sort_unstable();
         server.mapped_tools.dedup();
+        server
+            .resource_bindings
+            .sort_unstable_by(|a, b| a.tool.cmp(&b.tool));
+        if let Some(binding) = &server.provider_binding {
+            if !crate::valid_sha256(binding)
+                || !server.mapped_tools.iter().map(String::as_str).eq(server
+                    .resource_bindings
+                    .iter()
+                    .map(|entry| entry.tool.as_str()))
+                || server.resource_bindings.iter().any(|entry| {
+                    entry.rules.is_empty()
+                        || entry.rules.len() > 16
+                        || entry.rules.iter().any(|rule| !valid_resource_rule(rule))
+                })
+            {
+                return false;
+            }
+        } else if !server.resource_bindings.is_empty() {
+            return false;
+        }
     }
     servers.sort_unstable_by(|left, right| left.name.cmp(&right.name));
     servers.windows(2).all(|pair| pair[0].name != pair[1].name)
@@ -106,6 +133,7 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
         };
         profile.mcp_servers.iter().any(|candidate| {
             candidate.name == server
+                && candidate.provider_binding.is_some()
                 && (grant.resource.is_empty()
                     || candidate
                         .mapped_tools
@@ -113,4 +141,137 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
                         .any(|tool| tool_matches(pattern, tool)))
         })
     })
+}
+
+pub fn selected_servers(
+    task: &Task,
+    profile: &HarnessExecutionProfile,
+) -> Vec<McpServerCapability> {
+    profile
+        .mcp_servers
+        .iter()
+        .filter(|server| {
+            grants(task).any(|(_, grant)| {
+                parse_action(&grant.action).is_some_and(|(name, _)| name == server.name)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn valid_resource_rule(rule: &McpResourceRule) -> bool {
+    let ascii =
+        |value: &str, max| value.len() <= max && value.bytes().all(|c| (33..=126).contains(&c));
+    ascii(&rule.prefix, 64)
+        && ascii(&rule.separator, 8)
+        && !rule.components.is_empty()
+        && rule.components.len() <= 8
+        && rule.components.iter().all(|component| {
+            !component.arguments.is_empty()
+                && component.arguments.len() <= 8
+                && component.arguments.iter().all(|path| valid_path(path))
+        })
+        && rule.when.as_ref().is_none_or(|condition| {
+            valid_path(&condition.argument) && ascii(&condition.equals, 200)
+        })
+}
+
+fn valid_path(path: &str) -> bool {
+    path.len() <= 128
+        && path.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+        })
+}
+
+fn argument_at<'a>(arguments: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.')
+        .try_fold(arguments, |current, part| current.as_object()?.get(part))
+}
+
+fn resolve(rule: &McpResourceRule, arguments: &Value) -> Result<Option<String>, Denied> {
+    if rule.when.as_ref().is_some_and(|condition| {
+        argument_at(arguments, &condition.argument).and_then(Value::as_str)
+            != Some(&condition.equals)
+    }) {
+        return Ok(None);
+    }
+    let mut components = Vec::new();
+    for component in &rule.components {
+        let mut values = component
+            .arguments
+            .iter()
+            .filter_map(|path| argument_at(arguments, path))
+            .filter(|value| !value.is_null());
+        let Some(value) = values.next() else {
+            return Ok(None);
+        };
+        let text = value.as_str().ok_or(Denied)?;
+        if values.any(|alternative| alternative != value)
+            || text.is_empty()
+            || text.len() > 400
+            || !text.bytes().all(|c| (33..=126).contains(&c))
+            || (!rule.separator.is_empty() && text.contains(&rule.separator))
+        {
+            return Err(Denied);
+        }
+        components.push(text);
+    }
+    Ok(Some(format!(
+        "{}{}",
+        rule.prefix,
+        components.join(&rule.separator)
+    )))
+}
+
+#[derive(Debug)]
+pub struct Denied;
+
+pub fn resource(rules: &[McpResourceRule], arguments: &Value) -> Result<Option<String>, Denied> {
+    let mut selected = None;
+    for rule in rules {
+        if let Some(value) = resolve(rule, arguments)? {
+            if selected.as_ref().is_some_and(|prior| prior != &value) {
+                return Err(Denied);
+            }
+            selected = Some(value);
+        }
+    }
+    Ok(selected)
+}
+
+pub struct Authorization<'a> {
+    pub resource: Option<String>,
+    pub gates: Vec<(&'a PermissionSet, &'a PolicyPermission)>,
+}
+
+pub fn authorize<'a>(
+    task: &'a Task,
+    server: &str,
+    tool: &str,
+    mapping: &[McpResourceRule],
+    arguments: &Value,
+) -> Result<Authorization<'a>, Denied> {
+    let resource = resource(mapping, arguments)?;
+    let mut allowed = false;
+    let mut gates = Vec::new();
+    for (set, grant) in grants(task) {
+        let Some((name, pattern)) = parse_action(&grant.action) else {
+            continue;
+        };
+        if name != server || !tool_matches(pattern, tool) {
+            continue;
+        }
+        let covers = grant.resource.is_empty() || resource.as_deref() == Some(&grant.resource);
+        if grant.approval_required && (covers || resource.is_none()) {
+            gates.push((set, grant));
+        }
+        allowed |= covers;
+    }
+    if !allowed {
+        return Err(Denied);
+    }
+    Ok(Authorization { resource, gates })
 }

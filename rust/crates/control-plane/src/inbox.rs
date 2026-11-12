@@ -161,6 +161,7 @@ impl Store {
                     "asking requires work by the owner of an open Objective".into(),
                 )
             })?;
+        crate::mcp_effects::require_no_pending_approval_in(&mut tx, &attempt.attempt_id).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_questions (attempt_id,task_id,objective_id,operation_id,text,asked_at_ms) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(objective_id).bind(&input.operation_id).bind(text).bind(now).execute(&mut *tx).await?;
         let question = question_in(&mut tx, &attempt.task_id, false).await?;

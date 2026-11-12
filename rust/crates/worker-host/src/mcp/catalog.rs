@@ -7,13 +7,20 @@ use std::{
 };
 
 use anyhow::{Result, ensure};
+use prost::Message;
 use reqwest::{
     Url,
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 use serde::Deserialize;
-use serde_json::Value;
-use supertag_protocol::{mcp, v2::McpServerCapability};
+use sha2::{Digest, Sha256};
+use supertag_protocol::{
+    mcp,
+    v2::{
+        McpResourceBinding, McpResourceComponent, McpResourceCondition, McpResourceRule,
+        McpServerCapability,
+    },
+};
 
 const CATALOG_BYTES: u64 = 128 * 1024;
 
@@ -27,7 +34,8 @@ pub struct McpCatalog {
 pub(super) struct Server {
     pub(super) endpoint: Url,
     pub(super) headers: HeaderMap,
-    pub(super) resources: BTreeMap<String, Vec<ResourceRule>>,
+    pub(super) resources: BTreeMap<String, Vec<McpResourceRule>>,
+    pub(super) capability: McpServerCapability,
 }
 
 #[derive(Deserialize)]
@@ -56,7 +64,7 @@ struct ResourceMapping {
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ResourceRule {
+struct ResourceRule {
     #[serde(default)]
     prefix: String,
     #[serde(default)]
@@ -162,17 +170,47 @@ impl McpCatalog {
                 }
                 secrets.insert(value);
             }
-            let resources = server.resources.tools;
+            let resources: BTreeMap<_, Vec<McpResourceRule>> = server
+                .resources
+                .tools
+                .into_iter()
+                .map(|(name, rules)| (name, rules.into_iter().map(Into::into).collect()))
+                .collect();
             ensure!(
                 resources.len() <= mcp::MAX_TOOLS
                     && resources.iter().all(|(tool, rules)| {
                         mcp::tool_name(tool)
                             && !rules.is_empty()
                             && rules.len() <= 16
-                            && rules.iter().all(ResourceRule::valid)
+                            && rules.iter().all(mcp::valid_resource_rule)
                     }),
                 "invalid MCP tool resource mapping"
             );
+            let bindings: Vec<_> = resources
+                .iter()
+                .map(|(tool, rules)| McpResourceBinding {
+                    tool: tool.clone(),
+                    rules: rules.clone(),
+                })
+                .collect();
+            let mut identity = Sha256::new();
+            identity.update(b"supertag-mcp-provider-binding-v1\0");
+            let headers_by_name: BTreeMap<_, _> = headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_bytes()))
+                .collect();
+            identity.update(serde_json::to_vec(&(endpoint.as_str(), headers_by_name))?);
+            for binding in &bindings {
+                let mut frame = Vec::new();
+                binding.encode_length_delimited(&mut frame)?;
+                identity.update(frame);
+            }
+            let capability = McpServerCapability {
+                name: server.name.clone(),
+                mapped_tools: resources.keys().cloned().collect(),
+                provider_binding: Some(format!("{:x}", identity.finalize())),
+                resource_bindings: bindings,
+            };
             ensure!(
                 catalog
                     .servers
@@ -181,7 +219,8 @@ impl McpCatalog {
                         Server {
                             endpoint,
                             headers,
-                            resources
+                            resources,
+                            capability,
                         }
                     )
                     .is_none(),
@@ -192,16 +231,33 @@ impl McpCatalog {
         catalog
             .secrets
             .sort_unstable_by_key(|value| std::cmp::Reverse(value.len()));
+        let private = |value: &str| catalog.secrets.iter().any(|secret| value.contains(secret));
+        ensure!(
+            catalog
+                .servers
+                .values()
+                .flat_map(|server| server.resources.values().flatten())
+                .all(|rule| !private(&rule.prefix)
+                    && !private(&rule.separator)
+                    && !rule
+                        .components
+                        .iter()
+                        .flat_map(|component| &component.arguments)
+                        .any(|path| private(path))
+                    && rule
+                        .when
+                        .as_ref()
+                        .is_none_or(|condition| !private(&condition.argument)
+                            && !private(&condition.equals))),
+            "MCP resource mappings must not contain provider credentials"
+        );
         Ok(catalog)
     }
 
     pub fn capabilities(&self) -> Vec<McpServerCapability> {
         self.servers
-            .iter()
-            .map(|(name, server)| McpServerCapability {
-                name: name.clone(),
-                mapped_tools: server.resources.keys().cloned().collect(),
-            })
+            .values()
+            .map(|server| server.capability.clone())
             .collect()
     }
 }
@@ -267,93 +323,31 @@ fn valid_env(value: &str) -> bool {
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
 }
 
-impl ResourceRule {
-    fn valid(&self) -> bool {
-        let ascii =
-            |value: &str, max| value.len() <= max && value.bytes().all(|c| (33..=126).contains(&c));
-        ascii(&self.prefix, 64)
-            && ascii(&self.separator, 8)
-            && !self.components.is_empty()
-            && self.components.len() <= 8
-            && self.components.iter().all(|component| {
-                !component.arguments.is_empty()
-                    && component.arguments.len() <= 8
-                    && component.arguments.iter().all(|path| valid_path(path))
-            })
-            && self
-                .when
-                .as_ref()
-                .is_none_or(|when| valid_path(&when.argument) && ascii(&when.equals, 200))
-    }
-
-    fn resolve(&self, arguments: &Value) -> Result<Option<String>, ()> {
-        if self.when.as_ref().is_some_and(|when| {
-            argument_at(arguments, &when.argument).and_then(Value::as_str) != Some(&when.equals)
-        }) {
-            return Ok(None);
-        }
-        let mut components = Vec::new();
-        for component in &self.components {
-            let mut values = component
-                .arguments
-                .iter()
-                .filter_map(|path| argument_at(arguments, path))
-                .filter(|value| !value.is_null());
-            let Some(value) = values.next() else {
-                return Ok(None);
-            };
-            let text = value.as_str().ok_or(())?;
-            if values.any(|alternative| alternative != value)
-                || text.is_empty()
-                || text.len() > 400
-                || !text.bytes().all(|c| (33..=126).contains(&c))
-                || (!self.separator.is_empty() && text.contains(&self.separator))
-            {
-                return Err(());
-            }
-            components.push(text);
-        }
-        Ok(Some(format!(
-            "{}{}",
-            self.prefix,
-            components.join(&self.separator)
-        )))
-    }
-}
-
-fn valid_path(path: &str) -> bool {
-    path.len() <= 128
-        && path.split('.').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
-        })
-}
-
-fn argument_at<'a>(arguments: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.')
-        .try_fold(arguments, |current, part| current.as_object()?.get(part))
-}
-
-pub(super) fn resource(rules: &[ResourceRule], arguments: &Value) -> Result<Option<String>, ()> {
-    let mut selected = None;
-    for rule in rules {
-        if let Some(value) = rule.resolve(arguments)? {
-            if selected.as_ref().is_some_and(|prior| prior != &value) {
-                return Err(());
-            }
-            selected = Some(value);
+impl From<ResourceRule> for McpResourceRule {
+    fn from(rule: ResourceRule) -> Self {
+        Self {
+            prefix: rule.prefix,
+            separator: rule.separator,
+            components: rule
+                .components
+                .into_iter()
+                .map(|component| McpResourceComponent {
+                    arguments: component.arguments,
+                })
+                .collect(),
+            when: rule.when.map(|condition| McpResourceCondition {
+                argument: condition.argument,
+                equals: condition.equals,
+            }),
         }
     }
-    Ok(selected)
 }
 
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs::PermissionsExt};
 
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
 
@@ -368,6 +362,14 @@ mod tests {
         let parse = |value: &Value| McpCatalog::parse(value.to_string().as_bytes(), environment);
         let catalog = parse(&valid).unwrap();
         assert_eq!(catalog.capabilities()[0].name, "catalog");
+        let changed = McpCatalog::parse(valid.to_string().as_bytes(), |_| {
+            Some("Bearer another-fixture-secret".into())
+        })
+        .unwrap();
+        assert_ne!(
+            catalog.capabilities()[0].provider_binding,
+            changed.capabilities()[0].provider_binding
+        );
         assert!(
             catalog
                 .secrets

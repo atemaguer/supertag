@@ -86,6 +86,7 @@ impl Store {
                 "a Work Session question requires a live running Attempt".into(),
             ));
         }
+        crate::mcp_effects::require_no_pending_approval_in(&mut tx, &attempt.attempt_id).await?;
         let row = sqlx::query(
             "INSERT INTO supertag_v2_work_session_questions
              (attempt_id,task_id,work_session_id,operation_id,text,asked_at_ms)
