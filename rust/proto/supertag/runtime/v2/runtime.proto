@@ -10,12 +10,27 @@ service Operator {
   rpc GetTask(GetTaskRequest) returns (Task);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
+  rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
+}
+
+service Objectives {
+  rpc CreateObjective(CreateObjectiveRequest) returns (Objective);
+  rpc GetObjective(GetObjectiveRequest) returns (Objective);
+  rpc ListObjectives(ListObjectivesRequest) returns (ListObjectivesResponse);
+  rpc SetLimits(SetObjectiveLimitsRequest) returns (Objective);
+  rpc PauseObjective(ObjectiveActionRequest) returns (Objective);
+  rpc ResumeObjective(ObjectiveActionRequest) returns (Objective);
+  rpc CancelObjective(ObjectiveActionRequest) returns (Objective);
+  rpc ReviewObjective(ReviewObjectiveRequest) returns (Objective);
 }
 
 service WorkerHost {
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
+  rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
+  rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
+  rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
   rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
   rpc FinishTask(FinishTaskRequest) returns (Task);
 }
@@ -44,6 +59,7 @@ enum TaskState {
   TASK_STATE_FAILED = 4;
   TASK_STATE_CANCELLED = 5;
   TASK_STATE_CLAIMED = 6;
+  TASK_STATE_UNCERTAIN = 7;
 }
 
 message PutTagRequest {
@@ -123,6 +139,49 @@ message InspectAttemptRequest {
   string lease_token = 3;
 }
 
+message AttemptAuthority {
+  Task task = 1;
+  uint64 valid_for_ms = 2;
+}
+
+enum AttemptDecision {
+  ATTEMPT_DECISION_UNSPECIFIED = 0;
+  ATTEMPT_DECISION_FAILED = 1;
+  ATTEMPT_DECISION_RETRY = 2;
+}
+
+message ResolveAttemptRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string operation_id = 3;
+  AttemptDecision decision = 4;
+  string evidence = 5;
+  bool confirmed_stopped = 6;
+}
+
+message AttemptResolution {
+  string task_id = 1;
+  string attempt_id = 2;
+  AttemptDecision decision = 3;
+  string operator_id = 4;
+  string evidence = 5;
+  int64 resolved_at_ms = 6;
+}
+
+message GetAttemptResolutionResponse {
+  AttemptResolution resolution = 1;
+}
+
+message ReportAttemptUsageRequest {
+  InspectAttemptRequest attempt = 1;
+  uint64 sequence = 2;
+  optional uint64 amount_minor = 3;
+  optional string currency = 4;
+  bool estimated = 5;
+}
+
+message ReportAttemptUsageResponse {}
+
 message AppendEventRequest {
   string task_id = 1;
   string attempt_id = 2;
@@ -142,6 +201,7 @@ message FinishTaskRequest {
   string lease_token = 3;
   string result = 4;
   bool succeeded = 5;
+  ObjectiveSignal objective_signal = 6;
 }
 
 message HarnessAttachRequest {}
@@ -164,9 +224,91 @@ message HarnessPublishRequest {
 message HarnessCompleteRequest {
   string result = 1;
   bool succeeded = 2;
+  ObjectiveSignal objective_signal = 3;
 }
 
 message HarnessCompleteResponse {}
+
+enum ObjectiveStatus {
+  OBJECTIVE_STATUS_UNSPECIFIED = 0;
+  OBJECTIVE_STATUS_WORKING = 1;
+  OBJECTIVE_STATUS_BLOCKED = 2;
+  OBJECTIVE_STATUS_LIMITED = 3;
+  OBJECTIVE_STATUS_READY_FOR_REVIEW = 4;
+  OBJECTIVE_STATUS_COMPLETED = 5;
+  OBJECTIVE_STATUS_CANCELLED = 6;
+}
+
+enum ObjectiveSignal {
+  OBJECTIVE_SIGNAL_PROGRESS = 0;
+  OBJECTIVE_SIGNAL_READY_FOR_REVIEW = 1;
+  OBJECTIVE_SIGNAL_COMPLETED = 2;
+  OBJECTIVE_SIGNAL_BLOCKED = 3;
+}
+
+message CreateObjectiveRequest {
+  string operation_id = 1;
+  string objective_id = 2;
+  string owner_tag_id = 3;
+  string outcome = 4;
+  bool ongoing = 5;
+  optional int64 deadline_ms = 6;
+  optional uint64 budget_limit_minor = 7;
+  optional string budget_currency = 8;
+}
+
+message Objective {
+  string objective_id = 1;
+  string owner_tag_id = 2;
+  string session_id = 3;
+  string outcome = 4;
+  bool ongoing = 5;
+  string starting_task_id = 6;
+  ObjectiveStatus status = 7;
+  uint64 revision = 8;
+  optional int64 deadline_ms = 9;
+  optional uint64 budget_limit_minor = 10;
+  optional string budget_currency = 11;
+  optional int64 paused_at_ms = 12;
+  optional uint64 reported_spend_minor = 13;
+}
+
+message GetObjectiveRequest {
+  string objective_id = 1;
+}
+
+message ListObjectivesRequest {
+  uint32 limit = 1;
+  string after_id = 2;
+}
+
+message ListObjectivesResponse {
+  repeated Objective objectives = 1;
+}
+
+message SetObjectiveLimitsRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  optional int64 deadline_ms = 3;
+  bool clear_deadline = 4;
+  optional uint64 budget_limit_minor = 5;
+  optional string budget_currency = 6;
+  bool clear_budget = 7;
+  optional uint64 expected_revision = 8;
+}
+
+message ObjectiveActionRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  string reason = 3;
+}
+
+message ReviewObjectiveRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  bool approved = 3;
+  string feedback = 4;
+}
 
 message ReplyDestination {
   string conversation_id = 1;

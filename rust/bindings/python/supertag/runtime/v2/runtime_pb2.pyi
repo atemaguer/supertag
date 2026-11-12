@@ -16,6 +16,30 @@ class TaskState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TASK_STATE_FAILED: _ClassVar[TaskState]
     TASK_STATE_CANCELLED: _ClassVar[TaskState]
     TASK_STATE_CLAIMED: _ClassVar[TaskState]
+    TASK_STATE_UNCERTAIN: _ClassVar[TaskState]
+
+class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ATTEMPT_DECISION_UNSPECIFIED: _ClassVar[AttemptDecision]
+    ATTEMPT_DECISION_FAILED: _ClassVar[AttemptDecision]
+    ATTEMPT_DECISION_RETRY: _ClassVar[AttemptDecision]
+
+class ObjectiveStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OBJECTIVE_STATUS_UNSPECIFIED: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_WORKING: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_BLOCKED: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_LIMITED: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_READY_FOR_REVIEW: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_COMPLETED: _ClassVar[ObjectiveStatus]
+    OBJECTIVE_STATUS_CANCELLED: _ClassVar[ObjectiveStatus]
+
+class ObjectiveSignal(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OBJECTIVE_SIGNAL_PROGRESS: _ClassVar[ObjectiveSignal]
+    OBJECTIVE_SIGNAL_READY_FOR_REVIEW: _ClassVar[ObjectiveSignal]
+    OBJECTIVE_SIGNAL_COMPLETED: _ClassVar[ObjectiveSignal]
+    OBJECTIVE_SIGNAL_BLOCKED: _ClassVar[ObjectiveSignal]
 
 class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -32,6 +56,21 @@ TASK_STATE_SUCCEEDED: TaskState
 TASK_STATE_FAILED: TaskState
 TASK_STATE_CANCELLED: TaskState
 TASK_STATE_CLAIMED: TaskState
+TASK_STATE_UNCERTAIN: TaskState
+ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
+ATTEMPT_DECISION_FAILED: AttemptDecision
+ATTEMPT_DECISION_RETRY: AttemptDecision
+OBJECTIVE_STATUS_UNSPECIFIED: ObjectiveStatus
+OBJECTIVE_STATUS_WORKING: ObjectiveStatus
+OBJECTIVE_STATUS_BLOCKED: ObjectiveStatus
+OBJECTIVE_STATUS_LIMITED: ObjectiveStatus
+OBJECTIVE_STATUS_READY_FOR_REVIEW: ObjectiveStatus
+OBJECTIVE_STATUS_COMPLETED: ObjectiveStatus
+OBJECTIVE_STATUS_CANCELLED: ObjectiveStatus
+OBJECTIVE_SIGNAL_PROGRESS: ObjectiveSignal
+OBJECTIVE_SIGNAL_READY_FOR_REVIEW: ObjectiveSignal
+OBJECTIVE_SIGNAL_COMPLETED: ObjectiveSignal
+OBJECTIVE_SIGNAL_BLOCKED: ObjectiveSignal
 REPLY_STATE_UNSPECIFIED: ReplyState
 REPLY_STATE_PENDING: ReplyState
 REPLY_STATE_CLAIMED: ReplyState
@@ -167,6 +206,70 @@ class InspectAttemptRequest(_message.Message):
     lease_token: str
     def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
 
+class AttemptAuthority(_message.Message):
+    __slots__ = ("task", "valid_for_ms")
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    valid_for_ms: int
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., valid_for_ms: _Optional[int] = ...) -> None: ...
+
+class ResolveAttemptRequest(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "operation_id", "decision", "evidence", "confirmed_stopped")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMED_STOPPED_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    operation_id: str
+    decision: AttemptDecision
+    evidence: str
+    confirmed_stopped: bool
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., evidence: _Optional[str] = ..., confirmed_stopped: _Optional[bool] = ...) -> None: ...
+
+class AttemptResolution(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "decision", "operator_id", "evidence", "resolved_at_ms")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_ID_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    RESOLVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    decision: AttemptDecision
+    operator_id: str
+    evidence: str
+    resolved_at_ms: int
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., operator_id: _Optional[str] = ..., evidence: _Optional[str] = ..., resolved_at_ms: _Optional[int] = ...) -> None: ...
+
+class GetAttemptResolutionResponse(_message.Message):
+    __slots__ = ("resolution",)
+    RESOLUTION_FIELD_NUMBER: _ClassVar[int]
+    resolution: AttemptResolution
+    def __init__(self, resolution: _Optional[_Union[AttemptResolution, _Mapping]] = ...) -> None: ...
+
+class ReportAttemptUsageRequest(_message.Message):
+    __slots__ = ("attempt", "sequence", "amount_minor", "currency", "estimated")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    ESTIMATED_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    sequence: int
+    amount_minor: int
+    currency: str
+    estimated: bool
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., sequence: _Optional[int] = ..., amount_minor: _Optional[int] = ..., currency: _Optional[str] = ..., estimated: _Optional[bool] = ...) -> None: ...
+
+class ReportAttemptUsageResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class AppendEventRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "lease_token", "sequence", "text")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
@@ -190,18 +293,20 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
     result: str
     succeeded: bool
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ...) -> None: ...
+    objective_signal: ObjectiveSignal
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()
@@ -232,16 +337,130 @@ class HarnessPublishRequest(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class HarnessCompleteRequest(_message.Message):
-    __slots__ = ("result", "succeeded")
+    __slots__ = ("result", "succeeded", "objective_signal")
     RESULT_FIELD_NUMBER: _ClassVar[int]
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     result: str
     succeeded: bool
-    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ...) -> None: ...
+    objective_signal: ObjectiveSignal
+    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ...) -> None: ...
 
 class HarnessCompleteResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class CreateObjectiveRequest(_message.Message):
+    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    ONGOING_FIELD_NUMBER: _ClassVar[int]
+    DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    objective_id: str
+    owner_tag_id: str
+    outcome: str
+    ongoing: bool
+    deadline_ms: int
+    budget_limit_minor: int
+    budget_currency: str
+    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ...) -> None: ...
+
+class Objective(_message.Message):
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    ONGOING_FIELD_NUMBER: _ClassVar[int]
+    STARTING_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    PAUSED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    REPORTED_SPEND_MINOR_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    owner_tag_id: str
+    session_id: str
+    outcome: str
+    ongoing: bool
+    starting_task_id: str
+    status: ObjectiveStatus
+    revision: int
+    deadline_ms: int
+    budget_limit_minor: int
+    budget_currency: str
+    paused_at_ms: int
+    reported_spend_minor: int
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ...) -> None: ...
+
+class GetObjectiveRequest(_message.Message):
+    __slots__ = ("objective_id",)
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    def __init__(self, objective_id: _Optional[str] = ...) -> None: ...
+
+class ListObjectivesRequest(_message.Message):
+    __slots__ = ("limit", "after_id")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    AFTER_ID_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    after_id: str
+    def __init__(self, limit: _Optional[int] = ..., after_id: _Optional[str] = ...) -> None: ...
+
+class ListObjectivesResponse(_message.Message):
+    __slots__ = ("objectives",)
+    OBJECTIVES_FIELD_NUMBER: _ClassVar[int]
+    objectives: _containers.RepeatedCompositeFieldContainer[Objective]
+    def __init__(self, objectives: _Optional[_Iterable[_Union[Objective, _Mapping]]] = ...) -> None: ...
+
+class SetObjectiveLimitsRequest(_message.Message):
+    __slots__ = ("objective_id", "operation_id", "deadline_ms", "clear_deadline", "budget_limit_minor", "budget_currency", "clear_budget", "expected_revision")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
+    CLEAR_DEADLINE_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    CLEAR_BUDGET_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    operation_id: str
+    deadline_ms: int
+    clear_deadline: bool
+    budget_limit_minor: int
+    budget_currency: str
+    clear_budget: bool
+    expected_revision: int
+    def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., deadline_ms: _Optional[int] = ..., clear_deadline: _Optional[bool] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., clear_budget: _Optional[bool] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class ObjectiveActionRequest(_message.Message):
+    __slots__ = ("objective_id", "operation_id", "reason")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    operation_id: str
+    reason: str
+    def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class ReviewObjectiveRequest(_message.Message):
+    __slots__ = ("objective_id", "operation_id", "approved", "feedback")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_FIELD_NUMBER: _ClassVar[int]
+    FEEDBACK_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    operation_id: str
+    approved: bool
+    feedback: str
+    def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., approved: _Optional[bool] = ..., feedback: _Optional[str] = ...) -> None: ...
 
 class ReplyDestination(_message.Message):
     __slots__ = ("conversation_id", "thread_id")

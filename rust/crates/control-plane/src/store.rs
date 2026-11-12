@@ -4,7 +4,10 @@
 //! this first slice's mutations, including across multiple service instances. A
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
-use std::{str::FromStr, time::Duration};
+mod authority;
+pub(crate) use authority::lease_is_live;
+
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use sha2::{Digest, Sha256};
 use sqlx::{
@@ -36,15 +39,17 @@ pub enum StoreError {
     Data(#[from] serde_json::Error),
 }
 
-type Result<T> = std::result::Result<T, StoreError>;
+pub(crate) type Result<T> = std::result::Result<T, StoreError>;
 
 #[derive(Clone)]
 pub struct Store {
-    pool: AnyPool,
+    pub(crate) pool: AnyPool,
+    execution_clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
 }
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
+        const SCHEMA_VERSION: i64 = 4;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -82,7 +87,7 @@ impl Store {
             let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
                 .fetch_all(&pool)
                 .await?;
-            if versions != [1] && versions != [2] {
+            if !matches!(versions.as_slice(), [version] if (1..=SCHEMA_VERSION).contains(version)) {
                 pool.close().await;
                 anyhow::bail!("unsupported Rust database schema");
             }
@@ -93,36 +98,46 @@ impl Store {
         } else {
             0
         };
-        let initial = if sqlite {
-            include_str!("../migrations/sqlite/0001_initial.sql")
+        let migrations = if sqlite {
+            [
+                include_str!("../migrations/sqlite/0001_initial.sql"),
+                include_str!("../migrations/sqlite/0002_connector_outbox.sql"),
+                include_str!("../migrations/sqlite/0003_execution_authority.sql"),
+                include_str!("../migrations/sqlite/0004_objectives.sql"),
+            ]
         } else {
-            include_str!("../migrations/postgresql/0001_initial.sql")
+            [
+                include_str!("../migrations/postgresql/0001_initial.sql"),
+                include_str!("../migrations/postgresql/0002_connector_outbox.sql"),
+                include_str!("../migrations/postgresql/0003_execution_authority.sql"),
+                include_str!("../migrations/postgresql/0004_objectives.sql"),
+            ]
         };
-        let connector = if sqlite {
-            include_str!("../migrations/sqlite/0002_connector_outbox.sql")
-        } else {
-            include_str!("../migrations/postgresql/0002_connector_outbox.sql")
-        };
-        if version < 2 {
+        if version < SCHEMA_VERSION {
             let mut transaction = pool.begin().await?;
-            if version == 0 {
-                sqlx::raw_sql(initial).execute(&mut *transaction).await?;
+            for migration in &migrations[version as usize..] {
+                sqlx::raw_sql(migration).execute(&mut *transaction).await?;
             }
-            sqlx::raw_sql(connector).execute(&mut *transaction).await?;
             transaction.commit().await?;
         }
         let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
             .fetch_all(&pool)
             .await?;
-        anyhow::ensure!(versions == [2], "unsupported Rust database schema");
-        Ok(Self { pool })
+        anyhow::ensure!(
+            versions == [SCHEMA_VERSION],
+            "unsupported Rust database schema"
+        );
+        Ok(Self {
+            pool,
+            execution_clock: None,
+        })
     }
 
     pub async fn close(&self) {
         self.pool.close().await;
     }
 
-    async fn write(&self) -> Result<(Transaction<'_, Any>, i64)> {
+    pub(crate) async fn write(&self) -> Result<(Transaction<'_, Any>, i64)> {
         let mut transaction = self.pool.begin().await?;
         // PostgreSQL takes a row lock; SQLite takes its write lock before any reads.
         let order: i64 = sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision = revision + 1 WHERE singleton = 1 RETURNING revision")
@@ -186,6 +201,13 @@ impl Store {
             transaction.commit().await?;
             return Ok(task);
         }
+        crate::objectives::objective_admission_in(
+            &mut transaction,
+            &input.tag_id,
+            &input.session_id,
+            self.execution_now_ms(),
+        )
+        .await?;
         let task = insert_task(
             &mut transaction,
             order,
@@ -194,6 +216,7 @@ impl Store {
             &input.prompt,
         )
         .await?;
+        crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
         let id = &task.task_id;
         sqlx::query("INSERT INTO supertag_v2_admissions (principal, operation_id, request_digest, task_id) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(id).execute(&mut *transaction).await?;
@@ -241,48 +264,53 @@ impl Store {
         name("principal", principal)?;
         name("operation ID", operation_id)?;
         let (mut transaction, _) = self.write().await?;
+        let now = self.execution_now_ms();
+        authority::expire_due_attempts(&mut transaction, now).await?;
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         let prior = sqlx::query("SELECT task_id, attempt_id, lease_token FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let id: Option<String> = prior.try_get("task_id")?;
             let assignment = match id {
-                Some(id) => Some(Assignment {
-                    task: Some(task_in(&mut transaction, &id).await?),
-                    attempt_id: prior.try_get("attempt_id")?,
-                    lease_token: prior.try_get("lease_token")?,
-                }),
+                Some(id) => {
+                    let task = task_in(&mut transaction, &id).await?;
+                    let attempt_id: String = prior.try_get("attempt_id")?;
+                    if task.attempt_id.as_deref() == Some(attempt_id.as_str())
+                        && matches!(task.state(), TaskState::Claimed | TaskState::Running)
+                    {
+                        Some(Assignment {
+                            task: Some(task),
+                            attempt_id,
+                            lease_token: prior.try_get("lease_token")?,
+                        })
+                    } else {
+                        None
+                    }
+                }
                 None => None,
             };
             transaction.commit().await?;
             return Ok(assignment);
         }
-        let id: Option<String> = sqlx::query_scalar("SELECT pending.task_id FROM supertag_v2_tasks pending WHERE pending.state = $1 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state = $2 OR active.state = $3 OR active.cleanup_pending = 1)) ORDER BY pending.accepted_order LIMIT 1")
-            .bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64).bind(TaskState::Running as i64).fetch_optional(&mut *transaction).await?;
-        if id.is_none() {
-            // An empty poll has no durable effect. Its operation ID can be used again.
-            transaction.rollback().await?;
+        let Some(id) = authority::claim_candidate(&mut transaction, now).await? else {
+            // Commit maintenance transitions. An empty poll retains no claim receipt.
+            transaction.commit().await?;
             return Ok(None);
-        }
-        let (attempt, lease) = (
-            Some(Uuid::new_v4().to_string()),
-            Some(Uuid::new_v4().to_string()),
-        );
-        if let Some(id) = &id {
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, lease_token = $4 WHERE task_id = $5")
-                .bind(TaskState::Claimed as i64).bind(&attempt).bind(principal).bind(&lease).bind(id).execute(&mut *transaction).await?;
-        }
+        };
+        let attempt = Uuid::new_v4().to_string();
+        let lease = Uuid::new_v4().to_string();
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, lease_token = $4, lease_expires_at_ms = $5, event_sequence_base = next_sequence - 1 WHERE task_id = $6")
+            .bind(TaskState::Claimed as i64).bind(&attempt).bind(principal).bind(&lease)
+            .bind(authority::lease_deadline(now)).bind(&id).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token) VALUES ($1,$2,$3,$4,$5)")
             .bind(principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).execute(&mut *transaction).await?;
-        let assignment = match id {
-            Some(id) => Some(Assignment {
-                task: Some(task_in(&mut transaction, &id).await?),
-                attempt_id: attempt.expect("claimed attempt"),
-                lease_token: lease.expect("claimed lease"),
-            }),
-            None => None,
-        };
+        let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
-        Ok(assignment)
+        Ok(Some(Assignment {
+            task: Some(task),
+            attempt_id: attempt,
+            lease_token: lease,
+        }))
     }
 
     pub async fn inspect_attempt(
@@ -308,6 +336,8 @@ impl Store {
 
     pub async fn start_task(&self, principal: &str, input: &StartTaskRequest) -> Result<Task> {
         let (mut transaction, _) = self.write().await?;
+        let now = self.execution_now_ms();
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         let row = owned(
             &mut transaction,
             principal,
@@ -318,18 +348,50 @@ impl Store {
         .await?;
         let state = row.try_get::<i64, _>("state")?;
         if state != TaskState::Claimed as i64 && state != TaskState::Running as i64 {
+            transaction.commit().await?;
             return Err(StoreError::FailedPrecondition(
                 "Task is no longer eligible to start".into(),
             ));
         }
-        sqlx::query(
-            "UPDATE supertag_v2_tasks SET state = $1, cleanup_pending = 1 WHERE task_id = $2",
-        )
-        .bind(TaskState::Running as i64)
-        .bind(&input.task_id)
-        .execute(&mut *transaction)
-        .await?;
+        if !lease_is_live(&row, now)? {
+            return Err(StoreError::FailedPrecondition(
+                "execution lease expired".into(),
+            ));
+        }
+        if state == TaskState::Claimed as i64 {
+            if !crate::objectives::objective_task_can_start_in(
+                &mut transaction,
+                &task_row(&row)?,
+                now,
+            )
+            .await?
+            {
+                // This reservation never authorized native execution. Retire it
+                // immediately so a paused Objective cannot occupy its host until
+                // lease expiry. Its durable claim receipt remains bound to the old
+                // Attempt and cannot acquire the replacement reservation.
+                sqlx::query("UPDATE supertag_v2_tasks SET state=$1, attempt_id=NULL, host_principal=NULL, lease_token=NULL, lease_expires_at_ms=NULL, event_sequence_base=0 WHERE task_id=$2")
+                    .bind(TaskState::Queued as i64).bind(&input.task_id)
+                    .execute(&mut *transaction).await?;
+                transaction.commit().await?;
+                return Err(StoreError::FailedPrecondition(
+                    "Objective does not allow this Task to start".into(),
+                ));
+            }
+            let deadline = crate::objectives::objective_lease_deadline_in(
+                &mut transaction,
+                &task_row(&row)?,
+                authority::lease_deadline(now),
+            )
+            .await?;
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, cleanup_pending = 1, cleanup_observed = 0, lease_expires_at_ms = $2 WHERE task_id = $3")
+                .bind(TaskState::Running as i64).bind(deadline).bind(&input.task_id)
+                .execute(&mut *transaction).await?;
+        }
         let task = task_in(&mut transaction, &input.task_id).await?;
+        if state == TaskState::Claimed as i64 {
+            crate::objectives::objective_started_in(&mut transaction, &task).await?;
+        }
         transaction.commit().await?;
         Ok(task)
     }
@@ -354,6 +416,10 @@ impl Store {
             &input.lease_token,
         )
         .await?;
+        let sequence = row
+            .try_get::<i64, _>("event_sequence_base")?
+            .checked_add(sequence)
+            .ok_or_else(|| invalid("event sequence is too large"))?;
         let prior: Option<String> = sqlx::query_scalar(
             "SELECT text FROM supertag_v2_task_events WHERE task_id = $1 AND sequence = $2",
         )
@@ -370,6 +436,11 @@ impl Store {
         } else {
             if row.try_get::<i64, _>("state")? != TaskState::Running as i64 {
                 return Err(StoreError::FailedPrecondition("Task is not running".into()));
+            }
+            if !lease_is_live(&row, self.execution_now_ms())? {
+                return Err(StoreError::FailedPrecondition(
+                    "execution lease expired".into(),
+                ));
             }
             if row.try_get::<i64, _>("next_sequence")? != sequence {
                 return Err(StoreError::FailedPrecondition(
@@ -409,38 +480,68 @@ impl Store {
             &input.lease_token,
         )
         .await?;
-        let state = row.try_get::<i64, _>("state")?;
+        let now = self.execution_now_ms();
+        let mut state = task_row(&row)?.state();
+        if state == TaskState::Running {
+            crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+            state = task_in(&mut transaction, &input.task_id).await?.state();
+        }
+        if state == TaskState::Running && !lease_is_live(&row, now)? {
+            authority::mark_uncertain(&mut transaction, &input.task_id).await?;
+            state = TaskState::Uncertain;
+        }
         let desired = if input.succeeded {
             TaskState::Succeeded
         } else {
             TaskState::Failed
-        } as i64;
-        if state == TaskState::Cancelled as i64 {
+        };
+        if state == TaskState::Cancelled {
             // Finish is also the host's receipt that execution has stopped. Cancellation
             // remains authoritative; a late outcome cannot replace it.
-            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending = 0 WHERE task_id = $1")
+            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending = 0, cleanup_observed = 1 WHERE task_id = $1")
                 .bind(&input.task_id)
                 .execute(&mut *transaction)
                 .await?;
-        } else if state == TaskState::Succeeded as i64 || state == TaskState::Failed as i64 {
+        } else if state == TaskState::Uncertain {
+            // The host can confirm cleanup after its execution authority expired.
+            // The recovery decision remains with the operator.
+            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_observed = 1 WHERE task_id = $1")
+                .bind(&input.task_id)
+                .execute(&mut *transaction)
+                .await?;
+        } else if matches!(state, TaskState::Succeeded | TaskState::Failed) {
             if state != desired
                 || row.try_get::<Option<String>, _>("result")?.as_deref()
                     != Some(input.result.as_str())
+                || row.try_get::<i64, _>("finish_objective_signal")?
+                    != i64::from(input.objective_signal)
             {
                 return Err(StoreError::Conflict(
                     "Task already has a different outcome".into(),
                 ));
             }
         } else {
-            if state != TaskState::Running as i64 {
+            if state != TaskState::Running {
                 return Err(StoreError::FailedPrecondition("Task is not running".into()));
             }
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0 WHERE task_id = $3").bind(desired).bind(&input.result).bind(&input.task_id).execute(&mut *transaction).await?;
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, finish_objective_signal = $3 WHERE task_id = $4")
+                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.task_id)
+                .execute(&mut *transaction).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;
+        if state == TaskState::Running && task.state() == TaskState::Succeeded {
+            crate::objectives::objective_finish_in(
+                &mut transaction,
+                &task,
+                input.objective_signal,
+                now,
+            )
+            .await?;
+        }
         if task.state == TaskState::Succeeded as i32 {
             enqueue_reply(&mut transaction, &task, order).await?;
         }
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         transaction.commit().await?;
         Ok(task)
     }
@@ -485,6 +586,13 @@ impl Store {
             transaction.commit().await?;
             return Ok(task);
         }
+        crate::objectives::objective_admission_in(
+            &mut transaction,
+            &input.tag_id,
+            &input.session_id,
+            self.execution_now_ms(),
+        )
+        .await?;
         let task = insert_task(
             &mut transaction,
             order,
@@ -493,6 +601,7 @@ impl Store {
             &input.prompt,
         )
         .await?;
+        crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
         sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id, event_id, request_digest, task_id, conversation_id, thread_id) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(account).bind(&input.event_id).bind(digest).bind(&task.task_id).bind(&destination.conversation_id).bind(&destination.thread_id)
             .execute(&mut *transaction).await?;
@@ -610,7 +719,7 @@ impl Store {
     }
 }
 
-async fn insert_task(
+pub(crate) async fn insert_task(
     transaction: &mut Transaction<'_, Any>,
     order: i64,
     tag_id: &str,
@@ -691,7 +800,7 @@ fn reply_row(row: &AnyRow) -> Result<Reply> {
     })
 }
 
-async fn task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Task> {
+pub(crate) async fn task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Task> {
     let row = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id = $1")
         .bind(id)
         .fetch_optional(&mut **transaction)
@@ -700,7 +809,7 @@ async fn task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Tas
     task_row(&row)
 }
 
-async fn owned(
+pub(crate) async fn owned(
     transaction: &mut Transaction<'_, Any>,
     principal: &str,
     task_id: &str,
@@ -743,11 +852,11 @@ fn task_row(row: &AnyRow) -> Result<Task> {
     })
 }
 
-fn invalid(message: &str) -> StoreError {
+pub(crate) fn invalid(message: &str) -> StoreError {
     StoreError::InvalidArgument(message.into())
 }
 
-fn name(kind: &str, value: &str) -> Result<()> {
+pub(crate) fn name(kind: &str, value: &str) -> Result<()> {
     if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         return Err(invalid(&format!(
             "{kind} must contain 1–256 bytes without control characters"
@@ -756,7 +865,7 @@ fn name(kind: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {
+pub(crate) fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {
     if value.len() > maximum {
         return Err(invalid(&format!("{kind} exceeds its size limit")));
     }

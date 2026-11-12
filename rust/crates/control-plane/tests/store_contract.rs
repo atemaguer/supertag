@@ -121,6 +121,7 @@ async fn contract(store: &Store) {
         lease_token: start.lease_token.clone(),
         result: "Review complete".into(),
         succeeded: true,
+        objective_signal: 0,
     };
     let completed = store.finish_task(owner, &finish).await.unwrap();
     assert_eq!(completed.state, TaskState::Succeeded as i32);
@@ -195,6 +196,7 @@ async fn contract(store: &Store) {
         lease_token: start.lease_token,
         result: "late success".into(),
         succeeded: true,
+        objective_signal: 0,
     };
     let cancelled = store.finish_task("host:cleanup", &finish).await.unwrap();
     assert_eq!(cancelled.state, TaskState::Cancelled as i32);
@@ -235,6 +237,7 @@ async fn contract(store: &Store) {
             lease_token: start.lease_token,
             result: "done".into(),
             succeeded: true,
+            objective_signal: 0,
         };
         let (cancel, complete) = tokio::join!(
             store.cancel_task(&task.task_id),

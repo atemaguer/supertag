@@ -10,14 +10,30 @@
 use std::{collections::BTreeMap, fmt};
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use serde::{Deserialize, Serialize};
 
 pub const MINUTE_MS: i64 = 60_000;
 pub const BUDGET_WARNING_FRACTION: f64 = 0.8;
 pub const DEADLINE_GRACE_MS: i64 = 15 * MINUTE_MS;
 
 /// A validated UTC timestamp at the millisecond precision used by Objective notices.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "i64", into = "i64")]
 pub struct Timestamp(i64);
+
+impl TryFrom<i64> for Timestamp {
+    type Error = &'static str;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Self::from_millis(value).ok_or("timestamp is outside the supported range")
+    }
+}
+
+impl From<Timestamp> for i64 {
+    fn from(value: Timestamp) -> Self {
+        value.0
+    }
+}
 
 impl Timestamp {
     pub fn from_millis(value: i64) -> Option<Self> {
@@ -62,7 +78,8 @@ pub struct ObjectiveLimits {
     pub state: LimitState,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LimitState {
     pub summary: Option<Summary>,
     pub reported_spend: Option<SpendObservation>,
@@ -73,13 +90,13 @@ pub struct LimitState {
     pub deadline_passed: Option<DeadlineObservation>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Summary {
     pub text: String,
     pub at: Timestamp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportedSpend {
     pub amount_minor: u64,
     pub currency: String,
@@ -87,13 +104,13 @@ pub struct ReportedSpend {
     pub estimated_cost_attempts: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpendObservation {
     pub spend: ReportedSpend,
     pub observed_at: Timestamp,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BudgetWarning {
     pub fraction: f64,
     pub limit_minor: u64,
@@ -101,20 +118,20 @@ pub struct BudgetWarning {
     pub at: Timestamp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BudgetObservation {
     pub limit_minor: u64,
     pub spent_minor: u64,
     pub at: Timestamp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeadlineObservation {
     pub deadline: Timestamp,
     pub at: Timestamp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeadlineWarning {
     pub minutes_before: i64,
     pub deadline: Timestamp,

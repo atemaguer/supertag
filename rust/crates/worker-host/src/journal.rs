@@ -9,22 +9,34 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct Attempt {
+    pub task_id: String,
+    pub attempt_id: String,
+    pub lease_token: String,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub(crate) enum Entry {
     Claim {
         operation_id: String,
     },
+    Starting {
+        #[serde(flatten)]
+        attempt: Attempt,
+    },
     Executing {
-        task_id: String,
-        attempt_id: String,
+        #[serde(flatten)]
+        attempt: Attempt,
     },
     Finish {
-        task_id: String,
-        attempt_id: String,
-        lease_token: String,
+        #[serde(flatten)]
+        attempt: Attempt,
         result: String,
         succeeded: bool,
+        #[serde(default)]
+        objective_signal: i32,
     },
 }
 
@@ -102,15 +114,18 @@ mod tests {
             operation_id: "claim".into(),
         })?;
         journal.save(&Entry::Executing {
-            task_id: "task".into(),
-            attempt_id: "attempt".into(),
+            attempt: Attempt {
+                task_id: "task".into(),
+                attempt_id: "attempt".into(),
+                lease_token: "lease".into(),
+            },
         })?;
         drop(journal);
         let reopened = Journal::open(state.path())?;
         assert!(matches!(
             reopened.load()?,
-            Some(Entry::Executing { task_id, attempt_id })
-                if task_id == "task" && attempt_id == "attempt"
+            Some(Entry::Executing { attempt })
+                if attempt.task_id == "task" && attempt.attempt_id == "attempt"
         ));
         reopened.clear()?;
         assert!(reopened.load()?.is_none());

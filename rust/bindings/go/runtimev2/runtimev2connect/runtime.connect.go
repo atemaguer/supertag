@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// OperatorName is the fully-qualified name of the Operator service.
 	OperatorName = "supertag.runtime.v2.Operator"
+	// ObjectivesName is the fully-qualified name of the Objectives service.
+	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
 	WorkerHostName = "supertag.runtime.v2.WorkerHost"
 	// ConnectorName is the fully-qualified name of the Connector service.
@@ -49,6 +51,30 @@ const (
 	OperatorListEventsProcedure = "/supertag.runtime.v2.Operator/ListEvents"
 	// OperatorCancelTaskProcedure is the fully-qualified name of the Operator's CancelTask RPC.
 	OperatorCancelTaskProcedure = "/supertag.runtime.v2.Operator/CancelTask"
+	// OperatorResolveAttemptProcedure is the fully-qualified name of the Operator's ResolveAttempt RPC.
+	OperatorResolveAttemptProcedure = "/supertag.runtime.v2.Operator/ResolveAttempt"
+	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
+	// CreateObjective RPC.
+	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
+	// ObjectivesGetObjectiveProcedure is the fully-qualified name of the Objectives's GetObjective RPC.
+	ObjectivesGetObjectiveProcedure = "/supertag.runtime.v2.Objectives/GetObjective"
+	// ObjectivesListObjectivesProcedure is the fully-qualified name of the Objectives's ListObjectives
+	// RPC.
+	ObjectivesListObjectivesProcedure = "/supertag.runtime.v2.Objectives/ListObjectives"
+	// ObjectivesSetLimitsProcedure is the fully-qualified name of the Objectives's SetLimits RPC.
+	ObjectivesSetLimitsProcedure = "/supertag.runtime.v2.Objectives/SetLimits"
+	// ObjectivesPauseObjectiveProcedure is the fully-qualified name of the Objectives's PauseObjective
+	// RPC.
+	ObjectivesPauseObjectiveProcedure = "/supertag.runtime.v2.Objectives/PauseObjective"
+	// ObjectivesResumeObjectiveProcedure is the fully-qualified name of the Objectives's
+	// ResumeObjective RPC.
+	ObjectivesResumeObjectiveProcedure = "/supertag.runtime.v2.Objectives/ResumeObjective"
+	// ObjectivesCancelObjectiveProcedure is the fully-qualified name of the Objectives's
+	// CancelObjective RPC.
+	ObjectivesCancelObjectiveProcedure = "/supertag.runtime.v2.Objectives/CancelObjective"
+	// ObjectivesReviewObjectiveProcedure is the fully-qualified name of the Objectives's
+	// ReviewObjective RPC.
+	ObjectivesReviewObjectiveProcedure = "/supertag.runtime.v2.Objectives/ReviewObjective"
 	// WorkerHostClaimTaskProcedure is the fully-qualified name of the WorkerHost's ClaimTask RPC.
 	WorkerHostClaimTaskProcedure = "/supertag.runtime.v2.WorkerHost/ClaimTask"
 	// WorkerHostStartTaskProcedure is the fully-qualified name of the WorkerHost's StartTask RPC.
@@ -56,6 +82,14 @@ const (
 	// WorkerHostInspectAttemptProcedure is the fully-qualified name of the WorkerHost's InspectAttempt
 	// RPC.
 	WorkerHostInspectAttemptProcedure = "/supertag.runtime.v2.WorkerHost/InspectAttempt"
+	// WorkerHostRenewAttemptProcedure is the fully-qualified name of the WorkerHost's RenewAttempt RPC.
+	WorkerHostRenewAttemptProcedure = "/supertag.runtime.v2.WorkerHost/RenewAttempt"
+	// WorkerHostGetAttemptResolutionProcedure is the fully-qualified name of the WorkerHost's
+	// GetAttemptResolution RPC.
+	WorkerHostGetAttemptResolutionProcedure = "/supertag.runtime.v2.WorkerHost/GetAttemptResolution"
+	// WorkerHostReportAttemptUsageProcedure is the fully-qualified name of the WorkerHost's
+	// ReportAttemptUsage RPC.
+	WorkerHostReportAttemptUsageProcedure = "/supertag.runtime.v2.WorkerHost/ReportAttemptUsage"
 	// WorkerHostAppendEventProcedure is the fully-qualified name of the WorkerHost's AppendEvent RPC.
 	WorkerHostAppendEventProcedure = "/supertag.runtime.v2.WorkerHost/AppendEvent"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
@@ -81,6 +115,7 @@ type OperatorClient interface {
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 }
 
 // NewOperatorClient constructs a client for the supertag.runtime.v2.Operator service. By default,
@@ -124,16 +159,23 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(operatorMethods.ByName("CancelTask")),
 			connect.WithClientOptions(opts...),
 		),
+		resolveAttempt: connect.NewClient[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution](
+			httpClient,
+			baseURL+OperatorResolveAttemptProcedure,
+			connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // operatorClient implements OperatorClient.
 type operatorClient struct {
-	putTag     *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
-	submitTask *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
-	getTask    *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
-	listEvents *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
-	cancelTask *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
+	putTag         *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
+	submitTask     *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
+	getTask        *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
+	listEvents     *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
+	cancelTask     *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
+	resolveAttempt *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
 }
 
 // PutTag calls supertag.runtime.v2.Operator.PutTag.
@@ -161,6 +203,11 @@ func (c *operatorClient) CancelTask(ctx context.Context, req *connect.Request[ru
 	return c.cancelTask.CallUnary(ctx, req)
 }
 
+// ResolveAttempt calls supertag.runtime.v2.Operator.ResolveAttempt.
+func (c *operatorClient) ResolveAttempt(ctx context.Context, req *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
+	return c.resolveAttempt.CallUnary(ctx, req)
+}
+
 // OperatorHandler is an implementation of the supertag.runtime.v2.Operator service.
 type OperatorHandler interface {
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
@@ -168,6 +215,7 @@ type OperatorHandler interface {
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 }
 
 // NewOperatorHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -207,6 +255,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(operatorMethods.ByName("CancelTask")),
 		connect.WithHandlerOptions(opts...),
 	)
+	operatorResolveAttemptHandler := connect.NewUnaryHandler(
+		OperatorResolveAttemptProcedure,
+		svc.ResolveAttempt,
+		connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Operator/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case OperatorPutTagProcedure:
@@ -219,6 +273,8 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorListEventsHandler.ServeHTTP(w, r)
 		case OperatorCancelTaskProcedure:
 			operatorCancelTaskHandler.ServeHTTP(w, r)
+		case OperatorResolveAttemptProcedure:
+			operatorResolveAttemptHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -248,11 +304,270 @@ func (UnimplementedOperatorHandler) CancelTask(context.Context, *connect.Request
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.CancelTask is not implemented"))
 }
 
+func (UnimplementedOperatorHandler) ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ResolveAttempt is not implemented"))
+}
+
+// ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
+type ObjectivesClient interface {
+	CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
+	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
+	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+}
+
+// NewObjectivesClient constructs a client for the supertag.runtime.v2.Objectives service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewObjectivesClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ObjectivesClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	objectivesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Objectives").Methods()
+	return &objectivesClient{
+		createObjective: connect.NewClient[runtimev2.CreateObjectiveRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesCreateObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("CreateObjective")),
+			connect.WithClientOptions(opts...),
+		),
+		getObjective: connect.NewClient[runtimev2.GetObjectiveRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesGetObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("GetObjective")),
+			connect.WithClientOptions(opts...),
+		),
+		listObjectives: connect.NewClient[runtimev2.ListObjectivesRequest, runtimev2.ListObjectivesResponse](
+			httpClient,
+			baseURL+ObjectivesListObjectivesProcedure,
+			connect.WithSchema(objectivesMethods.ByName("ListObjectives")),
+			connect.WithClientOptions(opts...),
+		),
+		setLimits: connect.NewClient[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesSetLimitsProcedure,
+			connect.WithSchema(objectivesMethods.ByName("SetLimits")),
+			connect.WithClientOptions(opts...),
+		),
+		pauseObjective: connect.NewClient[runtimev2.ObjectiveActionRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesPauseObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("PauseObjective")),
+			connect.WithClientOptions(opts...),
+		),
+		resumeObjective: connect.NewClient[runtimev2.ObjectiveActionRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesResumeObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("ResumeObjective")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelObjective: connect.NewClient[runtimev2.ObjectiveActionRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesCancelObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("CancelObjective")),
+			connect.WithClientOptions(opts...),
+		),
+		reviewObjective: connect.NewClient[runtimev2.ReviewObjectiveRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesReviewObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("ReviewObjective")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// objectivesClient implements ObjectivesClient.
+type objectivesClient struct {
+	createObjective *connect.Client[runtimev2.CreateObjectiveRequest, runtimev2.Objective]
+	getObjective    *connect.Client[runtimev2.GetObjectiveRequest, runtimev2.Objective]
+	listObjectives  *connect.Client[runtimev2.ListObjectivesRequest, runtimev2.ListObjectivesResponse]
+	setLimits       *connect.Client[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective]
+	pauseObjective  *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	resumeObjective *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	cancelObjective *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	reviewObjective *connect.Client[runtimev2.ReviewObjectiveRequest, runtimev2.Objective]
+}
+
+// CreateObjective calls supertag.runtime.v2.Objectives.CreateObjective.
+func (c *objectivesClient) CreateObjective(ctx context.Context, req *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.createObjective.CallUnary(ctx, req)
+}
+
+// GetObjective calls supertag.runtime.v2.Objectives.GetObjective.
+func (c *objectivesClient) GetObjective(ctx context.Context, req *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.getObjective.CallUnary(ctx, req)
+}
+
+// ListObjectives calls supertag.runtime.v2.Objectives.ListObjectives.
+func (c *objectivesClient) ListObjectives(ctx context.Context, req *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error) {
+	return c.listObjectives.CallUnary(ctx, req)
+}
+
+// SetLimits calls supertag.runtime.v2.Objectives.SetLimits.
+func (c *objectivesClient) SetLimits(ctx context.Context, req *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.setLimits.CallUnary(ctx, req)
+}
+
+// PauseObjective calls supertag.runtime.v2.Objectives.PauseObjective.
+func (c *objectivesClient) PauseObjective(ctx context.Context, req *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.pauseObjective.CallUnary(ctx, req)
+}
+
+// ResumeObjective calls supertag.runtime.v2.Objectives.ResumeObjective.
+func (c *objectivesClient) ResumeObjective(ctx context.Context, req *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.resumeObjective.CallUnary(ctx, req)
+}
+
+// CancelObjective calls supertag.runtime.v2.Objectives.CancelObjective.
+func (c *objectivesClient) CancelObjective(ctx context.Context, req *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.cancelObjective.CallUnary(ctx, req)
+}
+
+// ReviewObjective calls supertag.runtime.v2.Objectives.ReviewObjective.
+func (c *objectivesClient) ReviewObjective(ctx context.Context, req *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.reviewObjective.CallUnary(ctx, req)
+}
+
+// ObjectivesHandler is an implementation of the supertag.runtime.v2.Objectives service.
+type ObjectivesHandler interface {
+	CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
+	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
+	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
+	ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+}
+
+// NewObjectivesHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	objectivesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Objectives").Methods()
+	objectivesCreateObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesCreateObjectiveProcedure,
+		svc.CreateObjective,
+		connect.WithSchema(objectivesMethods.ByName("CreateObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesGetObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesGetObjectiveProcedure,
+		svc.GetObjective,
+		connect.WithSchema(objectivesMethods.ByName("GetObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesListObjectivesHandler := connect.NewUnaryHandler(
+		ObjectivesListObjectivesProcedure,
+		svc.ListObjectives,
+		connect.WithSchema(objectivesMethods.ByName("ListObjectives")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesSetLimitsHandler := connect.NewUnaryHandler(
+		ObjectivesSetLimitsProcedure,
+		svc.SetLimits,
+		connect.WithSchema(objectivesMethods.ByName("SetLimits")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesPauseObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesPauseObjectiveProcedure,
+		svc.PauseObjective,
+		connect.WithSchema(objectivesMethods.ByName("PauseObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesResumeObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesResumeObjectiveProcedure,
+		svc.ResumeObjective,
+		connect.WithSchema(objectivesMethods.ByName("ResumeObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesCancelObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesCancelObjectiveProcedure,
+		svc.CancelObjective,
+		connect.WithSchema(objectivesMethods.ByName("CancelObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesReviewObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesReviewObjectiveProcedure,
+		svc.ReviewObjective,
+		connect.WithSchema(objectivesMethods.ByName("ReviewObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Objectives/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case ObjectivesCreateObjectiveProcedure:
+			objectivesCreateObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesGetObjectiveProcedure:
+			objectivesGetObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesListObjectivesProcedure:
+			objectivesListObjectivesHandler.ServeHTTP(w, r)
+		case ObjectivesSetLimitsProcedure:
+			objectivesSetLimitsHandler.ServeHTTP(w, r)
+		case ObjectivesPauseObjectiveProcedure:
+			objectivesPauseObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesResumeObjectiveProcedure:
+			objectivesResumeObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesCancelObjectiveProcedure:
+			objectivesCancelObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesReviewObjectiveProcedure:
+			objectivesReviewObjectiveHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedObjectivesHandler returns CodeUnimplemented from all methods.
+type UnimplementedObjectivesHandler struct{}
+
+func (UnimplementedObjectivesHandler) CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.CreateObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.GetObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ListObjectives is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.SetLimits is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.PauseObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ResumeObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.CancelObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ReviewObjective is not implemented"))
+}
+
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
 type WorkerHostClient interface {
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
+	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
+	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
+	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 }
@@ -286,6 +601,24 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("InspectAttempt")),
 			connect.WithClientOptions(opts...),
 		),
+		renewAttempt: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority](
+			httpClient,
+			baseURL+WorkerHostRenewAttemptProcedure,
+			connect.WithSchema(workerHostMethods.ByName("RenewAttempt")),
+			connect.WithClientOptions(opts...),
+		),
+		getAttemptResolution: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse](
+			httpClient,
+			baseURL+WorkerHostGetAttemptResolutionProcedure,
+			connect.WithSchema(workerHostMethods.ByName("GetAttemptResolution")),
+			connect.WithClientOptions(opts...),
+		),
+		reportAttemptUsage: connect.NewClient[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse](
+			httpClient,
+			baseURL+WorkerHostReportAttemptUsageProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportAttemptUsage")),
+			connect.WithClientOptions(opts...),
+		),
 		appendEvent: connect.NewClient[runtimev2.AppendEventRequest, runtimev2.TaskEvent](
 			httpClient,
 			baseURL+WorkerHostAppendEventProcedure,
@@ -303,11 +636,14 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 
 // workerHostClient implements WorkerHostClient.
 type workerHostClient struct {
-	claimTask      *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
-	startTask      *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
-	inspectAttempt *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
-	appendEvent    *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
-	finishTask     *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
+	claimTask            *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
+	startTask            *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
+	inspectAttempt       *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
+	renewAttempt         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority]
+	getAttemptResolution *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse]
+	reportAttemptUsage   *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
+	appendEvent          *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
+	finishTask           *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
 }
 
 // ClaimTask calls supertag.runtime.v2.WorkerHost.ClaimTask.
@@ -325,6 +661,21 @@ func (c *workerHostClient) InspectAttempt(ctx context.Context, req *connect.Requ
 	return c.inspectAttempt.CallUnary(ctx, req)
 }
 
+// RenewAttempt calls supertag.runtime.v2.WorkerHost.RenewAttempt.
+func (c *workerHostClient) RenewAttempt(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error) {
+	return c.renewAttempt.CallUnary(ctx, req)
+}
+
+// GetAttemptResolution calls supertag.runtime.v2.WorkerHost.GetAttemptResolution.
+func (c *workerHostClient) GetAttemptResolution(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error) {
+	return c.getAttemptResolution.CallUnary(ctx, req)
+}
+
+// ReportAttemptUsage calls supertag.runtime.v2.WorkerHost.ReportAttemptUsage.
+func (c *workerHostClient) ReportAttemptUsage(ctx context.Context, req *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {
+	return c.reportAttemptUsage.CallUnary(ctx, req)
+}
+
 // AppendEvent calls supertag.runtime.v2.WorkerHost.AppendEvent.
 func (c *workerHostClient) AppendEvent(ctx context.Context, req *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error) {
 	return c.appendEvent.CallUnary(ctx, req)
@@ -340,6 +691,9 @@ type WorkerHostHandler interface {
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
+	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
+	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
+	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 }
@@ -369,6 +723,24 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("InspectAttempt")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostRenewAttemptHandler := connect.NewUnaryHandler(
+		WorkerHostRenewAttemptProcedure,
+		svc.RenewAttempt,
+		connect.WithSchema(workerHostMethods.ByName("RenewAttempt")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostGetAttemptResolutionHandler := connect.NewUnaryHandler(
+		WorkerHostGetAttemptResolutionProcedure,
+		svc.GetAttemptResolution,
+		connect.WithSchema(workerHostMethods.ByName("GetAttemptResolution")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostReportAttemptUsageHandler := connect.NewUnaryHandler(
+		WorkerHostReportAttemptUsageProcedure,
+		svc.ReportAttemptUsage,
+		connect.WithSchema(workerHostMethods.ByName("ReportAttemptUsage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workerHostAppendEventHandler := connect.NewUnaryHandler(
 		WorkerHostAppendEventProcedure,
 		svc.AppendEvent,
@@ -389,6 +761,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostStartTaskHandler.ServeHTTP(w, r)
 		case WorkerHostInspectAttemptProcedure:
 			workerHostInspectAttemptHandler.ServeHTTP(w, r)
+		case WorkerHostRenewAttemptProcedure:
+			workerHostRenewAttemptHandler.ServeHTTP(w, r)
+		case WorkerHostGetAttemptResolutionProcedure:
+			workerHostGetAttemptResolutionHandler.ServeHTTP(w, r)
+		case WorkerHostReportAttemptUsageProcedure:
+			workerHostReportAttemptUsageHandler.ServeHTTP(w, r)
 		case WorkerHostAppendEventProcedure:
 			workerHostAppendEventHandler.ServeHTTP(w, r)
 		case WorkerHostFinishTaskProcedure:
@@ -412,6 +790,18 @@ func (UnimplementedWorkerHostHandler) StartTask(context.Context, *connect.Reques
 
 func (UnimplementedWorkerHostHandler) InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.InspectAttempt is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.RenewAttempt is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetAttemptResolution is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportAttemptUsage is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error) {

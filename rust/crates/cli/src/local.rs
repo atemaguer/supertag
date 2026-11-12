@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsString,
     fmt::Write as _,
     fs::{self, DirBuilder, File, OpenOptions, TryLockError},
     future::Future,
@@ -33,8 +32,7 @@ pub const LOCAL_SERVICE_LIFELINE: &str = "SUPERTAG_LOCAL_SERVICE_LIFELINE";
 
 pub struct LocalOptions {
     pub state_directory: PathBuf,
-    pub adapter: PathBuf,
-    pub adapter_args: Vec<OsString>,
+    pub adapter: crate::AdapterOptions,
     pub gateway_listen: SocketAddr,
 }
 
@@ -155,13 +153,15 @@ impl Children {
         let mut host = command(executable, "worker-host");
         host.args(["--gateway", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
-            .arg("--adapter")
-            .arg(&options.adapter)
+            .arg("--wait-for-recovery")
+            .args(options.adapter.worker_args())
             .env("SUPERTAG_HOST_TOKEN", &credentials.host);
-        for value in &options.adapter_args {
-            let mut argument = OsString::from("--adapter-arg=");
-            argument.push(value);
-            host.arg(argument);
+        if options.adapter.uses_codex() {
+            host.envs(
+                supertag_worker_host::CODEX_ENVIRONMENT
+                    .iter()
+                    .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
+            );
         }
         let ready = start_child(&mut self.worker_host, &mut host, "Worker Host").await?;
         ensure!(ready == "ready", "invalid Worker Host readiness signal");

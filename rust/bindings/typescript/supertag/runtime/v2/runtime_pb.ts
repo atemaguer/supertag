@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/runtime.proto.
  */
 export const file_supertag_runtime_v2_runtime: GenFile = /*@__PURE__*/
-  fileDesc("CiFzdXBlcnRhZy9ydW50aW1lL3YyL3J1bnRpbWUucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiTgoNUHV0VGFnUmVxdWVzdBIOCgZ0YWdfaWQYASABKAkSFAoMaW5zdHJ1Y3Rpb25zGAIgASgJEhcKD2FsbG93ZWRfYWN0aW9ucxgDIAMoCSJWCgNUYWcSDgoGdGFnX2lkGAEgASgJEhQKDGluc3RydWN0aW9ucxgCIAEoCRIXCg9hbGxvd2VkX2FjdGlvbnMYAyADKAkSEAoIcmV2aXNpb24YBCABKAQiXQoRU3VibWl0VGFza1JlcXVlc3QSDgoGdGFnX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMb3BlcmF0aW9uX2lkGAMgASgJEg4KBnByb21wdBgEIAEoCSKHAgoEVGFzaxIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg4KBnByb21wdBgEIAEoCRIUCgxpbnN0cnVjdGlvbnMYBSABKAkSFwoPYWxsb3dlZF9hY3Rpb25zGAYgAygJEhQKDHRhZ19yZXZpc2lvbhgHIAEoBBItCgVzdGF0ZRgIIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1N0YXRlEhMKBnJlc3VsdBgJIAEoCUgAiAEBEhcKCmF0dGVtcHRfaWQYCiABKAlIAYgBAUIJCgdfcmVzdWx0Qg0KC19hdHRlbXB0X2lkIiEKDkdldFRhc2tSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiSwoRTGlzdEV2ZW50c1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRIWCg5hZnRlcl9zZXF1ZW5jZRgCIAEoBBINCgVsaW1pdBgDIAEoDSJEChJMaXN0RXZlbnRzUmVzcG9uc2USLgoGZXZlbnRzGAEgAygLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrRXZlbnQiJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSIoChBDbGFpbVRhc2tSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCSJIChFDbGFpbVRhc2tSZXNwb25zZRIzCgphc3NpZ25tZW50GAEgASgLMh8uc3VwZXJ0YWcucnVudGltZS52Mi5Bc3NpZ25tZW50Il4KCkFzc2lnbm1lbnQSJwoEdGFzaxgBIAEoCzIZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzaxISCgphdHRlbXB0X2lkGAIgASgJEhMKC2xlYXNlX3Rva2VuGAMgASgJIkwKEFN0YXJ0VGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRISCgphdHRlbXB0X2lkGAIgASgJEhMKC2xlYXNlX3Rva2VuGAMgASgJIlEKFUluc3BlY3RBdHRlbXB0UmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEhIKCmF0dGVtcHRfaWQYAiABKAkSEwoLbGVhc2VfdG9rZW4YAyABKAkibgoSQXBwZW5kRXZlbnRSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRITCgtsZWFzZV90b2tlbhgDIAEoCRIQCghzZXF1ZW5jZRgEIAEoBBIMCgR0ZXh0GAUgASgJIisKCVRhc2tFdmVudBIQCghzZXF1ZW5jZRgBIAEoBBIMCgR0ZXh0GAIgASgJInAKEUZpbmlzaFRhc2tSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRITCgtsZWFzZV90b2tlbhgDIAEoCRIOCgZyZXN1bHQYBCABKAkSEQoJc3VjY2VlZGVkGAUgASgIIhYKFEhhcm5lc3NBdHRhY2hSZXF1ZXN0IjMKEEFkYXB0ZXJCb290c3RyYXASEAoIZW5kcG9pbnQYASABKAkSDQoFdG9rZW4YAiABKAkiSQoKSGFybmVzc1J1bhInCgR0YXNrGAEgASgLMhkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrEhIKCmF0dGVtcHRfaWQYAiABKAkiNwoVSGFybmVzc1B1Ymxpc2hSZXF1ZXN0EhAKCHNlcXVlbmNlGAEgASgEEgwKBHRleHQYAiABKAkiOwoWSGFybmVzc0NvbXBsZXRlUmVxdWVzdBIOCgZyZXN1bHQYASABKAkSEQoJc3VjY2VlZGVkGAIgASgIIhkKF0hhcm5lc3NDb21wbGV0ZVJlc3BvbnNlIlEKEFJlcGx5RGVzdGluYXRpb24SFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhYKCXRocmVhZF9pZBgCIAEoCUgAiAEBQgwKCl90aHJlYWRfaWQiqgEKEkFjY2VwdEV2ZW50UmVxdWVzdBISCgphY2NvdW50X2lkGAEgASgJEhAKCGV2ZW50X2lkGAIgASgJEg4KBnRhZ19pZBgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEg4KBnByb21wdBgFIAEoCRI6CgtkZXN0aW5hdGlvbhgGIAEoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwbHlEZXN0aW5hdGlvbiLsAQoFUmVwbHkSEAoIcmVwbHlfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJEjoKC2Rlc3RpbmF0aW9uGAQgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5SZXBseURlc3RpbmF0aW9uEgwKBHRleHQYBSABKAkSLgoFc3RhdGUYBiABKA4yHy5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcGx5U3RhdGUSHQoQcHJvdmlkZXJfcmVjZWlwdBgHIAEoCUgAiAEBQhMKEV9wcm92aWRlcl9yZWNlaXB0IikKEUNsYWltUmVwbHlSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCSJUChJDbGFpbVJlcGx5UmVzcG9uc2USKQoFcmVwbHkYASABKAsyGi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcGx5EhMKC2xlYXNlX3Rva2VuGAIgASgJIp8BChJTZXR0bGVSZXBseVJlcXVlc3QSEAoIcmVwbHlfaWQYASABKAkSEwoLbGVhc2VfdG9rZW4YAiABKAkSLgoFc3RhdGUYAyABKA4yHy5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcGx5U3RhdGUSHQoQcHJvdmlkZXJfcmVjZWlwdBgEIAEoCUgAiAEBQhMKEV9wcm92aWRlcl9yZWNlaXB0KrkBCglUYXNrU3RhdGUSGgoWVEFTS19TVEFURV9VTlNQRUNJRklFRBAAEhUKEVRBU0tfU1RBVEVfUVVFVUVEEAESFgoSVEFTS19TVEFURV9SVU5OSU5HEAISGAoUVEFTS19TVEFURV9TVUNDRUVERUQQAxIVChFUQVNLX1NUQVRFX0ZBSUxFRBAEEhgKFFRBU0tfU1RBVEVfQ0FOQ0VMTEVEEAUSFgoSVEFTS19TVEFURV9DTEFJTUVEEAYqqQEKClJlcGx5U3RhdGUSGwoXUkVQTFlfU1RBVEVfVU5TUEVDSUZJRUQQABIXChNSRVBMWV9TVEFURV9QRU5ESU5HEAESFwoTUkVQTFlfU1RBVEVfQ0xBSU1FRBACEhkKFVJFUExZX1NUQVRFX0RFTElWRVJFRBADEhYKElJFUExZX1NUQVRFX0ZBSUxFRBAEEhkKFVJFUExZX1NUQVRFX1VOQ0VSVEFJThAFMp4DCghPcGVyYXRvchJGCgZQdXRUYWcSIi5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFRhZ1JlcXVlc3QaGC5zdXBlcnRhZy5ydW50aW1lLnYyLlRhZxJPCgpTdWJtaXRUYXNrEiYuc3VwZXJ0YWcucnVudGltZS52Mi5TdWJtaXRUYXNrUmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzaxJJCgdHZXRUYXNrEiMuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRUYXNrUmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzaxJdCgpMaXN0RXZlbnRzEiYuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0RXZlbnRzUmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEV2ZW50c1Jlc3BvbnNlEk8KCkNhbmNlbFRhc2sSJi5zdXBlcnRhZy5ydW50aW1lLnYyLkNhbmNlbFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrMrkDCgpXb3JrZXJIb3N0EloKCUNsYWltVGFzaxIlLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1UYXNrUmVxdWVzdBomLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1UYXNrUmVzcG9uc2USTQoJU3RhcnRUYXNrEiUuc3VwZXJ0YWcucnVudGltZS52Mi5TdGFydFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrElcKDkluc3BlY3RBdHRlbXB0Eiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2sSVgoLQXBwZW5kRXZlbnQSJy5zdXBlcnRhZy5ydW50aW1lLnYyLkFwcGVuZEV2ZW50UmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza0V2ZW50Ek8KCkZpbmlzaFRhc2sSJi5zdXBlcnRhZy5ydW50aW1lLnYyLkZpbmlzaFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrMpECCglDb25uZWN0b3ISUQoLQWNjZXB0RXZlbnQSJy5zdXBlcnRhZy5ydW50aW1lLnYyLkFjY2VwdEV2ZW50UmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzaxJdCgpDbGFpbVJlcGx5EiYuc3VwZXJ0YWcucnVudGltZS52Mi5DbGFpbVJlcGx5UmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1SZXBseVJlc3BvbnNlElIKC1NldHRsZVJlcGx5Eicuc3VwZXJ0YWcucnVudGltZS52Mi5TZXR0bGVSZXBseVJlcXVlc3QaGi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcGx5Mp0CCgdIYXJuZXNzElQKBkF0dGFjaBIpLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0F0dGFjaFJlcXVlc3QaHy5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NSdW4SVQoHUHVibGlzaBIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc1B1Ymxpc2hSZXF1ZXN0Gh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrRXZlbnQSZQoIQ29tcGxldGUSKy5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NDb21wbGV0ZVJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NDb21wbGV0ZVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("CiFzdXBlcnRhZy9ydW50aW1lL3YyL3J1bnRpbWUucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiTgoNUHV0VGFnUmVxdWVzdBIOCgZ0YWdfaWQYASABKAkSFAoMaW5zdHJ1Y3Rpb25zGAIgASgJEhcKD2FsbG93ZWRfYWN0aW9ucxgDIAMoCSJWCgNUYWcSDgoGdGFnX2lkGAEgASgJEhQKDGluc3RydWN0aW9ucxgCIAEoCRIXCg9hbGxvd2VkX2FjdGlvbnMYAyADKAkSEAoIcmV2aXNpb24YBCABKAQiXQoRU3VibWl0VGFza1JlcXVlc3QSDgoGdGFnX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMb3BlcmF0aW9uX2lkGAMgASgJEg4KBnByb21wdBgEIAEoCSKHAgoEVGFzaxIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg4KBnByb21wdBgEIAEoCRIUCgxpbnN0cnVjdGlvbnMYBSABKAkSFwoPYWxsb3dlZF9hY3Rpb25zGAYgAygJEhQKDHRhZ19yZXZpc2lvbhgHIAEoBBItCgVzdGF0ZRgIIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1N0YXRlEhMKBnJlc3VsdBgJIAEoCUgAiAEBEhcKCmF0dGVtcHRfaWQYCiABKAlIAYgBAUIJCgdfcmVzdWx0Qg0KC19hdHRlbXB0X2lkIiEKDkdldFRhc2tSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiSwoRTGlzdEV2ZW50c1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRIWCg5hZnRlcl9zZXF1ZW5jZRgCIAEoBBINCgVsaW1pdBgDIAEoDSJEChJMaXN0RXZlbnRzUmVzcG9uc2USLgoGZXZlbnRzGAEgAygLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrRXZlbnQiJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSIoChBDbGFpbVRhc2tSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCSJIChFDbGFpbVRhc2tSZXNwb25zZRIzCgphc3NpZ25tZW50GAEgASgLMh8uc3VwZXJ0YWcucnVudGltZS52Mi5Bc3NpZ25tZW50Il4KCkFzc2lnbm1lbnQSJwoEdGFzaxgBIAEoCzIZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzaxISCgphdHRlbXB0X2lkGAIgASgJEhMKC2xlYXNlX3Rva2VuGAMgASgJIkwKEFN0YXJ0VGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCRISCgphdHRlbXB0X2lkGAIgASgJEhMKC2xlYXNlX3Rva2VuGAMgASgJIlEKFUluc3BlY3RBdHRlbXB0UmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEhIKCmF0dGVtcHRfaWQYAiABKAkSEwoLbGVhc2VfdG9rZW4YAyABKAkiUQoQQXR0ZW1wdEF1dGhvcml0eRInCgR0YXNrGAEgASgLMhkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrEhQKDHZhbGlkX2Zvcl9tcxgCIAEoBCK3AQoVUmVzb2x2ZUF0dGVtcHRSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRIUCgxvcGVyYXRpb25faWQYAyABKAkSNgoIZGVjaXNpb24YBCABKA4yJC5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHREZWNpc2lvbhIQCghldmlkZW5jZRgFIAEoCRIZChFjb25maXJtZWRfc3RvcHBlZBgGIAEoCCKvAQoRQXR0ZW1wdFJlc29sdXRpb24SDwoHdGFza19pZBgBIAEoCRISCgphdHRlbXB0X2lkGAIgASgJEjYKCGRlY2lzaW9uGAMgASgOMiQuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0RGVjaXNpb24SEwoLb3BlcmF0b3JfaWQYBCABKAkSEAoIZXZpZGVuY2UYBSABKAkSFgoOcmVzb2x2ZWRfYXRfbXMYBiABKAMiWgocR2V0QXR0ZW1wdFJlc29sdXRpb25SZXNwb25zZRI6CgpyZXNvbHV0aW9uGAEgASgLMiYuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0UmVzb2x1dGlvbiLNAQoZUmVwb3J0QXR0ZW1wdFVzYWdlUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSEAoIc2VxdWVuY2UYAiABKAQSGQoMYW1vdW50X21pbm9yGAMgASgESACIAQESFQoIY3VycmVuY3kYBCABKAlIAYgBARIRCgllc3RpbWF0ZWQYBSABKAhCDwoNX2Ftb3VudF9taW5vckILCglfY3VycmVuY3kiHAoaUmVwb3J0QXR0ZW1wdFVzYWdlUmVzcG9uc2UibgoSQXBwZW5kRXZlbnRSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRITCgtsZWFzZV90b2tlbhgDIAEoCRIQCghzZXF1ZW5jZRgEIAEoBBIMCgR0ZXh0GAUgASgJIisKCVRhc2tFdmVudBIQCghzZXF1ZW5jZRgBIAEoBBIMCgR0ZXh0GAIgASgJIrABChFGaW5pc2hUYXNrUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEhIKCmF0dGVtcHRfaWQYAiABKAkSEwoLbGVhc2VfdG9rZW4YAyABKAkSDgoGcmVzdWx0GAQgASgJEhEKCXN1Y2NlZWRlZBgFIAEoCBI+ChBvYmplY3RpdmVfc2lnbmFsGAYgASgOMiQuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVTaWduYWwiFgoUSGFybmVzc0F0dGFjaFJlcXVlc3QiMwoQQWRhcHRlckJvb3RzdHJhcBIQCghlbmRwb2ludBgBIAEoCRINCgV0b2tlbhgCIAEoCSJJCgpIYXJuZXNzUnVuEicKBHRhc2sYASABKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2sSEgoKYXR0ZW1wdF9pZBgCIAEoCSI3ChVIYXJuZXNzUHVibGlzaFJlcXVlc3QSEAoIc2VxdWVuY2UYASABKAQSDAoEdGV4dBgCIAEoCSJ7ChZIYXJuZXNzQ29tcGxldGVSZXF1ZXN0Eg4KBnJlc3VsdBgBIAEoCRIRCglzdWNjZWVkZWQYAiABKAgSPgoQb2JqZWN0aXZlX3NpZ25hbBgDIAEoDjIkLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlU2lnbmFsIhkKF0hhcm5lc3NDb21wbGV0ZVJlc3BvbnNlIpACChZDcmVhdGVPYmplY3RpdmVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIUCgxvYmplY3RpdmVfaWQYAiABKAkSFAoMb3duZXJfdGFnX2lkGAMgASgJEg8KB291dGNvbWUYBCABKAkSDwoHb25nb2luZxgFIAEoCBIYCgtkZWFkbGluZV9tcxgGIAEoA0gAiAEBEh8KEmJ1ZGdldF9saW1pdF9taW5vchgHIAEoBEgBiAEBEhwKD2J1ZGdldF9jdXJyZW5jeRgIIAEoCUgCiAEBQg4KDF9kZWFkbGluZV9tc0IVChNfYnVkZ2V0X2xpbWl0X21pbm9yQhIKEF9idWRnZXRfY3VycmVuY3kiywMKCU9iamVjdGl2ZRIUCgxvYmplY3RpdmVfaWQYASABKAkSFAoMb3duZXJfdGFnX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHb3V0Y29tZRgEIAEoCRIPCgdvbmdvaW5nGAUgASgIEhgKEHN0YXJ0aW5nX3Rhc2tfaWQYBiABKAkSNAoGc3RhdHVzGAcgASgOMiQuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVTdGF0dXMSEAoIcmV2aXNpb24YCCABKAQSGAoLZGVhZGxpbmVfbXMYCSABKANIAIgBARIfChJidWRnZXRfbGltaXRfbWlub3IYCiABKARIAYgBARIcCg9idWRnZXRfY3VycmVuY3kYCyABKAlIAogBARIZCgxwYXVzZWRfYXRfbXMYDCABKANIA4gBARIhChRyZXBvcnRlZF9zcGVuZF9taW5vchgNIAEoBEgEiAEBQg4KDF9kZWFkbGluZV9tc0IVChNfYnVkZ2V0X2xpbWl0X21pbm9yQhIKEF9idWRnZXRfY3VycmVuY3lCDwoNX3BhdXNlZF9hdF9tc0IXChVfcmVwb3J0ZWRfc3BlbmRfbWlub3IiKwoTR2V0T2JqZWN0aXZlUmVxdWVzdBIUCgxvYmplY3RpdmVfaWQYASABKAkiOAoVTGlzdE9iamVjdGl2ZXNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgNEhAKCGFmdGVyX2lkGAIgASgJIkwKFkxpc3RPYmplY3RpdmVzUmVzcG9uc2USMgoKb2JqZWN0aXZlcxgBIAMoCzIeLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlIr8CChlTZXRPYmplY3RpdmVMaW1pdHNSZXF1ZXN0EhQKDG9iamVjdGl2ZV9pZBgBIAEoCRIUCgxvcGVyYXRpb25faWQYAiABKAkSGAoLZGVhZGxpbmVfbXMYAyABKANIAIgBARIWCg5jbGVhcl9kZWFkbGluZRgEIAEoCBIfChJidWRnZXRfbGltaXRfbWlub3IYBSABKARIAYgBARIcCg9idWRnZXRfY3VycmVuY3kYBiABKAlIAogBARIUCgxjbGVhcl9idWRnZXQYByABKAgSHgoRZXhwZWN0ZWRfcmV2aXNpb24YCCABKARIA4gBAUIOCgxfZGVhZGxpbmVfbXNCFQoTX2J1ZGdldF9saW1pdF9taW5vckISChBfYnVkZ2V0X2N1cnJlbmN5QhQKEl9leHBlY3RlZF9yZXZpc2lvbiJUChZPYmplY3RpdmVBY3Rpb25SZXF1ZXN0EhQKDG9iamVjdGl2ZV9pZBgBIAEoCRIUCgxvcGVyYXRpb25faWQYAiABKAkSDgoGcmVhc29uGAMgASgJImgKFlJldmlld09iamVjdGl2ZVJlcXVlc3QSFAoMb2JqZWN0aXZlX2lkGAEgASgJEhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIQCghhcHByb3ZlZBgDIAEoCBIQCghmZWVkYmFjaxgEIAEoCSJRChBSZXBseURlc3RpbmF0aW9uEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIWCgl0aHJlYWRfaWQYAiABKAlIAIgBAUIMCgpfdGhyZWFkX2lkIqoBChJBY2NlcHRFdmVudFJlcXVlc3QSEgoKYWNjb3VudF9pZBgBIAEoCRIQCghldmVudF9pZBgCIAEoCRIOCgZ0YWdfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRIOCgZwcm9tcHQYBSABKAkSOgoLZGVzdGluYXRpb24YBiABKAsyJS5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcGx5RGVzdGluYXRpb24i7AEKBVJlcGx5EhAKCHJlcGx5X2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCRI6CgtkZXN0aW5hdGlvbhgEIAEoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuUmVwbHlEZXN0aW5hdGlvbhIMCgR0ZXh0GAUgASgJEi4KBXN0YXRlGAYgASgOMh8uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBseVN0YXRlEh0KEHByb3ZpZGVyX3JlY2VpcHQYByABKAlIAIgBAUITChFfcHJvdmlkZXJfcmVjZWlwdCIpChFDbGFpbVJlcGx5UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkiVAoSQ2xhaW1SZXBseVJlc3BvbnNlEikKBXJlcGx5GAEgASgLMhouc3VwZXJ0YWcucnVudGltZS52Mi5SZXBseRITCgtsZWFzZV90b2tlbhgCIAEoCSKfAQoSU2V0dGxlUmVwbHlSZXF1ZXN0EhAKCHJlcGx5X2lkGAEgASgJEhMKC2xlYXNlX3Rva2VuGAIgASgJEi4KBXN0YXRlGAMgASgOMh8uc3VwZXJ0YWcucnVudGltZS52Mi5SZXBseVN0YXRlEh0KEHByb3ZpZGVyX3JlY2VpcHQYBCABKAlIAIgBAUITChFfcHJvdmlkZXJfcmVjZWlwdCrTAQoJVGFza1N0YXRlEhoKFlRBU0tfU1RBVEVfVU5TUEVDSUZJRUQQABIVChFUQVNLX1NUQVRFX1FVRVVFRBABEhYKElRBU0tfU1RBVEVfUlVOTklORxACEhgKFFRBU0tfU1RBVEVfU1VDQ0VFREVEEAMSFQoRVEFTS19TVEFURV9GQUlMRUQQBBIYChRUQVNLX1NUQVRFX0NBTkNFTExFRBAFEhYKElRBU0tfU1RBVEVfQ0xBSU1FRBAGEhgKFFRBU0tfU1RBVEVfVU5DRVJUQUlOEAcqbAoPQXR0ZW1wdERlY2lzaW9uEiAKHEFUVEVNUFRfREVDSVNJT05fVU5TUEVDSUZJRUQQABIbChdBVFRFTVBUX0RFQ0lTSU9OX0ZBSUxFRBABEhoKFkFUVEVNUFRfREVDSVNJT05fUkVUUlkQAir0AQoPT2JqZWN0aXZlU3RhdHVzEiAKHE9CSkVDVElWRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIcChhPQkpFQ1RJVkVfU1RBVFVTX1dPUktJTkcQARIcChhPQkpFQ1RJVkVfU1RBVFVTX0JMT0NLRUQQAhIcChhPQkpFQ1RJVkVfU1RBVFVTX0xJTUlURUQQAxIlCiFPQkpFQ1RJVkVfU1RBVFVTX1JFQURZX0ZPUl9SRVZJRVcQBBIeChpPQkpFQ1RJVkVfU1RBVFVTX0NPTVBMRVRFRBAFEh4KGk9CSkVDVElWRV9TVEFUVVNfQ0FOQ0VMTEVEEAYqlQEKD09iamVjdGl2ZVNpZ25hbBIdChlPQkpFQ1RJVkVfU0lHTkFMX1BST0dSRVNTEAASJQohT0JKRUNUSVZFX1NJR05BTF9SRUFEWV9GT1JfUkVWSUVXEAESHgoaT0JKRUNUSVZFX1NJR05BTF9DT01QTEVURUQQAhIcChhPQkpFQ1RJVkVfU0lHTkFMX0JMT0NLRUQQAyqpAQoKUmVwbHlTdGF0ZRIbChdSRVBMWV9TVEFURV9VTlNQRUNJRklFRBAAEhcKE1JFUExZX1NUQVRFX1BFTkRJTkcQARIXChNSRVBMWV9TVEFURV9DTEFJTUVEEAISGQoVUkVQTFlfU1RBVEVfREVMSVZFUkVEEAMSFgoSUkVQTFlfU1RBVEVfRkFJTEVEEAQSGQoVUkVQTFlfU1RBVEVfVU5DRVJUQUlOEAUyhAQKCE9wZXJhdG9yEkYKBlB1dFRhZxIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUHV0VGFnUmVxdWVzdBoYLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFnEk8KClN1Ym1pdFRhc2sSJi5zdXBlcnRhZy5ydW50aW1lLnYyLlN1Ym1pdFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrEkkKB0dldFRhc2sSIy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrEl0KCkxpc3RFdmVudHMSJi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RFdmVudHNSZXF1ZXN0Gicuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0RXZlbnRzUmVzcG9uc2USTwoKQ2FuY2VsVGFzaxImLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FuY2VsVGFza1JlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2sSZAoOUmVzb2x2ZUF0dGVtcHQSKi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlc29sdmVBdHRlbXB0UmVxdWVzdBomLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdFJlc29sdXRpb24yjQYKCk9iamVjdGl2ZXMSXgoPQ3JlYXRlT2JqZWN0aXZlEisuc3VwZXJ0YWcucnVudGltZS52Mi5DcmVhdGVPYmplY3RpdmVSZXF1ZXN0Gh4uc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmUSWAoMR2V0T2JqZWN0aXZlEiguc3VwZXJ0YWcucnVudGltZS52Mi5HZXRPYmplY3RpdmVSZXF1ZXN0Gh4uc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmUSaQoOTGlzdE9iamVjdGl2ZXMSKi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RPYmplY3RpdmVzUmVxdWVzdBorLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdE9iamVjdGl2ZXNSZXNwb25zZRJbCglTZXRMaW1pdHMSLi5zdXBlcnRhZy5ydW50aW1lLnYyLlNldE9iamVjdGl2ZUxpbWl0c1JlcXVlc3QaHi5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZRJdCg5QYXVzZU9iamVjdGl2ZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlQWN0aW9uUmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlEl4KD1Jlc3VtZU9iamVjdGl2ZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlQWN0aW9uUmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlEl4KD0NhbmNlbE9iamVjdGl2ZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlQWN0aW9uUmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlEl4KD1Jldmlld09iamVjdGl2ZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuUmV2aWV3T2JqZWN0aXZlUmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlMooGCgpXb3JrZXJIb3N0EloKCUNsYWltVGFzaxIlLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1UYXNrUmVxdWVzdBomLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1UYXNrUmVzcG9uc2USTQoJU3RhcnRUYXNrEiUuc3VwZXJ0YWcucnVudGltZS52Mi5TdGFydFRhc2tSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrElcKDkluc3BlY3RBdHRlbXB0Eiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2sSYQoMUmVuZXdBdHRlbXB0Eiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRBdXRob3JpdHkSdQoUR2V0QXR0ZW1wdFJlc29sdXRpb24SKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QXR0ZW1wdFJlc29sdXRpb25SZXNwb25zZRJ1ChJSZXBvcnRBdHRlbXB0VXNhZ2USLi5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcG9ydEF0dGVtcHRVc2FnZVJlcXVlc3QaLy5zdXBlcnRhZy5ydW50aW1lLnYyLlJlcG9ydEF0dGVtcHRVc2FnZVJlc3BvbnNlElYKC0FwcGVuZEV2ZW50Eicuc3VwZXJ0YWcucnVudGltZS52Mi5BcHBlbmRFdmVudFJlcXVlc3QaHi5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tFdmVudBJPCgpGaW5pc2hUYXNrEiYuc3VwZXJ0YWcucnVudGltZS52Mi5GaW5pc2hUYXNrUmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFzazKRAgoJQ29ubmVjdG9yElEKC0FjY2VwdEV2ZW50Eicuc3VwZXJ0YWcucnVudGltZS52Mi5BY2NlcHRFdmVudFJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2sSXQoKQ2xhaW1SZXBseRImLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2xhaW1SZXBseVJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLkNsYWltUmVwbHlSZXNwb25zZRJSCgtTZXR0bGVSZXBseRInLnN1cGVydGFnLnJ1bnRpbWUudjIuU2V0dGxlUmVwbHlSZXF1ZXN0Ghouc3VwZXJ0YWcucnVudGltZS52Mi5SZXBseTKdAgoHSGFybmVzcxJUCgZBdHRhY2gSKS5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NBdHRhY2hSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzUnVuElUKB1B1Ymxpc2gSKi5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NQdWJsaXNoUmVxdWVzdBoeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza0V2ZW50EmUKCENvbXBsZXRlEisuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzQ29tcGxldGVSZXF1ZXN0Giwuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzQ29tcGxldGVSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message supertag.runtime.v2.PutTagRequest
@@ -359,6 +359,179 @@ export const InspectAttemptRequestSchema: GenMessage<InspectAttemptRequest> = /*
   messageDesc(file_supertag_runtime_v2_runtime, 12);
 
 /**
+ * @generated from message supertag.runtime.v2.AttemptAuthority
+ */
+export type AttemptAuthority = Message<"supertag.runtime.v2.AttemptAuthority"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.Task task = 1;
+   */
+  task?: Task | undefined;
+
+  /**
+   * @generated from field: uint64 valid_for_ms = 2;
+   */
+  validForMs: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.AttemptAuthority.
+ * Use `create(AttemptAuthoritySchema)` to create a new message.
+ */
+export const AttemptAuthoritySchema: GenMessage<AttemptAuthority> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 13);
+
+/**
+ * @generated from message supertag.runtime.v2.ResolveAttemptRequest
+ */
+export type ResolveAttemptRequest = Message<"supertag.runtime.v2.ResolveAttemptRequest"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string attempt_id = 2;
+   */
+  attemptId: string;
+
+  /**
+   * @generated from field: string operation_id = 3;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.AttemptDecision decision = 4;
+   */
+  decision: AttemptDecision;
+
+  /**
+   * @generated from field: string evidence = 5;
+   */
+  evidence: string;
+
+  /**
+   * @generated from field: bool confirmed_stopped = 6;
+   */
+  confirmedStopped: boolean;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ResolveAttemptRequest.
+ * Use `create(ResolveAttemptRequestSchema)` to create a new message.
+ */
+export const ResolveAttemptRequestSchema: GenMessage<ResolveAttemptRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 14);
+
+/**
+ * @generated from message supertag.runtime.v2.AttemptResolution
+ */
+export type AttemptResolution = Message<"supertag.runtime.v2.AttemptResolution"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string attempt_id = 2;
+   */
+  attemptId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.AttemptDecision decision = 3;
+   */
+  decision: AttemptDecision;
+
+  /**
+   * @generated from field: string operator_id = 4;
+   */
+  operatorId: string;
+
+  /**
+   * @generated from field: string evidence = 5;
+   */
+  evidence: string;
+
+  /**
+   * @generated from field: int64 resolved_at_ms = 6;
+   */
+  resolvedAtMs: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.AttemptResolution.
+ * Use `create(AttemptResolutionSchema)` to create a new message.
+ */
+export const AttemptResolutionSchema: GenMessage<AttemptResolution> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 15);
+
+/**
+ * @generated from message supertag.runtime.v2.GetAttemptResolutionResponse
+ */
+export type GetAttemptResolutionResponse = Message<"supertag.runtime.v2.GetAttemptResolutionResponse"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.AttemptResolution resolution = 1;
+   */
+  resolution?: AttemptResolution | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetAttemptResolutionResponse.
+ * Use `create(GetAttemptResolutionResponseSchema)` to create a new message.
+ */
+export const GetAttemptResolutionResponseSchema: GenMessage<GetAttemptResolutionResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 16);
+
+/**
+ * @generated from message supertag.runtime.v2.ReportAttemptUsageRequest
+ */
+export type ReportAttemptUsageRequest = Message<"supertag.runtime.v2.ReportAttemptUsageRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: optional uint64 amount_minor = 3;
+   */
+  amountMinor?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string currency = 4;
+   */
+  currency?: string | undefined;
+
+  /**
+   * @generated from field: bool estimated = 5;
+   */
+  estimated: boolean;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ReportAttemptUsageRequest.
+ * Use `create(ReportAttemptUsageRequestSchema)` to create a new message.
+ */
+export const ReportAttemptUsageRequestSchema: GenMessage<ReportAttemptUsageRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 17);
+
+/**
+ * @generated from message supertag.runtime.v2.ReportAttemptUsageResponse
+ */
+export type ReportAttemptUsageResponse = Message<"supertag.runtime.v2.ReportAttemptUsageResponse"> & {
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ReportAttemptUsageResponse.
+ * Use `create(ReportAttemptUsageResponseSchema)` to create a new message.
+ */
+export const ReportAttemptUsageResponseSchema: GenMessage<ReportAttemptUsageResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 18);
+
+/**
  * @generated from message supertag.runtime.v2.AppendEventRequest
  */
 export type AppendEventRequest = Message<"supertag.runtime.v2.AppendEventRequest"> & {
@@ -393,7 +566,7 @@ export type AppendEventRequest = Message<"supertag.runtime.v2.AppendEventRequest
  * Use `create(AppendEventRequestSchema)` to create a new message.
  */
 export const AppendEventRequestSchema: GenMessage<AppendEventRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 13);
+  messageDesc(file_supertag_runtime_v2_runtime, 19);
 
 /**
  * @generated from message supertag.runtime.v2.TaskEvent
@@ -415,7 +588,7 @@ export type TaskEvent = Message<"supertag.runtime.v2.TaskEvent"> & {
  * Use `create(TaskEventSchema)` to create a new message.
  */
 export const TaskEventSchema: GenMessage<TaskEvent> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 14);
+  messageDesc(file_supertag_runtime_v2_runtime, 20);
 
 /**
  * @generated from message supertag.runtime.v2.FinishTaskRequest
@@ -445,6 +618,11 @@ export type FinishTaskRequest = Message<"supertag.runtime.v2.FinishTaskRequest">
    * @generated from field: bool succeeded = 5;
    */
   succeeded: boolean;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ObjectiveSignal objective_signal = 6;
+   */
+  objectiveSignal: ObjectiveSignal;
 };
 
 /**
@@ -452,7 +630,7 @@ export type FinishTaskRequest = Message<"supertag.runtime.v2.FinishTaskRequest">
  * Use `create(FinishTaskRequestSchema)` to create a new message.
  */
 export const FinishTaskRequestSchema: GenMessage<FinishTaskRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 15);
+  messageDesc(file_supertag_runtime_v2_runtime, 21);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessAttachRequest
@@ -465,7 +643,7 @@ export type HarnessAttachRequest = Message<"supertag.runtime.v2.HarnessAttachReq
  * Use `create(HarnessAttachRequestSchema)` to create a new message.
  */
 export const HarnessAttachRequestSchema: GenMessage<HarnessAttachRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 16);
+  messageDesc(file_supertag_runtime_v2_runtime, 22);
 
 /**
  * @generated from message supertag.runtime.v2.AdapterBootstrap
@@ -487,7 +665,7 @@ export type AdapterBootstrap = Message<"supertag.runtime.v2.AdapterBootstrap"> &
  * Use `create(AdapterBootstrapSchema)` to create a new message.
  */
 export const AdapterBootstrapSchema: GenMessage<AdapterBootstrap> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 17);
+  messageDesc(file_supertag_runtime_v2_runtime, 23);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessRun
@@ -509,7 +687,7 @@ export type HarnessRun = Message<"supertag.runtime.v2.HarnessRun"> & {
  * Use `create(HarnessRunSchema)` to create a new message.
  */
 export const HarnessRunSchema: GenMessage<HarnessRun> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 18);
+  messageDesc(file_supertag_runtime_v2_runtime, 24);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessPublishRequest
@@ -531,7 +709,7 @@ export type HarnessPublishRequest = Message<"supertag.runtime.v2.HarnessPublishR
  * Use `create(HarnessPublishRequestSchema)` to create a new message.
  */
 export const HarnessPublishRequestSchema: GenMessage<HarnessPublishRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 19);
+  messageDesc(file_supertag_runtime_v2_runtime, 25);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessCompleteRequest
@@ -546,6 +724,11 @@ export type HarnessCompleteRequest = Message<"supertag.runtime.v2.HarnessComplet
    * @generated from field: bool succeeded = 2;
    */
   succeeded: boolean;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ObjectiveSignal objective_signal = 3;
+   */
+  objectiveSignal: ObjectiveSignal;
 };
 
 /**
@@ -553,7 +736,7 @@ export type HarnessCompleteRequest = Message<"supertag.runtime.v2.HarnessComplet
  * Use `create(HarnessCompleteRequestSchema)` to create a new message.
  */
 export const HarnessCompleteRequestSchema: GenMessage<HarnessCompleteRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 20);
+  messageDesc(file_supertag_runtime_v2_runtime, 26);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessCompleteResponse
@@ -566,7 +749,303 @@ export type HarnessCompleteResponse = Message<"supertag.runtime.v2.HarnessComple
  * Use `create(HarnessCompleteResponseSchema)` to create a new message.
  */
 export const HarnessCompleteResponseSchema: GenMessage<HarnessCompleteResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 21);
+  messageDesc(file_supertag_runtime_v2_runtime, 27);
+
+/**
+ * @generated from message supertag.runtime.v2.CreateObjectiveRequest
+ */
+export type CreateObjectiveRequest = Message<"supertag.runtime.v2.CreateObjectiveRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string objective_id = 2;
+   */
+  objectiveId: string;
+
+  /**
+   * @generated from field: string owner_tag_id = 3;
+   */
+  ownerTagId: string;
+
+  /**
+   * @generated from field: string outcome = 4;
+   */
+  outcome: string;
+
+  /**
+   * @generated from field: bool ongoing = 5;
+   */
+  ongoing: boolean;
+
+  /**
+   * @generated from field: optional int64 deadline_ms = 6;
+   */
+  deadlineMs?: bigint | undefined;
+
+  /**
+   * @generated from field: optional uint64 budget_limit_minor = 7;
+   */
+  budgetLimitMinor?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string budget_currency = 8;
+   */
+  budgetCurrency?: string | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.CreateObjectiveRequest.
+ * Use `create(CreateObjectiveRequestSchema)` to create a new message.
+ */
+export const CreateObjectiveRequestSchema: GenMessage<CreateObjectiveRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 28);
+
+/**
+ * @generated from message supertag.runtime.v2.Objective
+ */
+export type Objective = Message<"supertag.runtime.v2.Objective"> & {
+  /**
+   * @generated from field: string objective_id = 1;
+   */
+  objectiveId: string;
+
+  /**
+   * @generated from field: string owner_tag_id = 2;
+   */
+  ownerTagId: string;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string outcome = 4;
+   */
+  outcome: string;
+
+  /**
+   * @generated from field: bool ongoing = 5;
+   */
+  ongoing: boolean;
+
+  /**
+   * @generated from field: string starting_task_id = 6;
+   */
+  startingTaskId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ObjectiveStatus status = 7;
+   */
+  status: ObjectiveStatus;
+
+  /**
+   * @generated from field: uint64 revision = 8;
+   */
+  revision: bigint;
+
+  /**
+   * @generated from field: optional int64 deadline_ms = 9;
+   */
+  deadlineMs?: bigint | undefined;
+
+  /**
+   * @generated from field: optional uint64 budget_limit_minor = 10;
+   */
+  budgetLimitMinor?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string budget_currency = 11;
+   */
+  budgetCurrency?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 paused_at_ms = 12;
+   */
+  pausedAtMs?: bigint | undefined;
+
+  /**
+   * @generated from field: optional uint64 reported_spend_minor = 13;
+   */
+  reportedSpendMinor?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.Objective.
+ * Use `create(ObjectiveSchema)` to create a new message.
+ */
+export const ObjectiveSchema: GenMessage<Objective> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 29);
+
+/**
+ * @generated from message supertag.runtime.v2.GetObjectiveRequest
+ */
+export type GetObjectiveRequest = Message<"supertag.runtime.v2.GetObjectiveRequest"> & {
+  /**
+   * @generated from field: string objective_id = 1;
+   */
+  objectiveId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetObjectiveRequest.
+ * Use `create(GetObjectiveRequestSchema)` to create a new message.
+ */
+export const GetObjectiveRequestSchema: GenMessage<GetObjectiveRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 30);
+
+/**
+ * @generated from message supertag.runtime.v2.ListObjectivesRequest
+ */
+export type ListObjectivesRequest = Message<"supertag.runtime.v2.ListObjectivesRequest"> & {
+  /**
+   * @generated from field: uint32 limit = 1;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: string after_id = 2;
+   */
+  afterId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListObjectivesRequest.
+ * Use `create(ListObjectivesRequestSchema)` to create a new message.
+ */
+export const ListObjectivesRequestSchema: GenMessage<ListObjectivesRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 31);
+
+/**
+ * @generated from message supertag.runtime.v2.ListObjectivesResponse
+ */
+export type ListObjectivesResponse = Message<"supertag.runtime.v2.ListObjectivesResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.Objective objectives = 1;
+   */
+  objectives: Objective[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListObjectivesResponse.
+ * Use `create(ListObjectivesResponseSchema)` to create a new message.
+ */
+export const ListObjectivesResponseSchema: GenMessage<ListObjectivesResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 32);
+
+/**
+ * @generated from message supertag.runtime.v2.SetObjectiveLimitsRequest
+ */
+export type SetObjectiveLimitsRequest = Message<"supertag.runtime.v2.SetObjectiveLimitsRequest"> & {
+  /**
+   * @generated from field: string objective_id = 1;
+   */
+  objectiveId: string;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: optional int64 deadline_ms = 3;
+   */
+  deadlineMs?: bigint | undefined;
+
+  /**
+   * @generated from field: bool clear_deadline = 4;
+   */
+  clearDeadline: boolean;
+
+  /**
+   * @generated from field: optional uint64 budget_limit_minor = 5;
+   */
+  budgetLimitMinor?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string budget_currency = 6;
+   */
+  budgetCurrency?: string | undefined;
+
+  /**
+   * @generated from field: bool clear_budget = 7;
+   */
+  clearBudget: boolean;
+
+  /**
+   * @generated from field: optional uint64 expected_revision = 8;
+   */
+  expectedRevision?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SetObjectiveLimitsRequest.
+ * Use `create(SetObjectiveLimitsRequestSchema)` to create a new message.
+ */
+export const SetObjectiveLimitsRequestSchema: GenMessage<SetObjectiveLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 33);
+
+/**
+ * @generated from message supertag.runtime.v2.ObjectiveActionRequest
+ */
+export type ObjectiveActionRequest = Message<"supertag.runtime.v2.ObjectiveActionRequest"> & {
+  /**
+   * @generated from field: string objective_id = 1;
+   */
+  objectiveId: string;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ObjectiveActionRequest.
+ * Use `create(ObjectiveActionRequestSchema)` to create a new message.
+ */
+export const ObjectiveActionRequestSchema: GenMessage<ObjectiveActionRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 34);
+
+/**
+ * @generated from message supertag.runtime.v2.ReviewObjectiveRequest
+ */
+export type ReviewObjectiveRequest = Message<"supertag.runtime.v2.ReviewObjectiveRequest"> & {
+  /**
+   * @generated from field: string objective_id = 1;
+   */
+  objectiveId: string;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: bool approved = 3;
+   */
+  approved: boolean;
+
+  /**
+   * @generated from field: string feedback = 4;
+   */
+  feedback: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ReviewObjectiveRequest.
+ * Use `create(ReviewObjectiveRequestSchema)` to create a new message.
+ */
+export const ReviewObjectiveRequestSchema: GenMessage<ReviewObjectiveRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_runtime, 35);
 
 /**
  * @generated from message supertag.runtime.v2.ReplyDestination
@@ -588,7 +1067,7 @@ export type ReplyDestination = Message<"supertag.runtime.v2.ReplyDestination"> &
  * Use `create(ReplyDestinationSchema)` to create a new message.
  */
 export const ReplyDestinationSchema: GenMessage<ReplyDestination> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 22);
+  messageDesc(file_supertag_runtime_v2_runtime, 36);
 
 /**
  * @generated from message supertag.runtime.v2.AcceptEventRequest
@@ -630,7 +1109,7 @@ export type AcceptEventRequest = Message<"supertag.runtime.v2.AcceptEventRequest
  * Use `create(AcceptEventRequestSchema)` to create a new message.
  */
 export const AcceptEventRequestSchema: GenMessage<AcceptEventRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 23);
+  messageDesc(file_supertag_runtime_v2_runtime, 37);
 
 /**
  * @generated from message supertag.runtime.v2.Reply
@@ -677,7 +1156,7 @@ export type Reply = Message<"supertag.runtime.v2.Reply"> & {
  * Use `create(ReplySchema)` to create a new message.
  */
 export const ReplySchema: GenMessage<Reply> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 24);
+  messageDesc(file_supertag_runtime_v2_runtime, 38);
 
 /**
  * @generated from message supertag.runtime.v2.ClaimReplyRequest
@@ -694,7 +1173,7 @@ export type ClaimReplyRequest = Message<"supertag.runtime.v2.ClaimReplyRequest">
  * Use `create(ClaimReplyRequestSchema)` to create a new message.
  */
 export const ClaimReplyRequestSchema: GenMessage<ClaimReplyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 25);
+  messageDesc(file_supertag_runtime_v2_runtime, 39);
 
 /**
  * @generated from message supertag.runtime.v2.ClaimReplyResponse
@@ -716,7 +1195,7 @@ export type ClaimReplyResponse = Message<"supertag.runtime.v2.ClaimReplyResponse
  * Use `create(ClaimReplyResponseSchema)` to create a new message.
  */
 export const ClaimReplyResponseSchema: GenMessage<ClaimReplyResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 26);
+  messageDesc(file_supertag_runtime_v2_runtime, 40);
 
 /**
  * @generated from message supertag.runtime.v2.SettleReplyRequest
@@ -748,7 +1227,7 @@ export type SettleReplyRequest = Message<"supertag.runtime.v2.SettleReplyRequest
  * Use `create(SettleReplyRequestSchema)` to create a new message.
  */
 export const SettleReplyRequestSchema: GenMessage<SettleReplyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_runtime, 27);
+  messageDesc(file_supertag_runtime_v2_runtime, 41);
 
 /**
  * @generated from enum supertag.runtime.v2.TaskState
@@ -788,6 +1267,11 @@ export enum TaskState {
    * @generated from enum value: TASK_STATE_CLAIMED = 6;
    */
   CLAIMED = 6,
+
+  /**
+   * @generated from enum value: TASK_STATE_UNCERTAIN = 7;
+   */
+  UNCERTAIN = 7,
 }
 
 /**
@@ -795,6 +1279,109 @@ export enum TaskState {
  */
 export const TaskStateSchema: GenEnum<TaskState> = /*@__PURE__*/
   enumDesc(file_supertag_runtime_v2_runtime, 0);
+
+/**
+ * @generated from enum supertag.runtime.v2.AttemptDecision
+ */
+export enum AttemptDecision {
+  /**
+   * @generated from enum value: ATTEMPT_DECISION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ATTEMPT_DECISION_FAILED = 1;
+   */
+  FAILED = 1,
+
+  /**
+   * @generated from enum value: ATTEMPT_DECISION_RETRY = 2;
+   */
+  RETRY = 2,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.AttemptDecision.
+ */
+export const AttemptDecisionSchema: GenEnum<AttemptDecision> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_runtime, 1);
+
+/**
+ * @generated from enum supertag.runtime.v2.ObjectiveStatus
+ */
+export enum ObjectiveStatus {
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_WORKING = 1;
+   */
+  WORKING = 1,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_BLOCKED = 2;
+   */
+  BLOCKED = 2,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_LIMITED = 3;
+   */
+  LIMITED = 3,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_READY_FOR_REVIEW = 4;
+   */
+  READY_FOR_REVIEW = 4,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_COMPLETED = 5;
+   */
+  COMPLETED = 5,
+
+  /**
+   * @generated from enum value: OBJECTIVE_STATUS_CANCELLED = 6;
+   */
+  CANCELLED = 6,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.ObjectiveStatus.
+ */
+export const ObjectiveStatusSchema: GenEnum<ObjectiveStatus> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_runtime, 2);
+
+/**
+ * @generated from enum supertag.runtime.v2.ObjectiveSignal
+ */
+export enum ObjectiveSignal {
+  /**
+   * @generated from enum value: OBJECTIVE_SIGNAL_PROGRESS = 0;
+   */
+  PROGRESS = 0,
+
+  /**
+   * @generated from enum value: OBJECTIVE_SIGNAL_READY_FOR_REVIEW = 1;
+   */
+  READY_FOR_REVIEW = 1,
+
+  /**
+   * @generated from enum value: OBJECTIVE_SIGNAL_COMPLETED = 2;
+   */
+  COMPLETED = 2,
+
+  /**
+   * @generated from enum value: OBJECTIVE_SIGNAL_BLOCKED = 3;
+   */
+  BLOCKED = 3,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.ObjectiveSignal.
+ */
+export const ObjectiveSignalSchema: GenEnum<ObjectiveSignal> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_runtime, 3);
 
 /**
  * @generated from enum supertag.runtime.v2.ReplyState
@@ -835,7 +1422,7 @@ export enum ReplyState {
  * Describes the enum supertag.runtime.v2.ReplyState.
  */
 export const ReplyStateSchema: GenEnum<ReplyState> = /*@__PURE__*/
-  enumDesc(file_supertag_runtime_v2_runtime, 1);
+  enumDesc(file_supertag_runtime_v2_runtime, 4);
 
 /**
  * The Gateway exposes these services to operators and enrolled hosts. The
@@ -884,8 +1471,87 @@ export const Operator: GenService<{
     input: typeof CancelTaskRequestSchema;
     output: typeof TaskSchema;
   },
+  /**
+   * @generated from rpc supertag.runtime.v2.Operator.ResolveAttempt
+   */
+  resolveAttempt: {
+    methodKind: "unary";
+    input: typeof ResolveAttemptRequestSchema;
+    output: typeof AttemptResolutionSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_runtime, 0);
+
+/**
+ * @generated from service supertag.runtime.v2.Objectives
+ */
+export const Objectives: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.CreateObjective
+   */
+  createObjective: {
+    methodKind: "unary";
+    input: typeof CreateObjectiveRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.GetObjective
+   */
+  getObjective: {
+    methodKind: "unary";
+    input: typeof GetObjectiveRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.ListObjectives
+   */
+  listObjectives: {
+    methodKind: "unary";
+    input: typeof ListObjectivesRequestSchema;
+    output: typeof ListObjectivesResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.SetLimits
+   */
+  setLimits: {
+    methodKind: "unary";
+    input: typeof SetObjectiveLimitsRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.PauseObjective
+   */
+  pauseObjective: {
+    methodKind: "unary";
+    input: typeof ObjectiveActionRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.ResumeObjective
+   */
+  resumeObjective: {
+    methodKind: "unary";
+    input: typeof ObjectiveActionRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.CancelObjective
+   */
+  cancelObjective: {
+    methodKind: "unary";
+    input: typeof ObjectiveActionRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.Objectives.ReviewObjective
+   */
+  reviewObjective: {
+    methodKind: "unary";
+    input: typeof ReviewObjectiveRequestSchema;
+    output: typeof ObjectiveSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_runtime, 1);
 
 /**
  * @generated from service supertag.runtime.v2.WorkerHost
@@ -916,6 +1582,30 @@ export const WorkerHost: GenService<{
     output: typeof TaskSchema;
   },
   /**
+   * @generated from rpc supertag.runtime.v2.WorkerHost.RenewAttempt
+   */
+  renewAttempt: {
+    methodKind: "unary";
+    input: typeof InspectAttemptRequestSchema;
+    output: typeof AttemptAuthoritySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.WorkerHost.GetAttemptResolution
+   */
+  getAttemptResolution: {
+    methodKind: "unary";
+    input: typeof InspectAttemptRequestSchema;
+    output: typeof GetAttemptResolutionResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.WorkerHost.ReportAttemptUsage
+   */
+  reportAttemptUsage: {
+    methodKind: "unary";
+    input: typeof ReportAttemptUsageRequestSchema;
+    output: typeof ReportAttemptUsageResponseSchema;
+  },
+  /**
    * @generated from rpc supertag.runtime.v2.WorkerHost.AppendEvent
    */
   appendEvent: {
@@ -932,7 +1622,7 @@ export const WorkerHost: GenService<{
     output: typeof TaskSchema;
   },
 }> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_runtime, 1);
+  serviceDesc(file_supertag_runtime_v2_runtime, 2);
 
 /**
  * Private Gateway-to-Control-Plane operations. The authenticated connector
@@ -966,7 +1656,7 @@ export const Connector: GenService<{
     output: typeof ReplySchema;
   },
 }> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_runtime, 2);
+  serviceDesc(file_supertag_runtime_v2_runtime, 3);
 
 /**
  * An adapter connects only to its supervising Worker Host. The launch pipe
@@ -1000,4 +1690,4 @@ export const Harness: GenService<{
     output: typeof HarnessCompleteResponseSchema;
   },
 }> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_runtime, 3);
+  serviceDesc(file_supertag_runtime_v2_runtime, 4);

@@ -1,4 +1,5 @@
 pub mod objective_limits;
+mod objectives;
 mod store;
 
 pub use store::{Store, StoreError};
@@ -24,6 +25,12 @@ impl ControlPlane {
             store: Store::open(database_url).await?,
             gateway_token: Arc::new(gateway_token),
         })
+    }
+
+    pub async fn sweep(&self) -> anyhow::Result<()> {
+        self.store.sweep_objectives().await?;
+        self.store.sweep_expired_attempts().await?;
+        Ok(())
     }
 
     fn principal<T>(&self, request: &Request<T>, class: &str) -> Result<String, Status> {
@@ -113,6 +120,18 @@ impl operator_server::Operator for ControlPlane {
                 .await?,
         ))
     }
+
+    async fn resolve_attempt(
+        &self,
+        request: Request<ResolveAttemptRequest>,
+    ) -> Result<Response<AttemptResolution>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .resolve_attempt(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
 }
 
 #[tonic::async_trait]
@@ -158,6 +177,42 @@ impl worker_host_server::WorkerHost for ControlPlane {
                 )
                 .await?,
         ))
+    }
+
+    async fn renew_attempt(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptAuthority>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(
+            self.store
+                .renew_attempt(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_attempt_resolution(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<GetAttemptResolutionResponse>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(GetAttemptResolutionResponse {
+            resolution: self
+                .store
+                .get_attempt_resolution(&principal, &request.into_inner())
+                .await?,
+        }))
+    }
+
+    async fn report_attempt_usage(
+        &self,
+        request: Request<ReportAttemptUsageRequest>,
+    ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        self.store
+            .report_attempt_usage(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReportAttemptUsageResponse {}))
     }
 
     async fn append_event(

@@ -18,10 +18,11 @@ use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConne
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        AcceptEventRequest, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
-        ListEventsRequest, PutTagRequest, ReplyDestination, ReplyState, SettleReplyRequest,
-        SubmitTaskRequest, Task, TaskEvent, TaskState, connector_client::ConnectorClient,
-        operator_client::OperatorClient,
+        AcceptEventRequest, AttemptDecision, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
+        InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyDestination, ReplyState,
+        ResolveAttemptRequest, SettleReplyRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
+        connector_client::ConnectorClient, operator_client::OperatorClient,
+        worker_host_client::WorkerHostClient,
     },
 };
 use tempfile::TempDir;
@@ -1600,5 +1601,460 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             .len(),
         2
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_codex_launch_runs_the_starting_objective_task_with_private_state() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir()?;
+    let state = directory.path().join("local");
+    let home = directory.path().join("fixture-home");
+    let codex_home = home.join(".codex");
+    std::fs::create_dir_all(&codex_home)?;
+    let auth = codex_home.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{"tokens":{"access_token":"fixture-native-sign-in","refresh_token":"fixture-native-refresh"}}"#,
+    )?;
+    std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
+    let fake = directory.path().join("codex-fixture");
+    std::fs::write(
+        &fake,
+        r#"#!/bin/sh
+set -eu
+if [ "$1" = --version ]; then
+  printf '%s\n' 'codex-cli 0.163.0'
+  exit 0
+fi
+test "$1" = exec
+case " $* " in *" --model fixture-model "*) ;; *) exit 10 ;; esac
+case " $* " in *" --sandbox read-only "*) ;; *) exit 10 ;; esac
+test -z "${SUPERTAG_HOST_TOKEN:-}${SUPERTAG_OPERATOR_TOKEN:-}${SUPERTAG_GATEWAY_TOKEN:-}"
+test -z "${SUPERTAG_CODEX_ATTEMPT_DIRECTORY:-}${SUPERTAG_CODEX_SCRATCH_PARENT:-}"
+test -f "$CODEX_HOME/auth.json"
+grep -q fixture-native-sign-in "$CODEX_HOME/auth.json"
+prompt=$(cat)
+case "$prompt" in *"Verify the native harness"*) ;; *) exit 11 ;; esac
+printf '%s\n' '{"type":"thread.started","thread_id":"fixture-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"fixture-message","type":"agent_message","text":"Native adapter verified"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}'
+"#,
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
+
+    let mut command = local_command();
+    command
+        .args(["up", "--state-directory"])
+        .arg(&state)
+        .args(["--harness", "codex", "--codex-path"])
+        .arg(&fake)
+        .args(["--codex-model", "fixture-model"])
+        .env("HOME", &home);
+    let mut supervisor = Process::spawn(command, directory.path(), "native-codex", true)?;
+    let endpoint = supervisor.endpoint().await?;
+    let channel = Channel::from_shared(endpoint)?
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(3))
+        .connect()
+        .await?;
+    let mut operator = OperatorClient::new(channel);
+    let credentials = local_credentials(&state)?;
+    let local = state
+        .to_str()
+        .context("local state directory is not UTF-8")?;
+    cli(
+        local_command(),
+        directory.path(),
+        &[
+            "put-tag",
+            "--state-directory",
+            local,
+            "native-engineer",
+            "--instructions",
+            "Validate the local runtime.",
+            "--allow",
+            "files:read",
+        ],
+    )
+    .await?;
+    let objective = cli(
+        local_command(),
+        directory.path(),
+        &[
+            "objective",
+            "--state-directory",
+            local,
+            "create",
+            "native-objective",
+            "--ongoing",
+            "--owner",
+            "native-engineer",
+            "--operation-id",
+            "native-start",
+            "Verify the native harness",
+        ],
+    )
+    .await?;
+    let task_id = objective["starting_task_id"]
+        .as_str()
+        .context("missing starting Task")?;
+    let deadline = Instant::now() + WAIT;
+    let settled = loop {
+        let observed = task(&mut operator, &credentials, task_id).await?;
+        if observed.state() == TaskState::Succeeded {
+            break observed;
+        }
+        ensure!(
+            observed.state() != TaskState::Failed,
+            "native Codex fixture failed: {:?}",
+            observed.result
+        );
+        ensure!(
+            Instant::now() < deadline,
+            "native Codex fixture did not finish"
+        );
+        sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(settled.result.as_deref(), Some("Native adapter verified"));
+    let stored = cli(
+        local_command(),
+        directory.path(),
+        &[
+            "objective",
+            "--state-directory",
+            local,
+            "get",
+            "native-objective",
+        ],
+    )
+    .await?;
+    assert_eq!(stored["starting_task_id"].as_str(), Some(task_id));
+    assert_eq!(stored["status"], "OBJECTIVE_STATUS_WORKING");
+    assert!(
+        std::fs::read_dir(state.join("host"))?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .iter()
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("codex-attempt-")),
+        "guardian retained the disposable Codex state after completion",
+    );
+    supervisor.terminate()?;
+    supervisor.successful_exit().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "exercises the real 30-second execution authority deadline"]
+async fn gateway_partition_expires_execution_and_requires_audited_retry_before_replay() -> Result<()>
+{
+    let directory = TempDir::new()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("partition.db").display()
+    );
+    let credentials = Credentials::new();
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane =
+        Process::spawn(command, directory.path(), "partition-control-plane", true)?;
+    let private_endpoint = control_plane.endpoint().await?;
+    let mut command = credentials.command();
+    command.args(["gateway", "--control-plane", &private_endpoint]);
+    let mut gateway = Process::spawn(command, directory.path(), "partition-gateway", true)?;
+    let public_endpoint = gateway.endpoint().await?;
+    let mut services = Services {
+        control_plane,
+        gateway,
+        endpoint: public_endpoint.clone(),
+    };
+    let mut operator = services.client().await?;
+    operator
+        .put_tag(credentials.request(PutTagRequest {
+            tag_id: "engineer".into(),
+            instructions: "Retry only with evidence".into(),
+            allowed_actions: vec!["files:read".into()],
+        })?)
+        .await?;
+    let accepted = operator
+        .submit_task(credentials.request(SubmitTaskRequest {
+            tag_id: "engineer".into(),
+            session_id: "partitioned-session".into(),
+            operation_id: "partitioned-work".into(),
+            prompt: "inspect after recovery".into(),
+        })?)
+        .await?
+        .into_inner();
+    let pending = operator
+        .submit_task(credentials.request(SubmitTaskRequest {
+            tag_id: "engineer".into(),
+            session_id: "partitioned-session".into(),
+            operation_id: "later-session-work".into(),
+            prompt: "continue the Session".into(),
+        })?)
+        .await?
+        .into_inner();
+    let (adapter, launches) = recording_adapter(directory.path())?;
+    let state = directory.path().join("host");
+    let host_command = |waiting: bool| {
+        let mut command = credentials.command();
+        command
+            .args([
+                "worker-host",
+                "--gateway",
+                &public_endpoint,
+                "--once",
+                "--state-directory",
+            ])
+            .arg(&state)
+            .arg("--adapter")
+            .arg(&adapter);
+        if waiting {
+            command.arg("--adapter-arg=--wait-for-cancel");
+        }
+        command
+    };
+    let mut host = Process::spawn(
+        host_command(true),
+        directory.path(),
+        "partition-host",
+        false,
+    )?;
+    let running = wait_for_state(
+        &mut operator,
+        &credentials,
+        &accepted.task_id,
+        TaskState::Running,
+    )
+    .await?;
+    let deadline = Instant::now() + WAIT;
+    let original_events = loop {
+        let events = events(&mut operator, &credentials, &accepted.task_id, 0).await?;
+        if !events.is_empty() {
+            break events;
+        }
+        ensure!(Instant::now() < deadline, "waiting fixture did not start");
+        sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(original_events.len(), 1);
+    let launched: Vec<u32> = std::fs::read_to_string(&launches)?
+        .lines()
+        .map(str::parse)
+        .collect::<std::result::Result<_, _>>()?;
+    assert_eq!(launched.len(), 1);
+    let mut cleanup = DescendantCleanup(descendants(host.child.id())?);
+    assert!(cleanup.0.contains(&launched[0]));
+    let journal: Value = serde_json::from_slice(&std::fs::read(state.join("attempt.json"))?)?;
+    assert_eq!(journal["stage"], "executing");
+    let old_attempt = InspectAttemptRequest {
+        task_id: accepted.task_id.clone(),
+        attempt_id: running
+            .attempt_id
+            .clone()
+            .context("running Task omitted Attempt identity")?,
+        lease_token: journal["lease_token"]
+            .as_str()
+            .context("host journal omitted ownership proof")?
+            .into(),
+    };
+
+    // Keep the Control Plane alive but make the host's only authority route
+    // unavailable. This uses the real monotonic deadline and never advances a clock.
+    let partitioned_at = Instant::now();
+    services.gateway.crash()?;
+    drop(operator);
+    let private_channel = Channel::from_shared(private_endpoint.clone())?
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(3))
+        .connect()
+        .await?;
+    let mut private_operator = OperatorClient::new(private_channel);
+    let deadline = partitioned_at + Duration::from_secs(45);
+    loop {
+        let observed = private_operator
+            .get_task(authenticated_request(
+                GetTaskRequest {
+                    task_id: accepted.task_id.clone(),
+                },
+                &credentials.gateway,
+                Some("operator:local"),
+            )?)
+            .await?
+            .into_inner();
+        let mut alive = false;
+        for pid in &cleanup.0 {
+            alive |= process_exists(*pid)?;
+        }
+        if !alive && observed.state() == TaskState::Uncertain {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "partition did not stop local execution and preserve uncertain ownership"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    cleanup.0.clear();
+    assert!(
+        partitioned_at.elapsed() >= Duration::from_secs(20),
+        "a transient disconnect ended execution before its authority deadline"
+    );
+    assert!(
+        !process_exists(launched[0])?,
+        "fixture survived its authority deadline"
+    );
+    assert_eq!(std::fs::read_to_string(&launches)?.lines().count(), 1);
+    let resolution_input = ResolveAttemptRequest {
+        task_id: accepted.task_id.clone(),
+        attempt_id: old_attempt.attempt_id.clone(),
+        operation_id: "audited-partition-retry".into(),
+        decision: AttemptDecision::Retry as i32,
+        evidence: format!(
+            "Observed fixture PID {} and its guardian stopped after lost authority; require the host's cleanup receipt before retry.",
+            launched[0]
+        ),
+        confirmed_stopped: false,
+    };
+    let refused = private_operator
+        .resolve_attempt(authenticated_request(
+            resolution_input.clone(),
+            &credentials.gateway,
+            Some("operator:local"),
+        )?)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.code(),
+        Code::FailedPrecondition,
+        "local process exit alone must not invent a stored cleanup receipt"
+    );
+
+    // Rebind the original route. The surviving host can now deliver its saved
+    // cleanup receipt, which leaves the Task uncertain and the Session blocked.
+    let mut command = credentials.command();
+    command.args([
+        "gateway",
+        "--control-plane",
+        &private_endpoint,
+        "--listen",
+        public_endpoint.trim_start_matches("http://"),
+    ]);
+    services.gateway = Process::spawn(command, directory.path(), "restored-gateway", true)?;
+    assert_eq!(services.gateway.endpoint().await?, public_endpoint);
+    host.successful_exit().await?;
+    let mut operator = services.client().await?;
+    let uncertain = task(&mut operator, &credentials, &accepted.task_id).await?;
+    assert_eq!(uncertain.state(), TaskState::Uncertain);
+    assert_eq!(uncertain.attempt_id, running.attempt_id);
+    assert!(uncertain.result.is_none());
+    assert_eq!(
+        events(&mut operator, &credentials, &accepted.task_id, 0).await?,
+        original_events
+    );
+    let host_channel = Channel::from_shared(public_endpoint.clone())?
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(3))
+        .connect()
+        .await?;
+    let mut host_client = WorkerHostClient::new(host_channel);
+    let receipt = host_client
+        .get_attempt_resolution(authenticated_request(
+            old_attempt.clone(),
+            &credentials.host,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert!(receipt.resolution.is_none());
+    let mut no_replay =
+        Process::spawn(host_command(false), directory.path(), "blocked-host", false)?;
+    no_replay.successful_exit().await?;
+    assert_eq!(
+        std::fs::read_to_string(&launches)?.lines().count(),
+        1,
+        "restoring connectivity must not replay uncertain work"
+    );
+    assert_eq!(
+        task(&mut operator, &credentials, &pending.task_id)
+            .await?
+            .state(),
+        TaskState::Queued
+    );
+
+    let resolution = operator
+        .resolve_attempt(credentials.request(resolution_input.clone())?)
+        .await?
+        .into_inner();
+    assert_eq!(resolution.task_id, accepted.task_id);
+    assert_eq!(resolution.attempt_id, old_attempt.attempt_id);
+    assert_eq!(resolution.decision, AttemptDecision::Retry as i32);
+    assert_eq!(resolution.operator_id, "local");
+    assert_eq!(resolution.evidence, resolution_input.evidence);
+    assert!(resolution.resolved_at_ms > 0);
+    assert_eq!(
+        operator
+            .resolve_attempt(credentials.request(resolution_input)?)
+            .await?
+            .into_inner(),
+        resolution
+    );
+    let receipt = host_client
+        .get_attempt_resolution(authenticated_request(old_attempt, &credentials.host, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(receipt.resolution, Some(resolution));
+    let retry_queued = task(&mut operator, &credentials, &accepted.task_id).await?;
+    assert_eq!(retry_queued.state(), TaskState::Queued);
+    assert!(retry_queued.attempt_id.is_none());
+    let mut retried_host =
+        Process::spawn(host_command(false), directory.path(), "retried-host", false)?;
+    let completed = wait_for_state(
+        &mut operator,
+        &credentials,
+        &accepted.task_id,
+        TaskState::Succeeded,
+    )
+    .await?;
+    retried_host.successful_exit().await?;
+    assert_ne!(completed.attempt_id, running.attempt_id);
+    assert_eq!(
+        completed.result.as_deref(),
+        Some("Retry only with evidence: inspect after recovery [files:read]")
+    );
+    assert_eq!(std::fs::read_to_string(&launches)?.lines().count(), 2);
+    let history = events(&mut operator, &credentials, &accepted.task_id, 0).await?;
+    assert_eq!(
+        history
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(history[0], original_events[0]);
+    assert_eq!(
+        history[1].text,
+        format!("{} started", completed.attempt_id.unwrap())
+    );
+    assert_eq!(history[2].text, completed.result.unwrap());
+    let mut next_host = Process::spawn(
+        host_command(false),
+        directory.path(),
+        "next-session-host",
+        false,
+    )?;
+    wait_for_state(
+        &mut operator,
+        &credentials,
+        &pending.task_id,
+        TaskState::Succeeded,
+    )
+    .await?;
+    next_host.successful_exit().await?;
+    assert_eq!(std::fs::read_to_string(&launches)?.lines().count(), 3);
     Ok(())
 }

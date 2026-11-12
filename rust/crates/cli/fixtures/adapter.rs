@@ -65,6 +65,7 @@ async fn main() -> Result<()> {
             HarnessCompleteRequest {
                 result,
                 succeeded: true,
+                objective_signal: 0,
             },
             &bootstrap.token,
             None,

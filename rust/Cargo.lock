@@ -2230,6 +2230,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "supertag-codex-adapter",
  "supertag-control-plane",
  "supertag-gateway",
  "supertag-protocol",
@@ -2244,11 +2245,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "supertag-codex-adapter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde_json",
+ "supertag-protocol",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "uuid",
+]
+
+[[package]]
 name = "supertag-control-plane"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "prost",
+ "serde",
  "serde_json",
  "sha2",
  "sqlx",

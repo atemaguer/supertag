@@ -44,6 +44,7 @@ async fn finish(store: &Store, task_id: &str, succeeded: bool) -> FinishTaskRequ
         lease_token: assignment.lease_token,
         result: "Reviewed".into(),
         succeeded,
+        objective_signal: 0,
     };
     store.finish_task("host:worker", &finish).await.unwrap();
     finish

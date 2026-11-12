@@ -7,13 +7,13 @@ use std::{future::Future, sync::Arc, time::Duration};
 use anyhow::{Context, ensure};
 use subtle::ConstantTimeEq;
 use supertag_protocol::v2::{
-    AppendEventRequest, CancelTaskRequest, ClaimTaskRequest, ClaimTaskResponse, FinishTaskRequest,
-    GetTaskRequest, InspectAttemptRequest, ListEventsRequest, ListEventsResponse, PutTagRequest,
-    StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent,
+    objectives_client::ObjectivesClient,
+    objectives_server::{Objectives, ObjectivesServer},
     operator_client::OperatorClient,
     operator_server::{Operator, OperatorServer},
     worker_host_client::WorkerHostClient,
     worker_host_server::{WorkerHost, WorkerHostServer},
+    *,
 };
 use tonic::{
     Request, Response, Status,
@@ -81,6 +81,12 @@ impl Gateway {
 
     pub fn worker_host_service(&self) -> WorkerHostServer<Self> {
         WorkerHostServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    pub fn objectives_service(&self) -> ObjectivesServer<Self> {
+        ObjectivesServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
@@ -214,6 +220,111 @@ fn worker_host_client(channel: Channel) -> WorkerHostClient<Channel> {
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
+fn objectives_client(channel: Channel) -> ObjectivesClient<Channel> {
+    ObjectivesClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+#[tonic::async_trait]
+impl Objectives for Gateway {
+    async fn create_objective(
+        &self,
+        request: Request<CreateObjectiveRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).create_objective(request).await },
+        )
+        .await
+    }
+
+    async fn get_objective(
+        &self,
+        request: Request<GetObjectiveRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).get_objective(request).await },
+        )
+        .await
+    }
+
+    async fn list_objectives(
+        &self,
+        request: Request<ListObjectivesRequest>,
+    ) -> Result<Response<ListObjectivesResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).list_objectives(request).await },
+        )
+        .await
+    }
+
+    async fn set_limits(
+        &self,
+        request: Request<SetObjectiveLimitsRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).set_limits(request).await },
+        )
+        .await
+    }
+
+    async fn pause_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).pause_objective(request).await },
+        )
+        .await
+    }
+
+    async fn resume_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).resume_objective(request).await },
+        )
+        .await
+    }
+
+    async fn cancel_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).cancel_objective(request).await },
+        )
+        .await
+    }
+
+    async fn review_objective(
+        &self,
+        request: Request<ReviewObjectiveRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { objectives_client(channel).review_objective(request).await },
+        )
+        .await
+    }
+}
+
 #[tonic::async_trait]
 impl Operator for Gateway {
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
@@ -269,6 +380,18 @@ impl Operator for Gateway {
         )
         .await
     }
+
+    async fn resolve_attempt(
+        &self,
+        request: Request<ResolveAttemptRequest>,
+    ) -> Result<Response<AttemptResolution>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).resolve_attempt(request).await },
+        )
+        .await
+    }
 }
 
 #[tonic::async_trait]
@@ -305,6 +428,50 @@ impl WorkerHost for Gateway {
             request,
             &self.credentials.worker_host,
             |channel, request| async { worker_host_client(channel).inspect_attempt(request).await },
+        )
+        .await
+    }
+
+    async fn renew_attempt(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptAuthority>, Status> {
+        self.forward(
+            request,
+            &self.credentials.worker_host,
+            |channel, request| async { worker_host_client(channel).renew_attempt(request).await },
+        )
+        .await
+    }
+
+    async fn get_attempt_resolution(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<GetAttemptResolutionResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.worker_host,
+            |channel, request| async {
+                worker_host_client(channel)
+                    .get_attempt_resolution(request)
+                    .await
+            },
+        )
+        .await
+    }
+
+    async fn report_attempt_usage(
+        &self,
+        request: Request<ReportAttemptUsageRequest>,
+    ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.worker_host,
+            |channel, request| async {
+                worker_host_client(channel)
+                    .report_attempt_usage(request)
+                    .await
+            },
         )
         .await
     }

@@ -132,7 +132,20 @@ cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
 For PostgreSQL coverage, put the disposable test server URL in a private file and set
 `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
 `-- --include-ignored` to require the PostgreSQL cases. Each case creates a separate database.
-The process tests also use temporary state directories and a local HTTP provider fixture.
+The process tests also use temporary state directories and a local HTTP provider fixture. The
+partition case waits for the production 30-second execution lease to expire.
+
+For a live read-only smoke test, use the built-in Codex adapter with an installed Codex CLI
+version 0.163.0 or newer. Start the services with a separate development state directory.
+
+```sh
+cargo run --manifest-path rust/Cargo.toml -p supertag-cli -- \
+  up --state-directory .supertag/rust-dev --harness codex
+```
+
+The adapter uses native sign-in or a configured provider key. Give the test Tag `files:read`
+and submit a short text Task. The integration suite exercises the same launch path with a
+deterministic Codex subprocess.
 
 Regenerate the Go, TypeScript, and Python runtime bindings after changing the Rust protobuf
 contract. See [binding generation and conformance checks](rust/bindings/README.md).

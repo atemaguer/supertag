@@ -1,10 +1,13 @@
+mod harness;
 mod local;
 mod network;
+mod objectives;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use harness::{AdapterOptions, CodexAdapterArgs};
 use serde_json::json;
 use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
@@ -14,8 +17,9 @@ use supertag_gateway::{
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        CancelTaskRequest, GetTaskRequest, ListEventsRequest, PutTagRequest, SubmitTaskRequest,
-        Task, connector_server::ConnectorServer, operator_client::OperatorClient,
+        AttemptDecision, CancelTaskRequest, GetTaskRequest, ListEventsRequest, PutTagRequest,
+        ResolveAttemptRequest, SubmitTaskRequest, Task, connector_server::ConnectorServer,
+        objectives_server::ObjectivesServer, operator_client::OperatorClient,
         operator_server::OperatorServer, worker_host_server::WorkerHostServer,
     },
 };
@@ -45,16 +49,20 @@ struct Connection {
     state_directory: Option<PathBuf>,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum RecoveryDecision {
+    Failed,
+    Retry,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Start the local Control Plane, Gateway, and Worker Host.
     Up {
         #[arg(long)]
         state_directory: PathBuf,
-        #[arg(long)]
-        adapter: PathBuf,
-        #[arg(long, allow_hyphen_values = true)]
-        adapter_arg: Vec<OsString>,
+        #[command(flatten)]
+        adapter: AdapterOptions,
         #[arg(long, default_value = "127.0.0.1:0")]
         gateway_listen: SocketAddr,
     },
@@ -80,15 +88,17 @@ enum Command {
         gateway: String,
         #[arg(long)]
         state_directory: PathBuf,
-        #[arg(long)]
-        adapter: PathBuf,
-        #[arg(long, allow_hyphen_values = true)]
-        adapter_arg: Vec<OsString>,
+        #[command(flatten)]
+        adapter: AdapterOptions,
         #[arg(long, default_value_t = 120)]
         attempt_timeout_seconds: u64,
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        wait_for_recovery: bool,
     },
+    #[command(name = "__codex-adapter", hide = true)]
+    CodexAdapter(CodexAdapterArgs),
     #[command(name = "__adapter-guardian", hide = true)]
     AdapterGuardian {
         #[arg(long)]
@@ -138,6 +148,28 @@ enum Command {
         connection: Connection,
         task_id: String,
     },
+    /// Record an audited decision for a stopped, uncertain Task Attempt.
+    ResolveAttempt {
+        #[command(flatten)]
+        connection: Connection,
+        task_id: String,
+        attempt_id: String,
+        #[arg(long, value_enum)]
+        decision: RecoveryDecision,
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        confirmed_stopped: bool,
+        #[arg(long)]
+        operation_id: Option<String>,
+    },
+    /// Manage an Objective and inspect its owner's work.
+    Objective {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: objectives::ObjectiveCommand,
+    },
 }
 
 fn main() -> Result<()> {
@@ -146,6 +178,10 @@ fn main() -> Result<()> {
             adapter,
             adapter_args,
         } => supertag_worker_host::guard_adapter(&adapter, &adapter_args),
+        Command::CodexAdapter(args) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(harness::run_codex(args)),
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
@@ -158,14 +194,12 @@ async fn run(command: Command) -> Result<()> {
         Command::Up {
             state_directory,
             adapter,
-            adapter_arg,
             gateway_listen,
         } => {
             local::up(
                 local::LocalOptions {
                     state_directory,
                     adapter,
-                    adapter_args: adapter_arg,
                     gateway_listen,
                 },
                 termination_signal(),
@@ -190,18 +224,22 @@ async fn run(command: Command) -> Result<()> {
             gateway,
             state_directory,
             adapter,
-            adapter_arg,
             attempt_timeout_seconds,
             once,
+            wait_for_recovery,
         } => {
+            let forward_codex_credentials = adapter.uses_codex();
+            let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: required_env("SUPERTAG_HOST_TOKEN")?,
                 state_directory,
                 adapter_guardian: std::env::current_exe()?,
                 adapter,
-                adapter_args: adapter_arg,
+                adapter_args,
+                forward_codex_credentials,
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
+                wait_for_recovery,
                 once,
             };
             let token = CancellationToken::new();
@@ -215,6 +253,7 @@ async fn run(command: Command) -> Result<()> {
             result?;
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
+        Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
         Command::PutTag {
             connection,
             tag_id,
@@ -306,6 +345,47 @@ async fn run(command: Command) -> Result<()> {
                 .into_inner();
             print_task(&task);
         }
+        Command::ResolveAttempt {
+            connection,
+            task_id,
+            attempt_id,
+            decision,
+            evidence,
+            confirmed_stopped,
+            operation_id,
+        } => {
+            let (mut client, token) = operator(connection).await?;
+            let decision = match decision {
+                RecoveryDecision::Failed => AttemptDecision::Failed,
+                RecoveryDecision::Retry => AttemptDecision::Retry,
+            };
+            let resolution = client
+                .resolve_attempt(request(
+                    ResolveAttemptRequest {
+                        task_id,
+                        attempt_id,
+                        decision: decision as i32,
+                        evidence,
+                        confirmed_stopped,
+                        operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({
+                    "task_id": resolution.task_id, "attempt_id": resolution.attempt_id,
+                    "decision": resolution.decision().as_str_name(),
+                    "operator_id": resolution.operator_id, "resolved_at_ms": resolution.resolved_at_ms,
+                })
+            );
+        }
+        Command::Objective {
+            connection,
+            command,
+        } => objectives::run(connection, command).await?,
     }
     Ok(())
 }
@@ -321,9 +401,21 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health.set_serving::<OperatorServer<ControlPlane>>().await;
     health.set_serving::<WorkerHostServer<ControlPlane>>().await;
     health.set_serving::<ConnectorServer<ControlPlane>>().await;
+    health.set_serving::<ObjectivesServer<ControlPlane>>().await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
-    builder
+    let maintenance = plane.clone();
+    let sweep = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if let Err(error) = maintenance.sweep().await {
+                eprintln!("Control Plane maintenance failed: {error}");
+            }
+        }
+    });
+    let served = builder
         .add_service(health_service)
         .add_service(
             OperatorServer::new(plane.clone())
@@ -336,12 +428,20 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(
-            ConnectorServer::new(plane)
+            ConnectorServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            ObjectivesServer::new(plane)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .serve_with_incoming_shutdown(TcpListenerStream::new(listener), termination_signal())
-        .await?;
+        .await;
+    sweep.abort();
+    let _ = sweep.await;
+    served?;
     Ok(())
 }
 
@@ -379,6 +479,7 @@ async fn gateway(
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<Gateway>>().await;
     health.set_serving::<WorkerHostServer<Gateway>>().await;
+    health.set_serving::<ObjectivesServer<Gateway>>().await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -388,7 +489,8 @@ async fn gateway(
     let router = builder
         .add_service(health_service)
         .add_service(gateway.operator_service())
-        .add_service(gateway.worker_host_service());
+        .add_service(gateway.worker_host_service())
+        .add_service(gateway.objectives_service());
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
@@ -485,6 +587,16 @@ async fn termination_signal() {
 }
 
 async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, String)> {
+    let (channel, token) = connect_operator(connection).await?;
+    Ok((
+        OperatorClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        token,
+    ))
+}
+
+async fn connect_operator(connection: Connection) -> Result<(Channel, String)> {
     let (uri, token) = if let Some(directory) = connection.state_directory {
         local::connection(&directory)?
     } else {
@@ -494,12 +606,7 @@ async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, St
         )
     };
     let channel = network::endpoint(uri, false).await?.connect().await?;
-    Ok((
-        OperatorClient::new(channel)
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES),
-        token,
-    ))
+    Ok((channel, token))
 }
 
 fn required_env(name: &str) -> Result<String> {

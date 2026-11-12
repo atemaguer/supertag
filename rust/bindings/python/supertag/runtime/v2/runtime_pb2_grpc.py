@@ -61,6 +61,11 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CancelTaskRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.ResolveAttempt = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/ResolveAttempt',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+                _registered_method=True)
 
 
 class OperatorServicer:
@@ -98,6 +103,12 @@ class OperatorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ResolveAttempt(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OperatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -125,6 +136,11 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.CancelTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CancelTaskRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'ResolveAttempt': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveAttempt,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -274,6 +290,406 @@ class Operator:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def ResolveAttempt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/ResolveAttempt',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class ObjectivesStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CreateObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/CreateObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateObjectiveRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.GetObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/GetObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetObjectiveRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.ListObjectives = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/ListObjectives',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.FromString,
+                _registered_method=True)
+        self.SetLimits = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/SetLimits',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.PauseObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/PauseObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.ResumeObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/ResumeObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.CancelObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/CancelObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+        self.ReviewObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/ReviewObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
+
+
+class ObjectivesServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def CreateObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListObjectives(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetLimits(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PauseObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResumeObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReviewObjective(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ObjectivesServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'CreateObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateObjectiveRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'GetObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetObjectiveRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'ListObjectives': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListObjectives,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.SerializeToString,
+            ),
+            'SetLimits': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetLimits,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'PauseObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.PauseObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'ResumeObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResumeObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'CancelObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'ReviewObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReviewObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Objectives', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Objectives', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Objectives:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CreateObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/CreateObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateObjectiveRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/GetObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetObjectiveRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListObjectives(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/ListObjectives',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetLimits(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/SetLimits',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PauseObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/PauseObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResumeObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/ResumeObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/CancelObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReviewObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/ReviewObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class WorkerHostStub:
     """Missing associated documentation comment in .proto file."""
@@ -298,6 +714,21 @@ class WorkerHostStub:
                 '/supertag.runtime.v2.WorkerHost/InspectAttempt',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
+        self.RenewAttempt = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/RenewAttempt',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptAuthority.FromString,
+                _registered_method=True)
+        self.GetAttemptResolution = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/GetAttemptResolution',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptResolutionResponse.FromString,
+                _registered_method=True)
+        self.ReportAttemptUsage = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportAttemptUsage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.FromString,
                 _registered_method=True)
         self.AppendEvent = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/AppendEvent',
@@ -332,6 +763,24 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RenewAttempt(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAttemptResolution(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReportAttemptUsage(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def AppendEvent(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -361,6 +810,21 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.InspectAttempt,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'RenewAttempt': grpc.unary_unary_rpc_method_handler(
+                    servicer.RenewAttempt,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptAuthority.SerializeToString,
+            ),
+            'GetAttemptResolution': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAttemptResolution,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptResolutionResponse.SerializeToString,
+            ),
+            'ReportAttemptUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportAttemptUsage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.SerializeToString,
             ),
             'AppendEvent': grpc.unary_unary_rpc_method_handler(
                     servicer.AppendEvent,
@@ -454,6 +918,87 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/InspectAttempt',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RenewAttempt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/RenewAttempt',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptAuthority.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAttemptResolution(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/GetAttemptResolution',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetAttemptResolutionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportAttemptUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportAttemptUsage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,

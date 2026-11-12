@@ -34,5 +34,6 @@ tonic-prost-build = "0.14"
 uuid = { version = "1", features = ["v4"] }
 supertag-protocol = { path = "crates/protocol" }
 supertag-control-plane = { path = "crates/control-plane" }
+supertag-codex-adapter = { path = "crates/codex-adapter" }
 supertag-gateway = { path = "crates/gateway" }
 supertag-worker-host = { path = "crates/worker-host" }

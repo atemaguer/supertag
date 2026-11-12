@@ -13,7 +13,7 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, AppendEventRequest, Assignment, HarnessAttachRequest,
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessPublishRequest, HarnessRun,
-        InspectAttemptRequest, TaskEvent, TaskState,
+        InspectAttemptRequest, ObjectiveSignal, TaskEvent, TaskState,
         harness_server::{Harness, HarnessServer},
         worker_host_client::WorkerHostClient,
     },
@@ -23,7 +23,7 @@ use tokio::{
     net::TcpListener,
     process::{Child, Command},
     sync::Mutex,
-    time,
+    time::{self, Instant},
 };
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
@@ -33,7 +33,10 @@ use tonic::{
 };
 use uuid::Uuid;
 
-use crate::{HostOptions, guardian::MAX_BOOTSTRAP_BYTES};
+use crate::{
+    HostOptions,
+    guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
+};
 
 #[derive(Clone)]
 struct Bridge {
@@ -123,6 +126,13 @@ impl Harness for Bridge {
             ));
         }
         let outcome = request.into_inner();
+        if outcome.result.len() > 262_144
+            || outcome.result.contains('\0')
+            || ObjectiveSignal::try_from(outcome.objective_signal).is_err()
+            || (!outcome.succeeded && outcome.objective_signal != ObjectiveSignal::Progress as i32)
+        {
+            return Err(Status::invalid_argument("invalid harness outcome"));
+        }
         if let Some(previous) = &state.outcome {
             if previous != &outcome {
                 return Err(Status::already_exists(
@@ -140,6 +150,7 @@ pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
     host: WorkerHostClient<Channel>,
+    valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     ensure!(assignment.task.is_some(), "assignment is missing its Task");
@@ -168,7 +179,7 @@ pub(crate) async fn execute(
                 stop_server.clone().cancelled_owned(),
             ),
     );
-    let result = supervise(options, &bridge, bootstrap, shutdown).await;
+    let result = supervise(options, &bridge, bootstrap, valid_until, shutdown).await;
     stop_server.cancel();
     if time::timeout(Duration::from_secs(2), &mut server)
         .await
@@ -184,11 +195,26 @@ async fn supervise(
     options: &HostOptions,
     bridge: &Bridge,
     bootstrap: AdapterBootstrap,
+    valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(failed("Worker Host is shutting down"));
     }
+    if Instant::now() >= valid_until {
+        return Ok(failed("Execution authority expired before adapter launch"));
+    }
+    // Sample the shared clock first so the deadline sent to the guardian is
+    // no later than the remaining lifetime observed by this process.
+    let now_ns = monotonic_now_ns()?;
+    let remaining_ns = u64::try_from(
+        valid_until
+            .saturating_duration_since(Instant::now())
+            .as_nanos(),
+    )?;
+    let launch_deadline = now_ns
+        .checked_add(remaining_ns)
+        .context("adapter launch deadline overflow")?;
     let mut command = Command::new(&options.adapter_guardian);
     command
         .args(["__adapter-guardian", "--adapter"])
@@ -206,6 +232,17 @@ async fn supervise(
         .stderr(Stdio::null())
         .process_group(0)
         .kill_on_drop(true);
+    if options.forward_codex_credentials {
+        command.env(
+            crate::guardian::CODEX_SCRATCH_PARENT,
+            &options.state_directory,
+        );
+        command.envs(
+            crate::CODEX_ENVIRONMENT
+                .iter()
+                .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
+        );
+    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return Ok(failed("Harness adapter could not start")),
@@ -221,13 +258,20 @@ async fn supervise(
             payload.len() <= MAX_BOOTSTRAP_BYTES,
             "adapter bootstrap exceeds size limit"
         );
-        input
-            .write_all(&(payload.len() as u32).to_le_bytes())
-            .await?;
-        input.write_all(&payload).await?;
+        let write_bootstrap = async {
+            input.write_all(&(payload.len() as u32).to_le_bytes()).await?;
+            input.write_all(&launch_deadline.to_le_bytes()).await?;
+            input.write_all(&payload).await
+        };
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+            _ = time::sleep_until(valid_until) => return Err(anyhow!("execution authority expired during bootstrap")),
+            written = write_bootstrap => written?,
+        }
         // Keep the pipe open while monitoring. It closes on cancellation,
         // deadline, or Worker Host death and wakes the guardian.
-        let outcome = monitor(&mut child, bridge, shutdown).await;
+        let outcome = monitor(&mut child, bridge, valid_until, shutdown).await;
         drop(input);
         outcome
     })
@@ -268,53 +312,106 @@ async fn supervise(
         .unwrap_or_else(|| failed("Harness adapter exited without an outcome")))
 }
 
-fn failed(message: &str) -> HarnessCompleteRequest {
+pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
     HarnessCompleteRequest {
         result: message.into(),
         succeeded: false,
+        objective_signal: 0,
     }
 }
 
 async fn monitor(
     child: &mut Child,
     bridge: &Bridge,
+    mut valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<ExitStatus> {
-    let mut interval = time::interval(Duration::from_millis(250));
-    interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-    let check_cancellation = async {
-        let mut host = bridge.host.clone();
-        loop {
-            interval.tick().await;
-            let mut request = authenticated_request(
-                InspectAttemptRequest {
-                    task_id: bridge.task_id().into(),
-                    attempt_id: bridge.assignment.attempt_id.clone(),
-                    lease_token: bridge.assignment.lease_token.clone(),
-                },
-                &bridge.host_token,
-                None,
-            )?;
-            request.set_timeout(Duration::from_secs(2));
-            match host.inspect_attempt(request).await {
-                Ok(response) if response.get_ref().state() == TaskState::Running => {}
-                Ok(_) => return Err(anyhow!("Control Plane ended the Task Attempt")),
-                Err(error)
-                    if matches!(
-                        error.code(),
-                        tonic::Code::Unavailable
-                            | tonic::Code::DeadlineExceeded
-                            | tonic::Code::Cancelled
-                    ) => {}
-                Err(error) => return Err(error.into()),
-            }
-        }
+    let status = tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+        result = monitor_authority(bridge, &mut valid_until) => {
+            result?;
+            unreachable!("authority monitoring ends only on rejection")
+        },
+        status = child.wait() => status?,
     };
-    tokio::select! {
-        status = child.wait() => Ok(status?),
-        result = check_cancellation => result,
-        _ = shutdown.cancelled() => Err(anyhow!("Worker Host is shutting down")),
+    ensure!(!shutdown.is_cancelled(), "Worker Host is shutting down");
+    ensure!(
+        Instant::now() < valid_until,
+        "execution authority expired before adapter exit was observed"
+    );
+    Ok(status)
+}
+
+async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result<()> {
+    const POLL: Duration = Duration::from_millis(250);
+    let mut host = bridge.host.clone();
+    let mut poll_at = Instant::now();
+    let mut renew_at = renewal_time(*valid_until);
+    loop {
+        time::sleep_until(poll_at.min(renew_at).min(*valid_until)).await;
+        let sent = Instant::now();
+        ensure!(sent < *valid_until, "execution authority expired");
+        let mut request = authenticated_request(
+            InspectAttemptRequest {
+                task_id: bridge.task_id().into(),
+                attempt_id: bridge.assignment.attempt_id.clone(),
+                lease_token: bridge.assignment.lease_token.clone(),
+            },
+            &bridge.host_token,
+            None,
+        )?;
+        request.set_timeout(Duration::from_secs(2));
+        let observed = if sent >= renew_at {
+            let renewed = time::timeout_at(*valid_until, host.renew_attempt(request))
+                .await
+                .context("execution authority expired during renewal")?;
+            ensure!(
+                Instant::now() < *valid_until,
+                "execution authority expired during renewal"
+            );
+            match renewed {
+                Ok(response) => {
+                    let authority = response.into_inner();
+                    let deadline = sent
+                        .checked_add(Duration::from_millis(authority.valid_for_ms))
+                        .context("invalid execution authority duration")?;
+                    ensure!(
+                        deadline > Instant::now(),
+                        "Control Plane ended execution authority"
+                    );
+                    *valid_until = deadline;
+                    renew_at = renewal_time(deadline);
+                    Ok(authority.task.context("execution authority has no Task")?)
+                }
+                Err(error) => {
+                    renew_at = Instant::now() + POLL;
+                    Err(error)
+                }
+            }
+        } else {
+            time::timeout_at(*valid_until, host.inspect_attempt(request))
+                .await
+                .context("execution authority expired during inspection")?
+                .map(Response::into_inner)
+        };
+        match observed {
+            Ok(task) => ensure!(
+                task.task_id == bridge.task_id()
+                    && task.attempt_id.as_deref() == Some(bridge.assignment.attempt_id.as_str())
+                    && task.state() == TaskState::Running,
+                "Control Plane ended the Task Attempt"
+            ),
+            Err(error) if crate::retryable(&error) => {}
+            Err(error) => return Err(error.into()),
+        }
+        poll_at = Instant::now() + POLL;
     }
+}
+
+fn renewal_time(valid_until: Instant) -> Instant {
+    let now = Instant::now();
+    now + (valid_until.saturating_duration_since(now) / 3).min(Duration::from_secs(5))
 }
 
 fn signal_group(group: u32, signal: i32) -> Result<bool> {

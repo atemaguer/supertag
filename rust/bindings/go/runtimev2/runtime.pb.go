@@ -31,6 +31,7 @@ const (
 	TaskState_TASK_STATE_FAILED      TaskState = 4
 	TaskState_TASK_STATE_CANCELLED   TaskState = 5
 	TaskState_TASK_STATE_CLAIMED     TaskState = 6
+	TaskState_TASK_STATE_UNCERTAIN   TaskState = 7
 )
 
 // Enum value maps for TaskState.
@@ -43,6 +44,7 @@ var (
 		4: "TASK_STATE_FAILED",
 		5: "TASK_STATE_CANCELLED",
 		6: "TASK_STATE_CLAIMED",
+		7: "TASK_STATE_UNCERTAIN",
 	}
 	TaskState_value = map[string]int32{
 		"TASK_STATE_UNSPECIFIED": 0,
@@ -52,6 +54,7 @@ var (
 		"TASK_STATE_FAILED":      4,
 		"TASK_STATE_CANCELLED":   5,
 		"TASK_STATE_CLAIMED":     6,
+		"TASK_STATE_UNCERTAIN":   7,
 	}
 )
 
@@ -80,6 +83,168 @@ func (x TaskState) Number() protoreflect.EnumNumber {
 // Deprecated: Use TaskState.Descriptor instead.
 func (TaskState) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{0}
+}
+
+type AttemptDecision int32
+
+const (
+	AttemptDecision_ATTEMPT_DECISION_UNSPECIFIED AttemptDecision = 0
+	AttemptDecision_ATTEMPT_DECISION_FAILED      AttemptDecision = 1
+	AttemptDecision_ATTEMPT_DECISION_RETRY       AttemptDecision = 2
+)
+
+// Enum value maps for AttemptDecision.
+var (
+	AttemptDecision_name = map[int32]string{
+		0: "ATTEMPT_DECISION_UNSPECIFIED",
+		1: "ATTEMPT_DECISION_FAILED",
+		2: "ATTEMPT_DECISION_RETRY",
+	}
+	AttemptDecision_value = map[string]int32{
+		"ATTEMPT_DECISION_UNSPECIFIED": 0,
+		"ATTEMPT_DECISION_FAILED":      1,
+		"ATTEMPT_DECISION_RETRY":       2,
+	}
+)
+
+func (x AttemptDecision) Enum() *AttemptDecision {
+	p := new(AttemptDecision)
+	*p = x
+	return p
+}
+
+func (x AttemptDecision) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AttemptDecision) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[1].Descriptor()
+}
+
+func (AttemptDecision) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[1]
+}
+
+func (x AttemptDecision) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AttemptDecision.Descriptor instead.
+func (AttemptDecision) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{1}
+}
+
+type ObjectiveStatus int32
+
+const (
+	ObjectiveStatus_OBJECTIVE_STATUS_UNSPECIFIED      ObjectiveStatus = 0
+	ObjectiveStatus_OBJECTIVE_STATUS_WORKING          ObjectiveStatus = 1
+	ObjectiveStatus_OBJECTIVE_STATUS_BLOCKED          ObjectiveStatus = 2
+	ObjectiveStatus_OBJECTIVE_STATUS_LIMITED          ObjectiveStatus = 3
+	ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW ObjectiveStatus = 4
+	ObjectiveStatus_OBJECTIVE_STATUS_COMPLETED        ObjectiveStatus = 5
+	ObjectiveStatus_OBJECTIVE_STATUS_CANCELLED        ObjectiveStatus = 6
+)
+
+// Enum value maps for ObjectiveStatus.
+var (
+	ObjectiveStatus_name = map[int32]string{
+		0: "OBJECTIVE_STATUS_UNSPECIFIED",
+		1: "OBJECTIVE_STATUS_WORKING",
+		2: "OBJECTIVE_STATUS_BLOCKED",
+		3: "OBJECTIVE_STATUS_LIMITED",
+		4: "OBJECTIVE_STATUS_READY_FOR_REVIEW",
+		5: "OBJECTIVE_STATUS_COMPLETED",
+		6: "OBJECTIVE_STATUS_CANCELLED",
+	}
+	ObjectiveStatus_value = map[string]int32{
+		"OBJECTIVE_STATUS_UNSPECIFIED":      0,
+		"OBJECTIVE_STATUS_WORKING":          1,
+		"OBJECTIVE_STATUS_BLOCKED":          2,
+		"OBJECTIVE_STATUS_LIMITED":          3,
+		"OBJECTIVE_STATUS_READY_FOR_REVIEW": 4,
+		"OBJECTIVE_STATUS_COMPLETED":        5,
+		"OBJECTIVE_STATUS_CANCELLED":        6,
+	}
+)
+
+func (x ObjectiveStatus) Enum() *ObjectiveStatus {
+	p := new(ObjectiveStatus)
+	*p = x
+	return p
+}
+
+func (x ObjectiveStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ObjectiveStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[2].Descriptor()
+}
+
+func (ObjectiveStatus) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[2]
+}
+
+func (x ObjectiveStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ObjectiveStatus.Descriptor instead.
+func (ObjectiveStatus) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{2}
+}
+
+type ObjectiveSignal int32
+
+const (
+	ObjectiveSignal_OBJECTIVE_SIGNAL_PROGRESS         ObjectiveSignal = 0
+	ObjectiveSignal_OBJECTIVE_SIGNAL_READY_FOR_REVIEW ObjectiveSignal = 1
+	ObjectiveSignal_OBJECTIVE_SIGNAL_COMPLETED        ObjectiveSignal = 2
+	ObjectiveSignal_OBJECTIVE_SIGNAL_BLOCKED          ObjectiveSignal = 3
+)
+
+// Enum value maps for ObjectiveSignal.
+var (
+	ObjectiveSignal_name = map[int32]string{
+		0: "OBJECTIVE_SIGNAL_PROGRESS",
+		1: "OBJECTIVE_SIGNAL_READY_FOR_REVIEW",
+		2: "OBJECTIVE_SIGNAL_COMPLETED",
+		3: "OBJECTIVE_SIGNAL_BLOCKED",
+	}
+	ObjectiveSignal_value = map[string]int32{
+		"OBJECTIVE_SIGNAL_PROGRESS":         0,
+		"OBJECTIVE_SIGNAL_READY_FOR_REVIEW": 1,
+		"OBJECTIVE_SIGNAL_COMPLETED":        2,
+		"OBJECTIVE_SIGNAL_BLOCKED":          3,
+	}
+)
+
+func (x ObjectiveSignal) Enum() *ObjectiveSignal {
+	p := new(ObjectiveSignal)
+	*p = x
+	return p
+}
+
+func (x ObjectiveSignal) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ObjectiveSignal) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[3].Descriptor()
+}
+
+func (ObjectiveSignal) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[3]
+}
+
+func (x ObjectiveSignal) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ObjectiveSignal.Descriptor instead.
+func (ObjectiveSignal) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{3}
 }
 
 type ReplyState int32
@@ -124,11 +289,11 @@ func (x ReplyState) String() string {
 }
 
 func (ReplyState) Descriptor() protoreflect.EnumDescriptor {
-	return file_supertag_runtime_v2_runtime_proto_enumTypes[1].Descriptor()
+	return file_supertag_runtime_v2_runtime_proto_enumTypes[4].Descriptor()
 }
 
 func (ReplyState) Type() protoreflect.EnumType {
-	return &file_supertag_runtime_v2_runtime_proto_enumTypes[1]
+	return &file_supertag_runtime_v2_runtime_proto_enumTypes[4]
 }
 
 func (x ReplyState) Number() protoreflect.EnumNumber {
@@ -137,7 +302,7 @@ func (x ReplyState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplyState.Descriptor instead.
 func (ReplyState) EnumDescriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{1}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{4}
 }
 
 type PutTagRequest struct {
@@ -912,6 +1077,382 @@ func (x *InspectAttemptRequest) GetLeaseToken() string {
 	return ""
 }
 
+type AttemptAuthority struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	ValidForMs    uint64                 `protobuf:"varint,2,opt,name=valid_for_ms,json=validForMs,proto3" json:"valid_for_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttemptAuthority) Reset() {
+	*x = AttemptAuthority{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttemptAuthority) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttemptAuthority) ProtoMessage() {}
+
+func (x *AttemptAuthority) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttemptAuthority.ProtoReflect.Descriptor instead.
+func (*AttemptAuthority) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AttemptAuthority) GetTask() *Task {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
+func (x *AttemptAuthority) GetValidForMs() uint64 {
+	if x != nil {
+		return x.ValidForMs
+	}
+	return 0
+}
+
+type ResolveAttemptRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	TaskId           string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AttemptId        string                 `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	OperationId      string                 `protobuf:"bytes,3,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Decision         AttemptDecision        `protobuf:"varint,4,opt,name=decision,proto3,enum=supertag.runtime.v2.AttemptDecision" json:"decision,omitempty"`
+	Evidence         string                 `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	ConfirmedStopped bool                   `protobuf:"varint,6,opt,name=confirmed_stopped,json=confirmedStopped,proto3" json:"confirmed_stopped,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ResolveAttemptRequest) Reset() {
+	*x = ResolveAttemptRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveAttemptRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveAttemptRequest) ProtoMessage() {}
+
+func (x *ResolveAttemptRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveAttemptRequest.ProtoReflect.Descriptor instead.
+func (*ResolveAttemptRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ResolveAttemptRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ResolveAttemptRequest) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *ResolveAttemptRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ResolveAttemptRequest) GetDecision() AttemptDecision {
+	if x != nil {
+		return x.Decision
+	}
+	return AttemptDecision_ATTEMPT_DECISION_UNSPECIFIED
+}
+
+func (x *ResolveAttemptRequest) GetEvidence() string {
+	if x != nil {
+		return x.Evidence
+	}
+	return ""
+}
+
+func (x *ResolveAttemptRequest) GetConfirmedStopped() bool {
+	if x != nil {
+		return x.ConfirmedStopped
+	}
+	return false
+}
+
+type AttemptResolution struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AttemptId     string                 `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	Decision      AttemptDecision        `protobuf:"varint,3,opt,name=decision,proto3,enum=supertag.runtime.v2.AttemptDecision" json:"decision,omitempty"`
+	OperatorId    string                 `protobuf:"bytes,4,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
+	Evidence      string                 `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	ResolvedAtMs  int64                  `protobuf:"varint,6,opt,name=resolved_at_ms,json=resolvedAtMs,proto3" json:"resolved_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttemptResolution) Reset() {
+	*x = AttemptResolution{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttemptResolution) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttemptResolution) ProtoMessage() {}
+
+func (x *AttemptResolution) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttemptResolution.ProtoReflect.Descriptor instead.
+func (*AttemptResolution) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AttemptResolution) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AttemptResolution) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *AttemptResolution) GetDecision() AttemptDecision {
+	if x != nil {
+		return x.Decision
+	}
+	return AttemptDecision_ATTEMPT_DECISION_UNSPECIFIED
+}
+
+func (x *AttemptResolution) GetOperatorId() string {
+	if x != nil {
+		return x.OperatorId
+	}
+	return ""
+}
+
+func (x *AttemptResolution) GetEvidence() string {
+	if x != nil {
+		return x.Evidence
+	}
+	return ""
+}
+
+func (x *AttemptResolution) GetResolvedAtMs() int64 {
+	if x != nil {
+		return x.ResolvedAtMs
+	}
+	return 0
+}
+
+type GetAttemptResolutionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Resolution    *AttemptResolution     `protobuf:"bytes,1,opt,name=resolution,proto3" json:"resolution,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAttemptResolutionResponse) Reset() {
+	*x = GetAttemptResolutionResponse{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAttemptResolutionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAttemptResolutionResponse) ProtoMessage() {}
+
+func (x *GetAttemptResolutionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAttemptResolutionResponse.ProtoReflect.Descriptor instead.
+func (*GetAttemptResolutionResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetAttemptResolutionResponse) GetResolution() *AttemptResolution {
+	if x != nil {
+		return x.Resolution
+	}
+	return nil
+}
+
+type ReportAttemptUsageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	AmountMinor   *uint64                `protobuf:"varint,3,opt,name=amount_minor,json=amountMinor,proto3,oneof" json:"amount_minor,omitempty"`
+	Currency      *string                `protobuf:"bytes,4,opt,name=currency,proto3,oneof" json:"currency,omitempty"`
+	Estimated     bool                   `protobuf:"varint,5,opt,name=estimated,proto3" json:"estimated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportAttemptUsageRequest) Reset() {
+	*x = ReportAttemptUsageRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportAttemptUsageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportAttemptUsageRequest) ProtoMessage() {}
+
+func (x *ReportAttemptUsageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportAttemptUsageRequest.ProtoReflect.Descriptor instead.
+func (*ReportAttemptUsageRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ReportAttemptUsageRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *ReportAttemptUsageRequest) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *ReportAttemptUsageRequest) GetAmountMinor() uint64 {
+	if x != nil && x.AmountMinor != nil {
+		return *x.AmountMinor
+	}
+	return 0
+}
+
+func (x *ReportAttemptUsageRequest) GetCurrency() string {
+	if x != nil && x.Currency != nil {
+		return *x.Currency
+	}
+	return ""
+}
+
+func (x *ReportAttemptUsageRequest) GetEstimated() bool {
+	if x != nil {
+		return x.Estimated
+	}
+	return false
+}
+
+type ReportAttemptUsageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportAttemptUsageResponse) Reset() {
+	*x = ReportAttemptUsageResponse{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportAttemptUsageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportAttemptUsageResponse) ProtoMessage() {}
+
+func (x *ReportAttemptUsageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportAttemptUsageResponse.ProtoReflect.Descriptor instead.
+func (*ReportAttemptUsageResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{18}
+}
+
 type AppendEventRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -925,7 +1466,7 @@ type AppendEventRequest struct {
 
 func (x *AppendEventRequest) Reset() {
 	*x = AppendEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1478,7 @@ func (x *AppendEventRequest) String() string {
 func (*AppendEventRequest) ProtoMessage() {}
 
 func (x *AppendEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1491,7 @@ func (x *AppendEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEventRequest.ProtoReflect.Descriptor instead.
 func (*AppendEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{13}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AppendEventRequest) GetTaskId() string {
@@ -998,7 +1539,7 @@ type TaskEvent struct {
 
 func (x *TaskEvent) Reset() {
 	*x = TaskEvent{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1551,7 @@ func (x *TaskEvent) String() string {
 func (*TaskEvent) ProtoMessage() {}
 
 func (x *TaskEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1564,7 @@ func (x *TaskEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEvent.ProtoReflect.Descriptor instead.
 func (*TaskEvent) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{14}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TaskEvent) GetSequence() uint64 {
@@ -1041,19 +1582,20 @@ func (x *TaskEvent) GetText() string {
 }
 
 type FinishTaskRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	AttemptId     string                 `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
-	LeaseToken    string                 `protobuf:"bytes,3,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
-	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
-	Succeeded     bool                   `protobuf:"varint,5,opt,name=succeeded,proto3" json:"succeeded,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AttemptId       string                 `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	LeaseToken      string                 `protobuf:"bytes,3,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
+	Result          string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	Succeeded       bool                   `protobuf:"varint,5,opt,name=succeeded,proto3" json:"succeeded,omitempty"`
+	ObjectiveSignal ObjectiveSignal        `protobuf:"varint,6,opt,name=objective_signal,json=objectiveSignal,proto3,enum=supertag.runtime.v2.ObjectiveSignal" json:"objective_signal,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FinishTaskRequest) Reset() {
 	*x = FinishTaskRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1607,7 @@ func (x *FinishTaskRequest) String() string {
 func (*FinishTaskRequest) ProtoMessage() {}
 
 func (x *FinishTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1620,7 @@ func (x *FinishTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinishTaskRequest.ProtoReflect.Descriptor instead.
 func (*FinishTaskRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{15}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *FinishTaskRequest) GetTaskId() string {
@@ -1116,6 +1658,13 @@ func (x *FinishTaskRequest) GetSucceeded() bool {
 	return false
 }
 
+func (x *FinishTaskRequest) GetObjectiveSignal() ObjectiveSignal {
+	if x != nil {
+		return x.ObjectiveSignal
+	}
+	return ObjectiveSignal_OBJECTIVE_SIGNAL_PROGRESS
+}
+
 type HarnessAttachRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1124,7 +1673,7 @@ type HarnessAttachRequest struct {
 
 func (x *HarnessAttachRequest) Reset() {
 	*x = HarnessAttachRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1136,7 +1685,7 @@ func (x *HarnessAttachRequest) String() string {
 func (*HarnessAttachRequest) ProtoMessage() {}
 
 func (x *HarnessAttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1149,7 +1698,7 @@ func (x *HarnessAttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessAttachRequest.ProtoReflect.Descriptor instead.
 func (*HarnessAttachRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{16}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{22}
 }
 
 type AdapterBootstrap struct {
@@ -1162,7 +1711,7 @@ type AdapterBootstrap struct {
 
 func (x *AdapterBootstrap) Reset() {
 	*x = AdapterBootstrap{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1174,7 +1723,7 @@ func (x *AdapterBootstrap) String() string {
 func (*AdapterBootstrap) ProtoMessage() {}
 
 func (x *AdapterBootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1187,7 +1736,7 @@ func (x *AdapterBootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdapterBootstrap.ProtoReflect.Descriptor instead.
 func (*AdapterBootstrap) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{17}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *AdapterBootstrap) GetEndpoint() string {
@@ -1214,7 +1763,7 @@ type HarnessRun struct {
 
 func (x *HarnessRun) Reset() {
 	*x = HarnessRun{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1226,7 +1775,7 @@ func (x *HarnessRun) String() string {
 func (*HarnessRun) ProtoMessage() {}
 
 func (x *HarnessRun) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1239,7 +1788,7 @@ func (x *HarnessRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessRun.ProtoReflect.Descriptor instead.
 func (*HarnessRun) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{18}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *HarnessRun) GetTask() *Task {
@@ -1266,7 +1815,7 @@ type HarnessPublishRequest struct {
 
 func (x *HarnessPublishRequest) Reset() {
 	*x = HarnessPublishRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1278,7 +1827,7 @@ func (x *HarnessPublishRequest) String() string {
 func (*HarnessPublishRequest) ProtoMessage() {}
 
 func (x *HarnessPublishRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1291,7 +1840,7 @@ func (x *HarnessPublishRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessPublishRequest.ProtoReflect.Descriptor instead.
 func (*HarnessPublishRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{19}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *HarnessPublishRequest) GetSequence() uint64 {
@@ -1309,16 +1858,17 @@ func (x *HarnessPublishRequest) GetText() string {
 }
 
 type HarnessCompleteRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        string                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	Succeeded     bool                   `protobuf:"varint,2,opt,name=succeeded,proto3" json:"succeeded,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Result          string                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Succeeded       bool                   `protobuf:"varint,2,opt,name=succeeded,proto3" json:"succeeded,omitempty"`
+	ObjectiveSignal ObjectiveSignal        `protobuf:"varint,3,opt,name=objective_signal,json=objectiveSignal,proto3,enum=supertag.runtime.v2.ObjectiveSignal" json:"objective_signal,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *HarnessCompleteRequest) Reset() {
 	*x = HarnessCompleteRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1330,7 +1880,7 @@ func (x *HarnessCompleteRequest) String() string {
 func (*HarnessCompleteRequest) ProtoMessage() {}
 
 func (x *HarnessCompleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1343,7 +1893,7 @@ func (x *HarnessCompleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessCompleteRequest.ProtoReflect.Descriptor instead.
 func (*HarnessCompleteRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{20}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HarnessCompleteRequest) GetResult() string {
@@ -1360,6 +1910,13 @@ func (x *HarnessCompleteRequest) GetSucceeded() bool {
 	return false
 }
 
+func (x *HarnessCompleteRequest) GetObjectiveSignal() ObjectiveSignal {
+	if x != nil {
+		return x.ObjectiveSignal
+	}
+	return ObjectiveSignal_OBJECTIVE_SIGNAL_PROGRESS
+}
+
 type HarnessCompleteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1368,7 +1925,7 @@ type HarnessCompleteResponse struct {
 
 func (x *HarnessCompleteResponse) Reset() {
 	*x = HarnessCompleteResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1380,7 +1937,7 @@ func (x *HarnessCompleteResponse) String() string {
 func (*HarnessCompleteResponse) ProtoMessage() {}
 
 func (x *HarnessCompleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1393,7 +1950,615 @@ func (x *HarnessCompleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessCompleteResponse.ProtoReflect.Descriptor instead.
 func (*HarnessCompleteResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{21}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{27}
+}
+
+type CreateObjectiveRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	ObjectiveId      string                 `protobuf:"bytes,2,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	OwnerTagId       string                 `protobuf:"bytes,3,opt,name=owner_tag_id,json=ownerTagId,proto3" json:"owner_tag_id,omitempty"`
+	Outcome          string                 `protobuf:"bytes,4,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Ongoing          bool                   `protobuf:"varint,5,opt,name=ongoing,proto3" json:"ongoing,omitempty"`
+	DeadlineMs       *int64                 `protobuf:"varint,6,opt,name=deadline_ms,json=deadlineMs,proto3,oneof" json:"deadline_ms,omitempty"`
+	BudgetLimitMinor *uint64                `protobuf:"varint,7,opt,name=budget_limit_minor,json=budgetLimitMinor,proto3,oneof" json:"budget_limit_minor,omitempty"`
+	BudgetCurrency   *string                `protobuf:"bytes,8,opt,name=budget_currency,json=budgetCurrency,proto3,oneof" json:"budget_currency,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CreateObjectiveRequest) Reset() {
+	*x = CreateObjectiveRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateObjectiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateObjectiveRequest) ProtoMessage() {}
+
+func (x *CreateObjectiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateObjectiveRequest.ProtoReflect.Descriptor instead.
+func (*CreateObjectiveRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CreateObjectiveRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *CreateObjectiveRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *CreateObjectiveRequest) GetOwnerTagId() string {
+	if x != nil {
+		return x.OwnerTagId
+	}
+	return ""
+}
+
+func (x *CreateObjectiveRequest) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *CreateObjectiveRequest) GetOngoing() bool {
+	if x != nil {
+		return x.Ongoing
+	}
+	return false
+}
+
+func (x *CreateObjectiveRequest) GetDeadlineMs() int64 {
+	if x != nil && x.DeadlineMs != nil {
+		return *x.DeadlineMs
+	}
+	return 0
+}
+
+func (x *CreateObjectiveRequest) GetBudgetLimitMinor() uint64 {
+	if x != nil && x.BudgetLimitMinor != nil {
+		return *x.BudgetLimitMinor
+	}
+	return 0
+}
+
+func (x *CreateObjectiveRequest) GetBudgetCurrency() string {
+	if x != nil && x.BudgetCurrency != nil {
+		return *x.BudgetCurrency
+	}
+	return ""
+}
+
+type Objective struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId        string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	OwnerTagId         string                 `protobuf:"bytes,2,opt,name=owner_tag_id,json=ownerTagId,proto3" json:"owner_tag_id,omitempty"`
+	SessionId          string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Outcome            string                 `protobuf:"bytes,4,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Ongoing            bool                   `protobuf:"varint,5,opt,name=ongoing,proto3" json:"ongoing,omitempty"`
+	StartingTaskId     string                 `protobuf:"bytes,6,opt,name=starting_task_id,json=startingTaskId,proto3" json:"starting_task_id,omitempty"`
+	Status             ObjectiveStatus        `protobuf:"varint,7,opt,name=status,proto3,enum=supertag.runtime.v2.ObjectiveStatus" json:"status,omitempty"`
+	Revision           uint64                 `protobuf:"varint,8,opt,name=revision,proto3" json:"revision,omitempty"`
+	DeadlineMs         *int64                 `protobuf:"varint,9,opt,name=deadline_ms,json=deadlineMs,proto3,oneof" json:"deadline_ms,omitempty"`
+	BudgetLimitMinor   *uint64                `protobuf:"varint,10,opt,name=budget_limit_minor,json=budgetLimitMinor,proto3,oneof" json:"budget_limit_minor,omitempty"`
+	BudgetCurrency     *string                `protobuf:"bytes,11,opt,name=budget_currency,json=budgetCurrency,proto3,oneof" json:"budget_currency,omitempty"`
+	PausedAtMs         *int64                 `protobuf:"varint,12,opt,name=paused_at_ms,json=pausedAtMs,proto3,oneof" json:"paused_at_ms,omitempty"`
+	ReportedSpendMinor *uint64                `protobuf:"varint,13,opt,name=reported_spend_minor,json=reportedSpendMinor,proto3,oneof" json:"reported_spend_minor,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *Objective) Reset() {
+	*x = Objective{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Objective) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Objective) ProtoMessage() {}
+
+func (x *Objective) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Objective.ProtoReflect.Descriptor instead.
+func (*Objective) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *Objective) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *Objective) GetOwnerTagId() string {
+	if x != nil {
+		return x.OwnerTagId
+	}
+	return ""
+}
+
+func (x *Objective) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *Objective) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *Objective) GetOngoing() bool {
+	if x != nil {
+		return x.Ongoing
+	}
+	return false
+}
+
+func (x *Objective) GetStartingTaskId() string {
+	if x != nil {
+		return x.StartingTaskId
+	}
+	return ""
+}
+
+func (x *Objective) GetStatus() ObjectiveStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ObjectiveStatus_OBJECTIVE_STATUS_UNSPECIFIED
+}
+
+func (x *Objective) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *Objective) GetDeadlineMs() int64 {
+	if x != nil && x.DeadlineMs != nil {
+		return *x.DeadlineMs
+	}
+	return 0
+}
+
+func (x *Objective) GetBudgetLimitMinor() uint64 {
+	if x != nil && x.BudgetLimitMinor != nil {
+		return *x.BudgetLimitMinor
+	}
+	return 0
+}
+
+func (x *Objective) GetBudgetCurrency() string {
+	if x != nil && x.BudgetCurrency != nil {
+		return *x.BudgetCurrency
+	}
+	return ""
+}
+
+func (x *Objective) GetPausedAtMs() int64 {
+	if x != nil && x.PausedAtMs != nil {
+		return *x.PausedAtMs
+	}
+	return 0
+}
+
+func (x *Objective) GetReportedSpendMinor() uint64 {
+	if x != nil && x.ReportedSpendMinor != nil {
+		return *x.ReportedSpendMinor
+	}
+	return 0
+}
+
+type GetObjectiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId   string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetObjectiveRequest) Reset() {
+	*x = GetObjectiveRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetObjectiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetObjectiveRequest) ProtoMessage() {}
+
+func (x *GetObjectiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetObjectiveRequest.ProtoReflect.Descriptor instead.
+func (*GetObjectiveRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GetObjectiveRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+type ListObjectivesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	AfterId       string                 `protobuf:"bytes,2,opt,name=after_id,json=afterId,proto3" json:"after_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListObjectivesRequest) Reset() {
+	*x = ListObjectivesRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListObjectivesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListObjectivesRequest) ProtoMessage() {}
+
+func (x *ListObjectivesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListObjectivesRequest.ProtoReflect.Descriptor instead.
+func (*ListObjectivesRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ListObjectivesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListObjectivesRequest) GetAfterId() string {
+	if x != nil {
+		return x.AfterId
+	}
+	return ""
+}
+
+type ListObjectivesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Objectives    []*Objective           `protobuf:"bytes,1,rep,name=objectives,proto3" json:"objectives,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListObjectivesResponse) Reset() {
+	*x = ListObjectivesResponse{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListObjectivesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListObjectivesResponse) ProtoMessage() {}
+
+func (x *ListObjectivesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListObjectivesResponse.ProtoReflect.Descriptor instead.
+func (*ListObjectivesResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ListObjectivesResponse) GetObjectives() []*Objective {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
+}
+
+type SetObjectiveLimitsRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId      string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	OperationId      string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	DeadlineMs       *int64                 `protobuf:"varint,3,opt,name=deadline_ms,json=deadlineMs,proto3,oneof" json:"deadline_ms,omitempty"`
+	ClearDeadline    bool                   `protobuf:"varint,4,opt,name=clear_deadline,json=clearDeadline,proto3" json:"clear_deadline,omitempty"`
+	BudgetLimitMinor *uint64                `protobuf:"varint,5,opt,name=budget_limit_minor,json=budgetLimitMinor,proto3,oneof" json:"budget_limit_minor,omitempty"`
+	BudgetCurrency   *string                `protobuf:"bytes,6,opt,name=budget_currency,json=budgetCurrency,proto3,oneof" json:"budget_currency,omitempty"`
+	ClearBudget      bool                   `protobuf:"varint,7,opt,name=clear_budget,json=clearBudget,proto3" json:"clear_budget,omitempty"`
+	ExpectedRevision *uint64                `protobuf:"varint,8,opt,name=expected_revision,json=expectedRevision,proto3,oneof" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SetObjectiveLimitsRequest) Reset() {
+	*x = SetObjectiveLimitsRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetObjectiveLimitsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetObjectiveLimitsRequest) ProtoMessage() {}
+
+func (x *SetObjectiveLimitsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetObjectiveLimitsRequest.ProtoReflect.Descriptor instead.
+func (*SetObjectiveLimitsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *SetObjectiveLimitsRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *SetObjectiveLimitsRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *SetObjectiveLimitsRequest) GetDeadlineMs() int64 {
+	if x != nil && x.DeadlineMs != nil {
+		return *x.DeadlineMs
+	}
+	return 0
+}
+
+func (x *SetObjectiveLimitsRequest) GetClearDeadline() bool {
+	if x != nil {
+		return x.ClearDeadline
+	}
+	return false
+}
+
+func (x *SetObjectiveLimitsRequest) GetBudgetLimitMinor() uint64 {
+	if x != nil && x.BudgetLimitMinor != nil {
+		return *x.BudgetLimitMinor
+	}
+	return 0
+}
+
+func (x *SetObjectiveLimitsRequest) GetBudgetCurrency() string {
+	if x != nil && x.BudgetCurrency != nil {
+		return *x.BudgetCurrency
+	}
+	return ""
+}
+
+func (x *SetObjectiveLimitsRequest) GetClearBudget() bool {
+	if x != nil {
+		return x.ClearBudget
+	}
+	return false
+}
+
+func (x *SetObjectiveLimitsRequest) GetExpectedRevision() uint64 {
+	if x != nil && x.ExpectedRevision != nil {
+		return *x.ExpectedRevision
+	}
+	return 0
+}
+
+type ObjectiveActionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId   string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	OperationId   string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveActionRequest) Reset() {
+	*x = ObjectiveActionRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveActionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveActionRequest) ProtoMessage() {}
+
+func (x *ObjectiveActionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveActionRequest.ProtoReflect.Descriptor instead.
+func (*ObjectiveActionRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ObjectiveActionRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *ObjectiveActionRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ObjectiveActionRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ReviewObjectiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId   string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	OperationId   string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Approved      bool                   `protobuf:"varint,3,opt,name=approved,proto3" json:"approved,omitempty"`
+	Feedback      string                 `protobuf:"bytes,4,opt,name=feedback,proto3" json:"feedback,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviewObjectiveRequest) Reset() {
+	*x = ReviewObjectiveRequest{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewObjectiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewObjectiveRequest) ProtoMessage() {}
+
+func (x *ReviewObjectiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewObjectiveRequest.ProtoReflect.Descriptor instead.
+func (*ReviewObjectiveRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ReviewObjectiveRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *ReviewObjectiveRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ReviewObjectiveRequest) GetApproved() bool {
+	if x != nil {
+		return x.Approved
+	}
+	return false
+}
+
+func (x *ReviewObjectiveRequest) GetFeedback() string {
+	if x != nil {
+		return x.Feedback
+	}
+	return ""
 }
 
 type ReplyDestination struct {
@@ -1406,7 +2571,7 @@ type ReplyDestination struct {
 
 func (x *ReplyDestination) Reset() {
 	*x = ReplyDestination{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1418,7 +2583,7 @@ func (x *ReplyDestination) String() string {
 func (*ReplyDestination) ProtoMessage() {}
 
 func (x *ReplyDestination) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1431,7 +2596,7 @@ func (x *ReplyDestination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyDestination.ProtoReflect.Descriptor instead.
 func (*ReplyDestination) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{22}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ReplyDestination) GetConversationId() string {
@@ -1462,7 +2627,7 @@ type AcceptEventRequest struct {
 
 func (x *AcceptEventRequest) Reset() {
 	*x = AcceptEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[23]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1474,7 +2639,7 @@ func (x *AcceptEventRequest) String() string {
 func (*AcceptEventRequest) ProtoMessage() {}
 
 func (x *AcceptEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[23]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1487,7 +2652,7 @@ func (x *AcceptEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{23}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AcceptEventRequest) GetAccountId() string {
@@ -1547,7 +2712,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[24]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1559,7 +2724,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[24]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1572,7 +2737,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{24}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *Reply) GetReplyId() string {
@@ -1633,7 +2798,7 @@ type ClaimReplyRequest struct {
 
 func (x *ClaimReplyRequest) Reset() {
 	*x = ClaimReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[25]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1645,7 +2810,7 @@ func (x *ClaimReplyRequest) String() string {
 func (*ClaimReplyRequest) ProtoMessage() {}
 
 func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[25]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1658,7 +2823,7 @@ func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyRequest.ProtoReflect.Descriptor instead.
 func (*ClaimReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{25}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ClaimReplyRequest) GetOperationId() string {
@@ -1678,7 +2843,7 @@ type ClaimReplyResponse struct {
 
 func (x *ClaimReplyResponse) Reset() {
 	*x = ClaimReplyResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[26]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1690,7 +2855,7 @@ func (x *ClaimReplyResponse) String() string {
 func (*ClaimReplyResponse) ProtoMessage() {}
 
 func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[26]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1703,7 +2868,7 @@ func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyResponse.ProtoReflect.Descriptor instead.
 func (*ClaimReplyResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{26}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ClaimReplyResponse) GetReply() *Reply {
@@ -1732,7 +2897,7 @@ type SettleReplyRequest struct {
 
 func (x *SettleReplyRequest) Reset() {
 	*x = SettleReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[27]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1744,7 +2909,7 @@ func (x *SettleReplyRequest) String() string {
 func (*SettleReplyRequest) ProtoMessage() {}
 
 func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[27]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1757,7 +2922,7 @@ func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettleReplyRequest.ProtoReflect.Descriptor instead.
 func (*SettleReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{27}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SettleReplyRequest) GetReplyId() string {
@@ -1858,7 +3023,41 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
 	"attempt_id\x18\x02 \x01(\tR\tattemptId\x12\x1f\n" +
 	"\vlease_token\x18\x03 \x01(\tR\n" +
-	"leaseToken\"\x9d\x01\n" +
+	"leaseToken\"c\n" +
+	"\x10AttemptAuthority\x12-\n" +
+	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\x12 \n" +
+	"\fvalid_for_ms\x18\x02 \x01(\x04R\n" +
+	"validForMs\"\xfd\x01\n" +
+	"\x15ResolveAttemptRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x02 \x01(\tR\tattemptId\x12!\n" +
+	"\foperation_id\x18\x03 \x01(\tR\voperationId\x12@\n" +
+	"\bdecision\x18\x04 \x01(\x0e2$.supertag.runtime.v2.AttemptDecisionR\bdecision\x12\x1a\n" +
+	"\bevidence\x18\x05 \x01(\tR\bevidence\x12+\n" +
+	"\x11confirmed_stopped\x18\x06 \x01(\bR\x10confirmedStopped\"\xf0\x01\n" +
+	"\x11AttemptResolution\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x02 \x01(\tR\tattemptId\x12@\n" +
+	"\bdecision\x18\x03 \x01(\x0e2$.supertag.runtime.v2.AttemptDecisionR\bdecision\x12\x1f\n" +
+	"\voperator_id\x18\x04 \x01(\tR\n" +
+	"operatorId\x12\x1a\n" +
+	"\bevidence\x18\x05 \x01(\tR\bevidence\x12$\n" +
+	"\x0eresolved_at_ms\x18\x06 \x01(\x03R\fresolvedAtMs\"f\n" +
+	"\x1cGetAttemptResolutionResponse\x12F\n" +
+	"\n" +
+	"resolution\x18\x01 \x01(\v2&.supertag.runtime.v2.AttemptResolutionR\n" +
+	"resolution\"\x82\x02\n" +
+	"\x19ReportAttemptUsageRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12&\n" +
+	"\famount_minor\x18\x03 \x01(\x04H\x00R\vamountMinor\x88\x01\x01\x12\x1f\n" +
+	"\bcurrency\x18\x04 \x01(\tH\x01R\bcurrency\x88\x01\x01\x12\x1c\n" +
+	"\testimated\x18\x05 \x01(\bR\testimatedB\x0f\n" +
+	"\r_amount_minorB\v\n" +
+	"\t_currency\"\x1c\n" +
+	"\x1aReportAttemptUsageResponse\"\x9d\x01\n" +
 	"\x12AppendEventRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -1869,7 +3068,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x04text\x18\x05 \x01(\tR\x04text\";\n" +
 	"\tTaskEvent\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"\xa2\x01\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\xf3\x01\n" +
 	"\x11FinishTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -1877,7 +3076,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\vlease_token\x18\x03 \x01(\tR\n" +
 	"leaseToken\x12\x16\n" +
 	"\x06result\x18\x04 \x01(\tR\x06result\x12\x1c\n" +
-	"\tsucceeded\x18\x05 \x01(\bR\tsucceeded\"\x16\n" +
+	"\tsucceeded\x18\x05 \x01(\bR\tsucceeded\x12O\n" +
+	"\x10objective_signal\x18\x06 \x01(\x0e2$.supertag.runtime.v2.ObjectiveSignalR\x0fobjectiveSignal\"\x16\n" +
 	"\x14HarnessAttachRequest\"D\n" +
 	"\x10AdapterBootstrap\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x14\n" +
@@ -1889,11 +3089,82 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"attempt_id\x18\x02 \x01(\tR\tattemptId\"G\n" +
 	"\x15HarnessPublishRequest\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"N\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\x9f\x01\n" +
 	"\x16HarnessCompleteRequest\x12\x16\n" +
 	"\x06result\x18\x01 \x01(\tR\x06result\x12\x1c\n" +
-	"\tsucceeded\x18\x02 \x01(\bR\tsucceeded\"\x19\n" +
-	"\x17HarnessCompleteResponse\"k\n" +
+	"\tsucceeded\x18\x02 \x01(\bR\tsucceeded\x12O\n" +
+	"\x10objective_signal\x18\x03 \x01(\x0e2$.supertag.runtime.v2.ObjectiveSignalR\x0fobjectiveSignal\"\x19\n" +
+	"\x17HarnessCompleteResponse\"\xf6\x02\n" +
+	"\x16CreateObjectiveRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12!\n" +
+	"\fobjective_id\x18\x02 \x01(\tR\vobjectiveId\x12 \n" +
+	"\fowner_tag_id\x18\x03 \x01(\tR\n" +
+	"ownerTagId\x12\x18\n" +
+	"\aoutcome\x18\x04 \x01(\tR\aoutcome\x12\x18\n" +
+	"\aongoing\x18\x05 \x01(\bR\aongoing\x12$\n" +
+	"\vdeadline_ms\x18\x06 \x01(\x03H\x00R\n" +
+	"deadlineMs\x88\x01\x01\x121\n" +
+	"\x12budget_limit_minor\x18\a \x01(\x04H\x01R\x10budgetLimitMinor\x88\x01\x01\x12,\n" +
+	"\x0fbudget_currency\x18\b \x01(\tH\x02R\x0ebudgetCurrency\x88\x01\x01B\x0e\n" +
+	"\f_deadline_msB\x15\n" +
+	"\x13_budget_limit_minorB\x12\n" +
+	"\x10_budget_currency\"\xf1\x04\n" +
+	"\tObjective\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12 \n" +
+	"\fowner_tag_id\x18\x02 \x01(\tR\n" +
+	"ownerTagId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
+	"\aoutcome\x18\x04 \x01(\tR\aoutcome\x12\x18\n" +
+	"\aongoing\x18\x05 \x01(\bR\aongoing\x12(\n" +
+	"\x10starting_task_id\x18\x06 \x01(\tR\x0estartingTaskId\x12<\n" +
+	"\x06status\x18\a \x01(\x0e2$.supertag.runtime.v2.ObjectiveStatusR\x06status\x12\x1a\n" +
+	"\brevision\x18\b \x01(\x04R\brevision\x12$\n" +
+	"\vdeadline_ms\x18\t \x01(\x03H\x00R\n" +
+	"deadlineMs\x88\x01\x01\x121\n" +
+	"\x12budget_limit_minor\x18\n" +
+	" \x01(\x04H\x01R\x10budgetLimitMinor\x88\x01\x01\x12,\n" +
+	"\x0fbudget_currency\x18\v \x01(\tH\x02R\x0ebudgetCurrency\x88\x01\x01\x12%\n" +
+	"\fpaused_at_ms\x18\f \x01(\x03H\x03R\n" +
+	"pausedAtMs\x88\x01\x01\x125\n" +
+	"\x14reported_spend_minor\x18\r \x01(\x04H\x04R\x12reportedSpendMinor\x88\x01\x01B\x0e\n" +
+	"\f_deadline_msB\x15\n" +
+	"\x13_budget_limit_minorB\x12\n" +
+	"\x10_budget_currencyB\x0f\n" +
+	"\r_paused_at_msB\x17\n" +
+	"\x15_reported_spend_minor\"8\n" +
+	"\x13GetObjectiveRequest\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\"H\n" +
+	"\x15ListObjectivesRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x19\n" +
+	"\bafter_id\x18\x02 \x01(\tR\aafterId\"X\n" +
+	"\x16ListObjectivesResponse\x12>\n" +
+	"\n" +
+	"objectives\x18\x01 \x03(\v2\x1e.supertag.runtime.v2.ObjectiveR\n" +
+	"objectives\"\xb5\x03\n" +
+	"\x19SetObjectiveLimitsRequest\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12$\n" +
+	"\vdeadline_ms\x18\x03 \x01(\x03H\x00R\n" +
+	"deadlineMs\x88\x01\x01\x12%\n" +
+	"\x0eclear_deadline\x18\x04 \x01(\bR\rclearDeadline\x121\n" +
+	"\x12budget_limit_minor\x18\x05 \x01(\x04H\x01R\x10budgetLimitMinor\x88\x01\x01\x12,\n" +
+	"\x0fbudget_currency\x18\x06 \x01(\tH\x02R\x0ebudgetCurrency\x88\x01\x01\x12!\n" +
+	"\fclear_budget\x18\a \x01(\bR\vclearBudget\x120\n" +
+	"\x11expected_revision\x18\b \x01(\x04H\x03R\x10expectedRevision\x88\x01\x01B\x0e\n" +
+	"\f_deadline_msB\x15\n" +
+	"\x13_budget_limit_minorB\x12\n" +
+	"\x10_budget_currencyB\x14\n" +
+	"\x12_expected_revision\"v\n" +
+	"\x16ObjectiveActionRequest\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x96\x01\n" +
+	"\x16ReviewObjectiveRequest\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1a\n" +
+	"\bapproved\x18\x03 \x01(\bR\bapproved\x12\x1a\n" +
+	"\bfeedback\x18\x04 \x01(\tR\bfeedback\"k\n" +
 	"\x10ReplyDestination\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12 \n" +
 	"\tthread_id\x18\x02 \x01(\tH\x00R\bthreadId\x88\x01\x01B\f\n" +
@@ -1930,7 +3201,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"leaseToken\x125\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x1f.supertag.runtime.v2.ReplyStateR\x05state\x12.\n" +
 	"\x10provider_receipt\x18\x04 \x01(\tH\x00R\x0fproviderReceipt\x88\x01\x01B\x13\n" +
-	"\x11_provider_receipt*\xb9\x01\n" +
+	"\x11_provider_receipt*\xd3\x01\n" +
 	"\tTaskState\x12\x1a\n" +
 	"\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TASK_STATE_QUEUED\x10\x01\x12\x16\n" +
@@ -1938,7 +3209,25 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x14TASK_STATE_SUCCEEDED\x10\x03\x12\x15\n" +
 	"\x11TASK_STATE_FAILED\x10\x04\x12\x18\n" +
 	"\x14TASK_STATE_CANCELLED\x10\x05\x12\x16\n" +
-	"\x12TASK_STATE_CLAIMED\x10\x06*\xa9\x01\n" +
+	"\x12TASK_STATE_CLAIMED\x10\x06\x12\x18\n" +
+	"\x14TASK_STATE_UNCERTAIN\x10\a*l\n" +
+	"\x0fAttemptDecision\x12 \n" +
+	"\x1cATTEMPT_DECISION_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17ATTEMPT_DECISION_FAILED\x10\x01\x12\x1a\n" +
+	"\x16ATTEMPT_DECISION_RETRY\x10\x02*\xf4\x01\n" +
+	"\x0fObjectiveStatus\x12 \n" +
+	"\x1cOBJECTIVE_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18OBJECTIVE_STATUS_WORKING\x10\x01\x12\x1c\n" +
+	"\x18OBJECTIVE_STATUS_BLOCKED\x10\x02\x12\x1c\n" +
+	"\x18OBJECTIVE_STATUS_LIMITED\x10\x03\x12%\n" +
+	"!OBJECTIVE_STATUS_READY_FOR_REVIEW\x10\x04\x12\x1e\n" +
+	"\x1aOBJECTIVE_STATUS_COMPLETED\x10\x05\x12\x1e\n" +
+	"\x1aOBJECTIVE_STATUS_CANCELLED\x10\x06*\x95\x01\n" +
+	"\x0fObjectiveSignal\x12\x1d\n" +
+	"\x19OBJECTIVE_SIGNAL_PROGRESS\x10\x00\x12%\n" +
+	"!OBJECTIVE_SIGNAL_READY_FOR_REVIEW\x10\x01\x12\x1e\n" +
+	"\x1aOBJECTIVE_SIGNAL_COMPLETED\x10\x02\x12\x1c\n" +
+	"\x18OBJECTIVE_SIGNAL_BLOCKED\x10\x03*\xa9\x01\n" +
 	"\n" +
 	"ReplyState\x12\x1b\n" +
 	"\x17REPLY_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
@@ -1946,7 +3235,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x13REPLY_STATE_CLAIMED\x10\x02\x12\x19\n" +
 	"\x15REPLY_STATE_DELIVERED\x10\x03\x12\x16\n" +
 	"\x12REPLY_STATE_FAILED\x10\x04\x12\x19\n" +
-	"\x15REPLY_STATE_UNCERTAIN\x10\x052\x9e\x03\n" +
+	"\x15REPLY_STATE_UNCERTAIN\x10\x052\x84\x04\n" +
 	"\bOperator\x12F\n" +
 	"\x06PutTag\x12\".supertag.runtime.v2.PutTagRequest\x1a\x18.supertag.runtime.v2.Tag\x12O\n" +
 	"\n" +
@@ -1955,12 +3244,26 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
 	"ListEvents\x12&.supertag.runtime.v2.ListEventsRequest\x1a'.supertag.runtime.v2.ListEventsResponse\x12O\n" +
 	"\n" +
-	"CancelTask\x12&.supertag.runtime.v2.CancelTaskRequest\x1a\x19.supertag.runtime.v2.Task2\xb9\x03\n" +
+	"CancelTask\x12&.supertag.runtime.v2.CancelTaskRequest\x1a\x19.supertag.runtime.v2.Task\x12d\n" +
+	"\x0eResolveAttempt\x12*.supertag.runtime.v2.ResolveAttemptRequest\x1a&.supertag.runtime.v2.AttemptResolution2\x8d\x06\n" +
+	"\n" +
+	"Objectives\x12^\n" +
+	"\x0fCreateObjective\x12+.supertag.runtime.v2.CreateObjectiveRequest\x1a\x1e.supertag.runtime.v2.Objective\x12X\n" +
+	"\fGetObjective\x12(.supertag.runtime.v2.GetObjectiveRequest\x1a\x1e.supertag.runtime.v2.Objective\x12i\n" +
+	"\x0eListObjectives\x12*.supertag.runtime.v2.ListObjectivesRequest\x1a+.supertag.runtime.v2.ListObjectivesResponse\x12[\n" +
+	"\tSetLimits\x12..supertag.runtime.v2.SetObjectiveLimitsRequest\x1a\x1e.supertag.runtime.v2.Objective\x12]\n" +
+	"\x0ePauseObjective\x12+.supertag.runtime.v2.ObjectiveActionRequest\x1a\x1e.supertag.runtime.v2.Objective\x12^\n" +
+	"\x0fResumeObjective\x12+.supertag.runtime.v2.ObjectiveActionRequest\x1a\x1e.supertag.runtime.v2.Objective\x12^\n" +
+	"\x0fCancelObjective\x12+.supertag.runtime.v2.ObjectiveActionRequest\x1a\x1e.supertag.runtime.v2.Objective\x12^\n" +
+	"\x0fReviewObjective\x12+.supertag.runtime.v2.ReviewObjectiveRequest\x1a\x1e.supertag.runtime.v2.Objective2\x8a\x06\n" +
 	"\n" +
 	"WorkerHost\x12Z\n" +
 	"\tClaimTask\x12%.supertag.runtime.v2.ClaimTaskRequest\x1a&.supertag.runtime.v2.ClaimTaskResponse\x12M\n" +
 	"\tStartTask\x12%.supertag.runtime.v2.StartTaskRequest\x1a\x19.supertag.runtime.v2.Task\x12W\n" +
-	"\x0eInspectAttempt\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a\x19.supertag.runtime.v2.Task\x12V\n" +
+	"\x0eInspectAttempt\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a\x19.supertag.runtime.v2.Task\x12a\n" +
+	"\fRenewAttempt\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a%.supertag.runtime.v2.AttemptAuthority\x12u\n" +
+	"\x14GetAttemptResolution\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a1.supertag.runtime.v2.GetAttemptResolutionResponse\x12u\n" +
+	"\x12ReportAttemptUsage\x12..supertag.runtime.v2.ReportAttemptUsageRequest\x1a/.supertag.runtime.v2.ReportAttemptUsageResponse\x12V\n" +
 	"\vAppendEvent\x12'.supertag.runtime.v2.AppendEventRequest\x1a\x1e.supertag.runtime.v2.TaskEvent\x12O\n" +
 	"\n" +
 	"FinishTask\x12&.supertag.runtime.v2.FinishTaskRequest\x1a\x19.supertag.runtime.v2.Task2\x91\x02\n" +
@@ -1986,88 +3289,138 @@ func file_supertag_runtime_v2_runtime_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_runtime_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_supertag_runtime_v2_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_supertag_runtime_v2_runtime_proto_goTypes = []any{
-	(TaskState)(0),                  // 0: supertag.runtime.v2.TaskState
-	(ReplyState)(0),                 // 1: supertag.runtime.v2.ReplyState
-	(*PutTagRequest)(nil),           // 2: supertag.runtime.v2.PutTagRequest
-	(*Tag)(nil),                     // 3: supertag.runtime.v2.Tag
-	(*SubmitTaskRequest)(nil),       // 4: supertag.runtime.v2.SubmitTaskRequest
-	(*Task)(nil),                    // 5: supertag.runtime.v2.Task
-	(*GetTaskRequest)(nil),          // 6: supertag.runtime.v2.GetTaskRequest
-	(*ListEventsRequest)(nil),       // 7: supertag.runtime.v2.ListEventsRequest
-	(*ListEventsResponse)(nil),      // 8: supertag.runtime.v2.ListEventsResponse
-	(*CancelTaskRequest)(nil),       // 9: supertag.runtime.v2.CancelTaskRequest
-	(*ClaimTaskRequest)(nil),        // 10: supertag.runtime.v2.ClaimTaskRequest
-	(*ClaimTaskResponse)(nil),       // 11: supertag.runtime.v2.ClaimTaskResponse
-	(*Assignment)(nil),              // 12: supertag.runtime.v2.Assignment
-	(*StartTaskRequest)(nil),        // 13: supertag.runtime.v2.StartTaskRequest
-	(*InspectAttemptRequest)(nil),   // 14: supertag.runtime.v2.InspectAttemptRequest
-	(*AppendEventRequest)(nil),      // 15: supertag.runtime.v2.AppendEventRequest
-	(*TaskEvent)(nil),               // 16: supertag.runtime.v2.TaskEvent
-	(*FinishTaskRequest)(nil),       // 17: supertag.runtime.v2.FinishTaskRequest
-	(*HarnessAttachRequest)(nil),    // 18: supertag.runtime.v2.HarnessAttachRequest
-	(*AdapterBootstrap)(nil),        // 19: supertag.runtime.v2.AdapterBootstrap
-	(*HarnessRun)(nil),              // 20: supertag.runtime.v2.HarnessRun
-	(*HarnessPublishRequest)(nil),   // 21: supertag.runtime.v2.HarnessPublishRequest
-	(*HarnessCompleteRequest)(nil),  // 22: supertag.runtime.v2.HarnessCompleteRequest
-	(*HarnessCompleteResponse)(nil), // 23: supertag.runtime.v2.HarnessCompleteResponse
-	(*ReplyDestination)(nil),        // 24: supertag.runtime.v2.ReplyDestination
-	(*AcceptEventRequest)(nil),      // 25: supertag.runtime.v2.AcceptEventRequest
-	(*Reply)(nil),                   // 26: supertag.runtime.v2.Reply
-	(*ClaimReplyRequest)(nil),       // 27: supertag.runtime.v2.ClaimReplyRequest
-	(*ClaimReplyResponse)(nil),      // 28: supertag.runtime.v2.ClaimReplyResponse
-	(*SettleReplyRequest)(nil),      // 29: supertag.runtime.v2.SettleReplyRequest
+	(TaskState)(0),                       // 0: supertag.runtime.v2.TaskState
+	(AttemptDecision)(0),                 // 1: supertag.runtime.v2.AttemptDecision
+	(ObjectiveStatus)(0),                 // 2: supertag.runtime.v2.ObjectiveStatus
+	(ObjectiveSignal)(0),                 // 3: supertag.runtime.v2.ObjectiveSignal
+	(ReplyState)(0),                      // 4: supertag.runtime.v2.ReplyState
+	(*PutTagRequest)(nil),                // 5: supertag.runtime.v2.PutTagRequest
+	(*Tag)(nil),                          // 6: supertag.runtime.v2.Tag
+	(*SubmitTaskRequest)(nil),            // 7: supertag.runtime.v2.SubmitTaskRequest
+	(*Task)(nil),                         // 8: supertag.runtime.v2.Task
+	(*GetTaskRequest)(nil),               // 9: supertag.runtime.v2.GetTaskRequest
+	(*ListEventsRequest)(nil),            // 10: supertag.runtime.v2.ListEventsRequest
+	(*ListEventsResponse)(nil),           // 11: supertag.runtime.v2.ListEventsResponse
+	(*CancelTaskRequest)(nil),            // 12: supertag.runtime.v2.CancelTaskRequest
+	(*ClaimTaskRequest)(nil),             // 13: supertag.runtime.v2.ClaimTaskRequest
+	(*ClaimTaskResponse)(nil),            // 14: supertag.runtime.v2.ClaimTaskResponse
+	(*Assignment)(nil),                   // 15: supertag.runtime.v2.Assignment
+	(*StartTaskRequest)(nil),             // 16: supertag.runtime.v2.StartTaskRequest
+	(*InspectAttemptRequest)(nil),        // 17: supertag.runtime.v2.InspectAttemptRequest
+	(*AttemptAuthority)(nil),             // 18: supertag.runtime.v2.AttemptAuthority
+	(*ResolveAttemptRequest)(nil),        // 19: supertag.runtime.v2.ResolveAttemptRequest
+	(*AttemptResolution)(nil),            // 20: supertag.runtime.v2.AttemptResolution
+	(*GetAttemptResolutionResponse)(nil), // 21: supertag.runtime.v2.GetAttemptResolutionResponse
+	(*ReportAttemptUsageRequest)(nil),    // 22: supertag.runtime.v2.ReportAttemptUsageRequest
+	(*ReportAttemptUsageResponse)(nil),   // 23: supertag.runtime.v2.ReportAttemptUsageResponse
+	(*AppendEventRequest)(nil),           // 24: supertag.runtime.v2.AppendEventRequest
+	(*TaskEvent)(nil),                    // 25: supertag.runtime.v2.TaskEvent
+	(*FinishTaskRequest)(nil),            // 26: supertag.runtime.v2.FinishTaskRequest
+	(*HarnessAttachRequest)(nil),         // 27: supertag.runtime.v2.HarnessAttachRequest
+	(*AdapterBootstrap)(nil),             // 28: supertag.runtime.v2.AdapterBootstrap
+	(*HarnessRun)(nil),                   // 29: supertag.runtime.v2.HarnessRun
+	(*HarnessPublishRequest)(nil),        // 30: supertag.runtime.v2.HarnessPublishRequest
+	(*HarnessCompleteRequest)(nil),       // 31: supertag.runtime.v2.HarnessCompleteRequest
+	(*HarnessCompleteResponse)(nil),      // 32: supertag.runtime.v2.HarnessCompleteResponse
+	(*CreateObjectiveRequest)(nil),       // 33: supertag.runtime.v2.CreateObjectiveRequest
+	(*Objective)(nil),                    // 34: supertag.runtime.v2.Objective
+	(*GetObjectiveRequest)(nil),          // 35: supertag.runtime.v2.GetObjectiveRequest
+	(*ListObjectivesRequest)(nil),        // 36: supertag.runtime.v2.ListObjectivesRequest
+	(*ListObjectivesResponse)(nil),       // 37: supertag.runtime.v2.ListObjectivesResponse
+	(*SetObjectiveLimitsRequest)(nil),    // 38: supertag.runtime.v2.SetObjectiveLimitsRequest
+	(*ObjectiveActionRequest)(nil),       // 39: supertag.runtime.v2.ObjectiveActionRequest
+	(*ReviewObjectiveRequest)(nil),       // 40: supertag.runtime.v2.ReviewObjectiveRequest
+	(*ReplyDestination)(nil),             // 41: supertag.runtime.v2.ReplyDestination
+	(*AcceptEventRequest)(nil),           // 42: supertag.runtime.v2.AcceptEventRequest
+	(*Reply)(nil),                        // 43: supertag.runtime.v2.Reply
+	(*ClaimReplyRequest)(nil),            // 44: supertag.runtime.v2.ClaimReplyRequest
+	(*ClaimReplyResponse)(nil),           // 45: supertag.runtime.v2.ClaimReplyResponse
+	(*SettleReplyRequest)(nil),           // 46: supertag.runtime.v2.SettleReplyRequest
 }
 var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	0,  // 0: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
-	16, // 1: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
-	12, // 2: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
-	5,  // 3: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
-	5,  // 4: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
-	24, // 5: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	24, // 6: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	1,  // 7: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
-	26, // 8: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
-	1,  // 9: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	2,  // 10: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
-	4,  // 11: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
-	6,  // 12: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
-	7,  // 13: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
-	9,  // 14: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
-	10, // 15: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
-	13, // 16: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
-	14, // 17: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	15, // 18: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
-	17, // 19: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
-	25, // 20: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
-	27, // 21: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
-	29, // 22: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
-	18, // 23: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
-	21, // 24: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
-	22, // 25: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
-	3,  // 26: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
-	5,  // 27: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
-	5,  // 28: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
-	8,  // 29: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
-	5,  // 30: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
-	11, // 31: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
-	5,  // 32: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
-	5,  // 33: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
-	16, // 34: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
-	5,  // 35: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
-	5,  // 36: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
-	28, // 37: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
-	26, // 38: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
-	20, // 39: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
-	16, // 40: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
-	23, // 41: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
-	26, // [26:42] is the sub-list for method output_type
-	10, // [10:26] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	25, // 1: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
+	15, // 2: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
+	8,  // 3: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
+	8,  // 4: supertag.runtime.v2.AttemptAuthority.task:type_name -> supertag.runtime.v2.Task
+	1,  // 5: supertag.runtime.v2.ResolveAttemptRequest.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	1,  // 6: supertag.runtime.v2.AttemptResolution.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	20, // 7: supertag.runtime.v2.GetAttemptResolutionResponse.resolution:type_name -> supertag.runtime.v2.AttemptResolution
+	17, // 8: supertag.runtime.v2.ReportAttemptUsageRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	3,  // 9: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	8,  // 10: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
+	3,  // 11: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	2,  // 12: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
+	34, // 13: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
+	41, // 14: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	41, // 15: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	4,  // 16: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
+	43, // 17: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
+	4,  // 18: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	5,  // 19: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
+	7,  // 20: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
+	9,  // 21: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
+	10, // 22: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
+	12, // 23: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
+	19, // 24: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
+	33, // 25: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
+	35, // 26: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
+	36, // 27: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
+	38, // 28: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
+	39, // 29: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	39, // 30: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	39, // 31: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	40, // 32: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
+	13, // 33: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
+	16, // 34: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
+	17, // 35: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	17, // 36: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	17, // 37: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	22, // 38: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
+	24, // 39: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
+	26, // 40: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
+	42, // 41: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
+	44, // 42: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
+	46, // 43: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
+	27, // 44: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
+	30, // 45: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
+	31, // 46: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
+	6,  // 47: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
+	8,  // 48: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
+	8,  // 49: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
+	11, // 50: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
+	8,  // 51: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
+	20, // 52: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
+	34, // 53: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
+	34, // 54: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
+	37, // 55: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
+	34, // 56: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
+	34, // 57: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
+	34, // 58: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
+	34, // 59: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
+	34, // 60: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
+	14, // 61: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
+	8,  // 62: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
+	8,  // 63: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
+	18, // 64: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
+	21, // 65: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
+	23, // 66: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	25, // 67: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
+	8,  // 68: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
+	8,  // 69: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
+	45, // 70: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
+	43, // 71: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
+	29, // 72: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
+	25, // 73: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
+	32, // 74: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
+	47, // [47:75] is the sub-list for method output_type
+	19, // [19:47] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_runtime_proto_init() }
@@ -2076,18 +3429,22 @@ func file_supertag_runtime_v2_runtime_proto_init() {
 		return
 	}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[3].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[22].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[24].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[27].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[17].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[28].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[29].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[33].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[36].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[38].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[41].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_runtime_proto_rawDesc), len(file_supertag_runtime_v2_runtime_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   28,
+			NumEnums:      5,
+			NumMessages:   42,
 			NumExtensions: 0,
-			NumServices:   4,
+			NumServices:   5,
 		},
 		GoTypes:           file_supertag_runtime_v2_runtime_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_runtime_proto_depIdxs,

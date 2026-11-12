@@ -25,6 +25,7 @@ libc.workspace = true
 prost.workspace = true
 serde_json.workspace = true
 supertag-control-plane.workspace = true
+supertag-codex-adapter.workspace = true
 supertag-gateway.workspace = true
 supertag-protocol.workspace = true
 supertag-worker-host.workspace = true
@@ -36,10 +37,10 @@ tonic-health.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 hmac.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
-tempfile.workspace = true
 sqlx.workspace = true
 
 [[test]]
