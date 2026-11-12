@@ -448,7 +448,7 @@ pub async fn run(
                     }
                     let cancellation = shutdown.child_token();
                     let frozen = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
-                        pending.freeze(&workspace, &workspaces, &options.state_directory, &attempt, &cancellation)
+                        pending.freeze(&workspace, &workspaces, &options.state_directory, (&transfers, &attempt, &token), &cancellation)
                             .await.map(Box::new).map_err(|error| {
                                 let required = supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING;
                                 let message = if error.downcast_ref::<Status>().is_some_and(|status| status.message() == required) {
@@ -1306,9 +1306,10 @@ async fn run_assignment(
                 remote::capture(
                     provider,
                     journal,
-                    (&attempt, workspace, workspaces),
+                    (workspace, workspaces),
                     outputs.take(),
                     &options.state_directory,
+                    (transfers, &attempt, token),
                     &cancel,
                 ),
             )

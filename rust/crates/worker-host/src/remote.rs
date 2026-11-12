@@ -71,9 +71,10 @@ pub(crate) async fn prepare(
 pub(crate) async fn capture(
     provider: &RemoteProvider,
     journal: &Journal,
-    (attempt, workspace, workspaces): (&Attempt, &PreparedWorkspace, &Workspaces),
+    (workspace, workspaces): (&PreparedWorkspace, &Workspaces),
     outputs: Option<Box<PendingOutputs>>,
     state: &std::path::Path,
+    authority: (&crate::checkpoints::Transfers, &Attempt, &str),
     cancel: &CancellationToken,
 ) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
     let directory = journal
@@ -90,7 +91,7 @@ pub(crate) async fn capture(
                     (workspace, workspaces),
                     tree.clone(),
                     state,
-                    attempt,
+                    authority,
                     cancel,
                 )
                 .await

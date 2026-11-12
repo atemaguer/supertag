@@ -38,9 +38,10 @@ impl PendingOutputs {
         (workspace, workspaces): (&PreparedWorkspace, &Workspaces),
         archive: TransferArtifact,
         state: &Path,
-        attempt: &Attempt,
+        authority: (&Transfers, &Attempt, &str),
         cancel: &CancellationToken,
     ) -> Result<Self> {
+        let (_, attempt, _) = authority;
         let policy = self.policy()?;
         let git_mode = policy.as_ref().map(TaskOutputPolicy::git);
         let tracked = if policy
@@ -118,7 +119,7 @@ impl PendingOutputs {
             let remote = if git_mode == Some(OutputGitMode::Reference) && !files.tracked.is_empty()
             {
                 workspaces
-                    .output_remote(workspace, &files.head_commit, cancel)
+                    .output_remote(workspace, &files.head_commit, authority, cancel)
                     .await
             } else {
                 None

@@ -29,6 +29,7 @@ use crate::{
     Attempt, CoordinationClients,
     adapter::upload_records,
     artifact_snapshots::{Capture, CollectedOutput, Snapshots},
+    checkpoints::Transfers,
     workspaces::{PreparedWorkspace, Workspaces},
 };
 
@@ -122,9 +123,10 @@ impl PendingOutputs {
         workspace: &PreparedWorkspace,
         workspaces: &Workspaces,
         state: &Path,
-        attempt: &Attempt,
+        authority: (&Transfers, &Attempt, &str),
         cancel: &CancellationToken,
     ) -> Result<Self> {
+        let (_, attempt, _) = authority;
         let checkout = workspace.checkout.path.clone();
         let state = state.to_owned();
         let recovery_state = state.clone();
@@ -174,7 +176,7 @@ impl PendingOutputs {
                 let remote = if policy.git() == OutputGitMode::Reference && !git.tracked.is_empty()
                 {
                     workspaces
-                        .output_remote(workspace, &git.head_commit, cancel)
+                        .output_remote(workspace, &git.head_commit, authority, cancel)
                         .await
                 } else {
                     None

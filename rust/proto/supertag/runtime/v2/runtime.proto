@@ -649,6 +649,7 @@ service Transfers {
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceSource(InspectAttemptRequest) returns (stream GithubWorkspaceDownload);
+  rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }
 
 // Private authorization and commit for bytes stored by the Gateway.
@@ -1592,6 +1593,15 @@ message WorkspaceSpec {
 message GithubWorkspaceBundle {
   GithubWorkspace workspace = 1;
   BlobReference bundle = 2;
+}
+
+message VerifyWorkspaceOutputRemoteRequest {
+  InspectAttemptRequest attempt = 1;
+  string commit = 2;
+}
+
+message VerifyWorkspaceOutputRemoteResponse {
+  optional string remote = 1;
 }
 
 message GithubWorkspaceDownload {

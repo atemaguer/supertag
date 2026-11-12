@@ -240,6 +240,27 @@ async fn loopback_source_fetch_keeps_credentials_at_gateway_and_imports_exact_co
         0,
         "reject scope before credential or network work"
     );
+    let cancel = CancellationToken::new();
+    assert!(
+        sources
+            .advertised_output_remote(&forbidden, &commit, &cancel)
+            .await
+            .is_err()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        sources
+            .advertised_output_remote(&request, &commit, &cancel)
+            .await?,
+        Some("https://github.com/acme/project.git".into())
+    );
+    assert!(
+        sources
+            .advertised_output_remote(&request, &"a".repeat(40), &cancel)
+            .await?
+            .is_none()
+    );
+    assert!(calls.swap(0, Ordering::SeqCst) >= 4);
     let result = sources.fetch(&request, &CancellationToken::new()).await?;
     let bundle = fs::read(&result.bundle.path)?;
     assert!(

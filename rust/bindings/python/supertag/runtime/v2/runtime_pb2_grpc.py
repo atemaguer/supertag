@@ -4510,6 +4510,11 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.FromString,
                 _registered_method=True)
+        self.VerifyWorkspaceOutputRemote = channel.unary_unary(
+                '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteResponse.FromString,
+                _registered_method=True)
 
 
 class TransfersServicer:
@@ -4558,6 +4563,12 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def VerifyWorkspaceOutputRemote(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -4595,6 +4606,11 @@ def add_TransfersServicer_to_server(servicer, server):
                     servicer.DownloadWorkspaceSource,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.SerializeToString,
+            ),
+            'VerifyWorkspaceOutputRemote': grpc.unary_unary_rpc_method_handler(
+                    servicer.VerifyWorkspaceOutputRemote,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -4787,6 +4803,33 @@ class Transfers:
             '/supertag.runtime.v2.Transfers/DownloadWorkspaceSource',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def VerifyWorkspaceOutputRemote(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteResponse.FromString,
             options,
             channel_credentials,
             insecure,

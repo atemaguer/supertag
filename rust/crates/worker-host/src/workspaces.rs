@@ -244,19 +244,31 @@ impl Workspaces {
         &self,
         workspace: &PreparedWorkspace,
         commit: &str,
+        authority: (&Transfers, &Attempt, &str),
         cancel: &CancellationToken,
     ) -> Option<String> {
         let mapping = self
             .mapping
             .as_ref()
             .filter(|mapping| mapping.workspace_id == workspace.workspace_id)?;
-        let WorkspaceSource::Local(source) = &mapping.source else {
-            return None;
-        };
-        supertag_workspaces::advertised_output_remote(source, &self.directory, commit, cancel)
+        match &mapping.source {
+            WorkspaceSource::Local(source) => supertag_workspaces::advertised_output_remote(
+                source,
+                &self.directory,
+                commit,
+                cancel,
+            )
             .await
             .ok()
-            .flatten()
+            .flatten(),
+            WorkspaceSource::Gateway => {
+                let (transfers, attempt, token) = authority;
+                tokio::select! {
+                    remote = transfers.verify_output_remote(attempt, token, commit) => remote.ok().flatten(),
+                    _ = cancel.cancelled() => None,
+                }
+            }
+        }
     }
 
     pub async fn finalize(
@@ -383,6 +395,35 @@ fn read_blob(path: &Path, reference: &BlobReference) -> Result<Vec<u8>, Status> 
 }
 
 impl Transfers {
+    async fn verify_output_remote(
+        &self,
+        attempt: &Attempt,
+        token: &str,
+        commit: &str,
+    ) -> Result<Option<String>, Status> {
+        let mut request = request(
+            VerifyWorkspaceOutputRemoteRequest {
+                attempt: Some(attempt.inspect()),
+                commit: commit.into(),
+            },
+            token,
+        )
+        .map_err(|_| Status::internal("cannot authenticate Git output verification"))?;
+        request.set_timeout(Duration::from_secs(32));
+        let response =
+            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .verify_workspace_output_remote(request)
+                .await?
+                .into_inner();
+        Ok(response.remote.filter(|remote| {
+            supertag_protocol::git_outputs::remote_url(remote).is_some_and(|url| {
+                url.scheme() == "https"
+                    && url.host_str() == Some("github.com")
+                    && url.as_str() == remote
+            })
+        }))
+    }
+
     async fn download_source(
         &self,
         attempt: &Attempt,

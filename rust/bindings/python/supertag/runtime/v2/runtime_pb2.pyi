@@ -2379,6 +2379,20 @@ class GithubWorkspaceBundle(_message.Message):
     bundle: BlobReference
     def __init__(self, workspace: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
 
+class VerifyWorkspaceOutputRemoteRequest(_message.Message):
+    __slots__ = ("attempt", "commit")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    commit: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., commit: _Optional[str] = ...) -> None: ...
+
+class VerifyWorkspaceOutputRemoteResponse(_message.Message):
+    __slots__ = ("remote",)
+    REMOTE_FIELD_NUMBER: _ClassVar[int]
+    remote: str
+    def __init__(self, remote: _Optional[str] = ...) -> None: ...
+
 class GithubWorkspaceDownload(_message.Message):
     __slots__ = ("reference", "chunk")
     REFERENCE_FIELD_NUMBER: _ClassVar[int]

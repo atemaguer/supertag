@@ -110,12 +110,47 @@ impl GithubWorkspaceSources {
         Ok(self)
     }
 
-    pub(crate) async fn fetch(
+    pub(crate) async fn advertised_output_remote(
         &self,
         workspace: &GithubWorkspace,
+        commit: &str,
         cancel: &CancellationToken,
-    ) -> Result<FetchedSource> {
-        ensure!(!cancel.is_cancelled(), "source retrieval cancelled");
+    ) -> Result<Option<String>> {
+        let input = self.accepted_source(workspace)?;
+        ensure!(
+            supertag_protocol::valid_git_commit(commit),
+            "invalid Git output commit"
+        );
+        ensure!(!cancel.is_cancelled(), "Git remote verification cancelled");
+        let token = self
+            .0
+            .authentication
+            .access_token(&self.0.http, &self.0.api)
+            .await?;
+        self.verify_repository(input, token.expose()).await?;
+        let directory = TempDir::new_in(&self.0.directory)?;
+        let url = self.0.git.join(&format!("{}.git", input.repository))?;
+        let mut verify = git_command(directory.path());
+        Self::authenticate_git(&mut verify, &url, token.expose())?;
+        verify.args(["ls-remote", "--"]).arg(url.as_str());
+        let advertised = run_git_output(
+            verify,
+            directory.path(),
+            cancel,
+            1_048_576,
+            Duration::from_secs(15),
+        )
+        .await?;
+        let present = std::str::from_utf8(&advertised)?
+            .lines()
+            .any(|line| line.split_once('\t').is_some_and(|(sha, _)| sha == commit));
+        Ok(present.then(|| format!("https://github.com/{}.git", input.repository)))
+    }
+
+    fn accepted_source<'a>(
+        &self,
+        workspace: &'a GithubWorkspace,
+    ) -> Result<&'a supertag_protocol::v2::GithubWorkspaceSource> {
         let input = workspace
             .source
             .as_ref()
@@ -126,6 +161,58 @@ impl GithubWorkspaceSources {
                 && input.repository == self.0.repository,
             "accepted GitHub source is not configured on this Gateway"
         );
+        Ok(input)
+    }
+
+    async fn verify_repository(
+        &self,
+        input: &supertag_protocol::v2::GithubWorkspaceSource,
+        token: &str,
+    ) -> Result<()> {
+        let repository = self
+            .json(&format!("repositories/{}", input.repository_id), token)
+            .await?;
+        ensure!(
+            repository.get("id").and_then(Value::as_u64) == Some(input.repository_id)
+                && repository
+                    .get("full_name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&input.repository)),
+            "GitHub returned another repository"
+        );
+        Ok(())
+    }
+
+    fn authenticate_git(command: &mut Command, url: &Url, token: &str) -> Result<()> {
+        command
+            .env("GIT_CONFIG_COUNT", "2")
+            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+            .env(
+                "GIT_CONFIG_VALUE_0",
+                format!(
+                    "Authorization: Basic {}",
+                    STANDARD.encode(format!("x-access-token:{token}"))
+                ),
+            )
+            .env("GIT_CONFIG_KEY_1", "http.followRedirects")
+            .env("GIT_CONFIG_VALUE_1", "false");
+        if url.scheme() == "http" {
+            ensure!(
+                url.host_str() == Some("127.0.0.1"),
+                "HTTP source fetch requires a loopback fixture"
+            );
+            command.args(["-c", "protocol.http.allow=always"]);
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn fetch(
+        &self,
+        workspace: &GithubWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<FetchedSource> {
+        ensure!(!cancel.is_cancelled(), "source retrieval cancelled");
+        let input = self.accepted_source(workspace)?;
         ensure!(
             input.commit_sha.len() == 40
                 && input
@@ -139,20 +226,7 @@ impl GithubWorkspaceSources {
             .authentication
             .access_token(&self.0.http, &self.0.api)
             .await?;
-        let repository = self
-            .json(
-                &format!("repositories/{}", input.repository_id),
-                token.expose(),
-            )
-            .await?;
-        ensure!(
-            repository.get("id").and_then(Value::as_u64) == Some(input.repository_id)
-                && repository
-                    .get("full_name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| name.eq_ignore_ascii_case(&input.repository)),
-            "GitHub returned another repository"
-        );
+        self.verify_repository(input, token.expose()).await?;
         let commit = self
             .json(
                 &format!("repos/{}/commits/{}", input.repository, input.commit_sha),
@@ -174,25 +248,7 @@ impl GithubWorkspaceSources {
         let mut fetch = git_command(&repository);
         // This environment belongs only to the trusted Git child. It is never
         // serialized, included in argv, inherited from the Host, or logged.
-        fetch
-            .env("GIT_CONFIG_COUNT", "2")
-            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-            .env(
-                "GIT_CONFIG_VALUE_0",
-                format!(
-                    "Authorization: Basic {}",
-                    STANDARD.encode(format!("x-access-token:{}", token.expose()))
-                ),
-            )
-            .env("GIT_CONFIG_KEY_1", "http.followRedirects")
-            .env("GIT_CONFIG_VALUE_1", "false");
-        if url.scheme() == "http" {
-            ensure!(
-                url.host_str() == Some("127.0.0.1"),
-                "HTTP source fetch requires a loopback fixture"
-            );
-            fetch.args(["-c", "protocol.http.allow=always"]);
-        }
+        Self::authenticate_git(&mut fetch, &url, token.expose())?;
         fetch
             .args([
                 "fetch",
@@ -296,10 +352,22 @@ impl Drop for ProcessGroup {
 }
 
 pub(super) async fn run_git(
-    mut command: Command,
+    command: Command,
     directory: &Path,
     cancel: &CancellationToken,
 ) -> Result<()> {
+    run_git_output(command, directory, cancel, 16_384, Duration::from_secs(90))
+        .await
+        .map(drop)
+}
+
+async fn run_git_output(
+    mut command: Command,
+    directory: &Path,
+    cancel: &CancellationToken,
+    limit: usize,
+    deadline: Duration,
+) -> Result<Vec<u8>> {
     use std::os::unix::process::CommandExt as _;
     command
         .stdin(Stdio::null())
@@ -315,7 +383,7 @@ pub(super) async fn run_git(
         .stdout
         .take()
         .context("Git source output unavailable")?
-        .take(16_385);
+        .take(limit as u64 + 1);
     let mut stderr = child
         .stderr
         .take()
@@ -331,11 +399,11 @@ pub(super) async fn run_git(
                 stderr.read_to_end(&mut err)
             )?;
             ensure!(
-                out.len() <= 16_384 && err.len() <= 16_384,
+                out.len() <= limit && err.len() <= 16_384,
                 "Git source output exceeded its bound"
             );
             ensure!(status.success(), "Git source transfer failed");
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, anyhow::Error>(out)
         };
         tokio::pin!(operation);
         let started = time::Instant::now();
@@ -343,7 +411,7 @@ pub(super) async fn run_git(
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => break Err(anyhow::anyhow!("Git source retrieval cancelled")),
-                _ = time::sleep_until(started + Duration::from_secs(90)) => break Err(anyhow::anyhow!("Git source retrieval timed out")),
+                _ = time::sleep_until(started + deadline) => break Err(anyhow::anyhow!("Git source retrieval timed out")),
                 result = &mut operation => break result,
                 _ = time::sleep(Duration::from_millis(100)) => { if let Err(error) = check_size(directory) { break Err(error); } },
             }
@@ -353,8 +421,9 @@ pub(super) async fn run_git(
     time::timeout(Duration::from_secs(5), child.wait())
         .await
         .context("trusted Git source cleanup timed out")??;
-    result?;
-    check_size(directory)
+    let output = result?;
+    check_size(directory)?;
+    Ok(output)
 }
 
 fn check_size(directory: &Path) -> Result<()> {

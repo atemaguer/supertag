@@ -332,6 +332,46 @@ impl GatewayTransfers {
 impl Transfers for GatewayTransfers {
     type DownloadWorkspaceSourceStream = ReceiverStream<Result<GithubWorkspaceDownload, Status>>;
 
+    async fn verify_workspace_output_remote(
+        &self,
+        request: Request<VerifyWorkspaceOutputRemoteRequest>,
+    ) -> Result<Response<VerifyWorkspaceOutputRemoteResponse>, Status> {
+        let (metadata, _, input) = request.into_parts();
+        let attempt = input
+            .attempt
+            .ok_or_else(|| Status::invalid_argument("Attempt is required"))?;
+        if !supertag_protocol::valid_git_commit(&input.commit) {
+            return Err(Status::invalid_argument("invalid Git output commit"));
+        }
+        let source_request = || {
+            let mut request = Request::new(attempt.clone());
+            *request.metadata_mut() = metadata.clone();
+            request
+        };
+        let workspace = self.get_source(source_request()).await?;
+        let sources = self.github_sources.as_ref().ok_or_else(|| {
+            Status::failed_precondition("GitHub Workspace source is not configured on this Gateway")
+        })?;
+        let _permit = self.acquire()?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let _cancel_on_drop = cancel.clone().drop_guard();
+        let remote = timeout(
+            Duration::from_secs(30),
+            sources.advertised_output_remote(&workspace, &input.commit, &cancel),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("GitHub output verification timed out"))?
+        .map_err(|_| Status::unavailable("GitHub output remote could not be verified"))?;
+        if self.get_source(source_request()).await? != workspace {
+            return Err(Status::permission_denied(
+                "GitHub source is no longer authorized",
+            ));
+        }
+        Ok(Response::new(VerifyWorkspaceOutputRemoteResponse {
+            remote,
+        }))
+    }
+
     async fn download_workspace_source(
         &self,
         request: Request<InspectAttemptRequest>,

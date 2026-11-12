@@ -330,6 +330,9 @@ const (
 	// TransfersDownloadWorkspaceSourceProcedure is the fully-qualified name of the Transfers's
 	// DownloadWorkspaceSource RPC.
 	TransfersDownloadWorkspaceSourceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceSource"
+	// TransfersVerifyWorkspaceOutputRemoteProcedure is the fully-qualified name of the Transfers's
+	// VerifyWorkspaceOutputRemote RPC.
+	TransfersVerifyWorkspaceOutputRemoteProcedure = "/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote"
 	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's GetCheckpoint RPC.
 	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
@@ -3543,6 +3546,7 @@ type TransfersClient interface {
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error)
+	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
 // NewTransfersClient constructs a client for the supertag.runtime.v2.Transfers service. By default,
@@ -3598,18 +3602,25 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
 			connect.WithClientOptions(opts...),
 		),
+		verifyWorkspaceOutputRemote: connect.NewClient[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse](
+			httpClient,
+			baseURL+TransfersVerifyWorkspaceOutputRemoteProcedure,
+			connect.WithSchema(transfersMethods.ByName("VerifyWorkspaceOutputRemote")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // transfersClient implements TransfersClient.
 type transfersClient struct {
-	uploadCheckpoint          *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
-	downloadCheckpoint        *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
-	uploadWorkspace           *connect.Client[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
-	downloadWorkspace         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
-	downloadWorkspaceArtifact *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
-	downloadReviewArtifact    *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
-	downloadWorkspaceSource   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload]
+	uploadCheckpoint            *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
+	downloadCheckpoint          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
+	uploadWorkspace             *connect.Client[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
+	downloadWorkspace           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
+	downloadWorkspaceArtifact   *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
+	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
+	downloadWorkspaceSource     *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload]
+	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
 }
 
 // UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
@@ -3647,6 +3658,11 @@ func (c *transfersClient) DownloadWorkspaceSource(ctx context.Context, req *conn
 	return c.downloadWorkspaceSource.CallServerStream(ctx, req)
 }
 
+// VerifyWorkspaceOutputRemote calls supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote.
+func (c *transfersClient) VerifyWorkspaceOutputRemote(ctx context.Context, req *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {
+	return c.verifyWorkspaceOutputRemote.CallUnary(ctx, req)
+}
+
 // TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
 type TransfersHandler interface {
 	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
@@ -3656,6 +3672,7 @@ type TransfersHandler interface {
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error
+	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
 // NewTransfersHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3707,6 +3724,12 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
 		connect.WithHandlerOptions(opts...),
 	)
+	transfersVerifyWorkspaceOutputRemoteHandler := connect.NewUnaryHandler(
+		TransfersVerifyWorkspaceOutputRemoteProcedure,
+		svc.VerifyWorkspaceOutputRemote,
+		connect.WithSchema(transfersMethods.ByName("VerifyWorkspaceOutputRemote")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TransfersUploadCheckpointProcedure:
@@ -3723,6 +3746,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceSourceProcedure:
 			transfersDownloadWorkspaceSourceHandler.ServeHTTP(w, r)
+		case TransfersVerifyWorkspaceOutputRemoteProcedure:
+			transfersVerifyWorkspaceOutputRemoteHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3758,6 +3783,10 @@ func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *co
 
 func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceSource is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote is not implemented"))
 }
 
 // CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
