@@ -24,6 +24,7 @@ it("renders a Work Session report as Tag output with activity and no operator bu
       },
       activeTask: "report-task",
       onActivity: () => {},
+      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("Work Session report");
@@ -45,6 +46,7 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
       },
       activeTask: "running-task",
       onActivity: () => {},
+      onSaveArtifact: async () => false,
     }),
   );
   expect(html).toContain("user-turn");
@@ -53,4 +55,19 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("Work Session report");
   expect(html).not.toContain(task.result);
+});
+
+it("offers the selected Task result files in the Tag reply", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        conversation: "planning",
+        task: { ...task, artifacts: [{ artifactId: "capture", paths: ["outputs/report.md"] }] },
+      },
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html).toContain('aria-label="Task result files"');
+  expect(html).toContain('aria-label="Save outputs/report.md"');
 });

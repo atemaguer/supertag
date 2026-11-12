@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "gateway-client"
-description = "Connect to a Gateway and read or send personal conversation messages."
+description = "Connect to a Gateway and read or send personal conversation messages and save Task result files."
 commands.allow = [
   "connect_gateway",
   "disconnect_gateway",
@@ -12,4 +12,5 @@ commands.allow = [
   "send_message",
   "get_message",
   "list_message_events",
+  "save_result_artifact",
 ]

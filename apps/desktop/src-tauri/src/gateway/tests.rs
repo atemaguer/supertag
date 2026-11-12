@@ -95,6 +95,10 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
         state: v2::TaskState::Succeeded as i32,
         prompt: "Internal report instructions with raw child output".into(),
         result: Some("The dependency update passed verification.".into()),
+        artifacts: vec![v2::ArtifactSelection {
+            artifact_id: "report-capture".into(),
+            paths: vec!["outputs/review.md".into()],
+        }],
         ..Default::default()
     };
     let message = Message::try_from(v2::ConversationMessage {
@@ -114,6 +118,11 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert_eq!(
         json["task"]["result"],
         "The dependency update passed verification."
+    );
+    assert_eq!(json["task"]["artifacts"][0]["artifactId"], "report-capture");
+    assert_eq!(
+        json["task"]["artifacts"][0]["paths"][0],
+        "outputs/review.md"
     );
     assert!(json["task"].get("prompt").is_none());
     assert!(json.get("liveInput").is_none());
@@ -281,4 +290,140 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
     assert!(client.tags().await.is_err());
     gateway_task.abort();
     cp_task.abort();
+}
+
+#[tokio::test]
+async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
+    use sha2::{Digest, Sha256};
+    use v2::{
+        ArtifactDownload, ArtifactFile, ArtifactUpload, BlobReference, CapturedArtifact,
+        DownloadArtifactFileRequest,
+        artifact_download::Part,
+        artifact_transfers_server::{ArtifactTransfers, ArtifactTransfersServer},
+    };
+
+    const BODY: &[u8] = b"artifact fixture";
+    const PATH: &str = "outputs/report.txt";
+
+    struct Transfers;
+    #[tonic::async_trait]
+    impl ArtifactTransfers for Transfers {
+        async fn upload_capture(
+            &self,
+            _: Request<tonic::Streaming<ArtifactUpload>>,
+        ) -> std::result::Result<tonic::Response<CapturedArtifact>, Status> {
+            Err(Status::unimplemented("unused"))
+        }
+
+        type DownloadFileStream =
+            tokio_stream::Iter<std::vec::IntoIter<std::result::Result<ArtifactDownload, Status>>>;
+
+        async fn download_file(
+            &self,
+            request: Request<DownloadArtifactFileRequest>,
+        ) -> std::result::Result<tonic::Response<Self::DownloadFileStream>, Status> {
+            if request
+                .metadata()
+                .get("authorization")
+                .and_then(|header| header.to_str().ok())
+                != Some("Bearer artifact-operator")
+            {
+                return Err(Status::unauthenticated("unexpected credential"));
+            }
+            let input = request.into_inner();
+            if input.path != PATH {
+                return Err(Status::not_found("path missing"));
+            }
+            let digest = if input.artifact_id == "corrupted" {
+                Sha256::digest(b"other bytes")
+            } else {
+                Sha256::digest(BODY)
+            };
+            let frames = vec![
+                Ok(ArtifactDownload {
+                    part: Some(Part::File(ArtifactFile {
+                        path: input.path,
+                        blob: Some(BlobReference {
+                            sha256: format!("{digest:x}"),
+                            byte_length: BODY.len() as u64,
+                        }),
+                    })),
+                }),
+                Ok(ArtifactDownload {
+                    part: Some(Part::Chunk(BODY.to_vec())),
+                }),
+            ];
+            Ok(tonic::Response::new(tokio_stream::iter(frames)))
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("saved.txt");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(
+        Server::builder()
+            .add_service(ArtifactTransfersServer::new(Transfers))
+            .serve_with_incoming(TcpListenerStream::new(listener)),
+    );
+    let client = GatewayState::default();
+    client.0.write().await.session = Some(Arc::new(Session {
+        channel: endpoint(&address).unwrap().connect().await.unwrap(),
+        authorization: bearer("artifact-operator").unwrap(),
+    }));
+
+    assert!(
+        !client
+            .save_artifact("valid".into(), PATH.into(), |_| async { Ok(None) })
+            .await
+            .unwrap()
+    );
+    assert!(
+        client
+            .save_artifact("corrupted".into(), PATH.into(), |_| async {
+                Ok(Some(destination.clone()))
+            })
+            .await
+            .unwrap_err()
+            .contains("did not match")
+    );
+    assert!(!destination.exists());
+    let first_destination = destination.clone();
+    assert!(
+        client
+            .save_artifact("valid".into(), PATH.into(), |name| async move {
+                assert_eq!(name, "report.txt");
+                Ok(Some(first_destination))
+            })
+            .await
+            .unwrap()
+    );
+    assert_eq!(std::fs::read(&destination).unwrap(), BODY);
+
+    std::fs::write(&destination, b"operator file").unwrap();
+    assert!(
+        client
+            .save_artifact("valid".into(), PATH.into(), |_| async {
+                Ok(Some(destination.clone()))
+            })
+            .await
+            .unwrap_err()
+            .contains("already exists")
+    );
+    assert_eq!(std::fs::read(&destination).unwrap(), b"operator file");
+
+    let obsolete = directory.path().join("obsolete.txt");
+    assert!(
+        client
+            .save_artifact("valid".into(), PATH.into(), |_| async {
+                client.disconnect().await;
+                Ok(Some(obsolete.clone()))
+            })
+            .await
+            .unwrap_err()
+            .contains("connection changed")
+    );
+    assert!(!obsolete.exists());
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    server.abort();
 }

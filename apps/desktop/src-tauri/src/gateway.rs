@@ -12,6 +12,7 @@ use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint},
 };
 
+mod artifacts;
 mod watch;
 pub use watch::WatchUpdate;
 
@@ -236,6 +237,7 @@ impl GatewayState {
                 text,
                 operation_id,
                 execution_limits: None,
+                output_policy: None,
             }))
             .await
             .map_err(rpc_error)?
@@ -410,6 +412,24 @@ pub struct Task {
     pub result: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ResultArtifact>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultArtifact {
+    artifact_id: String,
+    paths: Vec<String>,
+}
+
+impl From<v2::ArtifactSelection> for ResultArtifact {
+    fn from(selection: v2::ArtifactSelection) -> Self {
+        Self {
+            artifact_id: selection.artifact_id,
+            paths: selection.paths,
+        }
+    }
 }
 
 impl From<v2::Task> for Task {
@@ -427,6 +447,11 @@ impl From<v2::Task> for Task {
             state,
             result: task.result,
             attempt_id: task.attempt_id,
+            artifacts: task
+                .artifacts
+                .into_iter()
+                .map(ResultArtifact::from)
+                .collect(),
         }
     }
 }

@@ -215,6 +215,7 @@ export function ConversationPane({
                   message={message}
                   activeTask={activeTask}
                   onActivity={viewActivity}
+                  onSaveArtifact={gateway.saveArtifact}
                 />
               ))}
             </div>

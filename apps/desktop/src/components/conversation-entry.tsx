@@ -1,4 +1,5 @@
-import type { Message } from "../gateway";
+import type { Gateway, Message } from "../gateway";
+import { ResultFiles } from "./result-files";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
@@ -28,10 +29,12 @@ export function ConversationEntry({
   message,
   activeTask,
   onActivity,
+  onSaveArtifact,
 }: {
   message: Message;
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
+  onSaveArtifact: Gateway["saveArtifact"];
 }) {
   const { task, workSessionReportId } = message;
   const report = workSessionReportId !== undefined;
@@ -66,6 +69,9 @@ export function ConversationEntry({
             </Button>
           </div>
           {task.result && !joined && <p className="result-text">{task.result}</p>}
+          {!joined && task.artifacts && task.artifacts.length > 0 && (
+            <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
+          )}
         </div>
       </div>
     </article>

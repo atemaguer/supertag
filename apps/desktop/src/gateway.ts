@@ -9,6 +9,11 @@ export interface Tag {
   harnessKind: string;
 }
 
+export interface ResultArtifact {
+  artifactId: string;
+  paths: string[];
+}
+
 export interface Task {
   taskId: string;
   tagId: string;
@@ -16,6 +21,7 @@ export interface Task {
   prompt?: string;
   state: string;
   result?: string;
+  artifacts?: ResultArtifact[];
 }
 
 export interface Message {
@@ -48,6 +54,7 @@ export interface Gateway {
   messages(tagId: string, conversation: string, cursor?: string): Promise<MessagePage>;
   send(tagId: string, conversation: string, text: string, operationId: string): Promise<Message>;
   events(tagId: string, taskId: string, afterSequence: number): Promise<TaskEvent[]>;
+  saveArtifact(artifactId: string, path: string): Promise<boolean>;
 }
 
 export type WatchUpdate =
@@ -75,6 +82,7 @@ export const nativeGateway: NativeGateway = {
     invoke("send_message", { tagId, conversation, text, operationId }),
   events: (tagId, taskId, afterSequence) =>
     invoke("list_message_events", { tagId, taskId, afterSequence }),
+  saveArtifact: (artifactId, path) => invoke("save_result_artifact", { artifactId, path }),
   async watch(connectionId, watchEpoch, receive) {
     const onUpdate = new Channel<WatchUpdate>(receive);
     const watchId = await invoke<string>("start_gateway_watch", {

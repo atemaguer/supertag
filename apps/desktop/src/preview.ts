@@ -112,6 +112,9 @@ export const previewGateway: Gateway = {
     threads.set(name, [...entries, message]);
     return message;
   },
+  async saveArtifact() {
+    return false;
+  },
   async events(_tagId, taskId, afterSequence) {
     const events: TaskEvent[] = [
       { sequence: 1, text: "Task accepted" },
