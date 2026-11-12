@@ -1,10 +1,12 @@
 //! Signed GitHub events and journaled issue/PR comments. No credentials reach Tasks.
+mod auth;
 mod delivery;
 #[cfg(test)]
 mod tests;
 
 use crate::delivery_journal::Journal;
 use anyhow::{Context, Result, ensure};
+pub use auth::{GithubAppConfig, GithubAuthentication};
 use axum::{
     Router,
     body::Bytes,
@@ -41,7 +43,7 @@ pub struct GithubConfig {
     pub tag_id: String,
     pub allowed_users: Vec<u64>,
     pub webhook_secret: String,
-    pub token: String,
+    pub authentication: GithubAuthentication,
     pub state_directory: PathBuf,
 }
 
@@ -56,6 +58,7 @@ struct Connector {
     http: reqwest::Client,
     api_base: reqwest::Url,
     journal: Journal,
+    authentication: auth::Authentication,
 }
 
 impl Github {
@@ -86,11 +89,16 @@ impl Github {
             "configure valid GitHub user IDs"
         );
         ensure!(
-            !config.webhook_secret.trim().is_empty() && !config.token.trim().is_empty(),
-            "GitHub webhook secret and token are required"
+            !config.webhook_secret.trim().is_empty(),
+            "GitHub webhook secret is required"
         );
         config.account_id = format!("github/{}", config.account_id);
         config.repository = config.repository.to_ascii_lowercase();
+        let authentication = auth::Authentication::new(
+            &config.authentication,
+            config.repository_id,
+            &config.repository,
+        )?;
         let principal = format!("connector:{}", config.account_id);
         authenticated_request((), &gateway_token, Some(&principal))
             .context("invalid GitHub connector credential")?;
@@ -112,10 +120,11 @@ impl Github {
             http,
             api_base: "https://api.github.com/".parse()?,
             journal,
+            authentication,
         })))
     }
 
-    #[cfg(feature = "test-fixtures")]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub fn with_test_api_url(mut self, url: &str) -> Result<Self> {
         let mut url: reqwest::Url = url.parse().context("invalid test GitHub API URL")?;
         ensure!(
@@ -249,6 +258,11 @@ struct Payload {
     issue: Option<Item>,
     pull_request: Option<Item>,
     comment: Option<Item>,
+    installation: Option<Installation>,
+}
+#[derive(Deserialize)]
+struct Installation {
+    id: u64,
 }
 #[derive(Deserialize)]
 struct Actor {
@@ -279,6 +293,15 @@ fn normalize(
         return Ok(None);
     }
     let payload: Payload = serde_json::from_slice(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if let GithubAuthentication::App(app) = &config.authentication
+        && payload
+            .installation
+            .as_ref()
+            .map(|installation| installation.id)
+            != Some(app.installation_id)
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
     if payload.repository.id != config.repository_id
         || !payload
             .repository

@@ -32,7 +32,11 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a, err := newApp(ctx, dial(version), h.Contexts, h.Current)
+	connect := dial(version)
+	if h.Protocol == "runtime.v2" {
+		connect = dialRuntimeV2(version)
+	}
+	a, err := newApp(ctx, connect, h.Contexts, h.Current)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -49,6 +53,7 @@ func main() {
 type handover struct {
 	Contexts []client.Target `json:"contexts"`
 	Current  int             `json:"current"`
+	Protocol string          `json:"protocol,omitempty"`
 }
 
 // readHandover reads the one JSON line `supertag` writes to the inherited pipe, to EOF. Only a
@@ -76,6 +81,9 @@ func readHandover(f *os.File) (handover, error) {
 	}
 	if len(h.Contexts) == 0 || h.Current < 0 || h.Current >= len(h.Contexts) {
 		return h, errors.New("the handover needs its Control Planes and the index of the current one")
+	}
+	if h.Protocol != "" && h.Protocol != "runtime.v2" {
+		return h, errors.New("unsupported TUI handover protocol")
 	}
 	for _, target := range h.Contexts {
 		if target.URL == "" || target.Token == "" {

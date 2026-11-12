@@ -8,6 +8,8 @@ mod authority;
 #[path = "github_events.rs"]
 mod github_events;
 mod hosts;
+#[path = "linear_events.rs"]
+mod linear_events;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 pub(crate) use authority::lease_is_live;
@@ -58,7 +60,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 11;
+        const SCHEMA_VERSION: i64 = 13;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -120,6 +122,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0009_slack_threads.sql"),
                 include_str!("../migrations/sqlite/0010_github_events.sql"),
                 include_str!("../migrations/sqlite/0011_harness_selection.sql"),
+                include_str!("../migrations/sqlite/0012_linear_events.sql"),
+                include_str!("../migrations/sqlite/0013_conversations.sql"),
             ]
         } else {
             [
@@ -134,6 +138,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0009_slack_threads.sql"),
                 include_str!("../migrations/postgresql/0010_github_events.sql"),
                 include_str!("../migrations/postgresql/0011_harness_selection.sql"),
+                include_str!("../migrations/postgresql/0012_linear_events.sql"),
+                include_str!("../migrations/postgresql/0013_conversations.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -242,6 +248,11 @@ impl Store {
         name("operation ID", &input.operation_id)?;
         name("Tag ID", &input.tag_id)?;
         name("Session ID", &input.session_id)?;
+        if crate::conversations::private_session(&input.session_id) {
+            return Err(StoreError::FailedPrecondition(
+                "send messages through the conversation".into(),
+            ));
+        }
         text("prompt", &input.prompt, 262_144)?;
         let digest = format!(
             "{:x}",
@@ -672,6 +683,11 @@ impl Store {
         name("event ID", &input.event_id)?;
         name("Tag ID", &input.tag_id)?;
         name("Session ID", &input.session_id)?;
+        if crate::conversations::private_session(&input.session_id) {
+            return Err(StoreError::FailedPrecondition(
+                "send messages through the conversation".into(),
+            ));
+        }
         text("prompt", &input.prompt, 262_144)?;
         let destination = input
             .destination

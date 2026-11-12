@@ -2222,6 +2222,7 @@ name = "supertag-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "hmac",
  "libc",
@@ -2288,10 +2289,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
+ "chrono",
  "hex",
  "hmac",
  "libc",
  "reqwest",
+ "ring",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2",

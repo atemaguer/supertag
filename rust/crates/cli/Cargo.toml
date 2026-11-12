@@ -39,6 +39,7 @@ tonic-health.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 hmac.workspace = true
 reqwest.workspace = true
 sqlx.workspace = true
@@ -76,4 +77,14 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "language_runtime"
 path = "tests/language_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "linear_runtime"
+path = "tests/linear_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "operator_runtime"
+path = "tests/operator_runtime.rs"
 required-features = ["test-fixtures"]

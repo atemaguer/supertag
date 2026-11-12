@@ -1,9 +1,11 @@
 //! Signed HTTP GitHub ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
 use std::{
+    collections::BTreeMap,
     fs::File,
     io::{BufRead, BufReader},
     net::SocketAddr,
+    os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, mpsc},
@@ -39,6 +41,9 @@ const ACCOUNT: &str = "github-process-test";
 const REPOSITORY: &str = "acme/project";
 const SIGNING: &str = "synthetic-github-webhook-secret";
 const TOKEN: &str = "synthetic-github-api-token";
+const APP_TOKEN: &str = "ghs_synthetic-github-installation-token";
+// An intentionally public test credential, never registered with a provider.
+const APP_KEY: &str = include_str!("../../gateway/src/github/auth/fixtures/app-test-key.pem");
 
 struct Credentials {
     gateway: String,
@@ -159,6 +164,33 @@ impl Process {
             sleep(Duration::from_millis(10)).await;
         }
     }
+    async fn rejected(&mut self, expected: &str) -> Result<()> {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                ensure!(
+                    !status.success(),
+                    "invalid GitHub App configuration was accepted"
+                );
+                let logs = self.logs();
+                ensure!(
+                    logs.contains(expected),
+                    "expected configuration error {expected}: {logs}"
+                );
+                ensure!(
+                    !logs.contains(APP_KEY) && !logs.contains(APP_TOKEN),
+                    "credential appeared in startup logs"
+                );
+                return Ok(());
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "invalid configuration did not exit: {}",
+                self.logs()
+            );
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
     async fn stop(&mut self) -> Result<()> {
         if self.child.try_wait()?.is_none() {
             ensure!(unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) } == 0);
@@ -186,7 +218,13 @@ impl Drop for Process {
     }
 }
 
-async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
+struct HttpRequest {
+    start: String,
+    headers: BTreeMap<String, String>,
+    body: Value,
+}
+
+async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let end = loop {
@@ -198,18 +236,22 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         ensure!(count > 0, "fixture HTTP headers ended early");
         bytes.extend_from_slice(&buffer[..count]);
     };
-    let headers = std::str::from_utf8(&bytes[..end])?;
-    ensure!(headers.starts_with("POST /repos/acme/project/issues/7/comments HTTP/1.1\r\n"));
-    let header = |name: &str| {
-        headers
-            .lines()
-            .filter_map(|line| line.split_once(':'))
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.trim())
-    };
-    ensure!(header("authorization") == Some(format!("Bearer {TOKEN}").as_str()));
-    let length: usize = header("content-length")
-        .context("fixture HTTP length missing")?
+    let raw_headers = std::str::from_utf8(&bytes[..end])?;
+    let start = raw_headers
+        .lines()
+        .next()
+        .context("missing HTTP request line")?
+        .to_owned();
+    let headers: BTreeMap<_, _> = raw_headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_owned()))
+        .collect();
+    let length: usize = headers
+        .get("content-length")
+        .map(String::as_str)
+        .unwrap_or("0")
         .parse()?;
     ensure!(length <= 262_144);
     while bytes.len() < end + length {
@@ -217,7 +259,23 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         ensure!(count > 0, "fixture HTTP body ended early");
         bytes.extend_from_slice(&buffer[..count]);
     }
-    Ok(serde_json::from_slice(&bytes[end..end + length])?)
+    let body = if length == 0 {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes[end..end + length])?
+    };
+    Ok(HttpRequest {
+        start,
+        headers,
+        body,
+    })
+}
+
+async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
+    let request = read_http_request(stream).await?;
+    ensure!(request.start == "POST /repos/acme/project/issues/7/comments HTTP/1.1");
+    ensure!(request.headers.get("authorization") == Some(&format!("Bearer {TOKEN}")));
+    Ok(request.body)
 }
 
 async fn task_count(database: &str) -> Result<i64> {
@@ -373,7 +431,7 @@ async fn receipt(
             },
             prompt: payload["comment"]["body"].as_str().unwrap().into(),
             tag_id: "builder".into(),
-            is_pull_request: false,
+            is_pull_request: payload["issue"].get("pull_request").is_some(),
         })?)
         .await?
         .into_inner()
@@ -599,6 +657,350 @@ async fn github_post_interrupted_after_provider_acceptance_stays_uncertain_after
     assert_eq!(task_count(&database).await?, 1);
     assert_eq!(mock.requests.lock().await.len(), 1);
     restarted.stop().await?;
+    cp.stop().await?;
+    Ok(())
+}
+
+struct MockGithubApp {
+    endpoint: String,
+    observed: Arc<Mutex<Vec<&'static str>>>,
+    server: tokio::task::JoinHandle<Result<()>>,
+}
+
+impl MockGithubApp {
+    async fn start(journal: PathBuf) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}/", listener.local_addr()?);
+        let issue = format!("{endpoint}repos/{REPOSITORY}/issues/7");
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let requests = observed.clone();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await?;
+                let request =
+                    tokio::time::timeout(Duration::from_secs(5), read_http_request(&mut stream))
+                        .await??;
+                let stored: Value = serde_json::from_slice(&std::fs::read(&journal)?)?;
+                let (kind, status, body) = match request.start.as_str() {
+                    "GET /repos/acme/project/installation HTTP/1.1" => {
+                        ensure!(
+                            stored["entry"]["stage"] == "claim",
+                            "installation lookup followed Sending"
+                        );
+                        verify_app_header(&request)?;
+                        (
+                            "installation",
+                            "200 OK",
+                            json!({"id":88,"app_id":77,"account":{"login":"acme"},"suspended_at":null}),
+                        )
+                    }
+                    "POST /app/installations/88/access_tokens HTTP/1.1" => {
+                        ensure!(
+                            stored["entry"]["stage"] == "claim",
+                            "token mint followed Sending"
+                        );
+                        verify_app_header(&request)?;
+                        ensure!(
+                            request.body
+                                == json!({"repository_ids":[123],"permissions":{"issues":"write"}}),
+                            "installation token scope was broadened"
+                        );
+                        let expires =
+                            chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+                                + chrono::TimeDelta::hours(1);
+                        (
+                            "mint",
+                            "201 Created",
+                            json!({"token":APP_TOKEN,"expires_at":expires.to_rfc3339(),"permissions":{"issues":"write","metadata":"read"},"repository_selection":"selected","repositories":[{"id":123,"full_name":REPOSITORY}]}),
+                        )
+                    }
+                    "POST /repos/acme/project/issues/7/comments HTTP/1.1" => {
+                        ensure!(
+                            stored["entry"]["stage"] == "sending",
+                            "comment sent without durable intent"
+                        );
+                        ensure!(
+                            request.headers.get("authorization")
+                                == Some(&format!("Bearer {APP_TOKEN}")),
+                            "comment did not use installation credentials"
+                        );
+                        ensure!(
+                            request.body["body"]
+                                .as_str()
+                                .is_some_and(|body| !body.is_empty())
+                        );
+                        (
+                            "comment",
+                            "201 Created",
+                            json!({"id":67890,"issue_url":issue}),
+                        )
+                    }
+                    _ => anyhow::bail!("unexpected GitHub App API route"),
+                };
+                let journal_text = stored.to_string();
+                ensure!(
+                    !journal_text.contains(APP_TOKEN)
+                        && !journal_text.contains("PRIVATE KEY")
+                        && !journal_text.contains("eyJ"),
+                    "provider credentials persisted in journal"
+                );
+                requests.lock().await.push(kind);
+                let body = body.to_string();
+                stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await?;
+                stream.shutdown().await?;
+            }
+        });
+        Ok(Self {
+            endpoint,
+            observed,
+            server,
+        })
+    }
+
+    async fn wait_comments(&self, count: usize) -> Result<()> {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if self
+                .observed
+                .lock()
+                .await
+                .iter()
+                .filter(|kind| **kind == "comment")
+                .count()
+                >= count
+            {
+                return Ok(());
+            }
+            ensure!(
+                !self.server.is_finished(),
+                "GitHub App HTTP fixture rejected a request"
+            );
+            ensure!(Instant::now() < deadline, "GitHub App comment was not sent");
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+impl Drop for MockGithubApp {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+fn verify_app_header(request: &HttpRequest) -> Result<()> {
+    let bearer = request
+        .headers
+        .get("authorization")
+        .context("missing App authorization")?;
+    let jwt = bearer
+        .strip_prefix("Bearer ")
+        .context("invalid App authorization scheme")?;
+    // Signature and exact claim bounds are independently verified in Gateway's real HTTP tests.
+    ensure!(
+        jwt.starts_with("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.") && jwt.split('.').count() == 3,
+        "App request did not carry its RS256 JWT"
+    );
+    ensure!(
+        request
+            .headers
+            .get("x-github-api-version")
+            .map(String::as_str)
+            == Some("2022-11-28")
+    );
+    Ok(())
+}
+
+fn private_app_key(directory: &Path) -> Result<PathBuf> {
+    let path = directory.join("app-key.pem");
+    std::fs::write(&path, APP_KEY)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(path)
+}
+
+fn app_gateway_command(
+    credentials: &Credentials,
+    directory: &Path,
+    private: &str,
+    state: &str,
+    key: &Path,
+    api: &str,
+) -> Command {
+    let mut command = credentials.command(&[
+        "gateway",
+        "--control-plane",
+        private,
+        "--github-listen",
+        "127.0.0.1:0",
+        "--github-state-directory",
+    ]);
+    command
+        .arg(directory.join(state))
+        .env("SUPERTAG_GITHUB_ACCOUNT_ID", ACCOUNT)
+        .env("SUPERTAG_GITHUB_REPOSITORY_ID", "123")
+        .env("SUPERTAG_GITHUB_REPOSITORY", REPOSITORY)
+        .env("SUPERTAG_GITHUB_TAG_ID", "builder")
+        .env("SUPERTAG_GITHUB_ALLOWED_USERS", "42")
+        .env("SUPERTAG_GITHUB_WEBHOOK_SECRET", SIGNING)
+        .env("SUPERTAG_GITHUB_APP_ID", "77")
+        .env("SUPERTAG_GITHUB_INSTALLATION_ID", "88")
+        .env("SUPERTAG_GITHUB_PRIVATE_KEY_FILE", key)
+        .env("SUPERTAG_TEST_GITHUB_API_URL", api);
+    command
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_token() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("app.db").display()
+    );
+    let credentials = Credentials::new();
+    let key = private_app_key(directory.path())?;
+    let mock = MockGithubApp::start(directory.path().join("app-gateway/reply.json")).await?;
+    let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
+    let mut gateway = Process::spawn(
+        app_gateway_command(
+            &credentials,
+            directory.path(),
+            &private,
+            "app-gateway",
+            &key,
+            &mock.endpoint,
+        ),
+        directory.path(),
+        "app-gateway",
+    )?;
+    let endpoints = gateway.endpoints(2).await?;
+    let public = &endpoints[0];
+    let http = &endpoints[1];
+    put_tag(public, &credentials).await?;
+    let mut input = payload();
+    // General PR discussion uses the issue-comments endpoint and its Issues write scope.
+    input["issue"]["pull_request"] = json!({});
+    assert_eq!(
+        signed(http, "missing-installation", &input).await?,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    input["installation"] = json!({"id":99});
+    assert_eq!(
+        signed(http, "wrong-installation", &input).await?,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    assert_eq!(task_count(&database).await?, 0);
+    input["installation"] = json!({"id":88});
+    assert_eq!(
+        signed(http, "app-delivery-one", &input).await?,
+        reqwest::StatusCode::ACCEPTED
+    );
+    let first = receipt(&private, &credentials, "app-delivery-one", &input).await?;
+    execute(&credentials, directory.path(), public, &first).await?;
+    mock.wait_comments(1).await?;
+    assert_eq!(
+        settled(&database, &first, ReplyState::Delivered)
+            .await?
+            .as_deref(),
+        Some("67890")
+    );
+    assert_eq!(
+        *mock.observed.lock().await,
+        vec!["installation", "mint", "comment"]
+    );
+    input["comment"]["id"] = json!(457);
+    input["comment"]["body"] = json!("@supertag follow up on the review");
+    assert_eq!(
+        signed(http, "app-delivery-two", &input).await?,
+        reqwest::StatusCode::ACCEPTED
+    );
+    let second = receipt(&private, &credentials, "app-delivery-two", &input).await?;
+    execute(&credentials, directory.path(), public, &second).await?;
+    mock.wait_comments(2).await?;
+    assert_eq!(
+        settled(&database, &second, ReplyState::Delivered)
+            .await?
+            .as_deref(),
+        Some("67890")
+    );
+    assert_eq!(
+        *mock.observed.lock().await,
+        vec!["installation", "mint", "comment", "comment"]
+    );
+    let logs = gateway.logs();
+    ensure!(
+        !logs.contains(APP_TOKEN) && !logs.contains(APP_KEY),
+        "App credentials appeared in Gateway logs"
+    );
+    gateway.stop().await?;
+    cp.stop().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn github_app_cli_rejects_ambiguous_env_and_unsafe_private_key_files() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("configuration.db").display()
+    );
+    let credentials = Credentials::new();
+    let key = private_app_key(directory.path())?;
+    let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
+    let command = |state: &str, path: &Path| {
+        app_gateway_command(
+            &credentials,
+            directory.path(),
+            &private,
+            state,
+            path,
+            "http://127.0.0.1:1/",
+        )
+    };
+    let mut mixed = command("mixed", &key);
+    mixed.env("SUPERTAG_GITHUB_TOKEN", TOKEN);
+    Process::spawn(mixed, directory.path(), "mixed")?
+        .rejected("select one GitHub authentication mode")
+        .await?;
+    let mut incomplete = command("incomplete", &key);
+    incomplete.env_remove("SUPERTAG_GITHUB_INSTALLATION_ID");
+    Process::spawn(incomplete, directory.path(), "incomplete")?
+        .rejected("SUPERTAG_GITHUB_INSTALLATION_ID")
+        .await?;
+    let mut missing = command("missing", &key);
+    missing.env_remove("SUPERTAG_GITHUB_PRIVATE_KEY_FILE");
+    Process::spawn(missing, directory.path(), "missing")?
+        .rejected("SUPERTAG_GITHUB_PRIVATE_KEY_FILE")
+        .await?;
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644))?;
+    Process::spawn(command("public-key", &key), directory.path(), "public-key")?
+        .rejected("owner-only regular file")
+        .await?;
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
+    let link = directory.path().join("key-link.pem");
+    symlink(&key, &link)?;
+    Process::spawn(command("linked-key", &link), directory.path(), "linked-key")?
+        .rejected("open GitHub App private key")
+        .await?;
+    Process::spawn(
+        command("directory-key", directory.path()),
+        directory.path(),
+        "directory-key",
+    )?
+    .rejected("owner-only regular file")
+    .await?;
+    let fifo = directory.path().join("key-pipe");
+    let fifo_name = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes())?;
+    ensure!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) } == 0);
+    Process::spawn(command("pipe-key", &fifo), directory.path(), "pipe-key")?
+        .rejected("owner-only regular file")
+        .await?;
+    std::fs::write(&key, "invalid private key")?;
+    Process::spawn(
+        command("malformed-key", &key),
+        directory.path(),
+        "malformed-key",
+    )?
+    .rejected("invalid GitHub App private key PEM")
+    .await?;
     cp.stop().await?;
     Ok(())
 }

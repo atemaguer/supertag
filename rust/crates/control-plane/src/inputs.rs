@@ -13,6 +13,7 @@ use crate::{
 };
 
 const ACKNOWLEDGEMENT_MS: i64 = 10_000;
+pub(crate) const MAX_INPUT_BYTES: usize = 16_384;
 
 impl Store {
     pub async fn queue_input(
@@ -51,22 +52,24 @@ impl Store {
         let attempt_id: String = task.try_get("attempt_id")?;
         let tag_id: String = task.try_get("tag_id")?;
         let session_id: String = task.try_get("session_id")?;
+        if crate::conversations::private_session(&session_id) {
+            return Err(StoreError::FailedPrecondition(
+                "send messages through the conversation".into(),
+            ));
+        }
         objective_admission_in(&mut tx, &tag_id, &session_id, now).await?;
         let follower = insert_task(&mut tx, order, &tag_id, &session_id, &request.text).await?;
         objective_link_task_in(&mut tx, &follower).await?;
-        let input = LiveInput {
-            input_id: Uuid::new_v4().to_string(),
-            task_id: request.task_id.clone(),
-            attempt_id,
-            follower_task_id: follower.task_id,
-            text: request.text.clone(),
-            state: LiveInputState::Pending.into(),
-            order: order as u64,
-        };
-        sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-            .bind(&input.input_id).bind(principal).bind(&request.operation_id).bind(&input.task_id)
-            .bind(&input.attempt_id).bind(&input.follower_task_id).bind(i64::from(input.state))
-            .execute(&mut *tx).await?;
+        let input = record_live_input_in(
+            &mut tx,
+            principal,
+            &request.operation_id,
+            &request.task_id,
+            &attempt_id,
+            &follower,
+            order,
+        )
+        .await?;
         tx.commit().await?;
         Ok(input)
     }
@@ -311,6 +314,47 @@ pub(crate) async fn can_claim_in(
     Ok(blocked.is_none())
 }
 
+pub(crate) async fn record_live_input_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    operation: &str,
+    task_id: &str,
+    attempt_id: &str,
+    follower: &Task,
+    order: i64,
+) -> Result<LiveInput> {
+    let input = LiveInput {
+        input_id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_owned(),
+        attempt_id: attempt_id.to_owned(),
+        follower_task_id: follower.task_id.clone(),
+        text: follower.prompt.clone(),
+        state: LiveInputState::Pending.into(),
+        order: order as u64,
+    };
+    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+        .bind(&input.input_id).bind(principal).bind(operation).bind(&input.task_id)
+        .bind(&input.attempt_id).bind(&input.follower_task_id).bind(i64::from(input.state))
+        .execute(&mut **tx).await?;
+    Ok(input)
+}
+
+pub(crate) async fn input_for_follower_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Option<LiveInput>> {
+    let id: Option<String> = sqlx::query_scalar(
+        "SELECT input_id FROM supertag_v2_live_inputs WHERE follower_task_id=$1",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    match id {
+        Some(id) => Ok(Some(input_in(tx, &id).await?.0)),
+        None => Ok(None),
+    }
+}
+
 async fn input_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<(LiveInput, i64)> {
     let row = sqlx::query(
         "SELECT i.*,f.prompt AS input_text,f.accepted_order AS input_order,f.state AS follower_state
@@ -386,7 +430,7 @@ fn validate_operator(principal: &str) -> Result<()> {
 }
 
 fn required_text(kind: &str, value: &str) -> Result<()> {
-    text(kind, value, 16_384)?;
+    text(kind, value, MAX_INPUT_BYTES)?;
     if value.trim().is_empty() {
         return Err(invalid(&format!("{kind} is required")));
     }

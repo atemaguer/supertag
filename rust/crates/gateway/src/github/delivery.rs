@@ -61,13 +61,7 @@ impl Connector {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
                 };
-                // Persist the last pre-effect state. A restart in this state cannot prove
-                // that GitHub did not receive the request and must not send it again.
-                self.journal.save(&Entry::Sending {
-                    target: target.clone(),
-                })?;
-                let outcome = self.post(&reply).await;
-                self.journal.save(&Entry::Settle { target, outcome })?;
+                return self.send_claimed_reply(&reply, target).await;
             }
             Entry::Sending { target } => {
                 self.journal.save(&Entry::Settle {
@@ -109,7 +103,31 @@ impl Connector {
         Ok(true)
     }
 
-    async fn post(&self, reply: &Reply) -> Outcome {
+    pub(in crate::github) async fn send_claimed_reply(
+        &self,
+        reply: &Reply,
+        target: Claim,
+    ) -> Result<bool> {
+        // Credential minting cannot publish a comment. Keep the durable claim receipt
+        // until it succeeds so auth failures/restarts do not become ambiguous sends.
+        let Ok(token) = self
+            .authentication
+            .access_token(&self.http, &self.api_base)
+            .await
+        else {
+            return Ok(false);
+        };
+        // Persist the last pre-effect state. A restart in this state cannot prove
+        // that GitHub did not receive the request and must not send it again.
+        self.journal.save(&Entry::Sending {
+            target: target.clone(),
+        })?;
+        let outcome = self.post(reply, &token).await;
+        self.journal.save(&Entry::Settle { target, outcome })?;
+        Ok(true)
+    }
+
+    async fn post(&self, reply: &Reply, token: &super::auth::AccessToken) -> Outcome {
         let Some(destination) = &reply.destination else {
             return Outcome::Failed;
         };
@@ -146,7 +164,7 @@ impl Connector {
         let response = self
             .http
             .post(target)
-            .bearer_auth(&self.config.token)
+            .bearer_auth(token.expose())
             .header("accept", "application/vnd.github+json")
             .header("user-agent", "supertag-gateway")
             .header("x-github-api-version", "2022-11-28")
@@ -156,6 +174,9 @@ impl Connector {
         let Ok(mut response) = response else {
             return Outcome::Uncertain;
         };
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.authentication.invalidate().await;
+        }
         if matches!(
             response.status().as_u16(),
             400 | 401 | 403 | 404 | 405 | 410 | 422 | 429

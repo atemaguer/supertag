@@ -23,7 +23,7 @@ func objectiveName(objective *operatorv1.Objective) string {
 
 // objectiveState is what the rail shows beside an open Objective: why it is held, else its spend
 // against a budget in a currency, else that it is working.
-func objectiveState(objective *operatorv1.Objective) string {
+func objectiveState(objective *operatorv1.Objective, runtimeV2 bool) string {
 	switch {
 	case objective.GetPausedAt() != nil:
 		return "paused"
@@ -35,6 +35,9 @@ func objectiveState(objective *operatorv1.Objective) string {
 		return "review"
 	}
 	if budget := objective.GetBudget(); budget != nil && budget.GetCurrency() != "" {
+		if runtimeV2 && objective.GetSpend() == nil {
+			return statusWords(objective.GetStatus())
+		}
 		spent := objective.GetSpend().GetAmountMinor()
 		return shortMoney(spent, budget.GetCurrency()) + "/" + shortMoney(budget.GetLimitMinor(), budget.GetCurrency())
 	}
@@ -65,11 +68,52 @@ func (m model) renderObjective() string {
 		sections = append(sections, errorStyle.Render(wrap.Render("Could not read the Objective: "+err)))
 	}
 	if overview != nil {
-		sections = append(sections, wrap.Render(describeObjective(overview, m.inbox.Items)))
+		if m.client.RuntimeV2() {
+			sections = append(sections, wrap.Render(describeRuntimeObjective(overview)))
+		} else {
+			sections = append(sections, wrap.Render(describeObjective(overview, m.inbox.Items)))
+		}
 	} else if err == "" {
 		sections = append(sections, faint.Render(wrap.Render("Reading the Objective…")))
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func describeRuntimeObjective(view *operatorv1.ObjectiveOverview) string {
+	objective := view.GetObjective()
+	state := statusWords(objective.GetStatus())
+	if objective.GetPausedAt() != nil {
+		state += " · paused"
+	}
+	lines := []string{
+		fmt.Sprintf("Objective %s · %s", objective.GetId(), state),
+		"Outcome: " + objective.GetOutcome(),
+		"Owner: " + objective.GetOwnerTag(),
+	}
+	if sessions := view.GetSessions(); len(sessions) > 0 {
+		lines = append(lines, "Owner Session: "+sessions[0].GetId())
+	}
+	use := view.GetBudget()
+	if use != nil && use.LimitMinor != nil && use.SpentMinor == nil {
+		amount := fmt.Sprintf("%d units", use.GetLimitMinor())
+		if use.GetCurrency() != "" {
+			amount = money(use.GetLimitMinor(), use.GetCurrency())
+		}
+		lines = append(lines, "Budget: "+amount+" · spend unavailable")
+	} else {
+		lines = append(lines, budgetLine(use))
+	}
+	if deadline := objective.GetDeadline(); deadline != nil {
+		lines = append(lines, "Deadline: "+timestamp(deadline))
+	}
+	if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
+		lines = append(lines, "Review with supertag objective review "+shellWord(objective.GetId())+" approve")
+	}
+	lines = append(lines, "", fmt.Sprintf("Revision: %d", objective.GetRevision()), "Session history and delivery details are unavailable.")
+	for i, line := range lines {
+		lines[i] = terminalLines(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // describeObjective renders an Objective's overview as `supertag describe objective` does: what a

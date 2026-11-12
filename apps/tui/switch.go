@@ -29,6 +29,16 @@ func dial(version string) connector {
 	}
 }
 
+func dialRuntimeV2(version string) connector {
+	return func(ctx context.Context, target client.Target) (model, error) {
+		c, err := client.NewRuntimeV2(target, version)
+		if err != nil {
+			return model{}, err
+		}
+		return newModel(ctx, c, client.NewFollower(c), nil), nil
+	}
+}
+
 // app is the program's model: the model of the current Control Plane, and the Control Planes the
 // CLI handed over to switch between. Switching ends every stream and call of the one left and
 // starts a fresh model for the next, so no state crosses from one Control Plane to another.
@@ -79,11 +89,14 @@ func (a *app) start(i int) error {
 	}
 	if a.cancel != nil {
 		a.cancel()
+		a.inner.client.Close()
 	}
 	a.cancel, a.current, a.inner = cancel, i, inner
 	a.generation++
 	a.inner.switchable = len(a.contexts) > 1
-	a.inner.defaultWorkspace = a.contexts[i].Workspace
+	if !inner.client.RuntimeV2() {
+		a.inner.defaultWorkspace = a.contexts[i].Workspace
+	}
 	if a.width > 0 {
 		next, _ := a.inner.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 		a.inner = next.(model)
@@ -95,6 +108,7 @@ func (a *app) start(i int) error {
 func (a *app) stop() {
 	if a.cancel != nil {
 		a.cancel()
+		a.inner.client.Close()
 	}
 }
 

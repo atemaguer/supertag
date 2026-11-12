@@ -9,6 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	connectrpc.com/connect v1.21.1
 	github.com/atemaguer/supertag/packages/operator-api/go v0.0.0
+	github.com/atemaguer/supertag/rust/bindings/go v0.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	google.golang.org/protobuf v1.36.12
 )
@@ -42,3 +43,5 @@ require (
 )
 
 replace github.com/atemaguer/supertag/packages/operator-api/go => ../../packages/operator-api/go
+
+replace github.com/atemaguer/supertag/rust/bindings/go => ../../rust/bindings/go

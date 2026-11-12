@@ -8,12 +8,22 @@ service Operator {
   rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
   rpc RevokeHost(RevokeHostRequest) returns (HostRecord);
   rpc PutTag(PutTagRequest) returns (Tag);
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
   rpc SubmitTask(SubmitTaskRequest) returns (Task);
   rpc GetTask(GetTaskRequest) returns (Task);
   rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
+}
+
+// An operator reads and sends messages in their personal conversations.
+service Conversations {
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  rpc SendMessage(SendMessageRequest) returns (ConversationMessage);
+  rpc GetMessage(GetMessageRequest) returns (ConversationMessage);
+  rpc ListMessageEvents(ListMessageEventsRequest) returns (ListEventsResponse);
 }
 
 service Objectives {
@@ -69,6 +79,7 @@ service Connector {
   rpc AcceptEvent(AcceptEventRequest) returns (Task);
   rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
   rpc AcceptGithubEvent(AcceptGithubEventRequest) returns (AcceptGithubEventResponse);
+  rpc AcceptLinearEvent(AcceptLinearEventRequest) returns (AcceptLinearEventResponse);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
@@ -261,6 +272,71 @@ message Tag {
   uint64 revision = 4;
   WorkspaceSpec workspace = 5;
   HarnessKind harness_kind = 6;
+}
+
+message ListTagsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message ListTagsResponse {
+  repeated Tag tags = 1;
+  string next_cursor = 2;
+}
+
+message Conversation {
+  string tag_id = 1;
+  string name = 2;
+  string session_id = 3;
+  Task latest_task = 4;
+}
+
+message ConversationMessage {
+  Task task = 1;
+  string conversation = 2;
+  LiveInput live_input = 3;
+}
+
+message ListConversationsRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListConversationsResponse {
+  repeated Conversation conversations = 1;
+  string next_cursor = 2;
+}
+
+message ListMessagesRequest {
+  string tag_id = 1;
+  string conversation = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ListMessagesResponse {
+  repeated ConversationMessage messages = 1;
+  string next_cursor = 2;
+}
+
+message SendMessageRequest {
+  string tag_id = 1;
+  string conversation = 2;
+  string text = 3;
+  string operation_id = 4;
+}
+
+message GetMessageRequest {
+  string tag_id = 1;
+  string task_id = 2;
+}
+
+message ListMessageEventsRequest {
+  string tag_id = 1;
+  string task_id = 2;
+  uint64 after_sequence = 3;
+  uint32 limit = 4;
 }
 
 message SubmitTaskRequest {
@@ -683,6 +759,35 @@ message AcceptGithubEventRequest {
 }
 
 message AcceptGithubEventResponse {
+  Task task = 1;
+}
+
+enum LinearEventKind {
+  LINEAR_EVENT_KIND_UNSPECIFIED = 0;
+  LINEAR_EVENT_KIND_ISSUE = 1;
+  LINEAR_EVENT_KIND_ISSUE_COMMENT = 2;
+}
+
+enum LinearEventAction {
+  LINEAR_EVENT_ACTION_UNSPECIFIED = 0;
+  LINEAR_EVENT_ACTION_CREATE = 1;
+  LINEAR_EVENT_ACTION_UPDATE = 2;
+}
+
+message AcceptLinearEventRequest {
+  string account_id = 1;
+  string delivery_id = 2;
+  string workspace_id = 3;
+  string team_id = 4;
+  string issue_id = 5;
+  string source_id = 6;
+  LinearEventKind kind = 7;
+  LinearEventAction action = 8;
+  string prompt = 9;
+  string tag_id = 10;
+}
+
+message AcceptLinearEventResponse {
   Task task = 1;
 }
 

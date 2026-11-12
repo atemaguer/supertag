@@ -65,6 +65,7 @@ type FollowEvent struct {
 type Shown struct {
 	tag, conversation string
 	joined            bool
+	joinedOnPage      string
 	replied           bool
 	waiting           map[string]bool
 	// sessions holds the latest snapshot of each work Session, in the order first seen.
@@ -249,6 +250,7 @@ func History(tag string, page []*operatorv1.Message) []HistoryItem {
 		if joined := message.GetJoinedTaskId(); joined != "" {
 			item.Events = shown.join()
 			if onPage[joined] && joined != message.GetTaskId() {
+				shown.joinedOnPage = joined
 				// Its follow shows nothing while that turn's does, unless the delivery is withdrawn.
 				item.Follow = message.GetStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
 				items = append(items, item)
@@ -293,6 +295,15 @@ func NewFollower(c *Client) *Follower {
 // what is already shown of the message, from History; nil for a message just sent. The channel
 // closes when there is nothing more to follow or ctx ends.
 func (f *Follower) Follow(ctx context.Context, tag string, message *operatorv1.Message, shown *Shown) <-chan FollowEvent {
+	return f.followMessage(ctx, tag, message, shown, false)
+}
+
+// FollowObjective follows a Task submitted through an Objective's owner Session.
+func (f *Follower) FollowObjective(ctx context.Context, tag string, message *operatorv1.Message) <-chan FollowEvent {
+	return f.followMessage(ctx, tag, message, nil, true)
+}
+
+func (f *Follower) followMessage(ctx context.Context, tag string, message *operatorv1.Message, shown *Shown, objective bool) <-chan FollowEvent {
 	if shown == nil {
 		shown = newShown(tag, message.GetConversation())
 	}
@@ -310,7 +321,13 @@ func (f *Follower) Follow(ctx context.Context, tag string, message *operatorv1.M
 	go func() {
 		defer close(events)
 		defer release()
-		if err := f.follow(ctx, tag, message, shown, emit); err != nil && ctx.Err() == nil {
+		var err error
+		if f.Client.RuntimeV2() {
+			err = f.followRuntime(ctx, tag, message.GetTaskId(), shown, objective, emit)
+		} else {
+			err = f.follow(ctx, tag, message, shown, emit)
+		}
+		if err != nil && ctx.Err() == nil {
 			emit(FollowEvent{Kind: EventError, Text: err.Error()})
 		}
 	}()

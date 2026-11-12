@@ -24,10 +24,13 @@ import (
 
 // Target names the Control Plane to talk to and the token to talk to it with.
 type Target struct {
-	URL       string `json:"url"`
-	Token     string `json:"token"`
-	Name      string `json:"name,omitempty"`
-	Workspace string `json:"workspace,omitempty"`
+	URL            string `json:"url"`
+	Token          string `json:"token"`
+	Name           string `json:"name,omitempty"`
+	Workspace      string `json:"workspace,omitempty"`
+	ServerCAFile   string `json:"server_ca_file,omitempty"`
+	ClientCertFile string `json:"client_cert_file,omitempty"`
+	ClientKeyFile  string `json:"client_key_file,omitempty"`
 }
 
 // APIError is a request the Control Plane refused, with the sentence it gave.
@@ -63,6 +66,7 @@ type Client struct {
 	mailbox       operatorv1connect.MailboxServiceClient
 	hosts         operatorv1connect.HostServiceClient
 	resources     operatorv1connect.ResourceServiceClient
+	runtime       *runtimeClient
 }
 
 // New returns a client for target; version is sent as the client version. Only the URL's origin
@@ -99,6 +103,16 @@ func New(target Target, version string) (*Client, error) {
 // Target is the Control Plane this client calls.
 func (c *Client) Target() Target { return c.target }
 
+// RuntimeV2 reports whether the target uses the Gateway's Rust runtime API.
+func (c *Client) RuntimeV2() bool { return c != nil && c.runtime != nil }
+
+// Close releases idle connections when the TUI leaves this target.
+func (c *Client) Close() {
+	if c != nil && c.http != nil {
+		c.http.CloseIdleConnections()
+	}
+}
+
 func (c *Client) setHeaders(header http.Header) {
 	header.Set("Authorization", "Bearer "+c.target.Token)
 	if c.version != "" {
@@ -133,6 +147,9 @@ const maxTagPages = 10
 
 // ListTags returns the organization's active Tags by name, read with ResourceService.
 func (c *Client) ListTags(ctx context.Context) ([]*operatorv1.Tag, error) {
+	if c.RuntimeV2() {
+		return c.runtime.listTags(ctx)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var tags []*operatorv1.Tag
@@ -161,6 +178,9 @@ func (c *Client) ListTags(ctx context.Context) ([]*operatorv1.Tag, error) {
 // not have reached the Control Plane reuses the same idempotency key, so the Tag gets the message
 // once.
 func (c *Client) SendMessage(ctx context.Context, tag, conversation, text string) (*operatorv1.Message, error) {
+	if c.RuntimeV2() {
+		return c.runtime.sendMessage(ctx, tag, conversation, text)
+	}
 	key, err := idempotencyKey()
 	if err != nil {
 		return nil, err
@@ -194,6 +214,10 @@ func retrying[T any](ctx context.Context, call func(context.Context) (T, error))
 
 // GetMessage reads a single message the operator can follow.
 func (c *Client) GetMessage(ctx context.Context, tag, taskID string) (*operatorv1.Message, error) {
+	if c.RuntimeV2() {
+		message, err := c.runtime.getMessage(ctx, tag, taskID)
+		return runtimeMessage(message), err
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.conversations.GetMessage(ctx, connect.NewRequest(&operatorv1.GetMessageRequest{Tag: tag, TaskId: taskID}))
@@ -206,6 +230,9 @@ func (c *Client) GetMessage(ctx context.Context, tag, taskID string) (*operatorv
 // ListMessages returns one page of the messages the caller sent in the conversation, newest
 // first, and the token of the next page.
 func (c *Client) ListMessages(ctx context.Context, tag, conversation string, pageSize int32, pageToken string) ([]*operatorv1.Message, string, error) {
+	if c.RuntimeV2() {
+		return c.runtime.listMessages(ctx, tag, conversation, pageSize, pageToken)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.conversations.ListMessages(ctx, connect.NewRequest(&operatorv1.ListMessagesRequest{
@@ -224,6 +251,9 @@ const maxConversationPages = 10
 // ListConversations returns the caller's conversations with the named Tag, or with every Tag when
 // tag is empty, the most recent first.
 func (c *Client) ListConversations(ctx context.Context, tag string) ([]*operatorv1.Conversation, error) {
+	if c.RuntimeV2() {
+		return c.runtime.listConversations(ctx, tag)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var all []*operatorv1.Conversation

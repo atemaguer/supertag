@@ -52,7 +52,7 @@ pub(crate) struct Journal {
 impl Journal {
     pub(crate) fn open(directory: &Path, account_id: &str, provider: &str) -> Result<Self> {
         ensure!(
-            matches!(provider, "slack" | "github"),
+            matches!(provider, "slack" | "github" | "linear"),
             "unknown delivery provider"
         );
         DirBuilder::new()

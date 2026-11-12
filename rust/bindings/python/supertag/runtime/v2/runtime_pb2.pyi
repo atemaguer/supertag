@@ -94,6 +94,18 @@ class GithubEventAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     GITHUB_EVENT_ACTION_EDITED: _ClassVar[GithubEventAction]
     GITHUB_EVENT_ACTION_OPENED: _ClassVar[GithubEventAction]
 
+class LinearEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LINEAR_EVENT_KIND_UNSPECIFIED: _ClassVar[LinearEventKind]
+    LINEAR_EVENT_KIND_ISSUE: _ClassVar[LinearEventKind]
+    LINEAR_EVENT_KIND_ISSUE_COMMENT: _ClassVar[LinearEventKind]
+
+class LinearEventAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LINEAR_EVENT_ACTION_UNSPECIFIED: _ClassVar[LinearEventAction]
+    LINEAR_EVENT_ACTION_CREATE: _ClassVar[LinearEventAction]
+    LINEAR_EVENT_ACTION_UPDATE: _ClassVar[LinearEventAction]
+
 class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     REPLY_STATE_UNSPECIFIED: _ClassVar[ReplyState]
@@ -156,6 +168,12 @@ GITHUB_EVENT_ACTION_UNSPECIFIED: GithubEventAction
 GITHUB_EVENT_ACTION_CREATED: GithubEventAction
 GITHUB_EVENT_ACTION_EDITED: GithubEventAction
 GITHUB_EVENT_ACTION_OPENED: GithubEventAction
+LINEAR_EVENT_KIND_UNSPECIFIED: LinearEventKind
+LINEAR_EVENT_KIND_ISSUE: LinearEventKind
+LINEAR_EVENT_KIND_ISSUE_COMMENT: LinearEventKind
+LINEAR_EVENT_ACTION_UNSPECIFIED: LinearEventAction
+LINEAR_EVENT_ACTION_CREATE: LinearEventAction
+LINEAR_EVENT_ACTION_UPDATE: LinearEventAction
 REPLY_STATE_UNSPECIFIED: ReplyState
 REPLY_STATE_PENDING: ReplyState
 REPLY_STATE_CLAIMED: ReplyState
@@ -348,6 +366,114 @@ class Tag(_message.Message):
     workspace: WorkspaceSpec
     harness_kind: HarnessKind
     def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
+
+class ListTagsRequest(_message.Message):
+    __slots__ = ("limit", "cursor")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    cursor: str
+    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListTagsResponse(_message.Message):
+    __slots__ = ("tags", "next_cursor")
+    TAGS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tags: _containers.RepeatedCompositeFieldContainer[Tag]
+    next_cursor: str
+    def __init__(self, tags: _Optional[_Iterable[_Union[Tag, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class Conversation(_message.Message):
+    __slots__ = ("tag_id", "name", "session_id", "latest_task")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    LATEST_TASK_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    name: str
+    session_id: str
+    latest_task: Task
+    def __init__(self, tag_id: _Optional[str] = ..., name: _Optional[str] = ..., session_id: _Optional[str] = ..., latest_task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class ConversationMessage(_message.Message):
+    __slots__ = ("task", "conversation", "live_input")
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
+    LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    conversation: str
+    live_input: LiveInput
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ...) -> None: ...
+
+class ListConversationsRequest(_message.Message):
+    __slots__ = ("tag_id", "limit", "cursor")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    limit: int
+    cursor: str
+    def __init__(self, tag_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListConversationsResponse(_message.Message):
+    __slots__ = ("conversations", "next_cursor")
+    CONVERSATIONS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    conversations: _containers.RepeatedCompositeFieldContainer[Conversation]
+    next_cursor: str
+    def __init__(self, conversations: _Optional[_Iterable[_Union[Conversation, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class ListMessagesRequest(_message.Message):
+    __slots__ = ("tag_id", "conversation", "limit", "cursor")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    conversation: str
+    limit: int
+    cursor: str
+    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListMessagesResponse(_message.Message):
+    __slots__ = ("messages", "next_cursor")
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    messages: _containers.RepeatedCompositeFieldContainer[ConversationMessage]
+    next_cursor: str
+    def __init__(self, messages: _Optional[_Iterable[_Union[ConversationMessage, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class SendMessageRequest(_message.Message):
+    __slots__ = ("tag_id", "conversation", "text", "operation_id")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    conversation: str
+    text: str
+    operation_id: str
+    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ...) -> None: ...
+
+class GetMessageRequest(_message.Message):
+    __slots__ = ("tag_id", "task_id")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    task_id: str
+    def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ...) -> None: ...
+
+class ListMessageEventsRequest(_message.Message):
+    __slots__ = ("tag_id", "task_id", "after_sequence", "limit")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    task_id: str
+    after_sequence: int
+    limit: int
+    def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
     __slots__ = ("tag_id", "session_id", "operation_id", "prompt")
@@ -978,6 +1104,36 @@ class AcceptGithubEventRequest(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., delivery_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., repository: _Optional[str] = ..., number: _Optional[int] = ..., source_id: _Optional[int] = ..., kind: _Optional[_Union[GithubEventKind, str]] = ..., action: _Optional[_Union[GithubEventAction, str]] = ..., prompt: _Optional[str] = ..., tag_id: _Optional[str] = ..., is_pull_request: _Optional[bool] = ...) -> None: ...
 
 class AcceptGithubEventResponse(_message.Message):
+    __slots__ = ("task",)
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class AcceptLinearEventRequest(_message.Message):
+    __slots__ = ("account_id", "delivery_id", "workspace_id", "team_id", "issue_id", "source_id", "kind", "action", "prompt", "tag_id")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    ISSUE_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    delivery_id: str
+    workspace_id: str
+    team_id: str
+    issue_id: str
+    source_id: str
+    kind: LinearEventKind
+    action: LinearEventAction
+    prompt: str
+    tag_id: str
+    def __init__(self, account_id: _Optional[str] = ..., delivery_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., team_id: _Optional[str] = ..., issue_id: _Optional[str] = ..., source_id: _Optional[str] = ..., kind: _Optional[_Union[LinearEventKind, str]] = ..., action: _Optional[_Union[LinearEventAction, str]] = ..., prompt: _Optional[str] = ..., tag_id: _Optional[str] = ...) -> None: ...
+
+class AcceptLinearEventResponse(_message.Message):
     __slots__ = ("task",)
     TASK_FIELD_NUMBER: _ClassVar[int]
     task: Task

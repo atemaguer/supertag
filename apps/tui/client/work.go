@@ -21,6 +21,9 @@ const maxTeamPages = 10
 
 // GetSession reads one Session with what its latest delivering Task delivered.
 func (c *Client) GetSession(ctx context.Context, id string) (*operatorv1.Session, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Work Session details")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.work.GetSession(ctx, connect.NewRequest(&operatorv1.GetSessionRequest{Id: id}))
@@ -43,6 +46,9 @@ type Activity struct {
 // after start, in order, and the last sequence read. A command shows once, when it starts
 // running.
 func (c *Client) TaskActivity(ctx context.Context, taskID string, after int64) ([]Activity, int64, error) {
+	if c.RuntimeV2() {
+		return nil, after, unavailable("Structured Task activity")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var activity []Activity
@@ -103,6 +109,9 @@ func eventActivity(event *operatorv1.TaskEvent) (Activity, bool) {
 
 // ListTeams returns every Team, by name.
 func (c *Client) ListTeams(ctx context.Context) ([]*operatorv1.Team, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Teams")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var all []*operatorv1.Team
@@ -133,6 +142,9 @@ type TeamView struct {
 // GetTeam reads a Team, by name or ID, and the newest posts of its Workstream, at most posts of
 // them.
 func (c *Client) GetTeam(ctx context.Context, team string, posts int32) (TeamView, error) {
+	if c.RuntimeV2() {
+		return TeamView{}, unavailable("Team Workstreams")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	got, err := c.teams.GetTeam(ctx, connect.NewRequest(&operatorv1.GetTeamRequest{Team: team}))

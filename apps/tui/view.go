@@ -108,6 +108,9 @@ func (m model) renderConversation() string {
 			return faint.Render(wrap.Render("Checking for Tags on the Control Plane…"))
 		case m.tagsErr != nil:
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
+		case m.client.RuntimeV2():
+			return wrap.Render("No Tags are set up on this Gateway.\n\n" +
+				"Run supertag put-tag --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
 		default:
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
 				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +
@@ -230,21 +233,26 @@ func (m model) renderRail(height int) string {
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
 		section("Objectives", m.objectivesErr)
 		for i, objective := range m.objectives {
-			add(row{rowObjective, i}, objectiveName(objective), objectiveState(objective))
+			add(row{rowObjective, i}, objectiveName(objective), objectiveState(objective, m.client.RuntimeV2()))
 		}
 	}
-	waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
-	if m.inbox.Truncated {
-		waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
-	}
-	section(waiting, m.inboxErr)
-	for i, item := range m.inbox.Items {
-		add(row{rowInbox, i}, m.inboxRow(item), "")
-	}
-	if len(m.teams) > 0 || m.teamsErr != "" {
-		section("Teams", m.teamsErr)
-		for i, team := range m.teams {
-			add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
+	if m.client.RuntimeV2() {
+		section("Inbox unavailable", "")
+		section("Teams unavailable", "")
+	} else {
+		waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
+		if m.inbox.Truncated {
+			waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
+		}
+		section(waiting, m.inboxErr)
+		for i, item := range m.inbox.Items {
+			add(row{rowInbox, i}, m.inboxRow(item), "")
+		}
+		if len(m.teams) > 0 || m.teamsErr != "" {
+			section("Teams", m.teamsErr)
+			for i, team := range m.teams {
+				add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
+			}
 		}
 	}
 
@@ -365,6 +373,12 @@ func (m model) paneTitle() string {
 func (m model) paneHint() string {
 	switch m.pane {
 	case paneObjective:
+		if m.client.RuntimeV2() {
+			if m.canMessageObjective() {
+				return "m message the owner"
+			}
+			return "Objective status refreshes automatically"
+		}
 		if m.canMessageObjective() {
 			return "m message the owner · answer questions under Waiting on you"
 		}

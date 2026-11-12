@@ -12,7 +12,7 @@ fn config(directory: &Path) -> GithubConfig {
         tag_id: "builder".into(),
         allowed_users: vec![42],
         webhook_secret: "fixture-secret".into(),
-        token: "fixture-token".into(),
+        authentication: GithubAuthentication::Token("fixture-token".into()),
         state_directory: directory.join("github"),
     }
 }

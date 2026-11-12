@@ -274,11 +274,13 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
         &self,
         request: Request<GetWorkspaceArtifactRequest>,
     ) -> std::result::Result<Response<WorkspaceDeliveryReference>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        self.store
+            .ensure_task_access(&principal, &input.task_id)
+            .await?;
         Ok(Response::new(
-            self.store
-                .get_workspace_artifact(&request.into_inner())
-                .await?,
+            self.store.get_workspace_artifact(&input).await?,
         ))
     }
 }

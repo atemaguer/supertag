@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// OperatorName is the fully-qualified name of the Operator service.
 	OperatorName = "supertag.runtime.v2.Operator"
+	// ConversationsName is the fully-qualified name of the Conversations service.
+	ConversationsName = "supertag.runtime.v2.Conversations"
 	// ObjectivesName is the fully-qualified name of the Objectives service.
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
@@ -61,6 +63,8 @@ const (
 	OperatorRevokeHostProcedure = "/supertag.runtime.v2.Operator/RevokeHost"
 	// OperatorPutTagProcedure is the fully-qualified name of the Operator's PutTag RPC.
 	OperatorPutTagProcedure = "/supertag.runtime.v2.Operator/PutTag"
+	// OperatorListTagsProcedure is the fully-qualified name of the Operator's ListTags RPC.
+	OperatorListTagsProcedure = "/supertag.runtime.v2.Operator/ListTags"
 	// OperatorSubmitTaskProcedure is the fully-qualified name of the Operator's SubmitTask RPC.
 	OperatorSubmitTaskProcedure = "/supertag.runtime.v2.Operator/SubmitTask"
 	// OperatorGetTaskProcedure is the fully-qualified name of the Operator's GetTask RPC.
@@ -74,6 +78,21 @@ const (
 	OperatorCancelTaskProcedure = "/supertag.runtime.v2.Operator/CancelTask"
 	// OperatorResolveAttemptProcedure is the fully-qualified name of the Operator's ResolveAttempt RPC.
 	OperatorResolveAttemptProcedure = "/supertag.runtime.v2.Operator/ResolveAttempt"
+	// ConversationsListConversationsProcedure is the fully-qualified name of the Conversations's
+	// ListConversations RPC.
+	ConversationsListConversationsProcedure = "/supertag.runtime.v2.Conversations/ListConversations"
+	// ConversationsListMessagesProcedure is the fully-qualified name of the Conversations's
+	// ListMessages RPC.
+	ConversationsListMessagesProcedure = "/supertag.runtime.v2.Conversations/ListMessages"
+	// ConversationsSendMessageProcedure is the fully-qualified name of the Conversations's SendMessage
+	// RPC.
+	ConversationsSendMessageProcedure = "/supertag.runtime.v2.Conversations/SendMessage"
+	// ConversationsGetMessageProcedure is the fully-qualified name of the Conversations's GetMessage
+	// RPC.
+	ConversationsGetMessageProcedure = "/supertag.runtime.v2.Conversations/GetMessage"
+	// ConversationsListMessageEventsProcedure is the fully-qualified name of the Conversations's
+	// ListMessageEvents RPC.
+	ConversationsListMessageEventsProcedure = "/supertag.runtime.v2.Conversations/ListMessageEvents"
 	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
 	// CreateObjective RPC.
 	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
@@ -144,6 +163,9 @@ const (
 	// ConnectorAcceptGithubEventProcedure is the fully-qualified name of the Connector's
 	// AcceptGithubEvent RPC.
 	ConnectorAcceptGithubEventProcedure = "/supertag.runtime.v2.Connector/AcceptGithubEvent"
+	// ConnectorAcceptLinearEventProcedure is the fully-qualified name of the Connector's
+	// AcceptLinearEvent RPC.
+	ConnectorAcceptLinearEventProcedure = "/supertag.runtime.v2.Connector/AcceptLinearEvent"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
@@ -203,6 +225,7 @@ type OperatorClient interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
+	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
@@ -238,6 +261,12 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			httpClient,
 			baseURL+OperatorPutTagProcedure,
 			connect.WithSchema(operatorMethods.ByName("PutTag")),
+			connect.WithClientOptions(opts...),
+		),
+		listTags: connect.NewClient[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse](
+			httpClient,
+			baseURL+OperatorListTagsProcedure,
+			connect.WithSchema(operatorMethods.ByName("ListTags")),
 			connect.WithClientOptions(opts...),
 		),
 		submitTask: connect.NewClient[runtimev2.SubmitTaskRequest, runtimev2.Task](
@@ -284,6 +313,7 @@ type operatorClient struct {
 	createAuthKey   *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
 	revokeHost      *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
 	putTag          *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
+	listTags        *connect.Client[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse]
 	submitTask      *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
 	getTask         *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
 	listNativeUsage *connect.Client[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse]
@@ -305,6 +335,11 @@ func (c *operatorClient) RevokeHost(ctx context.Context, req *connect.Request[ru
 // PutTag calls supertag.runtime.v2.Operator.PutTag.
 func (c *operatorClient) PutTag(ctx context.Context, req *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error) {
 	return c.putTag.CallUnary(ctx, req)
+}
+
+// ListTags calls supertag.runtime.v2.Operator.ListTags.
+func (c *operatorClient) ListTags(ctx context.Context, req *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error) {
+	return c.listTags.CallUnary(ctx, req)
 }
 
 // SubmitTask calls supertag.runtime.v2.Operator.SubmitTask.
@@ -342,6 +377,7 @@ type OperatorHandler interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
+	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
@@ -373,6 +409,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		OperatorPutTagProcedure,
 		svc.PutTag,
 		connect.WithSchema(operatorMethods.ByName("PutTag")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorListTagsHandler := connect.NewUnaryHandler(
+		OperatorListTagsProcedure,
+		svc.ListTags,
+		connect.WithSchema(operatorMethods.ByName("ListTags")),
 		connect.WithHandlerOptions(opts...),
 	)
 	operatorSubmitTaskHandler := connect.NewUnaryHandler(
@@ -419,6 +461,8 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorRevokeHostHandler.ServeHTTP(w, r)
 		case OperatorPutTagProcedure:
 			operatorPutTagHandler.ServeHTTP(w, r)
+		case OperatorListTagsProcedure:
+			operatorListTagsHandler.ServeHTTP(w, r)
 		case OperatorSubmitTaskProcedure:
 			operatorSubmitTaskHandler.ServeHTTP(w, r)
 		case OperatorGetTaskProcedure:
@@ -452,6 +496,10 @@ func (UnimplementedOperatorHandler) PutTag(context.Context, *connect.Request[run
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.PutTag is not implemented"))
 }
 
+func (UnimplementedOperatorHandler) ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ListTags is not implemented"))
+}
+
 func (UnimplementedOperatorHandler) SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.SubmitTask is not implemented"))
 }
@@ -474,6 +522,180 @@ func (UnimplementedOperatorHandler) CancelTask(context.Context, *connect.Request
 
 func (UnimplementedOperatorHandler) ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ResolveAttempt is not implemented"))
+}
+
+// ConversationsClient is a client for the supertag.runtime.v2.Conversations service.
+type ConversationsClient interface {
+	ListConversations(context.Context, *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error)
+	ListMessages(context.Context, *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	ListMessageEvents(context.Context, *connect.Request[runtimev2.ListMessageEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
+}
+
+// NewConversationsClient constructs a client for the supertag.runtime.v2.Conversations service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewConversationsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ConversationsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	conversationsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Conversations").Methods()
+	return &conversationsClient{
+		listConversations: connect.NewClient[runtimev2.ListConversationsRequest, runtimev2.ListConversationsResponse](
+			httpClient,
+			baseURL+ConversationsListConversationsProcedure,
+			connect.WithSchema(conversationsMethods.ByName("ListConversations")),
+			connect.WithClientOptions(opts...),
+		),
+		listMessages: connect.NewClient[runtimev2.ListMessagesRequest, runtimev2.ListMessagesResponse](
+			httpClient,
+			baseURL+ConversationsListMessagesProcedure,
+			connect.WithSchema(conversationsMethods.ByName("ListMessages")),
+			connect.WithClientOptions(opts...),
+		),
+		sendMessage: connect.NewClient[runtimev2.SendMessageRequest, runtimev2.ConversationMessage](
+			httpClient,
+			baseURL+ConversationsSendMessageProcedure,
+			connect.WithSchema(conversationsMethods.ByName("SendMessage")),
+			connect.WithClientOptions(opts...),
+		),
+		getMessage: connect.NewClient[runtimev2.GetMessageRequest, runtimev2.ConversationMessage](
+			httpClient,
+			baseURL+ConversationsGetMessageProcedure,
+			connect.WithSchema(conversationsMethods.ByName("GetMessage")),
+			connect.WithClientOptions(opts...),
+		),
+		listMessageEvents: connect.NewClient[runtimev2.ListMessageEventsRequest, runtimev2.ListEventsResponse](
+			httpClient,
+			baseURL+ConversationsListMessageEventsProcedure,
+			connect.WithSchema(conversationsMethods.ByName("ListMessageEvents")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// conversationsClient implements ConversationsClient.
+type conversationsClient struct {
+	listConversations *connect.Client[runtimev2.ListConversationsRequest, runtimev2.ListConversationsResponse]
+	listMessages      *connect.Client[runtimev2.ListMessagesRequest, runtimev2.ListMessagesResponse]
+	sendMessage       *connect.Client[runtimev2.SendMessageRequest, runtimev2.ConversationMessage]
+	getMessage        *connect.Client[runtimev2.GetMessageRequest, runtimev2.ConversationMessage]
+	listMessageEvents *connect.Client[runtimev2.ListMessageEventsRequest, runtimev2.ListEventsResponse]
+}
+
+// ListConversations calls supertag.runtime.v2.Conversations.ListConversations.
+func (c *conversationsClient) ListConversations(ctx context.Context, req *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error) {
+	return c.listConversations.CallUnary(ctx, req)
+}
+
+// ListMessages calls supertag.runtime.v2.Conversations.ListMessages.
+func (c *conversationsClient) ListMessages(ctx context.Context, req *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error) {
+	return c.listMessages.CallUnary(ctx, req)
+}
+
+// SendMessage calls supertag.runtime.v2.Conversations.SendMessage.
+func (c *conversationsClient) SendMessage(ctx context.Context, req *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error) {
+	return c.sendMessage.CallUnary(ctx, req)
+}
+
+// GetMessage calls supertag.runtime.v2.Conversations.GetMessage.
+func (c *conversationsClient) GetMessage(ctx context.Context, req *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error) {
+	return c.getMessage.CallUnary(ctx, req)
+}
+
+// ListMessageEvents calls supertag.runtime.v2.Conversations.ListMessageEvents.
+func (c *conversationsClient) ListMessageEvents(ctx context.Context, req *connect.Request[runtimev2.ListMessageEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error) {
+	return c.listMessageEvents.CallUnary(ctx, req)
+}
+
+// ConversationsHandler is an implementation of the supertag.runtime.v2.Conversations service.
+type ConversationsHandler interface {
+	ListConversations(context.Context, *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error)
+	ListMessages(context.Context, *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	ListMessageEvents(context.Context, *connect.Request[runtimev2.ListMessageEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
+}
+
+// NewConversationsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewConversationsHandler(svc ConversationsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	conversationsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Conversations").Methods()
+	conversationsListConversationsHandler := connect.NewUnaryHandler(
+		ConversationsListConversationsProcedure,
+		svc.ListConversations,
+		connect.WithSchema(conversationsMethods.ByName("ListConversations")),
+		connect.WithHandlerOptions(opts...),
+	)
+	conversationsListMessagesHandler := connect.NewUnaryHandler(
+		ConversationsListMessagesProcedure,
+		svc.ListMessages,
+		connect.WithSchema(conversationsMethods.ByName("ListMessages")),
+		connect.WithHandlerOptions(opts...),
+	)
+	conversationsSendMessageHandler := connect.NewUnaryHandler(
+		ConversationsSendMessageProcedure,
+		svc.SendMessage,
+		connect.WithSchema(conversationsMethods.ByName("SendMessage")),
+		connect.WithHandlerOptions(opts...),
+	)
+	conversationsGetMessageHandler := connect.NewUnaryHandler(
+		ConversationsGetMessageProcedure,
+		svc.GetMessage,
+		connect.WithSchema(conversationsMethods.ByName("GetMessage")),
+		connect.WithHandlerOptions(opts...),
+	)
+	conversationsListMessageEventsHandler := connect.NewUnaryHandler(
+		ConversationsListMessageEventsProcedure,
+		svc.ListMessageEvents,
+		connect.WithSchema(conversationsMethods.ByName("ListMessageEvents")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Conversations/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case ConversationsListConversationsProcedure:
+			conversationsListConversationsHandler.ServeHTTP(w, r)
+		case ConversationsListMessagesProcedure:
+			conversationsListMessagesHandler.ServeHTTP(w, r)
+		case ConversationsSendMessageProcedure:
+			conversationsSendMessageHandler.ServeHTTP(w, r)
+		case ConversationsGetMessageProcedure:
+			conversationsGetMessageHandler.ServeHTTP(w, r)
+		case ConversationsListMessageEventsProcedure:
+			conversationsListMessageEventsHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedConversationsHandler returns CodeUnimplemented from all methods.
+type UnimplementedConversationsHandler struct{}
+
+func (UnimplementedConversationsHandler) ListConversations(context.Context, *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.ListConversations is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) ListMessages(context.Context, *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.ListMessages is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) SendMessage(context.Context, *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.SendMessage is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.GetMessage is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) ListMessageEvents(context.Context, *connect.Request[runtimev2.ListMessageEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.ListMessageEvents is not implemented"))
 }
 
 // ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
@@ -1395,6 +1617,7 @@ type ConnectorClient interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
+	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1428,6 +1651,12 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("AcceptGithubEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		acceptLinearEvent: connect.NewClient[runtimev2.AcceptLinearEventRequest, runtimev2.AcceptLinearEventResponse](
+			httpClient,
+			baseURL+ConnectorAcceptLinearEventProcedure,
+			connect.WithSchema(connectorMethods.ByName("AcceptLinearEvent")),
+			connect.WithClientOptions(opts...),
+		),
 		claimReply: connect.NewClient[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse](
 			httpClient,
 			baseURL+ConnectorClaimReplyProcedure,
@@ -1448,6 +1677,7 @@ type connectorClient struct {
 	acceptEvent       *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
 	acceptSlackEvent  *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
 	acceptGithubEvent *connect.Client[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse]
+	acceptLinearEvent *connect.Client[runtimev2.AcceptLinearEventRequest, runtimev2.AcceptLinearEventResponse]
 	claimReply        *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
 	settleReply       *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
@@ -1467,6 +1697,11 @@ func (c *connectorClient) AcceptGithubEvent(ctx context.Context, req *connect.Re
 	return c.acceptGithubEvent.CallUnary(ctx, req)
 }
 
+// AcceptLinearEvent calls supertag.runtime.v2.Connector.AcceptLinearEvent.
+func (c *connectorClient) AcceptLinearEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error) {
+	return c.acceptLinearEvent.CallUnary(ctx, req)
+}
+
 // ClaimReply calls supertag.runtime.v2.Connector.ClaimReply.
 func (c *connectorClient) ClaimReply(ctx context.Context, req *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {
 	return c.claimReply.CallUnary(ctx, req)
@@ -1482,6 +1717,7 @@ type ConnectorHandler interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
+	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1511,6 +1747,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("AcceptGithubEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorAcceptLinearEventHandler := connect.NewUnaryHandler(
+		ConnectorAcceptLinearEventProcedure,
+		svc.AcceptLinearEvent,
+		connect.WithSchema(connectorMethods.ByName("AcceptLinearEvent")),
+		connect.WithHandlerOptions(opts...),
+	)
 	connectorClaimReplyHandler := connect.NewUnaryHandler(
 		ConnectorClaimReplyProcedure,
 		svc.ClaimReply,
@@ -1531,6 +1773,8 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorAcceptSlackEventHandler.ServeHTTP(w, r)
 		case ConnectorAcceptGithubEventProcedure:
 			connectorAcceptGithubEventHandler.ServeHTTP(w, r)
+		case ConnectorAcceptLinearEventProcedure:
+			connectorAcceptLinearEventHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
@@ -1554,6 +1798,10 @@ func (UnimplementedConnectorHandler) AcceptSlackEvent(context.Context, *connect.
 
 func (UnimplementedConnectorHandler) AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptGithubEvent is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptLinearEvent is not implemented"))
 }
 
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {

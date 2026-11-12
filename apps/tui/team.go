@@ -52,7 +52,7 @@ func (r *teamReads) start() uint64 {
 }
 
 func (m model) reloadTeams() tea.Cmd {
-	if !m.teamReload.start() {
+	if m.client.RuntimeV2() || !m.teamReload.start() {
 		return nil
 	}
 	return m.teamsCmd()

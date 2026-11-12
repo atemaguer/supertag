@@ -138,6 +138,13 @@ func (m model) formKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 
 // moveField moves the keys to field i, within the form.
 func (m *model) moveField(i int) tea.Cmd {
+	if m.client.RuntimeV2() && i == fieldTeam {
+		if m.form.field < fieldTeam {
+			i = fieldBudget
+		} else {
+			i = fieldOutcome
+		}
+	}
 	m.form.field = min(max(i, 0), formFields-1)
 	m.refresh()
 	return m.syncInput()
@@ -225,6 +232,10 @@ func (m model) renderObjectiveForm() string {
 	owner := terminalText(f.owner)
 	if f.created != nil {
 		text := wrap.Render(createdLines(f.owner, f.created))
+		if m.client.RuntimeV2() {
+			text = wrap.Render("Created Objective " + terminalText(f.created.GetObjective().GetId()) +
+				".\n" + owner + "'s first Task is " + terminalText(f.created.GetStartedTaskId()) + ".")
+		}
 		if f.note.text != "" {
 			text += "\n\n" + errorStyle.Render(wrap.Render(f.note.text))
 		}
@@ -235,6 +246,9 @@ func (m model) renderObjectiveForm() string {
 		lines = append(lines, faint.Render(wrap.Render("Workspace: "+terminalText(m.defaultWorkspace))), "")
 	}
 	for i, input := range f.fields {
+		if m.client.RuntimeV2() && i == fieldTeam {
+			continue
+		}
 		label := fieldLabels[i]
 		if i == f.field && m.focus == focusInput {
 			label = selected.Render(label)

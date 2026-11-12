@@ -395,7 +395,7 @@ func (m model) reloadObjectives() tea.Cmd {
 }
 
 func (m model) reloadInbox() tea.Cmd {
-	if !m.inboxReload.start() {
+	if m.client.RuntimeV2() || !m.inboxReload.start() {
 		return nil
 	}
 	return m.inboxCmd()

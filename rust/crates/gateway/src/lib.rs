@@ -1,8 +1,10 @@
 //! Public gRPC ingress for operators and Worker Hosts.
 
+mod conversations;
 mod delivery_journal;
 pub mod github;
 mod inputs;
+pub mod linear;
 pub mod slack;
 pub mod transfers;
 
@@ -483,6 +485,18 @@ impl Operator for Gateway {
             request,
             &self.credentials.operator,
             |channel, request| async { operator_client(channel).put_tag(request).await },
+        )
+        .await
+    }
+
+    async fn list_tags(
+        &self,
+        request: Request<ListTagsRequest>,
+    ) -> Result<Response<ListTagsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).list_tags(request).await },
         )
         .await
     }

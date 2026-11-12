@@ -1,7 +1,25 @@
 # supertag-tui
 
 SuperTag's terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
-and Glamour. The status bar shows which Control Plane it talks to, its Worker Hosts by phase
+and Glamour.
+
+## Runtime v2
+
+The Rust CLI launches the Go TUI with a Gateway URL and an operator credential over file
+descriptor 3. The handover identifies the protocol as `runtime.v2` and can include a trusted
+server certificate authority and client certificate and key paths. The TUI uses the generated
+runtime v2 Go bindings over gRPC and HTTP/2. Cleartext connections require a loopback IP address.
+
+The TUI lists Tags and named conversations, loads conversation history, sends messages, and
+follows replies. It resumes event polling from the last sequence shown after an interruption.
+Open Objectives show their status, owner, deadline, and available spend information. Use
+`/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
+message its owner. Work uses the Workspace configured on the owner Tag. Inbox, Teams, Worker Host
+status, and Session delivery details are unavailable on this Gateway.
+
+## Node launcher
+
+The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 (such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
 reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
 shows setup instructions. The rail on the left has four sections:
@@ -89,9 +107,16 @@ out. `ResourceService.ListResources` lists the active Tags. See
 `contributing/tui-design.md`.
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
-amd64) into `dist/supertag-tui-GOOS-GOARCH`, versioned from `packages/supertag-ai/package.json`.
-Run the tests with `go test ./...`. The end-to-end test runs the built binary through
-`supertag` under tmux, in a throwaway git checkout: `SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .`
+amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
+`rust/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
+different version.
+Run the tests with `go test ./...`. The Node launcher end-to-end test uses tmux and a temporary
+git checkout. Build the binary with the version in the npm package manifest before running it.
+
+```sh
+SUPERTAG_TUI_VERSION="$(node -p 'require("../../packages/supertag-ai/package.json").version')" ./build.sh
+SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
+```
 
 Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
 Control Plane as every other command does, and the others it can switch to, starts the binary with

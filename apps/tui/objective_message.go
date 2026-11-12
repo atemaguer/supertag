@@ -101,11 +101,11 @@ func (m *model) objectiveMessageSent(msg objectiveSentMsg) tea.Cmd {
 		message.cancel = cancel
 		c, follower, tag, task := m.client, m.follower, message.tag, msg.response.GetTaskId()
 		follow = func() tea.Msg {
-			reply, err := c.GetMessage(ctx, tag, task)
+			reply, err := c.GetObjectiveMessage(ctx, tag, task)
 			if err != nil {
 				return objectiveReplyMsg{id: msg.id, message: message, err: err}
 			}
-			return waitForObjectiveReply(msg.id, message, follower.Follow(ctx, tag, reply, nil))()
+			return waitForObjectiveReply(msg.id, message, follower.FollowObjective(ctx, tag, reply))()
 		}
 	}
 	return tea.Batch(overview, m.reloadObjectives(), m.reloadInbox(), follow)
@@ -130,7 +130,7 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 	switch {
 	case msg.err != nil:
 		var rpcErr *client.APIError
-		if errors.As(msg.err, &rpcErr) && (rpcErr.Code == connect.CodeNotFound || rpcErr.Code == connect.CodePermissionDenied) {
+		if !m.client.RuntimeV2() && errors.As(msg.err, &rpcErr) && (rpcErr.Code == connect.CodeNotFound || rpcErr.Code == connect.CodePermissionDenied) {
 			message.status += "\nThe reply posts to the thread the Objective was created in."
 		} else {
 			message.status += " Could not follow the reply. " + terminalText(msg.err.Error())

@@ -4,6 +4,7 @@ mod inputs;
 mod local;
 mod network;
 mod objectives;
+mod tui;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -15,7 +16,8 @@ use sha2::{Digest, Sha256};
 use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
     Gateway,
-    github::{Github, GithubConfig},
+    github::{Github, GithubAppConfig, GithubAuthentication, GithubConfig},
+    linear::{Linear, LinearConfig},
     slack::{Slack, SlackConfig},
     transfers::GatewayTransfers,
 };
@@ -27,11 +29,11 @@ use supertag_protocol::{
         RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
         attempt_inputs_server::AttemptInputsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
-        host_directory_server::HostDirectoryServer, host_enrollment_server::HostEnrollmentServer,
-        live_inputs_server::LiveInputsServer, objectives_server::ObjectivesServer,
-        operator_client::OperatorClient, operator_server::OperatorServer,
-        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
-        workspace_directory_server::WorkspaceDirectoryServer,
+        conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
+        host_enrollment_server::HostEnrollmentServer, live_inputs_server::LiveInputsServer,
+        objectives_server::ObjectivesServer, operator_client::OperatorClient,
+        operator_server::OperatorServer, transfers_server::TransfersServer,
+        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -45,7 +47,7 @@ use uuid::Uuid;
 #[command(name = "supertag", version)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Args)]
@@ -98,6 +100,19 @@ enum Command {
         github_listen: Option<SocketAddr>,
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
+        #[arg(long, requires = "linear_state_directory")]
+        linear_listen: Option<SocketAddr>,
+        #[arg(long, requires = "linear_listen")]
+        linear_state_directory: Option<PathBuf>,
+    },
+    /// Open the Go terminal UI for a running Gateway.
+    Tui {
+        #[command(flatten)]
+        connection: Connection,
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        #[arg(long)]
+        workspace: Option<String>,
     },
     /// Connect a Worker Host and run accepted Tasks through an adapter.
     WorkerHost {
@@ -258,7 +273,15 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
+    let command = match Cli::parse().command {
+        Some(command) => command,
+        None => Command::Tui {
+            connection: tui::default_connection()?,
+            binary: None,
+            workspace: None,
+        },
+    };
+    match command {
         Command::AdapterGuardian {
             adapter,
             adapter_args,
@@ -300,6 +323,8 @@ async fn run(command: Command) -> Result<()> {
             slack_state_directory,
             github_listen,
             github_state_directory,
+            linear_listen,
+            linear_state_directory,
         } => {
             gateway(
                 listen,
@@ -307,8 +332,16 @@ async fn run(command: Command) -> Result<()> {
                 checkpoint_directory,
                 slack_listen.zip(slack_state_directory),
                 github_listen.zip(github_state_directory),
+                linear_listen.zip(linear_state_directory),
             )
             .await?
+        }
+        Command::Tui {
+            connection,
+            binary,
+            workspace,
+        } => {
+            tui::launch(connection, binary, workspace).await?;
         }
         Command::WorkerHost {
             gateway,
@@ -638,6 +671,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     }
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<ControlPlane>>().await;
+    health
+        .set_serving::<ConversationsServer<ControlPlane>>()
+        .await;
     health.set_serving::<WorkerHostServer<ControlPlane>>().await;
     health
         .set_serving::<HostDirectoryServer<ControlPlane>>()
@@ -671,6 +707,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(health_service)
         .add_service(
             OperatorServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            ConversationsServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
@@ -728,6 +769,7 @@ async fn gateway(
     checkpoint_directory: Option<PathBuf>,
     slack_options: Option<(SocketAddr, PathBuf)>,
     github_options: Option<(SocketAddr, PathBuf)>,
+    linear_options: Option<(SocketAddr, PathBuf)>,
 ) -> Result<()> {
     let mut builder = network::server(listen, false).await?;
     let channel = network::endpoint(control_plane, true)
@@ -759,6 +801,18 @@ async fn gateway(
         }
         None => None,
     };
+    let linear = match linear_options {
+        Some((address, state_directory)) => {
+            ensure!(
+                address.ip().is_loopback(),
+                "Linear webhook listener must use loopback"
+            );
+            let connector =
+                linear_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+            Some((connector, TcpListener::bind(address).await?))
+        }
+        None => None,
+    };
     let gateway = Gateway::new(
         channel,
         gateway_token,
@@ -767,6 +821,7 @@ async fn gateway(
     )?;
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<Gateway>>().await;
+    health.set_serving::<ConversationsServer<Gateway>>().await;
     health.set_serving::<WorkerHostServer<Gateway>>().await;
     health.set_serving::<HostEnrollmentServer<Gateway>>().await;
     health
@@ -784,10 +839,14 @@ async fn gateway(
     if let Some((_, listener)) = &github {
         println!("{}", listener.local_addr()?);
     }
+    if let Some((_, listener)) = &linear {
+        println!("{}", listener.local_addr()?);
+    }
     let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
         .add_service(gateway.operator_service())
+        .add_service(gateway.conversations_service())
         .add_service(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
         .add_service(transfers.service())
@@ -824,11 +883,23 @@ async fn gateway(
             Ok(())
         }
     };
+    let linear_webhook = async {
+        if let Some((linear, listener)) = linear {
+            let result = linear.serve(listener, shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, slack, github) = tokio::join!(grpc, webhook, github_webhook);
+        let (grpc, slack, github, linear) =
+            tokio::join!(grpc, webhook, github_webhook, linear_webhook);
         grpc?;
         slack?;
-        github
+        github?;
+        linear
     };
     tokio::pin!(services);
     tokio::select! {
@@ -889,7 +960,7 @@ fn github_connector(
                 .collect::<std::result::Result<Vec<u64>, _>>()
                 .context("invalid GitHub user ID")?,
             webhook_secret: required_env("SUPERTAG_GITHUB_WEBHOOK_SECRET")?,
-            token: required_env("SUPERTAG_GITHUB_TOKEN")?,
+            authentication: github_authentication()?,
             state_directory,
         },
         channel,
@@ -897,6 +968,92 @@ fn github_connector(
     )?;
     #[cfg(feature = "test-fixtures")]
     if let Ok(url) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
+        return connector.with_test_api_url(&url);
+    }
+    Ok(connector)
+}
+
+fn github_authentication() -> Result<GithubAuthentication> {
+    use std::{
+        fs::OpenOptions,
+        io::Read,
+        os::unix::fs::{MetadataExt, OpenOptionsExt},
+    };
+
+    let app_settings = [
+        "SUPERTAG_GITHUB_APP_ID",
+        "SUPERTAG_GITHUB_INSTALLATION_ID",
+        "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+    ];
+    if !app_settings
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+    {
+        return Ok(GithubAuthentication::Token(required_env(
+            "SUPERTAG_GITHUB_TOKEN",
+        )?));
+    }
+    ensure!(
+        std::env::var_os("SUPERTAG_GITHUB_TOKEN").is_none(),
+        "select one GitHub authentication mode"
+    );
+    let path = std::env::var_os("SUPERTAG_GITHUB_PRIVATE_KEY_FILE")
+        .context("set SUPERTAG_GITHUB_PRIVATE_KEY_FILE")?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .context("open GitHub App private key")?;
+    let metadata = file.metadata().context("inspect GitHub App private key")?;
+    ensure!(
+        metadata.is_file()
+            && metadata.mode() & 0o077 == 0
+            && metadata.uid() == unsafe { libc::geteuid() },
+        "GitHub App private key must be an owner-only regular file"
+    );
+    let mut private_key_pem = String::new();
+    file.take(65_537)
+        .read_to_string(&mut private_key_pem)
+        .context("read GitHub App private key")?;
+    ensure!(
+        private_key_pem.len() <= 65_536,
+        "GitHub App private key is too large"
+    );
+    Ok(GithubAuthentication::App(GithubAppConfig {
+        app_id: required_env("SUPERTAG_GITHUB_APP_ID")?
+            .parse()
+            .context("invalid GitHub App ID")?,
+        installation_id: required_env("SUPERTAG_GITHUB_INSTALLATION_ID")?
+            .parse()
+            .context("invalid GitHub installation ID")?,
+        private_key_pem,
+    }))
+}
+
+fn linear_connector(
+    channel: Channel,
+    gateway_token: String,
+    state_directory: PathBuf,
+) -> Result<Linear> {
+    let connector = Linear::new(
+        LinearConfig {
+            account_id: required_env("SUPERTAG_LINEAR_ACCOUNT_ID")?,
+            workspace_id: required_env("SUPERTAG_LINEAR_WORKSPACE_ID")?,
+            team_id: required_env("SUPERTAG_LINEAR_TEAM_ID")?,
+            tag_id: required_env("SUPERTAG_LINEAR_TAG_ID")?,
+            allowed_users: required_env("SUPERTAG_LINEAR_ALLOWED_USERS")?
+                .split(',')
+                .map(|value| value.trim().to_owned())
+                .collect(),
+            webhook_secret: required_env("SUPERTAG_LINEAR_WEBHOOK_SECRET")?,
+            api_key: required_env("SUPERTAG_LINEAR_API_KEY")?,
+            state_directory,
+        },
+        channel,
+        gateway_token,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(url) = std::env::var("SUPERTAG_TEST_LINEAR_API_URL") {
         return connector.with_test_api_url(&url);
     }
     Ok(connector)
@@ -943,16 +1100,20 @@ async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, St
 }
 
 async fn connect_operator(connection: Connection) -> Result<(Channel, String)> {
-    let (uri, token) = if let Some(directory) = connection.state_directory {
-        local::connection(&directory)?
-    } else {
-        (
-            connection.gateway.context("Gateway address required")?,
-            required_env("SUPERTAG_OPERATOR_TOKEN")?,
-        )
-    };
+    let (uri, token) = operator_target(connection)?;
     let channel = network::endpoint(uri, false).await?.connect().await?;
     Ok((channel, token))
+}
+
+fn operator_target(connection: Connection) -> Result<(String, String)> {
+    if let Some(directory) = connection.state_directory {
+        local::connection(&directory)
+    } else {
+        Ok((
+            connection.gateway.context("Gateway address required")?,
+            required_env("SUPERTAG_OPERATOR_TOKEN")?,
+        ))
+    }
 }
 
 fn required_env(name: &str) -> Result<String> {

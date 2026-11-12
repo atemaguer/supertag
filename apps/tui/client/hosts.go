@@ -18,6 +18,9 @@ const hostPage = 500
 // ListWorkerHosts returns the organization's Worker Hosts, the earliest enrolled first, as
 // `supertag list worker-host` shows them.
 func (c *Client) ListWorkerHosts(ctx context.Context) ([]*operatorv1.WorkerHost, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Worker Host presence")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var all []*operatorv1.WorkerHost

@@ -355,6 +355,7 @@ func TestReadHandover(t *testing.T) {
 		`{"contexts":[{"url":"http://x","token":"t"}],"current":1}`,
 		`{"contexts":[{"url":"http://x","token":"t"}],"current":-1}`,
 		`{"contexts":[{"url":"http://x","token":"t"},{"url":"http://y"}],"current":0}`,
+		`{"protocol":"runtime.v3","contexts":[{"url":"https://gateway.test","token":"t"}],"current":0}`,
 	} {
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -379,6 +380,26 @@ func TestReadHandover(t *testing.T) {
 	}
 	if _, err := readHandover(nil); err == nil {
 		t.Fatal("want an error without a descriptor")
+	}
+}
+
+func TestReadRuntimeV2Handover(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprintln(w, `{"protocol":"runtime.v2","contexts":[{"url":"https://gateway.test","token":"t","server_ca_file":"server.pem","client_cert_file":"client.pem","client_key_file":"client.key"}],"current":0}`)
+	w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := readHandover(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := h.Contexts[h.Current]
+	if h.Protocol != "runtime.v2" || target.ServerCAFile != "server.pem" || target.ClientCertFile != "client.pem" || target.ClientKeyFile != "client.key" {
+		t.Fatal("handover did not retain the runtime protocol and TLS paths")
 	}
 }
 

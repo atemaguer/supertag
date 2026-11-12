@@ -63,7 +63,7 @@ jobs:
             echo "packages/supertag-ai is $version but the release is $RELEASE_TAG" >&2
             exit 1
           fi
-          apps/tui/build.sh
+          SUPERTAG_TUI_VERSION="$version" apps/tui/build.sh
       - name: Sign and notarize the macOS binaries
         env:
           APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}

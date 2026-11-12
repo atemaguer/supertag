@@ -1,4 +1,5 @@
 mod checkpoints;
+mod conversations;
 mod inputs;
 pub mod objective_limits;
 mod objectives;
@@ -123,6 +124,16 @@ impl operator_server::Operator for ControlPlane {
         ))
     }
 
+    async fn list_tags(
+        &self,
+        request: Request<ListTagsRequest>,
+    ) -> Result<Response<ListTagsResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.list_tags(&request.into_inner()).await?,
+        ))
+    }
+
     async fn submit_task(
         &self,
         request: Request<SubmitTaskRequest>,
@@ -136,28 +147,33 @@ impl operator_server::Operator for ControlPlane {
     }
 
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
-        self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store.get_task(&request.into_inner().task_id).await?,
-        ))
+        let principal = self.principal(&request, "operator:")?;
+        let task_id = request.into_inner().task_id;
+        self.store.ensure_task_access(&principal, &task_id).await?;
+        Ok(Response::new(self.store.get_task(&task_id).await?))
     }
 
     async fn list_native_usage(
         &self,
         request: Request<ListNativeUsageRequest>,
     ) -> Result<Response<ListNativeUsageResponse>, Status> {
-        self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store.list_native_usage(&request.into_inner()).await?,
-        ))
+        let principal = self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        self.store
+            .ensure_task_access(&principal, &input.task_id)
+            .await?;
+        Ok(Response::new(self.store.list_native_usage(&input).await?))
     }
 
     async fn list_events(
         &self,
         request: Request<ListEventsRequest>,
     ) -> Result<Response<ListEventsResponse>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.principal(&request, "operator:")?;
         let input = request.into_inner();
+        self.store
+            .ensure_task_access(&principal, &input.task_id)
+            .await?;
         Ok(Response::new(ListEventsResponse {
             events: self
                 .store
@@ -170,12 +186,10 @@ impl operator_server::Operator for ControlPlane {
         &self,
         request: Request<CancelTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store
-                .cancel_task(&request.into_inner().task_id)
-                .await?,
-        ))
+        let principal = self.principal(&request, "operator:")?;
+        let task_id = request.into_inner().task_id;
+        self.store.ensure_task_access(&principal, &task_id).await?;
+        Ok(Response::new(self.store.cancel_task(&task_id).await?))
     }
 
     async fn resolve_attempt(
@@ -183,10 +197,12 @@ impl operator_server::Operator for ControlPlane {
         request: Request<ResolveAttemptRequest>,
     ) -> Result<Response<AttemptResolution>, Status> {
         let principal = self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        self.store
+            .ensure_task_access(&principal, &input.task_id)
+            .await?;
         Ok(Response::new(
-            self.store
-                .resolve_attempt(&principal, &request.into_inner())
-                .await?,
+            self.store.resolve_attempt(&principal, &input).await?,
         ))
     }
 }
@@ -390,6 +406,18 @@ impl connector_server::Connector for ControlPlane {
         ))
     }
 
+    async fn accept_linear_event(
+        &self,
+        request: Request<AcceptLinearEventRequest>,
+    ) -> Result<Response<AcceptLinearEventResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_linear_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn claim_reply(
         &self,
         request: Request<ClaimReplyRequest>,
@@ -422,10 +450,12 @@ impl live_inputs_server::LiveInputs for ControlPlane {
         request: Request<QueueInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
         let principal = self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        self.store
+            .ensure_task_access(&principal, &input.task_id)
+            .await?;
         Ok(Response::new(
-            self.store
-                .queue_input(&principal, &request.into_inner())
-                .await?,
+            self.store.queue_input(&principal, &input).await?,
         ))
     }
 
@@ -433,10 +463,12 @@ impl live_inputs_server::LiveInputs for ControlPlane {
         &self,
         request: Request<GetInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store.get_input(&request.into_inner().input_id).await?,
-        ))
+        let principal = self.principal(&request, "operator:")?;
+        let input_id = request.into_inner().input_id;
+        self.store
+            .ensure_input_access(&principal, &input_id)
+            .await?;
+        Ok(Response::new(self.store.get_input(&input_id).await?))
     }
 
     async fn resolve_input(
@@ -444,10 +476,12 @@ impl live_inputs_server::LiveInputs for ControlPlane {
         request: Request<ResolveInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
         let principal = self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        self.store
+            .ensure_input_access(&principal, &input.input_id)
+            .await?;
         Ok(Response::new(
-            self.store
-                .resolve_input(&principal, &request.into_inner())
-                .await?,
+            self.store.resolve_input(&principal, &input).await?,
         ))
     }
 }

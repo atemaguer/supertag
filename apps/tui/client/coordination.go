@@ -22,6 +22,9 @@ const overviewTasks = 1
 // ListOpenObjectives returns the Objectives that are neither completed nor cancelled, the most
 // recently created first.
 func (c *Client) ListOpenObjectives(ctx context.Context) ([]*operatorv1.Objective, error) {
+	if c.RuntimeV2() {
+		return c.runtime.listOpenObjectives(ctx)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var open []*operatorv1.Objective
@@ -70,6 +73,9 @@ type NewObjective struct {
 // retried: without an ID, a repeat of a call that reached the Control Plane would create a second
 // Objective.
 func (c *Client) CreateObjective(ctx context.Context, objective NewObjective) (*operatorv1.CreateObjectiveResponse, error) {
+	if c.RuntimeV2() {
+		return c.runtime.createObjective(ctx, objective)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	request := &operatorv1.CreateObjectiveRequest{
@@ -88,6 +94,9 @@ func (c *Client) CreateObjective(ctx context.Context, objective NewObjective) (*
 // DescribeObjective reads the operator's view of an Objective, as `supertag describe objective`
 // shows it.
 func (c *Client) DescribeObjective(ctx context.Context, id string) (*operatorv1.ObjectiveOverview, error) {
+	if c.RuntimeV2() {
+		return c.runtime.describeObjective(ctx, id)
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.objectives.DescribeObjective(ctx, connect.NewRequest(&operatorv1.DescribeObjectiveRequest{Id: id, PageSize: overviewTasks}))
@@ -99,6 +108,9 @@ func (c *Client) DescribeObjective(ctx context.Context, id string) (*operatorv1.
 
 // MessageObjective sends a follow-up to the owner in the Objective's own conversation.
 func (c *Client) MessageObjective(ctx context.Context, id, text string) (*operatorv1.MessageObjectiveResponse, error) {
+	if c.RuntimeV2() {
+		return c.runtime.messageObjective(ctx, id, text)
+	}
 	key, err := idempotencyKey()
 	if err != nil {
 		return nil, err
@@ -126,6 +138,9 @@ type Inbox struct {
 
 // ListInbox returns the inbox items an operator decides.
 func (c *Client) ListInbox(ctx context.Context) (Inbox, error) {
+	if c.RuntimeV2() {
+		return Inbox{}, unavailable("The operator inbox")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	inbox := Inbox{TagNames: map[string]string{}}
@@ -160,6 +175,9 @@ func (c *Client) ListInbox(ctx context.Context) (Inbox, error) {
 // Approve approves a pending approval request once. It is not retried: a repeat of a call that
 // reached the Control Plane fails because the request is no longer pending.
 func (c *Client) Approve(ctx context.Context, id string) (*operatorv1.Approval, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Approval decisions")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.inbox.Approve(ctx, connect.NewRequest(&operatorv1.ApproveRequest{Id: id, Scope: operatorv1.ApprovalScope_APPROVAL_SCOPE_ONCE}))
@@ -172,6 +190,9 @@ func (c *Client) Approve(ctx context.Context, id string) (*operatorv1.Approval, 
 // Deny denies a pending approval request with a reason the Session that asked reads. It is not
 // retried, as Approve is not.
 func (c *Client) Deny(ctx context.Context, id, reason string) (*operatorv1.Approval, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Approval decisions")
+	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.inbox.Deny(ctx, connect.NewRequest(&operatorv1.DenyRequest{Id: id, Reason: reason}))
@@ -184,6 +205,9 @@ func (c *Client) Deny(ctx context.Context, id, reason string) (*operatorv1.Appro
 // AnswerQuestion sends text as the answer to the question inbox item key stands for. A retry
 // reuses the same idempotency key, so the owner gets the answer once.
 func (c *Client) AnswerQuestion(ctx context.Context, key, text string) (*operatorv1.MessageObjectiveResponse, error) {
+	if c.RuntimeV2() {
+		return nil, unavailable("Answering inbox questions")
+	}
 	idempotency, err := idempotencyKey()
 	if err != nil {
 		return nil, err

@@ -74,6 +74,9 @@ func (a *app) commands() []paletteCommand {
 	if a.inner.inbox.Truncated {
 		waiting = fmt.Sprintf("%d+ waiting", len(a.inner.inbox.Items))
 	}
+	if a.inner.client.RuntimeV2() {
+		waiting = "unavailable on this Gateway"
+	}
 	return append(out, paletteCommand{commandOpenInbox, "Open inbox", waiting})
 }
 
@@ -178,6 +181,10 @@ func (m *model) newConversation() tea.Cmd {
 // openInbox shows the first item waiting on you, with the rail focused on it to move through the
 // others, or says that nothing waits.
 func (m *model) openInbox() tea.Cmd {
+	if m.client.RuntimeV2() {
+		m.notice = note{text: "The operator inbox is unavailable on this Gateway."}
+		return nil
+	}
 	for i, r := range m.rows() {
 		if r.kind != rowInbox {
 			continue

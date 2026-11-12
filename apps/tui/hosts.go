@@ -36,11 +36,14 @@ var hostPhases = []struct {
 }
 
 func (m model) hostsAfter() tea.Cmd {
+	if m.client.RuntimeV2() {
+		return nil
+	}
 	return tea.Tick(hostRefresh, func(time.Time) tea.Msg { return hostTickMsg{} })
 }
 
 func (m model) reloadHosts() tea.Cmd {
-	if !m.hostReload.start() {
+	if m.client.RuntimeV2() || !m.hostReload.start() {
 		return nil
 	}
 	return m.hostsCmd()
@@ -71,6 +74,9 @@ func (m *model) hostsRead(msg hostsMsg) tea.Cmd {
 // hostSummary is what the status bar says of the Worker Hosts, such as
 // "Worker Hosts: 2 ready, 1 unreachable"; empty until they are read.
 func (m model) hostSummary() string {
+	if m.client.RuntimeV2() {
+		return "Worker Host status unavailable"
+	}
 	if !m.hostsKnown {
 		return ""
 	}

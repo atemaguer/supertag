@@ -26,8 +26,10 @@ import (
 // shows the branch's diff, opens the pull request with a stand-in for the platform opener, starts
 // a new conversation, answers the question and approves the request in place, shows the Team,
 // creates an Objective from the command palette and opens the emptied inbox from it.
-// It needs tmux, git, node_modules and ./build.sh output, so it runs only with SUPERTAG_TUI_E2E=1:
+// It needs tmux, git, node_modules and ./build.sh output versioned for the Node launcher.
+// From apps/tui, build and run it with:
 //
+//	SUPERTAG_TUI_VERSION="$(node -p 'require("../../packages/supertag-ai/package.json").version')" ./build.sh
 //	SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
 const (
 	fakeToken     = "test"
@@ -147,7 +149,7 @@ func TestEndToEnd(t *testing.T) {
 	binary := filepath.Join("dist", fmt.Sprintf("supertag-tui-%s-%s", runtime.GOOS, runtime.GOARCH))
 	for _, path := range []string{tsx, cli, binary} {
 		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("%s is missing; run pnpm install and ./build.sh first", path)
+			t.Fatalf("%s is missing; install Node dependencies and build the TUI for the Node launcher's version", path)
 		}
 	}
 
