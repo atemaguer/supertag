@@ -106,6 +106,12 @@ class LinearEventAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     LINEAR_EVENT_ACTION_CREATE: _ClassVar[LinearEventAction]
     LINEAR_EVENT_ACTION_UPDATE: _ClassVar[LinearEventAction]
 
+class LarkDomain(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LARK_DOMAIN_UNSPECIFIED: _ClassVar[LarkDomain]
+    LARK_DOMAIN_LARK: _ClassVar[LarkDomain]
+    LARK_DOMAIN_FEISHU: _ClassVar[LarkDomain]
+
 class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     REPLY_STATE_UNSPECIFIED: _ClassVar[ReplyState]
@@ -174,6 +180,9 @@ LINEAR_EVENT_KIND_ISSUE_COMMENT: LinearEventKind
 LINEAR_EVENT_ACTION_UNSPECIFIED: LinearEventAction
 LINEAR_EVENT_ACTION_CREATE: LinearEventAction
 LINEAR_EVENT_ACTION_UPDATE: LinearEventAction
+LARK_DOMAIN_UNSPECIFIED: LarkDomain
+LARK_DOMAIN_LARK: LarkDomain
+LARK_DOMAIN_FEISHU: LarkDomain
 REPLY_STATE_UNSPECIFIED: ReplyState
 REPLY_STATE_PENDING: ReplyState
 REPLY_STATE_CLAIMED: ReplyState
@@ -916,7 +925,7 @@ class HarnessCompleteResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class CreateObjectiveRequest(_message.Message):
-    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency")
+    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -925,6 +934,7 @@ class CreateObjectiveRequest(_message.Message):
     DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
     BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     objective_id: str
     owner_tag_id: str
@@ -933,10 +943,11 @@ class CreateObjectiveRequest(_message.Message):
     deadline_ms: int
     budget_limit_minor: int
     budget_currency: str
-    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ...) -> None: ...
+    team_id: str
+    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -950,6 +961,7 @@ class Objective(_message.Message):
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
     PAUSED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     REPORTED_SPEND_MINOR_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -963,7 +975,174 @@ class Objective(_message.Message):
     budget_currency: str
     paused_at_ms: int
     reported_spend_minor: int
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ...) -> None: ...
+    team_id: str
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ...) -> None: ...
+
+class Team(_message.Message):
+    __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    MEMBER_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    team_id: str
+    name: str
+    member_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    max_concurrency: int
+    revision: int
+    created_at_ms: int
+    updated_at_ms: int
+    def __init__(self, team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., max_concurrency: _Optional[int] = ..., revision: _Optional[int] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ...) -> None: ...
+
+class CreateTeamRequest(_message.Message):
+    __slots__ = ("operation_id", "team_id", "name", "member_tag_ids", "max_concurrency")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    MEMBER_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    team_id: str
+    name: str
+    member_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    max_concurrency: int
+    def __init__(self, operation_id: _Optional[str] = ..., team_id: _Optional[str] = ..., name: _Optional[str] = ..., member_tag_ids: _Optional[_Iterable[str]] = ..., max_concurrency: _Optional[int] = ...) -> None: ...
+
+class GetTeamRequest(_message.Message):
+    __slots__ = ("team",)
+    TEAM_FIELD_NUMBER: _ClassVar[int]
+    team: str
+    def __init__(self, team: _Optional[str] = ...) -> None: ...
+
+class ListTeamsRequest(_message.Message):
+    __slots__ = ("member_tag_id", "limit", "cursor")
+    MEMBER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    member_tag_id: str
+    limit: int
+    cursor: str
+    def __init__(self, member_tag_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListTeamsResponse(_message.Message):
+    __slots__ = ("teams", "next_cursor")
+    TEAMS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    teams: _containers.RepeatedCompositeFieldContainer[Team]
+    next_cursor: str
+    def __init__(self, teams: _Optional[_Iterable[_Union[Team, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class TeamMembers(_message.Message):
+    __slots__ = ("tag_ids",)
+    TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class UpdateTeamRequest(_message.Message):
+    __slots__ = ("operation_id", "team", "expected_revision", "name", "members", "max_concurrency")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    MEMBERS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    team: str
+    expected_revision: int
+    name: str
+    members: TeamMembers
+    max_concurrency: int
+    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., expected_revision: _Optional[int] = ..., name: _Optional[str] = ..., members: _Optional[_Union[TeamMembers, _Mapping]] = ..., max_concurrency: _Optional[int] = ...) -> None: ...
+
+class DeleteTeamRequest(_message.Message):
+    __slots__ = ("operation_id", "team")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    team: str
+    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ...) -> None: ...
+
+class WorkstreamPost(_message.Message):
+    __slots__ = ("post_id", "team_id", "author_tag_id", "to_tag_ids", "body", "source_task_id", "sequence", "created_at_ms")
+    POST_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    post_id: str
+    team_id: str
+    author_tag_id: str
+    to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    body: str
+    source_task_id: str
+    sequence: int
+    created_at_ms: int
+    def __init__(self, post_id: _Optional[str] = ..., team_id: _Optional[str] = ..., author_tag_id: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ..., body: _Optional[str] = ..., source_task_id: _Optional[str] = ..., sequence: _Optional[int] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListWorkstreamPostsRequest(_message.Message):
+    __slots__ = ("team", "after_sequence", "limit", "cursor")
+    TEAM_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    team: str
+    after_sequence: int
+    limit: int
+    cursor: str
+    def __init__(self, team: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListWorkstreamPostsResponse(_message.Message):
+    __slots__ = ("posts", "next_cursor")
+    POSTS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    posts: _containers.RepeatedCompositeFieldContainer[WorkstreamPost]
+    next_cursor: str
+    def __init__(self, posts: _Optional[_Iterable[_Union[WorkstreamPost, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class ReadAttemptWorkstreamRequest(_message.Message):
+    __slots__ = ("attempt", "after_sequence", "limit", "cursor")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    after_sequence: int
+    limit: int
+    cursor: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ReadAttemptWorkstreamResponse(_message.Message):
+    __slots__ = ("team", "page")
+    TEAM_FIELD_NUMBER: _ClassVar[int]
+    PAGE_FIELD_NUMBER: _ClassVar[int]
+    team: Team
+    page: ListWorkstreamPostsResponse
+    def __init__(self, team: _Optional[_Union[Team, _Mapping]] = ..., page: _Optional[_Union[ListWorkstreamPostsResponse, _Mapping]] = ...) -> None: ...
+
+class PostAttemptWorkstreamRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "body", "to_tag_ids")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    body: str
+    to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class PostAttemptWorkstreamResponse(_message.Message):
+    __slots__ = ("post", "duplicate")
+    POST_FIELD_NUMBER: _ClassVar[int]
+    DUPLICATE_FIELD_NUMBER: _ClassVar[int]
+    post: WorkstreamPost
+    duplicate: bool
+    def __init__(self, post: _Optional[_Union[WorkstreamPost, _Mapping]] = ..., duplicate: _Optional[bool] = ...) -> None: ...
 
 class GetObjectiveRequest(_message.Message):
     __slots__ = ("objective_id",)
@@ -1134,6 +1313,40 @@ class AcceptLinearEventRequest(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., delivery_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., team_id: _Optional[str] = ..., issue_id: _Optional[str] = ..., source_id: _Optional[str] = ..., kind: _Optional[_Union[LinearEventKind, str]] = ..., action: _Optional[_Union[LinearEventAction, str]] = ..., prompt: _Optional[str] = ..., tag_id: _Optional[str] = ...) -> None: ...
 
 class AcceptLinearEventResponse(_message.Message):
+    __slots__ = ("task",)
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class AcceptLarkEventRequest(_message.Message):
+    __slots__ = ("account_id", "domain", "app_id", "tenant_key", "event_id", "chat_id", "message_id", "root_message_id", "actor_id", "prompt", "mention_tag_id", "direct")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    DOMAIN_FIELD_NUMBER: _ClassVar[int]
+    APP_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_KEY_FIELD_NUMBER: _ClassVar[int]
+    EVENT_ID_FIELD_NUMBER: _ClassVar[int]
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    ROOT_MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    MENTION_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    DIRECT_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    domain: LarkDomain
+    app_id: str
+    tenant_key: str
+    event_id: str
+    chat_id: str
+    message_id: str
+    root_message_id: str
+    actor_id: str
+    prompt: str
+    mention_tag_id: str
+    direct: bool
+    def __init__(self, account_id: _Optional[str] = ..., domain: _Optional[_Union[LarkDomain, str]] = ..., app_id: _Optional[str] = ..., tenant_key: _Optional[str] = ..., event_id: _Optional[str] = ..., chat_id: _Optional[str] = ..., message_id: _Optional[str] = ..., root_message_id: _Optional[str] = ..., actor_id: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ..., direct: _Optional[bool] = ...) -> None: ...
+
+class AcceptLarkEventResponse(_message.Message):
     __slots__ = ("task",)
     TASK_FIELD_NUMBER: _ClassVar[int]
     task: Task

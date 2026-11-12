@@ -27,6 +27,10 @@ const (
 	ConversationsName = "supertag.runtime.v2.Conversations"
 	// ObjectivesName is the fully-qualified name of the Objectives service.
 	ObjectivesName = "supertag.runtime.v2.Objectives"
+	// TeamsName is the fully-qualified name of the Teams service.
+	TeamsName = "supertag.runtime.v2.Teams"
+	// AttemptWorkstreamsName is the fully-qualified name of the AttemptWorkstreams service.
+	AttemptWorkstreamsName = "supertag.runtime.v2.AttemptWorkstreams"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
 	WorkerHostName = "supertag.runtime.v2.WorkerHost"
 	// LiveInputsName is the fully-qualified name of the LiveInputs service.
@@ -115,6 +119,25 @@ const (
 	// ObjectivesReviewObjectiveProcedure is the fully-qualified name of the Objectives's
 	// ReviewObjective RPC.
 	ObjectivesReviewObjectiveProcedure = "/supertag.runtime.v2.Objectives/ReviewObjective"
+	// TeamsCreateTeamProcedure is the fully-qualified name of the Teams's CreateTeam RPC.
+	TeamsCreateTeamProcedure = "/supertag.runtime.v2.Teams/CreateTeam"
+	// TeamsGetTeamProcedure is the fully-qualified name of the Teams's GetTeam RPC.
+	TeamsGetTeamProcedure = "/supertag.runtime.v2.Teams/GetTeam"
+	// TeamsListTeamsProcedure is the fully-qualified name of the Teams's ListTeams RPC.
+	TeamsListTeamsProcedure = "/supertag.runtime.v2.Teams/ListTeams"
+	// TeamsUpdateTeamProcedure is the fully-qualified name of the Teams's UpdateTeam RPC.
+	TeamsUpdateTeamProcedure = "/supertag.runtime.v2.Teams/UpdateTeam"
+	// TeamsDeleteTeamProcedure is the fully-qualified name of the Teams's DeleteTeam RPC.
+	TeamsDeleteTeamProcedure = "/supertag.runtime.v2.Teams/DeleteTeam"
+	// TeamsListWorkstreamPostsProcedure is the fully-qualified name of the Teams's ListWorkstreamPosts
+	// RPC.
+	TeamsListWorkstreamPostsProcedure = "/supertag.runtime.v2.Teams/ListWorkstreamPosts"
+	// AttemptWorkstreamsReadAttemptWorkstreamProcedure is the fully-qualified name of the
+	// AttemptWorkstreams's ReadAttemptWorkstream RPC.
+	AttemptWorkstreamsReadAttemptWorkstreamProcedure = "/supertag.runtime.v2.AttemptWorkstreams/ReadAttemptWorkstream"
+	// AttemptWorkstreamsPostAttemptWorkstreamProcedure is the fully-qualified name of the
+	// AttemptWorkstreams's PostAttemptWorkstream RPC.
+	AttemptWorkstreamsPostAttemptWorkstreamProcedure = "/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream"
 	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
 	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
 	// WorkerHostClaimTaskProcedure is the fully-qualified name of the WorkerHost's ClaimTask RPC.
@@ -166,6 +189,9 @@ const (
 	// ConnectorAcceptLinearEventProcedure is the fully-qualified name of the Connector's
 	// AcceptLinearEvent RPC.
 	ConnectorAcceptLinearEventProcedure = "/supertag.runtime.v2.Connector/AcceptLinearEvent"
+	// ConnectorAcceptLarkEventProcedure is the fully-qualified name of the Connector's AcceptLarkEvent
+	// RPC.
+	ConnectorAcceptLarkEventProcedure = "/supertag.runtime.v2.Connector/AcceptLarkEvent"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
@@ -950,6 +976,303 @@ func (UnimplementedObjectivesHandler) ReviewObjective(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ReviewObjective is not implemented"))
 }
 
+// TeamsClient is a client for the supertag.runtime.v2.Teams service.
+type TeamsClient interface {
+	CreateTeam(context.Context, *connect.Request[runtimev2.CreateTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	GetTeam(context.Context, *connect.Request[runtimev2.GetTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	ListTeams(context.Context, *connect.Request[runtimev2.ListTeamsRequest]) (*connect.Response[runtimev2.ListTeamsResponse], error)
+	UpdateTeam(context.Context, *connect.Request[runtimev2.UpdateTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	DeleteTeam(context.Context, *connect.Request[runtimev2.DeleteTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	ListWorkstreamPosts(context.Context, *connect.Request[runtimev2.ListWorkstreamPostsRequest]) (*connect.Response[runtimev2.ListWorkstreamPostsResponse], error)
+}
+
+// NewTeamsClient constructs a client for the supertag.runtime.v2.Teams service. By default, it uses
+// the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewTeamsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) TeamsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	teamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Teams").Methods()
+	return &teamsClient{
+		createTeam: connect.NewClient[runtimev2.CreateTeamRequest, runtimev2.Team](
+			httpClient,
+			baseURL+TeamsCreateTeamProcedure,
+			connect.WithSchema(teamsMethods.ByName("CreateTeam")),
+			connect.WithClientOptions(opts...),
+		),
+		getTeam: connect.NewClient[runtimev2.GetTeamRequest, runtimev2.Team](
+			httpClient,
+			baseURL+TeamsGetTeamProcedure,
+			connect.WithSchema(teamsMethods.ByName("GetTeam")),
+			connect.WithClientOptions(opts...),
+		),
+		listTeams: connect.NewClient[runtimev2.ListTeamsRequest, runtimev2.ListTeamsResponse](
+			httpClient,
+			baseURL+TeamsListTeamsProcedure,
+			connect.WithSchema(teamsMethods.ByName("ListTeams")),
+			connect.WithClientOptions(opts...),
+		),
+		updateTeam: connect.NewClient[runtimev2.UpdateTeamRequest, runtimev2.Team](
+			httpClient,
+			baseURL+TeamsUpdateTeamProcedure,
+			connect.WithSchema(teamsMethods.ByName("UpdateTeam")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteTeam: connect.NewClient[runtimev2.DeleteTeamRequest, runtimev2.Team](
+			httpClient,
+			baseURL+TeamsDeleteTeamProcedure,
+			connect.WithSchema(teamsMethods.ByName("DeleteTeam")),
+			connect.WithClientOptions(opts...),
+		),
+		listWorkstreamPosts: connect.NewClient[runtimev2.ListWorkstreamPostsRequest, runtimev2.ListWorkstreamPostsResponse](
+			httpClient,
+			baseURL+TeamsListWorkstreamPostsProcedure,
+			connect.WithSchema(teamsMethods.ByName("ListWorkstreamPosts")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// teamsClient implements TeamsClient.
+type teamsClient struct {
+	createTeam          *connect.Client[runtimev2.CreateTeamRequest, runtimev2.Team]
+	getTeam             *connect.Client[runtimev2.GetTeamRequest, runtimev2.Team]
+	listTeams           *connect.Client[runtimev2.ListTeamsRequest, runtimev2.ListTeamsResponse]
+	updateTeam          *connect.Client[runtimev2.UpdateTeamRequest, runtimev2.Team]
+	deleteTeam          *connect.Client[runtimev2.DeleteTeamRequest, runtimev2.Team]
+	listWorkstreamPosts *connect.Client[runtimev2.ListWorkstreamPostsRequest, runtimev2.ListWorkstreamPostsResponse]
+}
+
+// CreateTeam calls supertag.runtime.v2.Teams.CreateTeam.
+func (c *teamsClient) CreateTeam(ctx context.Context, req *connect.Request[runtimev2.CreateTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return c.createTeam.CallUnary(ctx, req)
+}
+
+// GetTeam calls supertag.runtime.v2.Teams.GetTeam.
+func (c *teamsClient) GetTeam(ctx context.Context, req *connect.Request[runtimev2.GetTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return c.getTeam.CallUnary(ctx, req)
+}
+
+// ListTeams calls supertag.runtime.v2.Teams.ListTeams.
+func (c *teamsClient) ListTeams(ctx context.Context, req *connect.Request[runtimev2.ListTeamsRequest]) (*connect.Response[runtimev2.ListTeamsResponse], error) {
+	return c.listTeams.CallUnary(ctx, req)
+}
+
+// UpdateTeam calls supertag.runtime.v2.Teams.UpdateTeam.
+func (c *teamsClient) UpdateTeam(ctx context.Context, req *connect.Request[runtimev2.UpdateTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return c.updateTeam.CallUnary(ctx, req)
+}
+
+// DeleteTeam calls supertag.runtime.v2.Teams.DeleteTeam.
+func (c *teamsClient) DeleteTeam(ctx context.Context, req *connect.Request[runtimev2.DeleteTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return c.deleteTeam.CallUnary(ctx, req)
+}
+
+// ListWorkstreamPosts calls supertag.runtime.v2.Teams.ListWorkstreamPosts.
+func (c *teamsClient) ListWorkstreamPosts(ctx context.Context, req *connect.Request[runtimev2.ListWorkstreamPostsRequest]) (*connect.Response[runtimev2.ListWorkstreamPostsResponse], error) {
+	return c.listWorkstreamPosts.CallUnary(ctx, req)
+}
+
+// TeamsHandler is an implementation of the supertag.runtime.v2.Teams service.
+type TeamsHandler interface {
+	CreateTeam(context.Context, *connect.Request[runtimev2.CreateTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	GetTeam(context.Context, *connect.Request[runtimev2.GetTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	ListTeams(context.Context, *connect.Request[runtimev2.ListTeamsRequest]) (*connect.Response[runtimev2.ListTeamsResponse], error)
+	UpdateTeam(context.Context, *connect.Request[runtimev2.UpdateTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	DeleteTeam(context.Context, *connect.Request[runtimev2.DeleteTeamRequest]) (*connect.Response[runtimev2.Team], error)
+	ListWorkstreamPosts(context.Context, *connect.Request[runtimev2.ListWorkstreamPostsRequest]) (*connect.Response[runtimev2.ListWorkstreamPostsResponse], error)
+}
+
+// NewTeamsHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewTeamsHandler(svc TeamsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	teamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Teams").Methods()
+	teamsCreateTeamHandler := connect.NewUnaryHandler(
+		TeamsCreateTeamProcedure,
+		svc.CreateTeam,
+		connect.WithSchema(teamsMethods.ByName("CreateTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teamsGetTeamHandler := connect.NewUnaryHandler(
+		TeamsGetTeamProcedure,
+		svc.GetTeam,
+		connect.WithSchema(teamsMethods.ByName("GetTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teamsListTeamsHandler := connect.NewUnaryHandler(
+		TeamsListTeamsProcedure,
+		svc.ListTeams,
+		connect.WithSchema(teamsMethods.ByName("ListTeams")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teamsUpdateTeamHandler := connect.NewUnaryHandler(
+		TeamsUpdateTeamProcedure,
+		svc.UpdateTeam,
+		connect.WithSchema(teamsMethods.ByName("UpdateTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teamsDeleteTeamHandler := connect.NewUnaryHandler(
+		TeamsDeleteTeamProcedure,
+		svc.DeleteTeam,
+		connect.WithSchema(teamsMethods.ByName("DeleteTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	teamsListWorkstreamPostsHandler := connect.NewUnaryHandler(
+		TeamsListWorkstreamPostsProcedure,
+		svc.ListWorkstreamPosts,
+		connect.WithSchema(teamsMethods.ByName("ListWorkstreamPosts")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Teams/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case TeamsCreateTeamProcedure:
+			teamsCreateTeamHandler.ServeHTTP(w, r)
+		case TeamsGetTeamProcedure:
+			teamsGetTeamHandler.ServeHTTP(w, r)
+		case TeamsListTeamsProcedure:
+			teamsListTeamsHandler.ServeHTTP(w, r)
+		case TeamsUpdateTeamProcedure:
+			teamsUpdateTeamHandler.ServeHTTP(w, r)
+		case TeamsDeleteTeamProcedure:
+			teamsDeleteTeamHandler.ServeHTTP(w, r)
+		case TeamsListWorkstreamPostsProcedure:
+			teamsListWorkstreamPostsHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedTeamsHandler returns CodeUnimplemented from all methods.
+type UnimplementedTeamsHandler struct{}
+
+func (UnimplementedTeamsHandler) CreateTeam(context.Context, *connect.Request[runtimev2.CreateTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.CreateTeam is not implemented"))
+}
+
+func (UnimplementedTeamsHandler) GetTeam(context.Context, *connect.Request[runtimev2.GetTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.GetTeam is not implemented"))
+}
+
+func (UnimplementedTeamsHandler) ListTeams(context.Context, *connect.Request[runtimev2.ListTeamsRequest]) (*connect.Response[runtimev2.ListTeamsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.ListTeams is not implemented"))
+}
+
+func (UnimplementedTeamsHandler) UpdateTeam(context.Context, *connect.Request[runtimev2.UpdateTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.UpdateTeam is not implemented"))
+}
+
+func (UnimplementedTeamsHandler) DeleteTeam(context.Context, *connect.Request[runtimev2.DeleteTeamRequest]) (*connect.Response[runtimev2.Team], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.DeleteTeam is not implemented"))
+}
+
+func (UnimplementedTeamsHandler) ListWorkstreamPosts(context.Context, *connect.Request[runtimev2.ListWorkstreamPostsRequest]) (*connect.Response[runtimev2.ListWorkstreamPostsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Teams.ListWorkstreamPosts is not implemented"))
+}
+
+// AttemptWorkstreamsClient is a client for the supertag.runtime.v2.AttemptWorkstreams service.
+type AttemptWorkstreamsClient interface {
+	ReadAttemptWorkstream(context.Context, *connect.Request[runtimev2.ReadAttemptWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error)
+	PostAttemptWorkstream(context.Context, *connect.Request[runtimev2.PostAttemptWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error)
+}
+
+// NewAttemptWorkstreamsClient constructs a client for the supertag.runtime.v2.AttemptWorkstreams
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptWorkstreamsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptWorkstreamsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptWorkstreamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptWorkstreams").Methods()
+	return &attemptWorkstreamsClient{
+		readAttemptWorkstream: connect.NewClient[runtimev2.ReadAttemptWorkstreamRequest, runtimev2.ReadAttemptWorkstreamResponse](
+			httpClient,
+			baseURL+AttemptWorkstreamsReadAttemptWorkstreamProcedure,
+			connect.WithSchema(attemptWorkstreamsMethods.ByName("ReadAttemptWorkstream")),
+			connect.WithClientOptions(opts...),
+		),
+		postAttemptWorkstream: connect.NewClient[runtimev2.PostAttemptWorkstreamRequest, runtimev2.PostAttemptWorkstreamResponse](
+			httpClient,
+			baseURL+AttemptWorkstreamsPostAttemptWorkstreamProcedure,
+			connect.WithSchema(attemptWorkstreamsMethods.ByName("PostAttemptWorkstream")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptWorkstreamsClient implements AttemptWorkstreamsClient.
+type attemptWorkstreamsClient struct {
+	readAttemptWorkstream *connect.Client[runtimev2.ReadAttemptWorkstreamRequest, runtimev2.ReadAttemptWorkstreamResponse]
+	postAttemptWorkstream *connect.Client[runtimev2.PostAttemptWorkstreamRequest, runtimev2.PostAttemptWorkstreamResponse]
+}
+
+// ReadAttemptWorkstream calls supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream.
+func (c *attemptWorkstreamsClient) ReadAttemptWorkstream(ctx context.Context, req *connect.Request[runtimev2.ReadAttemptWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error) {
+	return c.readAttemptWorkstream.CallUnary(ctx, req)
+}
+
+// PostAttemptWorkstream calls supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream.
+func (c *attemptWorkstreamsClient) PostAttemptWorkstream(ctx context.Context, req *connect.Request[runtimev2.PostAttemptWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error) {
+	return c.postAttemptWorkstream.CallUnary(ctx, req)
+}
+
+// AttemptWorkstreamsHandler is an implementation of the supertag.runtime.v2.AttemptWorkstreams
+// service.
+type AttemptWorkstreamsHandler interface {
+	ReadAttemptWorkstream(context.Context, *connect.Request[runtimev2.ReadAttemptWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error)
+	PostAttemptWorkstream(context.Context, *connect.Request[runtimev2.PostAttemptWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error)
+}
+
+// NewAttemptWorkstreamsHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptWorkstreamsHandler(svc AttemptWorkstreamsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptWorkstreamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptWorkstreams").Methods()
+	attemptWorkstreamsReadAttemptWorkstreamHandler := connect.NewUnaryHandler(
+		AttemptWorkstreamsReadAttemptWorkstreamProcedure,
+		svc.ReadAttemptWorkstream,
+		connect.WithSchema(attemptWorkstreamsMethods.ByName("ReadAttemptWorkstream")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptWorkstreamsPostAttemptWorkstreamHandler := connect.NewUnaryHandler(
+		AttemptWorkstreamsPostAttemptWorkstreamProcedure,
+		svc.PostAttemptWorkstream,
+		connect.WithSchema(attemptWorkstreamsMethods.ByName("PostAttemptWorkstream")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptWorkstreams/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptWorkstreamsReadAttemptWorkstreamProcedure:
+			attemptWorkstreamsReadAttemptWorkstreamHandler.ServeHTTP(w, r)
+		case AttemptWorkstreamsPostAttemptWorkstreamProcedure:
+			attemptWorkstreamsPostAttemptWorkstreamHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptWorkstreamsHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptWorkstreamsHandler struct{}
+
+func (UnimplementedAttemptWorkstreamsHandler) ReadAttemptWorkstream(context.Context, *connect.Request[runtimev2.ReadAttemptWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream is not implemented"))
+}
+
+func (UnimplementedAttemptWorkstreamsHandler) PostAttemptWorkstream(context.Context, *connect.Request[runtimev2.PostAttemptWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream is not implemented"))
+}
+
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
 type WorkerHostClient interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -1618,6 +1941,7 @@ type ConnectorClient interface {
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
+	AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1657,6 +1981,12 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("AcceptLinearEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		acceptLarkEvent: connect.NewClient[runtimev2.AcceptLarkEventRequest, runtimev2.AcceptLarkEventResponse](
+			httpClient,
+			baseURL+ConnectorAcceptLarkEventProcedure,
+			connect.WithSchema(connectorMethods.ByName("AcceptLarkEvent")),
+			connect.WithClientOptions(opts...),
+		),
 		claimReply: connect.NewClient[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse](
 			httpClient,
 			baseURL+ConnectorClaimReplyProcedure,
@@ -1678,6 +2008,7 @@ type connectorClient struct {
 	acceptSlackEvent  *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
 	acceptGithubEvent *connect.Client[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse]
 	acceptLinearEvent *connect.Client[runtimev2.AcceptLinearEventRequest, runtimev2.AcceptLinearEventResponse]
+	acceptLarkEvent   *connect.Client[runtimev2.AcceptLarkEventRequest, runtimev2.AcceptLarkEventResponse]
 	claimReply        *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
 	settleReply       *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
@@ -1702,6 +2033,11 @@ func (c *connectorClient) AcceptLinearEvent(ctx context.Context, req *connect.Re
 	return c.acceptLinearEvent.CallUnary(ctx, req)
 }
 
+// AcceptLarkEvent calls supertag.runtime.v2.Connector.AcceptLarkEvent.
+func (c *connectorClient) AcceptLarkEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error) {
+	return c.acceptLarkEvent.CallUnary(ctx, req)
+}
+
 // ClaimReply calls supertag.runtime.v2.Connector.ClaimReply.
 func (c *connectorClient) ClaimReply(ctx context.Context, req *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {
 	return c.claimReply.CallUnary(ctx, req)
@@ -1718,6 +2054,7 @@ type ConnectorHandler interface {
 	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
+	AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1753,6 +2090,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("AcceptLinearEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorAcceptLarkEventHandler := connect.NewUnaryHandler(
+		ConnectorAcceptLarkEventProcedure,
+		svc.AcceptLarkEvent,
+		connect.WithSchema(connectorMethods.ByName("AcceptLarkEvent")),
+		connect.WithHandlerOptions(opts...),
+	)
 	connectorClaimReplyHandler := connect.NewUnaryHandler(
 		ConnectorClaimReplyProcedure,
 		svc.ClaimReply,
@@ -1775,6 +2118,8 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorAcceptGithubEventHandler.ServeHTTP(w, r)
 		case ConnectorAcceptLinearEventProcedure:
 			connectorAcceptLinearEventHandler.ServeHTTP(w, r)
+		case ConnectorAcceptLarkEventProcedure:
+			connectorAcceptLarkEventHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
@@ -1802,6 +2147,10 @@ func (UnimplementedConnectorHandler) AcceptGithubEvent(context.Context, *connect
 
 func (UnimplementedConnectorHandler) AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptLinearEvent is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptLarkEvent is not implemented"))
 }
 
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {

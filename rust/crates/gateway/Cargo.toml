@@ -15,6 +15,11 @@ axum = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 hex = "0.4"
+futures-util = { version = "0.3", features = ["sink"] }
+prost.workspace = true
+pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark-to-cmark = "22"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 hmac = "0.12"
 libc.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }

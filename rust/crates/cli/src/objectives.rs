@@ -21,6 +21,9 @@ pub enum ObjectiveCommand {
         objective_id: String,
         #[arg(long)]
         owner: String,
+        /// Optional Team ID or name.
+        #[arg(long)]
+        team: Option<String>,
         #[arg(long)]
         ongoing: bool,
         #[arg(long, value_parser = deadline)]
@@ -118,6 +121,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
         ObjectiveCommand::Create {
             objective_id,
             owner,
+            team,
             outcome,
             ongoing,
             deadline,
@@ -130,6 +134,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                     CreateObjectiveRequest {
                         objective_id,
                         owner_tag_id: owner,
+                        team_id: team,
                         outcome,
                         ongoing,
                         deadline_ms: deadline,
@@ -224,6 +229,7 @@ fn output(objective: Objective) -> Value {
     json!({
         "objective_id": objective.objective_id,
         "owner_tag_id": objective.owner_tag_id,
+        "team_id": objective.team_id,
         "session_id": objective.session_id,
         "outcome": objective.outcome,
         "ongoing": objective.ongoing,

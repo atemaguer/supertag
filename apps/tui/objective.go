@@ -69,7 +69,8 @@ func (m model) renderObjective() string {
 	}
 	if overview != nil {
 		if m.client.RuntimeV2() {
-			sections = append(sections, wrap.Render(describeRuntimeObjective(overview)))
+			team := m.listedTeam(overview.GetObjective().GetTeamId())
+			sections = append(sections, wrap.Render(describeRuntimeObjective(overview, team.GetName())))
 		} else {
 			sections = append(sections, wrap.Render(describeObjective(overview, m.inbox.Items)))
 		}
@@ -79,7 +80,7 @@ func (m model) renderObjective() string {
 	return strings.Join(sections, "\n\n")
 }
 
-func describeRuntimeObjective(view *operatorv1.ObjectiveOverview) string {
+func describeRuntimeObjective(view *operatorv1.ObjectiveOverview, teamName string) string {
 	objective := view.GetObjective()
 	state := statusWords(objective.GetStatus())
 	if objective.GetPausedAt() != nil {
@@ -89,6 +90,12 @@ func describeRuntimeObjective(view *operatorv1.ObjectiveOverview) string {
 		fmt.Sprintf("Objective %s · %s", objective.GetId(), state),
 		"Outcome: " + objective.GetOutcome(),
 		"Owner: " + objective.GetOwnerTag(),
+	}
+	if id := objective.GetTeamId(); id != "" {
+		if teamName == "" {
+			teamName = id
+		}
+		lines = append(lines, "Team: "+teamName)
 	}
 	if sessions := view.GetSessions(); len(sessions) > 0 {
 		lines = append(lines, "Owner Session: "+sessions[0].GetId())

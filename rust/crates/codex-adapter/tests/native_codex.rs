@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_codex_adapter::{CodexOptions, run};
@@ -18,8 +18,9 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessCompleteResponse,
         HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
-        HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, ReportAttemptUsageResponse,
-        SessionCheckpoint, TakeInputResponse, Task, TaskEvent,
+        HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, LiveInputReceipt,
+        LiveInputState, ReportAttemptUsageResponse, SessionCheckpoint, TakeInputResponse, Task,
+        TaskEvent,
         harness_server::{Harness, HarnessServer},
     },
 };
@@ -36,6 +37,12 @@ struct Observed {
     events: Vec<HarnessPublishRequest>,
     outcome: Option<HarnessCompleteRequest>,
     usage: Vec<HarnessUsageRequest>,
+    input: Option<LiveInput>,
+    dispatched: Option<LiveInput>,
+    receipts: Vec<HarnessSettleLiveInputRequest>,
+    valid_for_ms: u64,
+    lose_settlement_response: bool,
+    lose_take_response: bool,
 }
 
 #[derive(Clone)]
@@ -69,20 +76,51 @@ impl Harness for HarnessFixture {
     }
     async fn take_live_input(
         &self,
-        _request: Request<HarnessTakeLiveInputRequest>,
+        request: Request<HarnessTakeLiveInputRequest>,
     ) -> Result<Response<TakeInputResponse>, Status> {
-        Err(Status::unimplemented(
-            "the Codex exec fixture does not steer live input",
-        ))
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let input = observed.input.take();
+        if let Some(input) = &input {
+            observed.dispatched = Some(input.clone());
+        }
+        if observed.lose_take_response {
+            return Err(Status::unavailable("synthetic take response loss"));
+        }
+        Ok(Response::new(TakeInputResponse {
+            input,
+            valid_for_ms: observed.valid_for_ms,
+        }))
     }
 
     async fn settle_live_input(
         &self,
-        _request: Request<HarnessSettleLiveInputRequest>,
+        request: Request<HarnessSettleLiveInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        Err(Status::unimplemented(
-            "the Codex exec fixture does not steer live input",
-        ))
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        if let Some(previous) = observed.receipts.first() {
+            assert_eq!(*previous, request);
+        }
+        let mut input = observed
+            .dispatched
+            .clone()
+            .expect("input was taken before settlement");
+        assert_eq!(input.input_id, request.input_id);
+        input.state = match request.receipt() {
+            LiveInputReceipt::Accepted => LiveInputState::Accepted,
+            LiveInputReceipt::Rejected => LiveInputState::Rejected,
+            LiveInputReceipt::Unknown => LiveInputState::Unknown,
+            LiveInputReceipt::Withdrawn => LiveInputState::Withdrawn,
+            _ => panic!("invalid receipt"),
+        } as i32;
+        observed.receipts.push(request);
+        if observed.lose_settlement_response {
+            observed.lose_settlement_response = false;
+            return Err(Status::unavailable("synthetic receipt response loss"));
+        }
+        Ok(Response::new(input))
     }
 
     async fn publish(
@@ -143,6 +181,14 @@ impl HarnessProcess {
         actions: &[&str],
         checkpoint: Option<SessionCheckpoint>,
     ) -> Result<Self> {
+        Self::with_prompt(actions, checkpoint, "Inspect this fixture").await
+    }
+
+    async fn with_prompt(
+        actions: &[&str],
+        checkpoint: Option<SessionCheckpoint>,
+        prompt: &str,
+    ) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let bootstrap = AdapterBootstrap {
             endpoint: format!("http://{}", listener.local_addr()?),
@@ -158,7 +204,7 @@ impl HarnessProcess {
                 tag_id: "native-tag".into(),
                 session_id: "native-session".into(),
                 instructions: "Review carefully".into(),
-                prompt: "Inspect this fixture".into(),
+                prompt: prompt.into(),
                 allowed_actions: actions.iter().map(|value| (*value).into()).collect(),
                 ..Default::default()
             },
@@ -215,23 +261,8 @@ impl NativeFixture {
                 json!({"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"remember this fixture"}]}}),
             ]),
         )?;
-        let file = |name: &str| quote(&directory.path().join(name));
-        let script = format!(
-            "#!/bin/sh\nif [ \"$1\" = '--version' ]; then printf 'codex-cli 0.163.0\\n'; exit 0; fi\nprintf '%s\\0' \"$@\" > {}\nprintf '%s' \"$$\" > {}\n/bin/cat > {}\n/usr/bin/env > {}\nif [ -f \"$CODEX_HOME/auth.json\" ]; then /bin/cat \"$CODEX_HOME/auth.json\" > {}; /bin/ls -l \"$CODEX_HOME/auth.json\" > {}; fi\nif [ -f \"$CODEX_HOME/config.toml\" ]; then printf 'unexpected config' > {}; fi\nprintf 'private stderr {}\\n' >&2\n/bin/mkdir -p \"$CODEX_HOME/sessions\"\nif [ -f \"$CODEX_HOME/sessions/thread.jsonl\" ]; then /bin/cat \"$CODEX_HOME/sessions/thread.jsonl\" > {}; else /bin/cp {} \"$CODEX_HOME/sessions/thread.jsonl\"; fi\n/bin/cat {}\n{}\n",
-            file("args")?,
-            file("pid")?,
-            file("prompt")?,
-            file("env")?,
-            file("auth")?,
-            file("auth-mode")?,
-            file("config-copied")?,
-            KEY,
-            file("restored.jsonl")?,
-            file("seed.jsonl")?,
-            quote(&output_file)?,
-            tail,
-        );
-        std::fs::write(&command, script)?;
+        std::fs::write(directory.path().join("tail"), tail)?;
+        std::fs::write(&command, include_str!("fixtures/app_server.py"))?;
         std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700))?;
         Ok(Self {
             directory,
@@ -288,15 +319,6 @@ impl NativeFixture {
     }
 }
 
-fn quote(path: &Path) -> Result<String> {
-    Ok(format!(
-        "'{}'",
-        path.to_str()
-            .context("fixture path must be UTF-8")?
-            .replace('\'', "'\\''")
-    ))
-}
-
 fn event_lines(values: &[Value]) -> String {
     values
         .iter()
@@ -315,8 +337,247 @@ fn successful(text: &str) -> String {
     ])
 }
 
+async fn steering_fixture(
+    mode: &str,
+    valid_for_ms: u64,
+    lose_receipt: bool,
+) -> Result<(NativeFixture, HarnessProcess)> {
+    let fixture = NativeFixture::new(
+        &successful("response includes the live instruction"),
+        "exit 0",
+    )?;
+    std::fs::write(fixture.directory.path().join("steering-mode"), mode)?;
+    let server = HarnessProcess::start(&["files:read"]).await?;
+    {
+        let mut observed = server.observed.lock().await;
+        observed.input = Some(LiveInput {
+            input_id: "live-input".into(),
+            task_id: "native-task".into(),
+            attempt_id: "native-attempt".into(),
+            follower_task_id: "follower-task".into(),
+            text: "Use the revised requirement".into(),
+            state: LiveInputState::Dispatching as i32,
+            order: 1,
+        });
+        observed.valid_for_ms = valid_for_ms;
+        observed.lose_settlement_response = lose_receipt;
+    }
+    Ok((fixture, server))
+}
+
 #[tokio::test]
-async fn native_exec_uses_exact_model_read_only_sandbox_scoped_env_and_redacted_events()
+async fn live_input_targets_exact_active_turn_once_and_retries_only_the_receipt() -> Result<()> {
+    let (fixture, server) = steering_fixture("accept", 10_000, true).await?;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().unwrap();
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert!(outcome.checkpoint.is_some());
+    assert_eq!(observed.receipts.len(), 2);
+    assert!(
+        observed
+            .receipts
+            .iter()
+            .all(|value| value.receipt() == LiveInputReceipt::Accepted)
+    );
+    let requests: Vec<Value> = fixture
+        .read("requests.jsonl")?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|value| value["method"] == "turn/start")
+            .count(),
+        1
+    );
+    let steering: Vec<_> = requests
+        .iter()
+        .filter(|value| value["method"] == "turn/steer")
+        .collect();
+    assert_eq!(steering.len(), 1);
+    assert_eq!(steering[0]["params"]["threadId"], "native-thread");
+    assert_eq!(steering[0]["params"]["expectedTurnId"], "native-turn");
+    assert_eq!(
+        steering[0]["params"]["input"][0]["text"],
+        "Use the revised requirement"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn steering_rejection_and_ambiguous_native_delivery_never_replay_or_checkpoint() -> Result<()>
+{
+    for (mode, expected) in [
+        ("reject", LiveInputReceipt::Rejected),
+        ("lost", LiveInputReceipt::Unknown),
+        ("wrong-turn", LiveInputReceipt::Unknown),
+        ("late", LiveInputReceipt::Unknown),
+    ] {
+        let (fixture, server) = steering_fixture(mode, 10_000, false).await?;
+        run(fixture.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().unwrap();
+        assert!(!outcome.succeeded, "{mode}");
+        assert!(outcome.checkpoint.is_none(), "{mode}");
+        assert_eq!(observed.receipts.len(), 1, "{mode}: {}", outcome.result);
+        assert_eq!(observed.receipts[0].receipt(), expected, "{mode}");
+        let requests = fixture.read("requests.jsonl")?;
+        assert_eq!(
+            requests.matches("\"method\": \"turn/steer\"").count(),
+            1,
+            "{mode}"
+        );
+        assert_eq!(
+            requests.matches("\"method\": \"turn/start\"").count(),
+            1,
+            "{mode}"
+        );
+        let pid: i32 = fixture.read("pid")?.parse()?;
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "native process must be stopped before completing {mode}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn expired_dispatch_authority_does_not_write_to_native_stdin() -> Result<()> {
+    let (fixture, server) = steering_fixture("accept", 0, false).await?;
+    let mut options = fixture.options();
+    options.timeout = Duration::from_millis(700);
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    assert_eq!(observed.receipts.len(), 1);
+    assert_eq!(observed.receipts[0].receipt(), LiveInputReceipt::Rejected);
+    assert!(!fixture.read("requests.jsonl")?.contains("turn/steer"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn lost_take_response_or_wrong_attempt_never_reaches_native_input() -> Result<()> {
+    for lost in [true, false] {
+        let (fixture, server) = steering_fixture("accept", 10_000, false).await?;
+        {
+            let mut observed = server.observed.lock().await;
+            if lost {
+                observed.lose_take_response = true;
+            } else {
+                observed.input.as_mut().unwrap().attempt_id = "other-attempt".into();
+            }
+        }
+        run(fixture.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        assert!(!observed.outcome.as_ref().unwrap().succeeded);
+        assert!(observed.dispatched.is_some());
+        assert!(observed.input.is_none());
+        assert!(observed.receipts.is_empty());
+        assert!(!fixture.read("requests.jsonl")?.contains("turn/steer"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn active_repository_configuration_is_rejected_before_starting_native_work() -> Result<()> {
+    let (fixture, server) = steering_fixture("project-config", 10_000, false).await?;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    assert!(!observed.outcome.as_ref().unwrap().succeeded);
+    assert!(observed.receipts.is_empty());
+    assert!(!fixture.read("requests.jsonl")?.contains("thread/start"));
+    assert!(!fixture.read("requests.jsonl")?.contains("turn/start"));
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "uses approved native Codex sign-in and model calls; set SUPERTAG_TEST_CODEX_BINARY"]
+async fn installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint() -> Result<()> {
+    let binary =
+        std::env::var_os("SUPERTAG_TEST_CODEX_BINARY").context("set SUPERTAG_TEST_CODEX_BINARY")?;
+    let fixture = NativeFixture::new(&successful("unused"), "exit 0")?;
+    let mut options = fixture.options();
+    options.executable = binary.into();
+    options.model = Some("gpt-6.1-sol".into());
+    options.timeout = Duration::from_secs(90);
+    options.environment = ["PATH", "HOME", "CODEX_HOME", "LANG", "TMPDIR"]
+        .into_iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+        .collect();
+    let server = HarnessProcess::with_prompt(&["files:read"],None,"Write a detailed 350-word explanation of how checking an exact turn identity makes live steering reliable. Do not run any tools or read any files.").await?;
+    {
+        let mut observed = server.observed.lock().await;
+        observed.input=Some(LiveInput { input_id:"live-native-input".into(),task_id:"native-task".into(),attempt_id:"native-attempt".into(),follower_task_id:"native-follower".into(),text:"Replace the previous request. Reply with exactly NATIVE_STEER_OK. Do not use tools.".into(),state:LiveInputState::Dispatching as i32,order:1 });
+        observed.valid_for_ms = 30_000;
+    }
+    run(options, server.bootstrap.clone()).await?;
+    let checkpoint = {
+        let observed = server.observed.lock().await;
+        let outcome = observed
+            .outcome
+            .as_ref()
+            .context("native outcome missing")?;
+        ensure!(
+            outcome.succeeded,
+            "native live steering failed: {}",
+            outcome.result
+        );
+        ensure!(
+            outcome.result.contains("NATIVE_STEER_OK"),
+            "native result did not incorporate the steered instruction"
+        );
+        assert_eq!(observed.receipts.len(), 1);
+        assert_eq!(observed.receipts[0].receipt(), LiveInputReceipt::Accepted);
+        ensure!(!observed.usage.is_empty(), "native usage missing");
+        outcome
+            .checkpoint
+            .clone()
+            .context("native checkpoint missing")?
+    };
+    let second = NativeFixture::new(&successful("unused"), "exit 0")?;
+    let mut options = second.options();
+    options.executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+        .unwrap()
+        .into();
+    options.model = Some("gpt-6.1-sol".into());
+    options.timeout = Duration::from_secs(90);
+    options.environment = ["PATH", "HOME", "CODEX_HOME", "LANG", "TMPDIR"]
+        .into_iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+        .collect();
+    let server = HarnessProcess::with_prompt(
+        &["files:read"],
+        Some(checkpoint),
+        "Reply with exactly NATIVE_RESUME_OK. Do not use tools.",
+    )
+    .await?;
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed
+        .outcome
+        .as_ref()
+        .context("native resume outcome missing")?;
+    ensure!(
+        outcome.succeeded,
+        "native resume failed: {}",
+        outcome.result
+    );
+    ensure!(
+        outcome.result.contains("NATIVE_RESUME_OK"),
+        "native resume result missing"
+    );
+    ensure!(
+        outcome.checkpoint.is_some(),
+        "resumed native checkpoint missing"
+    );
+    ensure!(!observed.usage.is_empty(), "resumed native usage missing");
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_redacted_events()
 -> Result<()> {
     let fixture = NativeFixture::new(
         &successful(&format!("Reviewed {KEY}; no changes.")),
@@ -332,38 +593,25 @@ async fn native_exec_uses_exact_model_read_only_sandbox_scoped_env_and_redacted_
     assert_eq!(observed.events.len(), 2);
     assert_eq!(observed.events[1].text, outcome.result);
     let args = fixture.args()?;
-    assert_eq!(
-        &args[..4],
-        [
-            "exec",
-            "--json",
-            "--cd",
-            fixture.workspace.canonicalize()?.to_str().unwrap()
-        ]
-    );
-    assert_eq!(args.last().map(String::as_str), Some("-"));
+    assert_eq!(&args[..3], ["app-server", "--listen", "stdio://"]);
     assert!(!args.iter().any(|value| value == "--ephemeral"));
-    for pair in [
-        ["--model", "gpt-fixture-exact"],
-        ["--sandbox", "read-only"],
-        ["--config", "approval_policy=\"never\""],
-        ["--config", "features.shell_tool=false"],
-        ["--config", "features.unified_exec=false"],
-        ["--config", "features.hooks=false"],
-        ["--config", "mcp_servers={}"],
-        ["--config", "web_search=\"disabled\""],
+    for setting in [
+        "model=\"gpt-fixture-exact\"",
+        "sandbox_mode=\"read-only\"",
+        "approval_policy=\"never\"",
+        "features.shell_tool=false",
+        "features.unified_exec=false",
+        "features.hooks=false",
+        "features.code_mode_host=false",
+        "mcp_servers={}",
+        "web_search=\"disabled\"",
+        "project_doc_max_bytes=0",
     ] {
         assert!(
-            args.windows(2).any(|values| values == pair),
-            "missing expected native configuration: {pair:?}"
+            args.windows(2)
+                .any(|values| values == ["--config", setting]),
+            "missing {setting}"
         );
-    }
-    for flag in [
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--skip-git-repo-check",
-    ] {
-        assert!(args.iter().any(|value| value == flag));
     }
     assert!(
         !args
@@ -567,7 +815,7 @@ async fn native_failed_malformed_and_incomplete_streams_never_complete_successfu
     ];
     let failures = [
         "Codex emitted malformed JSON",
-        "Codex emitted work before its thread identity",
+        "Codex emitted work for an unowned thread",
         "Codex process ended without a completed turn",
         "Codex completed without a final response",
         "Codex reported a failed turn",
@@ -788,16 +1036,28 @@ async fn continuation_restores_native_history_in_a_new_home_and_reapplies_curren
         "printf '%s\\n' '{\"type\":\"response_item\",\"payload\":{\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"second native turn\"}]}}' >> \"$CODEX_HOME/sessions/thread.jsonl\"; exit 0",
     )?;
     let server = HarnessProcess::with_checkpoint(&["files:read"], Some(checkpoint.clone())).await?;
+    std::fs::write(second.directory.path().join("late-baseline"), "")?;
     run(second.options(), server.bootstrap.clone()).await?;
     let observed = server.observed.lock().await;
     let outcome = observed.outcome.as_ref().unwrap();
     assert!(outcome.succeeded, "{}", outcome.result);
     let args = second.args()?;
-    assert_eq!(&args[args.len() - 3..], ["resume", "native-thread", "-"]);
-    assert!(
-        args.windows(2)
-            .any(|pair| pair == ["--sandbox", "read-only"])
+    let requests: Vec<Value> = second
+        .read("requests.jsonl")?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let resumed = requests
+        .iter()
+        .find(|value| value["method"] == "thread/resume")
+        .unwrap();
+    assert_eq!(resumed["params"]["threadId"], "native-thread");
+    assert_eq!(resumed["params"]["sandbox"], "read-only");
+    assert_eq!(
+        resumed["params"]["config"]["features.code_mode_host"],
+        false
     );
+    assert!(args.iter().any(|arg| arg == "sandbox_mode=\"read-only\""));
     assert!(args.iter().any(|arg| arg == "features.shell_tool=false"));
     assert!(!args.iter().any(|arg| arg == "features.shell_tool=true"));
     let restored = second.read("restored.jsonl")?;

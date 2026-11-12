@@ -37,6 +37,20 @@ service Objectives {
   rpc ReviewObjective(ReviewObjectiveRequest) returns (Objective);
 }
 
+service Teams {
+  rpc CreateTeam(CreateTeamRequest) returns (Team);
+  rpc GetTeam(GetTeamRequest) returns (Team);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc UpdateTeam(UpdateTeamRequest) returns (Team);
+  rpc DeleteTeam(DeleteTeamRequest) returns (Team);
+  rpc ListWorkstreamPosts(ListWorkstreamPostsRequest) returns (ListWorkstreamPostsResponse);
+}
+
+service AttemptWorkstreams {
+  rpc ReadAttemptWorkstream(ReadAttemptWorkstreamRequest) returns (ReadAttemptWorkstreamResponse);
+  rpc PostAttemptWorkstream(PostAttemptWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
 service WorkerHost {
   rpc RegisterHost(RegisterHostRequest) returns (HostRecord);
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
@@ -80,6 +94,7 @@ service Connector {
   rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
   rpc AcceptGithubEvent(AcceptGithubEventRequest) returns (AcceptGithubEventResponse);
   rpc AcceptLinearEvent(AcceptLinearEventRequest) returns (AcceptLinearEventResponse);
+  rpc AcceptLarkEvent(AcceptLarkEventRequest) returns (AcceptLarkEventResponse);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
@@ -646,6 +661,7 @@ message CreateObjectiveRequest {
   optional int64 deadline_ms = 6;
   optional uint64 budget_limit_minor = 7;
   optional string budget_currency = 8;
+  optional string team_id = 9;
 }
 
 message Objective {
@@ -662,6 +678,105 @@ message Objective {
   optional string budget_currency = 11;
   optional int64 paused_at_ms = 12;
   optional uint64 reported_spend_minor = 13;
+  optional string team_id = 14;
+}
+
+message Team {
+  string team_id = 1;
+  string name = 2;
+  repeated string member_tag_ids = 3;
+  optional uint32 max_concurrency = 4;
+  uint64 revision = 5;
+  int64 created_at_ms = 6;
+  int64 updated_at_ms = 7;
+}
+
+message CreateTeamRequest {
+  string operation_id = 1;
+  string team_id = 2;
+  string name = 3;
+  repeated string member_tag_ids = 4;
+  optional uint32 max_concurrency = 5;
+}
+
+message GetTeamRequest {
+  string team = 1;
+}
+
+message ListTeamsRequest {
+  string member_tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+  string next_cursor = 2;
+}
+
+message TeamMembers {
+  repeated string tag_ids = 1;
+}
+
+message UpdateTeamRequest {
+  string operation_id = 1;
+  string team = 2;
+  uint64 expected_revision = 3;
+  optional string name = 4;
+  TeamMembers members = 5;
+  optional uint32 max_concurrency = 6;
+}
+
+message DeleteTeamRequest {
+  string operation_id = 1;
+  string team = 2;
+}
+
+message WorkstreamPost {
+  string post_id = 1;
+  string team_id = 2;
+  string author_tag_id = 3;
+  repeated string to_tag_ids = 4;
+  string body = 5;
+  string source_task_id = 6;
+  uint64 sequence = 7;
+  int64 created_at_ms = 8;
+}
+
+message ListWorkstreamPostsRequest {
+  string team = 1;
+  optional uint64 after_sequence = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ListWorkstreamPostsResponse {
+  repeated WorkstreamPost posts = 1;
+  string next_cursor = 2;
+}
+
+message ReadAttemptWorkstreamRequest {
+  InspectAttemptRequest attempt = 1;
+  optional uint64 after_sequence = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ReadAttemptWorkstreamResponse {
+  Team team = 1;
+  ListWorkstreamPostsResponse page = 2;
+}
+
+message PostAttemptWorkstreamRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string body = 3;
+  repeated string to_tag_ids = 4;
+}
+
+message PostAttemptWorkstreamResponse {
+  WorkstreamPost post = 1;
+  bool duplicate = 2;
 }
 
 message GetObjectiveRequest {
@@ -788,6 +903,31 @@ message AcceptLinearEventRequest {
 }
 
 message AcceptLinearEventResponse {
+  Task task = 1;
+}
+
+enum LarkDomain {
+  LARK_DOMAIN_UNSPECIFIED = 0;
+  LARK_DOMAIN_LARK = 1;
+  LARK_DOMAIN_FEISHU = 2;
+}
+
+message AcceptLarkEventRequest {
+  string account_id = 1;
+  LarkDomain domain = 2;
+  string app_id = 3;
+  string tenant_key = 4;
+  string event_id = 5;
+  string chat_id = 6;
+  string message_id = 7;
+  string root_message_id = 8;
+  string actor_id = 9;
+  string prompt = 10;
+  optional string mention_tag_id = 11;
+  bool direct = 12;
+}
+
+message AcceptLarkEventResponse {
   Task task = 1;
 }
 

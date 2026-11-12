@@ -8,6 +8,8 @@ mod authority;
 #[path = "github_events.rs"]
 mod github_events;
 mod hosts;
+#[path = "lark_events.rs"]
+mod lark_events;
 #[path = "linear_events.rs"]
 mod linear_events;
 #[path = "slack_threads.rs"]
@@ -60,7 +62,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 13;
+        const SCHEMA_VERSION: i64 = 15;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -124,6 +126,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0011_harness_selection.sql"),
                 include_str!("../migrations/sqlite/0012_linear_events.sql"),
                 include_str!("../migrations/sqlite/0013_conversations.sql"),
+                include_str!("../migrations/sqlite/0014_lark.sql"),
+                include_str!("../migrations/sqlite/0015_team_workstreams.sql"),
             ]
         } else {
             [
@@ -140,6 +144,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0011_harness_selection.sql"),
                 include_str!("../migrations/postgresql/0012_linear_events.sql"),
                 include_str!("../migrations/postgresql/0013_conversations.sql"),
+                include_str!("../migrations/postgresql/0014_lark.sql"),
+                include_str!("../migrations/postgresql/0015_team_workstreams.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

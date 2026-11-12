@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 
+#[derive(Clone)]
 pub(crate) struct Policy {
     pub(crate) write: bool,
     pub(crate) commands: bool,
@@ -46,31 +47,26 @@ pub(crate) fn arguments(
     model: Option<&str>,
     policy: &Policy,
 ) -> Result<Vec<String>> {
-    let path = workspace
+    workspace
         .to_str()
         .context("Codex workspace path must be UTF-8")?;
-    let mut args = vec![
-        "exec".into(),
-        "--json".into(),
-        "--cd".into(),
-        path.into(),
-        "--ignore-user-config".into(),
-        "--ignore-rules".into(),
-        "--skip-git-repo-check".into(),
-        "--color".into(),
-        "never".into(),
-    ];
+    let mut args = vec!["app-server".into(), "--listen".into(), "stdio://".into()];
     if let Some(model) = model {
         ensure!(
             !model.is_empty() && model.len() <= 256 && !model.chars().any(char::is_control),
             "invalid Codex model selection"
         );
-        args.extend(["--model".into(), model.into()]);
+        args.extend([
+            "--config".into(),
+            format!("model={}", serde_json::to_string(model)?),
+        ]);
     }
     let mut configuration = vec![
         "approval_policy=\"never\"".into(),
         "agents.enabled=false".into(),
         "mcp_servers={}".into(),
+        "project_doc_max_bytes=0".into(),
+        "analytics.enabled=false".into(),
     ];
     for feature in [
         "multi_agent",
@@ -103,7 +99,7 @@ pub(crate) fn arguments(
         if policy.search { "live" } else { "disabled" }
     ));
     if policy.network {
-        args.extend(["--sandbox".into(), "workspace-write".into()]);
+        configuration.push("sandbox_mode=\"workspace-write\"".into());
         configuration.push("sandbox_workspace_write.network_access=true".into());
     } else if policy.commands || policy.write {
         // Exact legacy profile: permit loopback only for admitted commands and
@@ -139,13 +135,43 @@ pub(crate) fn arguments(
             ));
         }
     } else {
-        args.extend(["--sandbox".into(), "read-only".into()]);
+        configuration.push("sandbox_mode=\"read-only\"".into());
     }
     for value in configuration {
         args.extend(["--config".into(), value]);
     }
-    args.push("-".into());
     Ok(args)
+}
+
+/// Reapply the current Task's policy when resuming a native thread. Native
+/// history cannot select the new Attempt's model, tools, or sandbox.
+pub(crate) fn thread_parameters(workspace: &Path, args: &[String]) -> Result<serde_json::Value> {
+    let mut configuration = serde_json::Map::new();
+    for pair in args.windows(2).filter(|pair| pair[0] == "--config") {
+        let (key, raw) = pair[1]
+            .split_once('=')
+            .context("invalid owned Codex configuration")?;
+        let value = if key == "permissions.supertag.filesystem" {
+            let path = protected_git_directory(workspace)?
+                .context("protected Git directory is unavailable")?;
+            serde_json::json!({path.to_str().context("common Git path must be UTF-8")?: "read"})
+        } else {
+            serde_json::from_str(raw).context("invalid owned Codex configuration")?
+        };
+        configuration.insert(key.to_owned(), value);
+    }
+    let mut params = serde_json::json!({
+        "cwd": workspace,
+        "approvalPolicy": "never",
+        "config": configuration,
+    });
+    if let Some(model) = configuration.get("model") {
+        params["model"] = model.clone();
+    }
+    if let Some(sandbox) = configuration.get("sandbox_mode") {
+        params["sandbox"] = sandbox.clone();
+    }
+    Ok(params)
 }
 
 fn protected_git_directory(workspace: &Path) -> Result<Option<PathBuf>> {

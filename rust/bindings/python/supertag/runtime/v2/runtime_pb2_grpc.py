@@ -1110,6 +1110,408 @@ class Objectives:
             _registered_method=True)
 
 
+class TeamsStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CreateTeam = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/CreateTeam',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateTeamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+                _registered_method=True)
+        self.GetTeam = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/GetTeam',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTeamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+                _registered_method=True)
+        self.ListTeams = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/ListTeams',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsResponse.FromString,
+                _registered_method=True)
+        self.UpdateTeam = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/UpdateTeam',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.UpdateTeamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+                _registered_method=True)
+        self.DeleteTeam = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/DeleteTeam',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DeleteTeamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+                _registered_method=True)
+        self.ListWorkstreamPosts = channel.unary_unary(
+                '/supertag.runtime.v2.Teams/ListWorkstreamPosts',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsResponse.FromString,
+                _registered_method=True)
+
+
+class TeamsServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def CreateTeam(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetTeam(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListTeams(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateTeam(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteTeam(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListWorkstreamPosts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_TeamsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'CreateTeam': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateTeam,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateTeamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.SerializeToString,
+            ),
+            'GetTeam': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTeam,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTeamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.SerializeToString,
+            ),
+            'ListTeams': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListTeams,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsResponse.SerializeToString,
+            ),
+            'UpdateTeam': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateTeam,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.UpdateTeamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.SerializeToString,
+            ),
+            'DeleteTeam': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteTeam,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DeleteTeamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.SerializeToString,
+            ),
+            'ListWorkstreamPosts': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListWorkstreamPosts,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Teams', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Teams', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Teams:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CreateTeam(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/CreateTeam',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateTeamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetTeam(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/GetTeam',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTeamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListTeams(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/ListTeams',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListTeamsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateTeam(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/UpdateTeam',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.UpdateTeamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteTeam(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/DeleteTeam',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.DeleteTeamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Team.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListWorkstreamPosts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Teams/ListWorkstreamPosts',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkstreamPostsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AttemptWorkstreamsStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ReadAttemptWorkstream = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkstreams/ReadAttemptWorkstream',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.FromString,
+                _registered_method=True)
+        self.PostAttemptWorkstream = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
+                _registered_method=True)
+
+
+class AttemptWorkstreamsServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def ReadAttemptWorkstream(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PostAttemptWorkstream(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptWorkstreamsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ReadAttemptWorkstream': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadAttemptWorkstream,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.SerializeToString,
+            ),
+            'PostAttemptWorkstream': grpc.unary_unary_rpc_method_handler(
+                    servicer.PostAttemptWorkstream,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptWorkstreams', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptWorkstreams', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptWorkstreams:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ReadAttemptWorkstream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkstreams/ReadAttemptWorkstream',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PostAttemptWorkstream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class WorkerHostStub:
     """Missing associated documentation comment in .proto file."""
 
@@ -2029,6 +2431,11 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventResponse.FromString,
                 _registered_method=True)
+        self.AcceptLarkEvent = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/AcceptLarkEvent',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.FromString,
+                _registered_method=True)
         self.ClaimReply = channel.unary_unary(
                 '/supertag.runtime.v2.Connector/ClaimReply',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
@@ -2070,6 +2477,12 @@ class ConnectorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AcceptLarkEvent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ClaimReply(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -2104,6 +2517,11 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.AcceptLinearEvent,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventResponse.SerializeToString,
+            ),
+            'AcceptLarkEvent': grpc.unary_unary_rpc_method_handler(
+                    servicer.AcceptLarkEvent,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.SerializeToString,
             ),
             'ClaimReply': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimReply,
@@ -2226,6 +2644,33 @@ class Connector:
             '/supertag.runtime.v2.Connector/AcceptLinearEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLinearEventResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AcceptLarkEvent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/AcceptLarkEvent',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -258,7 +258,7 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 	objective := &v2.Objective{
 		ObjectiveId: "sso", OwnerTagId: "lead", SessionId: "objective-session", Outcome: "Verify SSO",
 		Status: v2.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW, StartingTaskId: "objective-first",
-		BudgetLimitMinor: &limit, BudgetCurrency: &currency, ReportedSpendMinor: &spend, Revision: 5,
+		BudgetLimitMinor: &limit, BudgetCurrency: &currency, ReportedSpendMinor: &spend, Revision: 5, TeamId: proto.String("release"),
 	}
 	testRPC(mux, rpc.ObjectivesListObjectivesProcedure, func(_ context.Context, req *v2.ListObjectivesRequest) (*v2.ListObjectivesResponse, error) {
 		if req.GetAfterId() == "sso" {
@@ -270,7 +270,8 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 	})
 	testRPC(mux, rpc.ObjectivesCreateObjectiveProcedure, func(_ context.Context, req *v2.CreateObjectiveRequest) (*v2.Objective, error) {
 		if req.GetOperationId() != "sso" || req.GetObjectiveId() != "sso" || req.GetOwnerTagId() != "lead" ||
-			req.GetOutcome() != "Verify SSO" || req.GetBudgetLimitMinor() != limit || req.GetBudgetCurrency() != currency {
+			req.GetOutcome() != "Verify SSO" || req.GetBudgetLimitMinor() != limit || req.GetBudgetCurrency() != currency ||
+			req.GetTeamId() != "Release team" {
 			t.Errorf("CreateObjective request = %v", req)
 		}
 		return objective, nil
@@ -308,10 +309,10 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 		open[0].GetStatus() != operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
 		t.Fatalf("ListOpenObjectives = %v, %v", open, err)
 	}
-	created, err := c.CreateObjective(ctx, NewObjective{ID: "sso", Owner: "lead", Outcome: "Verify SSO", Budget: &operatorv1.Budget{
+	created, err := c.CreateObjective(ctx, NewObjective{ID: "sso", Owner: "lead", Outcome: "Verify SSO", Team: "Release team", Budget: &operatorv1.Budget{
 		LimitMinor: int64(limit), Currency: currency,
 	}})
-	if err != nil || created.GetStartedTaskId() != "objective-first" {
+	if err != nil || created.GetStartedTaskId() != "objective-first" || created.GetObjective().GetTeamId() != "release" {
 		t.Fatalf("CreateObjective = %v, %v", created, err)
 	}
 	view, err := c.DescribeObjective(ctx, "sso")
@@ -328,6 +329,55 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect(t, collect(t, testFollower(c).FollowObjective(ctx, sent.GetTag(), msg)), "reply Verified")
+}
+
+func TestRuntimeV2TeamsAndWorkstream(t *testing.T) {
+	mux := http.NewServeMux()
+	team := &v2.Team{
+		TeamId: "release", Name: "Release review", MemberTagIds: []string{"lead", "reviewer"},
+		MaxConcurrency: proto.Uint32(2), Revision: 4, CreatedAtMs: 1000, UpdatedAtMs: 2000,
+	}
+	testRPC(mux, rpc.TeamsListTeamsProcedure, func(_ context.Context, req *v2.ListTeamsRequest) (*v2.ListTeamsResponse, error) {
+		switch req.GetCursor() {
+		case "":
+			return &v2.ListTeamsResponse{Teams: []*v2.Team{team}, NextCursor: "opaque-b"}, nil
+		case "opaque-b":
+			return &v2.ListTeamsResponse{Teams: []*v2.Team{{TeamId: "docs", Name: "Docs"}}, NextCursor: "opaque-a"}, nil
+		case "opaque-a":
+			return &v2.ListTeamsResponse{Teams: []*v2.Team{{TeamId: "ops", Name: "Ops"}}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected Team cursor %q", req.GetCursor())
+		}
+	})
+	testRPC(mux, rpc.TeamsGetTeamProcedure, func(_ context.Context, req *v2.GetTeamRequest) (*v2.Team, error) {
+		if req.GetTeam() != team.GetName() {
+			t.Errorf("GetTeam request = %v", req)
+		}
+		return team, nil
+	})
+	testRPC(mux, rpc.TeamsListWorkstreamPostsProcedure, func(_ context.Context, req *v2.ListWorkstreamPostsRequest) (*v2.ListWorkstreamPostsResponse, error) {
+		if req.GetTeam() != "release" || req.GetLimit() != 10 || req.AfterSequence != nil {
+			t.Errorf("ListWorkstreamPosts request = %v", req)
+		}
+		return &v2.ListWorkstreamPostsResponse{Posts: []*v2.WorkstreamPost{{
+			PostId: "post-1", TeamId: "release", AuthorTagId: "reviewer", ToTagIds: []string{"lead"},
+			Body: "Checks passed.", SourceTaskId: "task-1", Sequence: 3, CreatedAtMs: 3000,
+		}}}, nil
+	})
+	c := testRuntime(t, mux, false)
+	teams, err := c.ListTeams(t.Context())
+	if err != nil || len(teams) != 3 || teams[0].GetId() != "release" || teams[2].GetId() != "ops" ||
+		teams[0].GetMaxConcurrency() != 2 || teams[0].GetMembers()[1].GetTag() != "reviewer" {
+		t.Fatalf("ListTeams = %v, %v", teams, err)
+	}
+	view, err := c.GetTeam(t.Context(), "Release review", 10)
+	if err != nil || view.Team.GetRevision() != 4 || view.TagNames["lead"] != "lead" || len(view.Posts) != 1 {
+		t.Fatalf("GetTeam = %+v, %v", view, err)
+	}
+	post := view.Posts[0]
+	if post.GetBody() != "Checks passed." || post.GetSequence() != 3 || post.GetCreatedAt().AsTime().UnixMilli() != 3000 {
+		t.Fatalf("Workstream post = %v", post)
+	}
 }
 
 func TestRuntimeV2CancelsInFlightFollow(t *testing.T) {

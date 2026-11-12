@@ -380,6 +380,15 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         "configure terminal UI fixture Tag: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let mut team = command(&["team", "--state-directory"]);
+    team.arg(&state)
+        .args(["create", "maintainers", "--member", "engineer"]);
+    let output = timeout(WAIT, team.output()).await??;
+    ensure!(
+        output.status.success(),
+        "configure terminal UI fixture Team: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let tmux = Tmux {
         socket: directory.path().join("tmux.sock"),
@@ -409,6 +418,11 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
     tmux.wait_for("Process requests: Rust UI round trip")
         .await?;
+    tmux.wait_for("maintainers").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Tab", "Down"])
+        .await?;
+    tmux.wait_for("Members: engineer").await?;
+    tmux.wait_for("No posts yet.").await?;
     tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
     if let Some(pid) = runtime.id() {
         // SAFETY: this PID belongs to the supervised disposable runtime.

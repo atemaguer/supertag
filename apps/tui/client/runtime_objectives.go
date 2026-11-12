@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
@@ -38,9 +39,6 @@ func (c *runtimeClient) listOpenObjectives(ctx context.Context) ([]*operatorv1.O
 }
 
 func (c *runtimeClient) createObjective(ctx context.Context, objective NewObjective) (*operatorv1.CreateObjectiveResponse, error) {
-	if objective.Team != "" {
-		return nil, unavailable("Assigning a Team to an Objective")
-	}
 	if objective.Workspace != "" {
 		return nil, &APIError{Code: connect.CodeFailedPrecondition, Message: "Configure the Workspace on the owner Tag. This Gateway uses the Tag's Workspace for its Objective."}
 	}
@@ -54,6 +52,9 @@ func (c *runtimeClient) createObjective(ctx context.Context, objective NewObject
 	}
 	body := &v2.CreateObjectiveRequest{
 		OperationId: id, ObjectiveId: id, OwnerTagId: objective.Owner, Outcome: objective.Outcome,
+	}
+	if objective.Team != "" {
+		body.TeamId = proto.String(objective.Team)
 	}
 	if objective.Budget != nil {
 		if objective.Budget.GetLimitMinor() < 0 {
@@ -138,6 +139,7 @@ func runtimeObjective(objective *v2.Objective) *operatorv1.Objective {
 	out := &operatorv1.Objective{
 		Id: objective.GetObjectiveId(), Outcome: objective.GetOutcome(),
 		OwnerTagId: objective.GetOwnerTagId(), OwnerTag: objective.GetOwnerTagId(),
+		TeamId: objective.GetTeamId(),
 		Status: objectiveStatus(objective.GetStatus()), Revision: int64(objective.GetRevision()),
 		Ongoing: objective.GetOngoing(),
 	}

@@ -25,6 +25,7 @@ type runtimeClient struct {
 	operator      runtimev2connect.OperatorClient
 	conversations runtimev2connect.ConversationsClient
 	objectives    runtimev2connect.ObjectivesClient
+	teams         runtimev2connect.TeamsClient
 }
 
 // NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2.
@@ -79,6 +80,7 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		operator:      runtimev2connect.NewOperatorClient(httpClient, origin, options...),
 		conversations: runtimev2connect.NewConversationsClient(httpClient, origin, options...),
 		objectives:    runtimev2connect.NewObjectivesClient(httpClient, origin, options...),
+		teams:         runtimev2connect.NewTeamsClient(httpClient, origin, options...),
 	}
 	return c, nil
 }

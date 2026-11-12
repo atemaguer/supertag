@@ -40,9 +40,11 @@ uuid.workspace = true
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", features = ["sink"] }
 hmac.workspace = true
 reqwest.workspace = true
 sqlx.workspace = true
+tokio-tungstenite = "0.28"
 
 [[test]]
 name = "split_runtime"
@@ -82,6 +84,11 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "linear_runtime"
 path = "tests/linear_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "lark_runtime"
+path = "tests/lark_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]

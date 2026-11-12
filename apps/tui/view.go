@@ -238,7 +238,6 @@ func (m model) renderRail(height int) string {
 	}
 	if m.client.RuntimeV2() {
 		section("Inbox unavailable", "")
-		section("Teams unavailable", "")
 	} else {
 		waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
 		if m.inbox.Truncated {
@@ -248,11 +247,11 @@ func (m model) renderRail(height int) string {
 		for i, item := range m.inbox.Items {
 			add(row{rowInbox, i}, m.inboxRow(item), "")
 		}
-		if len(m.teams) > 0 || m.teamsErr != "" {
-			section("Teams", m.teamsErr)
-			for i, team := range m.teams {
-				add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
-			}
+	}
+	if len(m.teams) > 0 || m.teamsErr != "" {
+		section("Teams", m.teamsErr)
+		for i, team := range m.teams {
+			add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
 		}
 	}
 

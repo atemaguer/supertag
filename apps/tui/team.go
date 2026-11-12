@@ -52,7 +52,7 @@ func (r *teamReads) start() uint64 {
 }
 
 func (m model) reloadTeams() tea.Cmd {
-	if m.client.RuntimeV2() || !m.teamReload.start() {
+	if !m.teamReload.start() {
 		return nil
 	}
 	return m.teamsCmd()
@@ -225,12 +225,12 @@ func (m model) renderTeam() string {
 		}
 		view = client.TeamView{Team: team}
 	}
-	return text + wrap.Render(describeTeam(view, read))
+	return text + wrap.Render(describeTeam(view, read, m.client.RuntimeV2()))
 }
 
 // describeTeam renders a Team and its Workstream; posts says the Workstream was read. Every line
 // is filtered for the terminal.
-func describeTeam(view client.TeamView, posts bool) string {
+func describeTeam(view client.TeamView, posts, runtimeV2 bool) string {
 	team := view.Team
 	var lines []string
 	add := func(line ...string) { lines = append(lines, line...) }
@@ -288,7 +288,11 @@ func describeTeam(view client.TeamView, posts bool) string {
 			add("    " + body)
 		}
 	}
-	add("", "Change it with supertag update team "+shellWord(team.GetName())+".")
+	if runtimeV2 {
+		add("", "Change it with supertag team update "+shellWord(team.GetId())+" --help.")
+	} else {
+		add("", "Change it with supertag update team "+shellWord(team.GetName())+".")
+	}
 	for i, line := range lines {
 		lines[i] = terminalText(line)
 	}

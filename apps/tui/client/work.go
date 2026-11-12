@@ -110,7 +110,7 @@ func eventActivity(event *operatorv1.TaskEvent) (Activity, bool) {
 // ListTeams returns every Team, by name.
 func (c *Client) ListTeams(ctx context.Context) ([]*operatorv1.Team, error) {
 	if c.RuntimeV2() {
-		return nil, unavailable("Teams")
+		return c.runtime.listTeams(ctx)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
@@ -143,7 +143,7 @@ type TeamView struct {
 // them.
 func (c *Client) GetTeam(ctx context.Context, team string, posts int32) (TeamView, error) {
 	if c.RuntimeV2() {
-		return TeamView{}, unavailable("Team Workstreams")
+		return c.runtime.getTeam(ctx, team, posts)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()

@@ -8,8 +8,31 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"connectrpc.com/connect"
 
+	"github.com/atemaguer/supertag/apps/tui/client"
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
+
+func TestRuntimeV2ObjectiveFormKeepsTeamSelection(t *testing.T) {
+	m, err := dialRuntimeV2("test")(t.Context(), client.Target{URL: "http://127.0.0.1:1", Token: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.client.Close)
+	m.tags, m.teams, m.selected = tagList("lead"), []*operatorv1.Team{billingTeam()}, 0
+	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.openObjectiveForm("")
+	m.form.fields[fieldOutcome].SetValue("Verify SSO")
+	m.moveField(fieldTeam)
+	if m.form.field != fieldTeam || !strings.Contains(m.renderObjectiveForm(), "Teams: billing") {
+		t.Fatal("the runtime v2 Objective form must expose available Teams")
+	}
+	m.form.fields[fieldTeam].SetValue("billing")
+	m.moveField(fieldBudget)
+	m.createObjective()
+	if m.form.request.Team != "billing" || m.form.request.Owner != "lead" {
+		t.Fatalf("Objective request = %+v", m.form.request)
+	}
+}
 
 // dedupingFake commits each create by ID, as the Control Plane does, and loses the first n
 // answers after committing.

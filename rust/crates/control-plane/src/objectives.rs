@@ -135,6 +135,7 @@ fn record_row(row: &AnyRow) -> Result<Record> {
                 .reported_spend
                 .as_ref()
                 .map(|value| value.spend.amount_minor),
+            team_id: row.try_get("team_id")?,
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -315,6 +316,14 @@ impl Store {
         if tag.is_none() {
             return Err(StoreError::NotFound("owner Tag was not found".into()));
         }
+        let team_id = match &input.team_id {
+            Some(team) => Some(
+                crate::teams::team_by_reference_in(&mut tx, team)
+                    .await?
+                    .team_id,
+            ),
+            None => None,
+        };
         let session_id = Uuid::new_v4().to_string();
         let mut state = limits::LimitState::default();
         if let Some(deadline) = input.deadline_ms {
@@ -323,9 +332,9 @@ impl Store {
                 at: timestamp(now_ms)?,
             });
         }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11)")
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12)")
             .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).execute(&mut *tx).await?;
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
         let prompt = format!(
@@ -744,14 +753,18 @@ pub(crate) async fn objective_task_can_start_in(
     if record.closed() || record.value.paused_at_ms.is_some() {
         return Ok(false);
     }
-    if parent.try_get::<String, _>("kind")? == "notice" {
-        return Ok(!limits::deadline_stops_running(
-            &record.limits,
-            timestamp(now_ms)?,
-            None,
-        ));
+    let eligible = if parent.try_get::<String, _>("kind")? == "notice" {
+        !limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None)
+    } else {
+        limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none()
+    };
+    if !eligible {
+        return Ok(false);
     }
-    Ok(limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none())
+    match record.value.team_id {
+        Some(team_id) => crate::teams::capacity_in(tx, &team_id, task, now_ms).await,
+        None => Ok(true),
+    }
 }
 
 /// Starting native execution is the point at which absent provider cost becomes unknown.

@@ -1,4 +1,5 @@
 //! Native Codex execution through the supervising Worker Host's private Harness API.
+mod app_server;
 mod auth;
 mod checkpoint;
 mod config;
@@ -11,11 +12,11 @@ use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest,
-        HarnessUsageRequest, SessionCheckpoint, Task, harness_client::HarnessClient,
+        SessionCheckpoint, Task, harness_client::HarnessClient,
     },
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt},
     process::Command,
     time,
 };
@@ -78,6 +79,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         &options,
         &task,
         attached.checkpoint.as_ref(),
+        &attached.attempt_id,
         &mut harness,
         &bootstrap.token,
     )
@@ -111,6 +113,7 @@ async fn execute(
     options: &CodexOptions,
     task: &Task,
     previous_checkpoint: Option<&SessionCheckpoint>,
+    attempt_id: &str,
     harness: &mut HarnessClient<Channel>,
     token: &str,
 ) -> Result<(String, SessionCheckpoint)> {
@@ -125,7 +128,8 @@ async fn execute(
     ensure!(workspace.is_dir(), "Codex workspace must be a directory");
     let policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
-    let mut arguments = config::arguments(&workspace, options.model.as_deref(), &policy)?;
+    let arguments = config::arguments(&workspace, options.model.as_deref(), &policy)?;
+    let thread_parameters = config::thread_parameters(&workspace, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let mut environment = authentication.environment(&options.environment);
     // Secrets belonging to the transport are never forwarded to the native process.
@@ -143,12 +147,10 @@ async fn execute(
             )
         })
         .transpose()?;
-    if let Some(thread) = &expected_thread {
-        // Keep sandbox and all current Task configuration before the resume
-        // subcommand; no permission authority is inherited from the transcript.
-        arguments.pop(); // stdin prompt sentinel
-        arguments.extend(["resume".into(), thread.clone(), "-".into()]);
-    }
+    let baseline = match previous_checkpoint {
+        Some(checkpoint) => checkpoint::usage_baseline(checkpoint)?,
+        None => Some([0, 0, 0]),
+    };
     verify_version(options, &environment).await?;
 
     let mut command = Command::new(&options.executable);
@@ -167,68 +169,30 @@ async fn execute(
         .spawn()
         .context("Codex executable could not start")?;
     let outcome = time::timeout(options.timeout, async {
-        let mut input = child
+        let input = child
             .stdin
             .take()
-            .context("Codex prompt pipe is unavailable")?;
-        let prompt = format!(
-            "Tag instructions:\n{}\n\nTask:\n{}\n",
-            task.instructions, task.prompt
-        );
-        input
-            .write_all(prompt.as_bytes())
-            .await
-            .context("could not send Codex prompt")?;
-        input
-            .shutdown()
-            .await
-            .context("could not finish Codex prompt")?;
-        drop(input);
-        let mut output = BufReader::new(
-            child
-                .stdout
-                .take()
-                .context("Codex event pipe is unavailable")?,
-        );
-        let mut state = events::Stream::new(policy, expected_thread);
-        let mut sequence = 0;
-        let mut total = 0;
-        while let Some(line) = read_line(&mut output).await? {
-            total += line.len();
-            ensure!(total <= MAX_STREAM, "Codex event stream exceeds its limit");
-            if line.iter().all(u8::is_ascii_whitespace) {
-                continue;
-            }
-            if let Some(message) = state.accept(&line)? {
-                let message = auth::redact(message, &secrets);
-                publish(harness, token, &mut sequence, &message).await?;
-            }
-            if let Some(mut usage) = state.take_usage() {
-                // Codex exec emits one turn. Its measured counters are the
-                // cumulative totals for this Attempt, independently of whether
-                // process exit or subsequent checkpoint preparation succeeds.
-                if usage
-                    .observed_model
-                    .as_ref()
-                    .is_some_and(|model| auth::redact(model.clone(), &secrets) != *model)
-                {
-                    usage.observed_model = None;
-                }
-                harness
-                    .report_usage(request(
-                        HarnessUsageRequest {
-                            sequence: 1,
-                            native_usage: Some(usage),
-                        },
-                        token,
-                    )?)
-                    .await
-                    .context("could not record Codex token usage")?;
-            }
-        }
+            .context("Codex request pipe is unavailable")?;
+        let output = child
+            .stdout
+            .take()
+            .context("Codex event pipe is unavailable")?;
+        let (result, thread) = app_server::execute(
+            input,
+            output,
+            task,
+            attempt_id,
+            thread_parameters,
+            policy,
+            expected_thread,
+            baseline,
+            harness,
+            token,
+            &secrets,
+        )
+        .await?;
         let status = child.wait().await.context("could not reap Codex process")?;
         ensure!(status.success(), "Codex process exited unsuccessfully");
-        let (result, thread) = state.finish()?;
         let result = auth::redact(result, &secrets);
         ensure!(
             result.len() <= MAX_RESULT,

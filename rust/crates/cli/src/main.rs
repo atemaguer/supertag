@@ -4,6 +4,7 @@ mod inputs;
 mod local;
 mod network;
 mod objectives;
+mod teams;
 mod tui;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
@@ -17,6 +18,7 @@ use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
     Gateway,
     github::{Github, GithubAppConfig, GithubAuthentication, GithubConfig},
+    lark::{Lark, LarkConfig},
     linear::{Linear, LinearConfig},
     slack::{Slack, SlackConfig},
     transfers::GatewayTransfers,
@@ -25,15 +27,17 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest, HarnessKind,
-        ListEventsRequest, ListNativeUsageRequest, PutTagRequest, ResolveAttemptRequest,
-        RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
+        LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
+        ResolveAttemptRequest, RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
         attempt_inputs_server::AttemptInputsServer,
+        attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
         host_enrollment_server::HostEnrollmentServer, live_inputs_server::LiveInputsServer,
         objectives_server::ObjectivesServer, operator_client::OperatorClient,
-        operator_server::OperatorServer, transfers_server::TransfersServer,
-        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
+        operator_server::OperatorServer, teams_server::TeamsServer,
+        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
+        workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -70,6 +74,13 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage Teams and read their Workstream posts.
+    Team {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: teams::TeamCommand,
+    },
     /// Start the local Control Plane, Gateway, and Worker Host.
     Up {
         #[arg(long)]
@@ -104,6 +115,9 @@ enum Command {
         linear_listen: Option<SocketAddr>,
         #[arg(long, requires = "linear_listen")]
         linear_state_directory: Option<PathBuf>,
+        /// Enable the outbound Lark or Feishu connection and store reply receipts here.
+        #[arg(long)]
+        lark_state_directory: Option<PathBuf>,
     },
     /// Open the Go terminal UI for a running Gateway.
     Tui {
@@ -299,6 +313,10 @@ fn main() -> Result<()> {
 
 async fn run(command: Command) -> Result<()> {
     match command {
+        Command::Team {
+            connection,
+            command,
+        } => teams::run(connection, command).await?,
         Command::Up {
             state_directory,
             adapter,
@@ -325,6 +343,7 @@ async fn run(command: Command) -> Result<()> {
             github_state_directory,
             linear_listen,
             linear_state_directory,
+            lark_state_directory,
         } => {
             gateway(
                 listen,
@@ -333,6 +352,7 @@ async fn run(command: Command) -> Result<()> {
                 slack_listen.zip(slack_state_directory),
                 github_listen.zip(github_state_directory),
                 linear_listen.zip(linear_state_directory),
+                lark_state_directory,
             )
             .await?
         }
@@ -690,6 +710,10 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .await;
     health.set_serving::<ConnectorServer<ControlPlane>>().await;
     health.set_serving::<ObjectivesServer<ControlPlane>>().await;
+    health.set_serving::<TeamsServer<ControlPlane>>().await;
+    health
+        .set_serving::<AttemptWorkstreamsServer<ControlPlane>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
@@ -750,6 +774,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
+        .add_service(plane.teams_service())
+        .add_service(plane.attempt_workstreams_service())
         .add_service(
             ObjectivesServer::new(plane)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -770,6 +796,7 @@ async fn gateway(
     slack_options: Option<(SocketAddr, PathBuf)>,
     github_options: Option<(SocketAddr, PathBuf)>,
     linear_options: Option<(SocketAddr, PathBuf)>,
+    lark_state_directory: Option<PathBuf>,
 ) -> Result<()> {
     let mut builder = network::server(listen, false).await?;
     let channel = network::endpoint(control_plane, true)
@@ -813,6 +840,9 @@ async fn gateway(
         }
         None => None,
     };
+    let lark = lark_state_directory
+        .map(|directory| lark_connector(channel.clone(), gateway_token.clone(), directory))
+        .transpose()?;
     let gateway = Gateway::new(
         channel,
         gateway_token,
@@ -831,6 +861,10 @@ async fn gateway(
     health.set_serving::<ObjectivesServer<Gateway>>().await;
     health.set_serving::<LiveInputsServer<Gateway>>().await;
     health.set_serving::<AttemptInputsServer<Gateway>>().await;
+    health.set_serving::<TeamsServer<Gateway>>().await;
+    health
+        .set_serving::<AttemptWorkstreamsServer<Gateway>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -852,7 +886,9 @@ async fn gateway(
         .add_service(transfers.service())
         .add_service(gateway.objectives_service())
         .add_service(gateway.live_inputs_service())
-        .add_service(gateway.attempt_inputs_service());
+        .add_service(gateway.attempt_inputs_service())
+        .add_service(gateway.teams_service())
+        .add_service(gateway.attempt_workstreams_service());
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
@@ -893,13 +929,29 @@ async fn gateway(
             Ok(())
         }
     };
+    let lark_connection = async {
+        if let Some(lark) = lark {
+            let result = lark.run(shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, slack, github, linear) =
-            tokio::join!(grpc, webhook, github_webhook, linear_webhook);
+        let (grpc, slack, github, linear, lark) = tokio::join!(
+            grpc,
+            webhook,
+            github_webhook,
+            linear_webhook,
+            lark_connection
+        );
         grpc?;
         slack?;
         github?;
-        linear
+        linear?;
+        lark
     };
     tokio::pin!(services);
     tokio::select! {
@@ -1055,6 +1107,42 @@ fn linear_connector(
     #[cfg(feature = "test-fixtures")]
     if let Ok(url) = std::env::var("SUPERTAG_TEST_LINEAR_API_URL") {
         return connector.with_test_api_url(&url);
+    }
+    Ok(connector)
+}
+
+fn lark_connector(
+    channel: Channel,
+    gateway_token: String,
+    state_directory: PathBuf,
+) -> Result<Lark> {
+    let domain = match required_env("SUPERTAG_LARK_DOMAIN")?.as_str() {
+        "lark" => LarkDomain::Lark,
+        "feishu" => LarkDomain::Feishu,
+        _ => anyhow::bail!("SUPERTAG_LARK_DOMAIN must be lark or feishu"),
+    };
+    let connector = Lark::new(
+        LarkConfig {
+            account_id: required_env("SUPERTAG_LARK_ACCOUNT_ID")?,
+            domain,
+            app_id: required_env("SUPERTAG_LARK_APP_ID")?,
+            app_secret: required_env("SUPERTAG_LARK_APP_SECRET")?,
+            tenant_key: required_env("SUPERTAG_LARK_TENANT_KEY")?,
+            bot_open_id: required_env("SUPERTAG_LARK_BOT_OPEN_ID")?,
+            chat_id: required_env("SUPERTAG_LARK_CHAT_ID")?,
+            tag_id: required_env("SUPERTAG_LARK_TAG_ID")?,
+            allowed_users: required_env("SUPERTAG_LARK_ALLOWED_USERS")?
+                .split(',')
+                .map(|value| value.trim().to_owned())
+                .collect(),
+            state_directory,
+        },
+        channel,
+        gateway_token,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(url) = std::env::var("SUPERTAG_TEST_LARK_ORIGIN") {
+        return connector.with_test_origin(&url);
     }
     Ok(connector)
 }

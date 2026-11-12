@@ -14,8 +14,9 @@ The TUI lists Tags and named conversations, loads conversation history, sends me
 follows replies. It resumes event polling from the last sequence shown after an interruption.
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
-message its owner. Work uses the Workspace configured on the owner Tag. Inbox, Teams, Worker Host
-status, and Session delivery details are unavailable on this Gateway.
+message its owner. You can select a Team in the Objective form and read its members, concurrency
+limit, and recent Workstream posts from the rail. Work uses the Workspace configured on the owner
+Tag. Inbox, Worker Host status, and Session delivery details are unavailable on this Gateway.
 
 ## Node launcher
 

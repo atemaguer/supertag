@@ -23,6 +23,7 @@ fn create(id: &str) -> CreateObjectiveRequest {
         deadline_ms: None,
         budget_limit_minor: None,
         budget_currency: None,
+        team_id: None,
     }
 }
 

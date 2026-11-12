@@ -1627,6 +1627,9 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
 #[tokio::test]
 async fn native_codex_records_usage_and_restores_session_after_services_restart() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
+    use supertag_protocol::v2::{
+        GetInputRequest, LiveInputState, QueueInputRequest, live_inputs_client::LiveInputsClient,
+    };
 
     let directory = tempfile::tempdir()?;
     let state = directory.path().join("local");
@@ -1642,39 +1645,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     let fake = directory.path().join("codex-fixture");
     std::fs::write(
         &fake,
-        r#"#!/bin/sh
-set -eu
-if [ "$1" = --version ]; then
-  printf '%s\n' 'codex-cli 0.163.0'
-  exit 0
-fi
-test "$1" = exec
-case " $* " in *" --model fixture-model "*) ;; *) exit 10 ;; esac
-case " $* " in *" --sandbox read-only "*) ;; *) exit 10 ;; esac
-test -z "${SUPERTAG_HOST_TOKEN:-}${SUPERTAG_OPERATOR_TOKEN:-}${SUPERTAG_GATEWAY_TOKEN:-}"
-test -z "${SUPERTAG_ADAPTER_STATE_DIRECTORY:-}${SUPERTAG_ADAPTER_SCRATCH_PARENT:-}"
-test -f "$CODEX_HOME/auth.json"
-grep -q fixture-native-sign-in "$CODEX_HOME/auth.json"
-prompt=$(cat)
-case " $* " in
-*" resume fixture-thread "*)
-  case "$prompt" in *"Resume the native harness"*) ;; *) exit 13 ;; esac
-  grep -q 'fixture history' "$CODEX_HOME/sessions/thread.jsonl"
-  grep -Fq "$(printf '"cwd":"%s"' "$PWD")" "$CODEX_HOME/sessions/thread.jsonl"
-  message='Native adapter resumed'
-  ;;
-*)
-  case "$prompt" in *"Verify the native harness"*) ;; *) exit 11 ;; esac
-  mkdir -p "$CODEX_HOME/sessions"
-  printf '{"type":"session_meta","payload":{"id":"fixture-thread","cwd":"%s"}}\n' "$PWD" > "$CODEX_HOME/sessions/thread.jsonl"
-  printf '%s\n' '{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"fixture history"}]}}' >> "$CODEX_HOME/sessions/thread.jsonl"
-  message='Native adapter verified'
-  ;;
-esac
-printf '%s\n' '{"type":"thread.started","thread_id":"fixture-thread"}'
-printf '{"type":"item.completed","item":{"id":"fixture-message","type":"agent_message","text":"%s"}}\n' "$message"
-printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}'
-"#,
+        include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
     )?;
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
 
@@ -1798,6 +1769,8 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_
     supervisor.successful_exit().await?;
     let mut supervisor = start()?;
     let endpoint = supervisor.endpoint().await?;
+    let mut inputs =
+        LiveInputsClient::new(Channel::from_shared(endpoint.clone())?.connect().await?);
     let mut operator = OperatorClient::new(Channel::from_shared(endpoint)?.connect().await?);
     let session_id = stored["session_id"]
         .as_str()
@@ -1836,6 +1809,95 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_
     )
     .await?;
     assert_eq!(next.result.as_deref(), Some("Native adapter resumed"));
+    let running = operator
+        .submit_task(credentials.request(SubmitTaskRequest {
+            tag_id: "native-engineer".into(),
+            session_id: session_id.into(),
+            prompt: "Wait for live input".into(),
+            operation_id: "native-live-steering".into(),
+        })?)
+        .await?
+        .into_inner();
+    wait_for_state(
+        &mut operator,
+        &credentials,
+        &running.task_id,
+        TaskState::Running,
+    )
+    .await?;
+    let input = inputs
+        .queue_input(credentials.request(QueueInputRequest {
+            task_id: running.task_id.clone(),
+            operation_id: "native-live-input".into(),
+            text: "Use the live correction".into(),
+        })?)
+        .await?
+        .into_inner();
+    let steered = wait_for_state(
+        &mut operator,
+        &credentials,
+        &running.task_id,
+        TaskState::Succeeded,
+    )
+    .await?;
+    assert_eq!(steered.result.as_deref(), Some("Native adapter steered"));
+    let receipt = inputs
+        .get_input(credentials.request(GetInputRequest {
+            input_id: input.input_id,
+        })?)
+        .await?
+        .into_inner();
+    assert_eq!(receipt.state(), LiveInputState::Accepted);
+    let follower = task(&mut operator, &credentials, &receipt.follower_task_id).await?;
+    assert_eq!(follower.state(), TaskState::Succeeded);
+    assert!(
+        follower.attempt_id.is_none(),
+        "accepted input must not launch another native turn"
+    );
+    let ambiguous = operator
+        .submit_task(credentials.request(SubmitTaskRequest {
+            tag_id: "native-engineer".into(),
+            session_id: session_id.into(),
+            prompt: "Wait for live input".into(),
+            operation_id: "native-ambiguous-steering".into(),
+        })?)
+        .await?
+        .into_inner();
+    wait_for_state(
+        &mut operator,
+        &credentials,
+        &ambiguous.task_id,
+        TaskState::Running,
+    )
+    .await?;
+    let ambiguous_input = inputs
+        .queue_input(credentials.request(QueueInputRequest {
+            task_id: ambiguous.task_id.clone(),
+            operation_id: "native-ambiguous-input".into(),
+            text: "Simulate lost acknowledgement".into(),
+        })?)
+        .await?
+        .into_inner();
+    wait_for_state(
+        &mut operator,
+        &credentials,
+        &ambiguous.task_id,
+        TaskState::Failed,
+    )
+    .await?;
+    let receipt = inputs
+        .get_input(credentials.request(GetInputRequest {
+            input_id: ambiguous_input.input_id,
+        })?)
+        .await?
+        .into_inner();
+    assert_eq!(receipt.state(), LiveInputState::Unknown);
+    let follower = task(&mut operator, &credentials, &receipt.follower_task_id).await?;
+    assert_eq!(follower.state(), TaskState::Queued);
+    assert!(
+        follower.attempt_id.is_none(),
+        "ambiguous input must not be blindly replayed"
+    );
     assert!(
         std::fs::read_dir(state.join("host"))?
             .collect::<std::io::Result<Vec<_>>>()?

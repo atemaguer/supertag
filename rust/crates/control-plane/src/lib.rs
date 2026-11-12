@@ -4,6 +4,7 @@ mod inputs;
 pub mod objective_limits;
 mod objectives;
 mod store;
+mod teams;
 mod usage;
 mod workspaces;
 
@@ -414,6 +415,18 @@ impl connector_server::Connector for ControlPlane {
         Ok(Response::new(
             self.store
                 .accept_linear_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn accept_lark_event(
+        &self,
+        request: Request<AcceptLarkEventRequest>,
+    ) -> Result<Response<AcceptLarkEventResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_lark_event(&principal, &request.into_inner())
                 .await?,
         ))
     }

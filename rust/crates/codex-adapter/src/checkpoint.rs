@@ -33,6 +33,43 @@ const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RAW_BYTES: usize = 12 * 1024 * 1024;
 const MAX_ENCODED_BYTES: usize = 15 * 1024 * 1024;
 
+/// A resumed thread reports lifetime totals. Only subtract a persisted native
+/// counter, never the first new response of the current Attempt.
+pub(crate) fn usage_baseline(checkpoint: &SessionCheckpoint) -> Result<Option<[u64; 3]>> {
+    let archive: Archive =
+        serde_json::from_slice(&checkpoint.payload).context("invalid Codex checkpoint usage")?;
+    let mut found = None;
+    for transcript in archive.transcripts {
+        if metadata(&transcript.text)?.0 != archive.thread_id {
+            continue;
+        }
+        for record in records(&transcript.text)? {
+            if record.get("type").and_then(Value::as_str) != Some("event_msg")
+                || record.pointer("/payload/type").and_then(Value::as_str) != Some("token_count")
+            {
+                continue;
+            }
+            let Some(total) = record.pointer("/payload/info/total_token_usage") else {
+                continue;
+            };
+            let read = |name| {
+                total
+                    .get(name)
+                    .and_then(Value::as_u64)
+                    .context("invalid Codex checkpoint usage")
+            };
+            let value = [
+                read("input_tokens")?,
+                read("cached_input_tokens")?,
+                read("output_tokens")?,
+            ];
+            ensure!(value[1] <= value[0], "invalid Codex checkpoint usage");
+            found = Some(value);
+        }
+    }
+    Ok(found)
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Archive {
