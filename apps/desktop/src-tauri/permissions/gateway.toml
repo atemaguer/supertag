@@ -1,0 +1,13 @@
+[[permission]]
+identifier = "gateway-client"
+description = "Connect to a Gateway and read or send personal conversation messages."
+commands.allow = [
+  "connect_gateway",
+  "disconnect_gateway",
+  "list_tags",
+  "list_conversations",
+  "list_messages",
+  "send_message",
+  "get_message",
+  "list_message_events",
+]
