@@ -283,7 +283,8 @@ TypeScript and Python harness adapters running as its child processes. The defau
 produces deterministic text through real gRPC calls. A separate opt-in runner invokes Codex.
 The experiment does not replace the current Worker runtime.
 
-On macOS or Linux, install Rust/Cargo, Node.js with npm, and `uv`, then run from the checkout:
+On macOS or Linux, install Rust/Cargo, Node.js 22.18 or newer with npm, and `uv`, then run from
+the checkout:
 
 ```sh
 bash tests/fixtures/rust-harness-interop/run.sh
@@ -292,6 +293,7 @@ bash tests/fixtures/rust-harness-interop/run.sh
 The script installs locked dependencies inside the fixture, generates protobuf bindings,
 typechecks the TypeScript adapter, and builds and runs the Rust supervisor. It uses Python
 3.13 by default; `SUPERTAG_SPIKE_PYTHON` selects another interpreter available to `uv`.
+Node runs the TypeScript adapters with native type stripping, without a compiler subprocess.
 The first run needs network access to obtain dependencies. No SuperTag database or provider
 credentials are required.
 

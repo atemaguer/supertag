@@ -612,15 +612,12 @@ async fn run_case(
     let mut command = match language {
         "typescript" => {
             let mut command = Command::new("node");
-            command.args([
-                "--import",
-                "tsx",
-                if live.is_some() {
-                    "codex-adapter.ts"
-                } else {
-                    "adapter.ts"
-                },
-            ]);
+            // Native type stripping avoids a loader's compiler helper outliving the adapter.
+            command.arg(if live.is_some() {
+                "codex-adapter.ts"
+            } else {
+                "adapter.ts"
+            });
             command
         }
         "python" => {

@@ -42,6 +42,46 @@ impl Drop for ProcessGroup {
     }
 }
 
+#[cfg(test)]
+mod process_group_tests {
+    use super::ProcessGroup;
+    use std::{os::unix::process::CommandExt, os::unix::process::ExitStatusExt, process::Command};
+
+    #[test]
+    fn reports_and_terminates_a_process_that_did_not_exit() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("start process in its own group");
+        let mut group = ProcessGroup(child.id());
+
+        assert!(
+            group.terminate(),
+            "a running process must fail the leak check"
+        );
+        assert_eq!(
+            child.wait().expect("reap process").signal(),
+            Some(libc::SIGKILL)
+        );
+    }
+
+    #[test]
+    fn accepts_a_reaped_process_with_no_descendants() {
+        let mut child = Command::new("true")
+            .process_group(0)
+            .spawn()
+            .expect("start process in its own group");
+        let mut group = ProcessGroup(child.id());
+
+        assert!(child.wait().expect("reap process").success());
+        assert!(
+            !group.terminate(),
+            "a reaped process must leave no group behind"
+        );
+    }
+}
+
 impl LiveTask {
     pub async fn prepare(root: &Path, output: &Path, language: &'static str) -> Result<Self> {
         let directory = output.join(language);
