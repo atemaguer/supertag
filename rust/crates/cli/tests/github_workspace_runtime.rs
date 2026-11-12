@@ -234,18 +234,25 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn source_and_continuation_cross_hosts_without_provider_credentials() -> Result<()> {
-    scenario(false, false).await
+    scenario(false, false, false).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn publication_approval_then_replacement_proves_lost_create_without_reposting() -> Result<()>
 {
-    scenario(true, false).await
+    scenario(true, false, false).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn moving_ref_pins_session_before_execution_and_survives_gateway_restart() -> Result<()> {
-    scenario(false, true).await
+    scenario(false, true, false).await
 }
-async fn scenario(publication: bool, moving: bool) -> Result<()> {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn github_workspace_output_references_are_verified_by_the_credentialed_gateway() -> Result<()>
+{
+    scenario(false, false, true).await
+}
+
+async fn scenario(publication: bool, moving: bool, git_outputs: bool) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let repository = root.join("input");
@@ -433,6 +440,20 @@ async fn scenario(publication: bool, moving: bool) -> Result<()> {
     )?;
     json(cli(&["policy", "put", "role", &role])).await?;
     json(cli(&["policy", "assign", "reader", "builder"])).await?;
+    if git_outputs {
+        let policy = spec(
+            "output-policy.json",
+            json!({
+                "include": [], "required": ["workspace.txt"], "git": "reference",
+            }),
+        )?;
+        verify_github_output(root, &cli, (&public, &host_token, &commit), &policy).await?;
+        gateway.kill().await?;
+        gateway.wait().await?;
+        plane.kill().await?;
+        plane.wait().await?;
+        return Ok(());
+    }
     let adapter = root.join("isolated-adapter");
     fs::write(
         &adapter,
@@ -740,6 +761,103 @@ async fn scenario(publication: bool, moving: bool) -> Result<()> {
         timeout(WAIT, local_process.wait()).await??.success(),
         "local services did not stop cleanly"
     );
+    Ok(())
+}
+
+async fn verify_github_output(
+    root: &Path,
+    cli: &impl Fn(&[&str]) -> Command,
+    (public, host_token, commit): (&str, &str, &str),
+    policy: &str,
+) -> Result<()> {
+    let node =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let harness = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../packages/runtime/harnesses/claude-code")
+        .canonicalize()?;
+    let native = root.join("native-claude-fixture.mjs");
+    fs::copy(harness.join("fixtures/rust-native-claude.mjs"), &native)?;
+    fs::set_permissions(&native, fs::Permissions::from_mode(0o700))?;
+    json(cli(&[
+        "put-tag",
+        "git-output",
+        "--instructions",
+        "Preserve exact Git outputs.",
+        "--harness",
+        "claude-code",
+        "--allow",
+        "files:read",
+        "--workspace-id",
+        "project",
+        "--workspace-base",
+        commit,
+    ]))
+    .await?;
+    json(cli(&["policy", "assign", "reader", "git-output"])).await?;
+    let task = json(cli(&[
+        "submit",
+        "--tag",
+        "git-output",
+        "--session",
+        "git-output",
+        "--outputs",
+        policy,
+        "Read the source.",
+    ]))
+    .await?;
+    let task_id = field(&task, "task_id")?;
+    let mut worker = Command::new(BINARY);
+    worker
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("SUPERTAG_HOST_TOKEN", host_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", host_token)
+        .env("ANTHROPIC_API_KEY", "synthetic-model-token")
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .args([
+            "worker-host",
+            "--gateway",
+            public,
+            "--once",
+            "--harness",
+            "claude-code",
+            "--harness-model",
+            "fixture-model",
+            "--workspace-id",
+            "project",
+            "--workspace-from-gateway",
+            "--harness-runtime",
+        ])
+        .arg(node)
+        .arg("--harness-entrypoint")
+        .arg(harness.join("dist/rust-adapter/entry.js"))
+        .arg("--claude-path")
+        .arg(native)
+        .arg("--state-directory")
+        .arg(root.join("git-output-host"));
+    success(worker).await?;
+    let completed = json(cli(&["get-task", task_id])).await?;
+    assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
+    let selection = &completed["artifacts"][0];
+    assert_eq!(selection["paths"], json!(["supertag-git-output.json"]));
+    let path = root.join("downloaded-git-output.json");
+    json(cli(&[
+        "artifact",
+        "download",
+        field(selection, "artifact_id")?,
+        "--path",
+        "supertag-git-output.json",
+        "--output",
+        path.to_str().context("fixture destination is not UTF-8")?,
+    ]))
+    .await?;
+    let bytes = fs::read(path)?;
+    assert!(!String::from_utf8_lossy(&bytes).contains("fixture-source-token"));
+    let manifest: Value = serde_json::from_slice(&bytes)?;
+    assert_eq!(manifest["remote"], "https://github.com/acme/project.git");
+    assert_eq!(manifest["head"], commit);
+    assert_eq!(manifest["referencedPaths"], json!(["workspace.txt"]));
     Ok(())
 }
 
