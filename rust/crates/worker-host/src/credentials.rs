@@ -13,6 +13,7 @@ pub fn provider_environment(harness: HarnessKind) -> &'static [&'static str] {
             "CLAUDE_SECURESTORAGE_CONFIG_DIR",
         ],
         HarnessKind::OpenaiAgents => &["OPENAI_API_KEY"],
+        HarnessKind::Cursor => &["CURSOR_API_KEY"],
         HarnessKind::Opencode | HarnessKind::Unspecified => &[],
     }
 }
@@ -52,6 +53,21 @@ pub fn provider_environment_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cursor_receives_only_its_api_key() {
+        assert_eq!(
+            provider_environment(HarnessKind::Cursor),
+            ["CURSOR_API_KEY"]
+        );
+        assert_eq!(
+            provider_environment_for(HarnessKind::Cursor, None).unwrap(),
+            ["CURSOR_API_KEY"]
+        );
+        assert_eq!(
+            provider_environment_for(HarnessKind::Cursor, Some("fixture-model")).unwrap(),
+            ["CURSOR_API_KEY"]
+        );
+    }
     #[test]
     fn selected_provider_receives_exactly_its_legacy_key() {
         for (provider, key) in [

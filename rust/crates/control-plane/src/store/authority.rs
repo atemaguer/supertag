@@ -266,8 +266,26 @@ fn supports_execution_limits(harness: HarnessKind, task: &Task) -> bool {
                     .as_ref()
                     .is_none_or(|limit| limit.currency == "USD")
         }
-        HarnessKind::OpenaiAgents | HarnessKind::Opencode => false,
+        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor => false,
     }
+}
+
+// Cursor's local SDK bridge exposes only these scoped tools. Keep work requiring
+// another native capability queued instead of claiming it and weakening policy.
+fn supports_runtime_actions(harness: HarnessKind, task: &Task) -> bool {
+    harness != HarnessKind::Cursor
+        || (task.allowed_actions.iter().all(|action| {
+            matches!(
+                action.as_str(),
+                "files:read"
+                    | "files:write"
+                    | "commands:execute"
+                    | "web:search"
+                    | "workstream:post"
+                    | "mailbox:send"
+            )
+        }) && (!task.allowed_actions.iter().any(|a| a == "commands:execute")
+            || task.allowed_actions.iter().any(|a| a == "files:write")))
 }
 
 pub(super) async fn claim_candidate(
@@ -279,8 +297,10 @@ pub(super) async fn claim_candidate(
     harness: HarnessKind,
     context_contracts: &[supertag_protocol::v2::ContextContract],
 ) -> Result<Option<String>> {
-    let context_contracts = if matches!(harness, HarnessKind::Opencode | HarnessKind::OpenaiAgents)
-    {
+    let context_contracts = if matches!(
+        harness,
+        HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
+    ) {
         &[]
     } else {
         context_contracts
@@ -301,6 +321,7 @@ pub(super) async fn claim_candidate(
                 .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
             if has_workspace
                 && supports_execution_limits(harness, &task)
+                && supports_runtime_actions(harness, &task)
                 && crate::context::task_supported(&task, context_contracts)
                 && crate::work_sessions::can_claim_in(transaction, &task).await?
                 && crate::inputs::can_claim_in(

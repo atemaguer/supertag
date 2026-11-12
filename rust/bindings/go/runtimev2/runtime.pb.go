@@ -857,6 +857,7 @@ const (
 	HarnessKind_HARNESS_KIND_CLAUDE_CODE   HarnessKind = 2
 	HarnessKind_HARNESS_KIND_OPENAI_AGENTS HarnessKind = 3
 	HarnessKind_HARNESS_KIND_OPENCODE      HarnessKind = 4
+	HarnessKind_HARNESS_KIND_CURSOR        HarnessKind = 5
 )
 
 // Enum value maps for HarnessKind.
@@ -867,6 +868,7 @@ var (
 		2: "HARNESS_KIND_CLAUDE_CODE",
 		3: "HARNESS_KIND_OPENAI_AGENTS",
 		4: "HARNESS_KIND_OPENCODE",
+		5: "HARNESS_KIND_CURSOR",
 	}
 	HarnessKind_value = map[string]int32{
 		"HARNESS_KIND_UNSPECIFIED":   0,
@@ -874,6 +876,7 @@ var (
 		"HARNESS_KIND_CLAUDE_CODE":   2,
 		"HARNESS_KIND_OPENAI_AGENTS": 3,
 		"HARNESS_KIND_OPENCODE":      4,
+		"HARNESS_KIND_CURSOR":        5,
 	}
 )
 
@@ -15859,13 +15862,14 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x11TASK_STATE_FAILED\x10\x04\x12\x18\n" +
 	"\x14TASK_STATE_CANCELLED\x10\x05\x12\x16\n" +
 	"\x12TASK_STATE_CLAIMED\x10\x06\x12\x18\n" +
-	"\x14TASK_STATE_UNCERTAIN\x10\a*\x9c\x01\n" +
+	"\x14TASK_STATE_UNCERTAIN\x10\a*\xb5\x01\n" +
 	"\vHarnessKind\x12\x1c\n" +
 	"\x18HARNESS_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12HARNESS_KIND_CODEX\x10\x01\x12\x1c\n" +
 	"\x18HARNESS_KIND_CLAUDE_CODE\x10\x02\x12\x1e\n" +
 	"\x1aHARNESS_KIND_OPENAI_AGENTS\x10\x03\x12\x19\n" +
-	"\x15HARNESS_KIND_OPENCODE\x10\x04*l\n" +
+	"\x15HARNESS_KIND_OPENCODE\x10\x04\x12\x17\n" +
+	"\x13HARNESS_KIND_CURSOR\x10\x05*l\n" +
 	"\x0fAttemptDecision\x12 \n" +
 	"\x1cATTEMPT_DECISION_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ATTEMPT_DECISION_FAILED\x10\x01\x12\x1a\n" +

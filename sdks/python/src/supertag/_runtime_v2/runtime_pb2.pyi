@@ -136,6 +136,7 @@ class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HARNESS_KIND_CLAUDE_CODE: _ClassVar[HarnessKind]
     HARNESS_KIND_OPENAI_AGENTS: _ClassVar[HarnessKind]
     HARNESS_KIND_OPENCODE: _ClassVar[HarnessKind]
+    HARNESS_KIND_CURSOR: _ClassVar[HarnessKind]
 
 class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -294,6 +295,7 @@ HARNESS_KIND_CODEX: HarnessKind
 HARNESS_KIND_CLAUDE_CODE: HarnessKind
 HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 HARNESS_KIND_OPENCODE: HarnessKind
+HARNESS_KIND_CURSOR: HarnessKind
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision

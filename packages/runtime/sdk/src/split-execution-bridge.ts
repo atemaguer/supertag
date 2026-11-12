@@ -227,6 +227,14 @@ function globMatcher(pattern: string): (path: string) => boolean {
 export function createSplitExecutionBridge(
   options: SplitExecutionBridgeOptions,
 ): SplitExecutionBridge {
+  return createWorkspaceToolBridge(options);
+}
+
+export function createWorkspaceToolBridge(
+  options: Omit<SplitExecutionBridgeOptions, "environment"> & {
+    environment: Pick<ExecutionEnvironment, "rootDirectory" | "resolvePath" | "read" | "spawn">;
+  },
+): SplitExecutionBridge {
   const { environment, permissions } = options;
   const root = environment.resolvePath(options.workspaceRoot);
   const environmentRoot = environment.resolvePath(environment.rootDirectory);

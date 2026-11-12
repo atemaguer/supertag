@@ -556,7 +556,10 @@ async fn run(command: Command) -> Result<()> {
             let harness = adapter.harness_kind();
             ensure!(
                 skill_catalog.is_none()
-                    || !matches!(harness, HarnessKind::OpenaiAgents | HarnessKind::Opencode),
+                    || !matches!(
+                        harness,
+                        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor
+                    ),
                 "this Worker Host's selected harness does not load Skills"
             );
             let provider_model = adapter.provider_model();

@@ -26,7 +26,8 @@ export class CursorProtocolError extends Error {
 }
 
 export type CursorRunnerEvent =
-  | HarnessEvent
+  | Exclude<HarnessEvent, { type: "usage.updated" }>
+  | (Extract<HarnessEvent, { type: "usage.updated" }> & { readonly observedModel?: string })
   | { readonly type: "cursor.session"; readonly agentId: string };
 
 export interface CursorResultFrame {

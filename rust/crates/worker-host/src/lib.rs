@@ -112,7 +112,7 @@ pub async fn run(
     ensure!(
         !matches!(
             options.harness,
-            HarnessKind::Opencode | HarnessKind::OpenaiAgents
+            HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
         ) || options.context_catalog.supported_contracts().is_empty(),
         "the selected harness does not load Skills"
     );

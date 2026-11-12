@@ -116,3 +116,8 @@ required-features = ["test-fixtures"]
 name = "opencode_runtime"
 path = "tests/opencode_runtime.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "cursor_runtime"
+path = "tests/cursor_runtime.rs"
+required-features = ["test-fixtures"]

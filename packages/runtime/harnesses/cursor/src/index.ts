@@ -129,6 +129,8 @@ export interface CursorRunRequest {
    * tools and forwards to the Worker. Absent means colocated execution.
    */
   readonly splitTools?: readonly CursorSplitToolDefinition[];
+  /** The local workspace bridge can retain the explicitly admitted native web search. */
+  readonly allowNativeWebSearch?: true;
   /** Colocated command access is handled by the Worker, not Cursor's shell. */
   readonly localCommandTool?: CursorSplitToolDefinition;
 }
@@ -950,7 +952,7 @@ function sanitizeError(error: unknown, secrets: readonly string[]): Error {
  */
 export async function* runCursor(
   request: CursorRunRequest,
-  runtime: HarnessRuntime,
+  runtime: Pick<HarnessRuntime, "spawn" | "placement">,
   signal?: AbortSignal,
   executor?: CursorSplitExecutor,
 ): AsyncIterable<CursorRunnerEvent> {
@@ -963,7 +965,12 @@ export async function* runCursor(
     () => false,
   );
   const timeout = AbortSignal.timeout(request.timeoutMs);
-  const cancellation = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const workspaceFailure = new AbortController();
+  const cancellation = AbortSignal.any([
+    timeout,
+    workspaceFailure.signal,
+    ...(signal ? [signal] : []),
+  ]);
   const workspaceTools =
     request.splitTools ?? (request.localCommandTool ? [request.localCommandTool] : undefined);
   cancellation.throwIfAborted();
@@ -1100,14 +1107,23 @@ export async function* runCursor(
         );
         answer(frame.id, redactText(outcome.text, secrets), outcome.isError);
       } catch (error) {
+        if (error instanceof ExecutionCleanupError) {
+          workspaceFailure.abort(error);
+          return;
+        }
         const reason = redactText(error instanceof Error ? error.message : String(error), secrets);
         answer(frame.id, `Workspace tool failed: ${reason.slice(0, 500)}`, true);
       }
     })();
   };
+  let stoppingExecutor: Promise<void> | undefined;
+  const stopExecutor = () => {
+    stoppingExecutor ??= Promise.resolve().then(() => executor?.cancelAll());
+    return stoppingExecutor;
+  };
   const cancel = () => {
     failInflight("Workspace tool call was cancelled");
-    void executor?.cancelAll().catch(() => undefined);
+    void stopExecutor().catch(() => undefined);
     void handle.write?.(Buffer.from('{"type":"cancel"}\n')).catch(() => undefined);
     killTimer = setTimeout(() => {
       if (!exited) {
@@ -1129,7 +1145,7 @@ export async function* runCursor(
     failInflight("Workspace tool call ended with the run");
     if (executor) {
       try {
-        await withinCleanup(executor.cancelAll(), deadline);
+        await withinCleanup(stopExecutor(), deadline);
       } catch (cause) {
         executorFailure = cause;
       }
@@ -1176,11 +1192,11 @@ export async function* runCursor(
       throw new ExecutionCleanupError("Cursor process termination could not be confirmed", {
         cause: cleanupError,
       });
-    if (executorFailure)
+    if (executorFailure || workspaceFailure.signal.aborted)
       throw new ExecutionCleanupError(
         "Cursor workspace process termination could not be confirmed",
         {
-          cause: executorFailure,
+          cause: executorFailure ?? workspaceFailure.signal.reason,
         },
       );
   };
@@ -1346,16 +1362,15 @@ export async function* runCursor(
         : undefined;
       throw new CursorProtocolError(detail ? `${summary}: ${detail}` : summary);
     }
-    if (result.usage)
+    const finalUsage = result.usage
+      ? cursorUsage(result.usage, result.model ?? request.model ?? "auto", result.chargedCents)
+      : turnUsage && { ...turnUsage, complete: true };
+    if (finalUsage)
       yield {
         type: "usage.updated",
-        usage: cursorUsage(
-          result.usage,
-          result.model ?? request.model ?? "auto",
-          result.chargedCents,
-        ),
+        usage: finalUsage,
+        ...(result.model === undefined ? {} : { observedModel: result.model }),
       };
-    else if (turnUsage) yield { type: "usage.updated", usage: { ...turnUsage, complete: true } };
     if (!result.result?.trim()) throw new CursorProtocolError("Cursor returned an empty result");
     if (!agentId) throw new CursorProtocolError("Cursor runner omitted the agent ID");
     yield {

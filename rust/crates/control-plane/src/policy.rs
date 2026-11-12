@@ -1183,6 +1183,7 @@ pub(crate) async fn admission_in(
         Ok(HarnessKind::ClaudeCode) => Some("claude-code"),
         Ok(HarnessKind::OpenaiAgents) => Some("openai-agents"),
         Ok(HarnessKind::Opencode) => Some("opencode"),
+        Ok(HarnessKind::Cursor) => Some("cursor"),
         _ => None,
     };
     let harness = base_harness.map(str::to_owned).or_else(|| {
@@ -1216,6 +1217,7 @@ pub(crate) async fn admission_in(
         Some("claude-code") => HarnessKind::ClaudeCode as i32,
         Some("openai-agents") => HarnessKind::OpenaiAgents as i32,
         Some("opencode") => HarnessKind::Opencode as i32,
+        Some("cursor") => HarnessKind::Cursor as i32,
         Some(_) => {
             return Err(StoreError::FailedPrecondition(
                 "Role requires a harness this runtime does not support".into(),

@@ -128,7 +128,7 @@ impl Harness for Bridge {
             .get_attempt_capabilities(upstream)
             .await?
             .into_inner();
-        let history = if self.harness == HarnessKind::Opencode {
+        let history = if matches!(self.harness, HarnessKind::Opencode | HarnessKind::Cursor) {
             let mut upstream = authenticated_request(self.attempt(), &self.host_token, None)?;
             upstream.set_timeout(Duration::from_secs(5));
             self.host

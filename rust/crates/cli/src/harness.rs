@@ -17,6 +17,7 @@ pub enum Harness {
     OpenaiAgents,
     #[value(name = "opencode")]
     Opencode,
+    Cursor,
 }
 
 impl Harness {
@@ -26,6 +27,7 @@ impl Harness {
             Self::ClaudeCode => "claude-code",
             Self::OpenaiAgents => "openai-agents",
             Self::Opencode => "opencode",
+            Self::Cursor => "cursor",
         }
     }
 
@@ -35,6 +37,7 @@ impl Harness {
             Self::ClaudeCode => HarnessKind::ClaudeCode,
             Self::OpenaiAgents => HarnessKind::OpenaiAgents,
             Self::Opencode => HarnessKind::Opencode,
+            Self::Cursor => HarnessKind::Cursor,
         }
     }
 }
@@ -57,6 +60,12 @@ pub struct AdapterOptions {
     harness_entrypoint: Option<PathBuf>,
     #[arg(long, requires = "harness")]
     harness_model: Option<String>,
+    /// Node interpreter for the Cursor SDK adapter application.
+    #[arg(long, requires = "harness", conflicts_with = "harness_runtime")]
+    cursor_node: Option<PathBuf>,
+    /// Compiled JavaScript entrypoint for the Cursor SDK adapter.
+    #[arg(long, requires = "harness", conflicts_with = "harness_entrypoint")]
+    cursor_adapter: Option<PathBuf>,
     /// Node interpreter for the OpenCode adapter application.
     #[arg(long, requires = "harness", conflicts_with = "harness_runtime")]
     opencode_node: Option<PathBuf>,
@@ -69,7 +78,7 @@ pub struct AdapterOptions {
     /// Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE.
     #[arg(long, requires = "harness")]
     opencode_auth_file: Option<PathBuf>,
-    /// Allow OpenCode command execution without an operating-system sandbox.
+    /// Allow OpenCode or Cursor commands without an operating-system sandbox.
     #[arg(long, requires = "harness")]
     allow_unsandboxed_commands: bool,
     /// Claude executable used by the Agent SDK.
@@ -173,6 +182,8 @@ impl AdapterOptions {
             }
         }
         for (flag, value) in [
+            ("--cursor-node", self.cursor_node.as_ref()),
+            ("--cursor-adapter", self.cursor_adapter.as_ref()),
             ("--opencode-node", self.opencode_node.as_ref()),
             ("--opencode-adapter", self.opencode_adapter.as_ref()),
             ("--opencode-path", self.opencode_path.as_ref()),
@@ -220,9 +231,18 @@ impl AdapterOptions {
                 || (self.opencode_node.is_none()
                     && self.opencode_adapter.is_none()
                     && self.opencode_path.is_none()
-                    && auth_file.is_none()
-                    && !self.allow_unsandboxed_commands),
+                    && auth_file.is_none()),
             "OpenCode-specific options require --harness opencode"
+        );
+        ensure!(
+            matches!(self.harness, Some(Harness::Cursor))
+                || (self.cursor_node.is_none() && self.cursor_adapter.is_none()),
+            "Cursor-specific options require --harness cursor"
+        );
+        ensure!(
+            !self.allow_unsandboxed_commands
+                || matches!(self.harness, Some(Harness::Opencode | Harness::Cursor)),
+            "--allow-unsandboxed-commands requires --harness opencode or cursor"
         );
         if let Some(path) = self.adapter {
             return Ok((executable_path(path)?, self.adapter_arg));
@@ -307,6 +327,48 @@ impl AdapterOptions {
                     args,
                 ))
             }
+            Harness::Cursor => {
+                ensure!(
+                    self.codex_path.is_none()
+                        && self.codex_model.is_none()
+                        && self.codex_workspace.is_none()
+                        && self.claude_path.is_none(),
+                    "other harness options cannot configure Cursor"
+                );
+                let entrypoint = self
+                    .cursor_adapter
+                    .or(self.harness_entrypoint)
+                    .context("--cursor-adapter is required for Cursor")?;
+                ensure!(
+                    entrypoint.is_file(),
+                    "Cursor adapter entrypoint is unavailable"
+                );
+                let mut args = vec![entrypoint.canonicalize()?.into_os_string()];
+                if let Some(model) = self.harness_model {
+                    ensure!(
+                        !model.is_empty()
+                            && model.len() <= 256
+                            && !model.chars().any(|c| c.is_whitespace() || c.is_control()),
+                        "Cursor model must be a bounded model identifier"
+                    );
+                    args.extend(["--model".into(), model.into()]);
+                }
+                args.extend([
+                    "--timeout-seconds".into(),
+                    timeout_seconds.to_string().into(),
+                ]);
+                if self.allow_unsandboxed_commands {
+                    args.push("--allow-unsandboxed-commands".into());
+                }
+                Ok((
+                    interpreter_path(
+                        self.cursor_node
+                            .or(self.harness_runtime)
+                            .unwrap_or_else(|| "node".into()),
+                    )?,
+                    args,
+                ))
+            }
             harness => {
                 ensure!(
                     self.codex_path.is_none()
@@ -352,7 +414,7 @@ impl AdapterOptions {
                         }
                         "python3"
                     }
-                    Harness::Codex | Harness::Opencode => unreachable!(),
+                    Harness::Codex | Harness::Opencode | Harness::Cursor => unreachable!(),
                 };
                 if let Some(model) = self.harness_model {
                     args.extend(["--model".into(), model.into()]);
@@ -608,5 +670,87 @@ mod tests {
             Command::try_parse_from(["test", "--harness", "codex", "--allow-unsandboxed-commands"])
                 .unwrap();
         assert!(other.options.launch(42).is_err());
+    }
+
+    #[test]
+    fn cursor_launch_preserves_explicit_configuration_and_only_its_key() {
+        let (_d, _binary, entry, node) = fixture();
+        let command = Command::try_parse_from(vec![
+            OsString::from("test"),
+            "--harness".into(),
+            "cursor".into(),
+            "--cursor-node".into(),
+            node.clone().into_os_string(),
+            "--cursor-adapter".into(),
+            entry.clone().into_os_string(),
+            "--harness-model".into(),
+            "fixture-model".into(),
+            "--allow-unsandboxed-commands".into(),
+        ])
+        .unwrap();
+        assert_eq!(command.options.harness_kind(), HarnessKind::Cursor);
+        assert_eq!(
+            command.options.provider_environment().unwrap(),
+            ["CURSOR_API_KEY"]
+        );
+        let mut forwarded = vec![OsString::from("test")];
+        forwarded.extend(command.options.worker_args());
+        let (runtime, arguments) = Command::try_parse_from(forwarded)
+            .unwrap()
+            .options
+            .launch(42)
+            .unwrap();
+        assert_eq!(runtime, node);
+        assert_eq!(
+            arguments,
+            vec![
+                entry.canonicalize().unwrap().into_os_string(),
+                "--model".into(),
+                "fixture-model".into(),
+                "--timeout-seconds".into(),
+                "42".into(),
+                "--allow-unsandboxed-commands".into()
+            ]
+        );
+    }
+
+    #[test]
+    fn cursor_requires_an_entrypoint_and_refuses_foreign_options() {
+        assert!(
+            Command::try_parse_from(["test", "--harness", "cursor"])
+                .unwrap()
+                .options
+                .launch(1)
+                .is_err()
+        );
+        let (_d, binary, entry, node) = fixture();
+        for (flag, value) in [
+            ("--opencode-path", &binary),
+            ("--claude-path", &binary),
+            ("--codex-path", &binary),
+        ] {
+            let command = Command::try_parse_from(vec![
+                OsString::from("test"),
+                "--harness".into(),
+                "cursor".into(),
+                "--cursor-adapter".into(),
+                entry.clone().into_os_string(),
+                "--cursor-node".into(),
+                node.clone().into_os_string(),
+                flag.into(),
+                value.clone().into_os_string(),
+            ])
+            .unwrap();
+            assert!(command.options.launch(1).is_err(), "{flag}");
+        }
+        let command = Command::try_parse_from(vec![
+            OsString::from("test"),
+            "--harness".into(),
+            "codex".into(),
+            "--cursor-adapter".into(),
+            entry.into_os_string(),
+        ])
+        .unwrap();
+        assert!(command.options.launch(1).is_err());
     }
 }

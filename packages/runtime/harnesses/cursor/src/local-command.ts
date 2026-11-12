@@ -20,7 +20,7 @@ const COMMAND: CursorSplitToolDefinition = {
 
 /** The caller grants shell access separately from Cursor's native tool allowlist. */
 export function localCursorCommand(
-  runtime: HarnessRuntime,
+  runtime: Pick<HarnessRuntime, "spawn">,
   workspace: string,
   home: string,
   timeoutMs: number,

@@ -80,7 +80,7 @@ async fn contract(url: &str) {
         assert_eq!(value, kind);
         assert!(
             sqlx::query(&format!(
-                "UPDATE supertag_v2_{table} SET harness_kind=5 WHERE {column}=$1"
+                "UPDATE supertag_v2_{table} SET harness_kind=6 WHERE {column}=$1"
             ))
             .bind(id)
             .execute(&mut connection)

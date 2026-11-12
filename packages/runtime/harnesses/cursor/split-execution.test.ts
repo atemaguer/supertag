@@ -1108,6 +1108,21 @@ it("cancels remote processes at a normal attempt end and reports a cleanup that 
   expect(executor.cancelAll).toHaveBeenCalledOnce();
 });
 
+it("stops the run when a workspace tool could not confirm process termination", async () => {
+  const { runtime, push } = interactiveRuntime();
+  const executor = fakeExecutor(async () => {
+    throw new ExecutionCleanupError("workspace process still exists");
+  });
+  const running = Array.fromAsync(runCursor(workerRequest, runtime, undefined, executor));
+  push({ type: "agent", agentId: "agent-fixture" });
+  push(call("workspace-1", "command", { command: "sleep 600" }));
+  await expect(running).rejects.toMatchObject({
+    name: "ExecutionCleanupError",
+    message: "Cursor workspace process termination could not be confirmed",
+  });
+  expect(executor.cancelAll).toHaveBeenCalledOnce();
+});
+
 it("never gives CURSOR_API_KEY to the executor, its environment, its tools or its answers", async () => {
   const { dir, context } = await fixture();
   const mockTree = {
