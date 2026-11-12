@@ -1,5 +1,9 @@
 use std::collections::BTreeSet;
 
+use icu_properties::{
+    CodePointMapData, CodePointSetData,
+    props::{DefaultIgnorableCodePoint, GeneralCategory},
+};
 use sha2::{Digest, Sha256};
 use tonic::Status;
 
@@ -89,7 +93,8 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
 pub fn validate_artifact_path(path: &str) -> Result<(), Status> {
     if path.len() > 1024
         || path.contains(['\\', ':'])
-        || path.chars().any(char::is_control)
+        || !unicode_normalization::is_nfc(path)
+        || path.chars().any(unsafe_artifact_character)
         || path.split('/').any(|part| {
             matches!(part, "" | "." | "..")
                 || part.eq_ignore_ascii_case(".git")
@@ -101,6 +106,24 @@ pub fn validate_artifact_path(path: &str) -> Result<(), Status> {
         ));
     }
     Ok(())
+}
+
+fn unsafe_artifact_character(character: char) -> bool {
+    if character.is_ascii() {
+        return character.is_ascii_control();
+    }
+    CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(character)
+        || character == '\u{2800}'
+        || matches!(
+            CodePointMapData::<GeneralCategory>::new().get(character),
+            GeneralCategory::Control
+                | GeneralCategory::Format
+                | GeneralCategory::Unassigned
+                | GeneralCategory::PrivateUse
+                | GeneralCategory::SpaceSeparator
+                | GeneralCategory::LineSeparator
+                | GeneralCategory::ParagraphSeparator
+        )
 }
 
 fn validate_paths<'a>(paths: impl ExactSizeIterator<Item = &'a str>) -> Result<(), Status> {
@@ -162,6 +185,27 @@ mod tests {
     use super::*;
     use crate::v2::{ArtifactFile, BlobReference, InspectAttemptRequest};
     use tonic::Code;
+
+    #[test]
+    fn artifact_paths_accept_visible_nfc_and_reject_invisible_or_noncanonical_names() {
+        for path in ["reports/my file.txt", "résumé/日本語.txt", "reports/😀.txt"] {
+            assert!(validate_artifact_path(path).is_ok(), "{path:?}");
+        }
+        for codepoint in [
+            0x3164, 0xffa0, 0x115f, 0x1160, 0x2800, 0x034f, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef,
+            0x17b4, 0x0378, 0xe000, 0xf0000, 0x200b, 0x00a0, 0x2028, 0x202e,
+        ] {
+            let path = format!("reports/a{}b.txt", char::from_u32(codepoint).unwrap());
+            assert!(validate_artifact_path(&path).is_err(), "U+{codepoint:X}");
+        }
+        for path in [
+            "re\u{0301}sume\u{0301}.txt",
+            "reports/../secret",
+            ".git/config",
+        ] {
+            assert!(validate_artifact_path(path).is_err(), "{path:?}");
+        }
+    }
 
     fn manifest(paths: &[&str], bytes: u64) -> CommitArtifactCaptureRequest {
         CommitArtifactCaptureRequest {

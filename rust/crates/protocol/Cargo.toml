@@ -7,6 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+icu_properties = "2"
 prost.workspace = true
 regex = "1"
 serde.workspace = true
@@ -15,6 +16,7 @@ sha2.workspace = true
 subtle.workspace = true
 tonic.workspace = true
 tonic-prost.workspace = true
+unicode-normalization = "0.1"
 url = "2"
 uuid.workspace = true
 

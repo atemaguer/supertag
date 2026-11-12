@@ -2406,6 +2406,7 @@ dependencies = [
 name = "supertag-protocol"
 version = "0.1.0"
 dependencies = [
+ "icu_properties",
  "prost",
  "protoc-bin-vendored",
  "regex",
@@ -2416,6 +2417,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "unicode-normalization",
  "url",
  "uuid",
 ]
