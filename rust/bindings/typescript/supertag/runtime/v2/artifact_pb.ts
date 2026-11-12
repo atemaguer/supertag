@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/artifact.proto.
  */
 export const file_supertag_runtime_v2_artifact: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL2FydGlmYWN0LnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIlQKE0FydGlmYWN0RGVzY3JpcHRpb24SDQoFdGl0bGUYASABKAkSDAoEa2luZBgCIAEoCRIUCgdzdW1tYXJ5GAMgASgJSACIAQFCCgoIX3N1bW1hcnkiigEKDEFydGlmYWN0RmlsZRIMCgRwYXRoGAEgASgJEjAKBGJsb2IYAiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkJsb2JSZWZlcmVuY2USOgoKZ2l0X291dHB1dBgDIAEoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0T3V0cHV0U25hcHNob3QipgEKEUdpdE91dHB1dFNuYXBzaG90EhQKDHN0YXJ0X2NvbW1pdBgBIAEoCRITCgtoZWFkX2NvbW1pdBgCIAEoCRITCgZyZW1vdGUYAyABKAlIAIgBARIVCg10cmFja2VkX3BhdGhzGAQgAygJEhUKDWRlbGV0ZWRfcGF0aHMYBSADKAkSGAoQcmVmZXJlbmNlZF9wYXRocxgGIAMoCUIJCgdfcmVtb3RlIvUBChBBcnRpZmFjdFByb2R1Y2VyEg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRIOCgZ0YWdfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRIZCgxvYmplY3RpdmVfaWQYBSABKAlIAIgBARI2CgxoYXJuZXNzX2tpbmQYBiABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NLaW5kEh4KEW5hdGl2ZV9zZXNzaW9uX2lkGAcgASgJSAGIAQFCDwoNX29iamVjdGl2ZV9pZEIUChJfbmF0aXZlX3Nlc3Npb25faWQi/QEKD0FydGlmYWN0U3VtbWFyeRITCgthcnRpZmFjdF9pZBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgCIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhI3Cghwcm9kdWNlchgDIAEoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RQcm9kdWNlchISCgpmaWxlX2NvdW50GAQgASgNEhMKC2J5dGVfbGVuZ3RoGAUgASgEEhYKDmNhcHR1cmVkX2F0X21zGAYgASgDEhwKFGRlY2xhcmVkX3Rhc2tfb3V0cHV0GAcgASgIIrMBChBDYXB0dXJlZEFydGlmYWN0EjUKB3N1bW1hcnkYASABKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U3VtbWFyeRIwCgVmaWxlcxgCIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEjYKBmlucHV0cxgDIAMoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RTZWxlY3Rpb24i/gIKE0FydGlmYWN0QWNxdWlzaXRpb24SFgoOYWNxdWlzaXRpb25faWQYASABKAkSFAoMb3BlcmF0aW9uX2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSEgoKYXR0ZW1wdF9pZBgEIAEoCRITCgthcnRpZmFjdF9pZBgFIAEoCRIwCgVmaWxlcxgGIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEjcKCGRlbGl2ZXJ5GAcgASgOMiUuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERlbGl2ZXJ5EhgKC2Rlc3RpbmF0aW9uGAggASgJSACIAQESPAoFc3RhdGUYCSABKA4yLS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb25TdGF0ZRIVCg1jcmVhdGVkX2F0X21zGAogASgDEhUKDXVwZGF0ZWRfYXRfbXMYCyABKANCDgoMX2Rlc3RpbmF0aW9uIq0BChtGaW5kQXR0ZW1wdEFydGlmYWN0c1JlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0Eg0KBXF1ZXJ5GAIgASgJEgwKBGtpbmQYAyABKAkSDwoHdGFza19pZBgEIAEoCRINCgVsaW1pdBgFIAEoDRIUCgxiZWZvcmVfb3JkZXIYBiABKAQicQodSW5zcGVjdEF0dGVtcHRBcnRpZmFjdFJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAIgASgJIvIBChZBY3F1aXJlQXJ0aWZhY3RSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYAiABKAkSEwoLYXJ0aWZhY3RfaWQYAyABKAkSDQoFcGF0aHMYBCADKAkSNwoIZGVsaXZlcnkYBSABKA4yJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVsaXZlcnkSGAoLZGVzdGluYXRpb24YBiABKAlIAIgBAUIOCgxfZGVzdGluYXRpb24itQEKIFNldHRsZUFydGlmYWN0QWNxdWlzaXRpb25SZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIWCg5hY3F1aXNpdGlvbl9pZBgCIAEoCRI8CgVzdGF0ZRgDIAEoDjItLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvblN0YXRlIoMBCh5HZXRBY3F1aXJlZEFydGlmYWN0RmlsZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhYKDmFjcXVpc2l0aW9uX2lkGAIgASgJEgwKBHBhdGgYAyABKAkicAobSGFybmVzc0ZpbmRBcnRpZmFjdHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEgwKBGtpbmQYAiABKAkSDwoHdGFza19pZBgDIAEoCRINCgVsaW1pdBgEIAEoDRIUCgxiZWZvcmVfb3JkZXIYBSABKAQidAoaSGFybmVzc1JlYWRBcnRpZmFjdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhMKC2FydGlmYWN0X2lkGAIgASgJEgwKBHBhdGgYAyABKAkSDgoGb2Zmc2V0GAQgASgEEg0KBWxpbWl0GAUgASgNIqgBChNIYXJuZXNzQXJ0aWZhY3RQYWdlEj0KC2FjcXVpc2l0aW9uGAEgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEgwKBHBhdGgYAiABKAkSDAoEdGV4dBgDIAEoCRIOCgZvZmZzZXQYBCABKAQSEwoLbmV4dF9vZmZzZXQYBSABKAQSEQoJdHJ1bmNhdGVkGAYgASgIIlgKHEhhcm5lc3NBdHRhY2hBcnRpZmFjdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhMKC2FydGlmYWN0X2lkGAIgASgJEg0KBXBhdGhzGAMgAygJImwKF0hhcm5lc3NBdHRhY2hlZEFydGlmYWN0Ej0KC2FjcXVpc2l0aW9uGAEgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEhIKCmxvY2FsX3BhdGgYAiABKAkiuQEKHUhhcm5lc3NDYXB0dXJlQXJ0aWZhY3RSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgCIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhINCgVwYXRocxgDIAMoCRIeChFuYXRpdmVfc2Vzc2lvbl9pZBgEIAEoCUgAiAEBQhQKEl9uYXRpdmVfc2Vzc2lvbl9pZCLTAgocQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEj0KC2Rlc2NyaXB0aW9uGAMgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERlc2NyaXB0aW9uEjAKBWZpbGVzGAQgAygLMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGUSHgoRbmF0aXZlX3Nlc3Npb25faWQYBSABKAlIAIgBARIbChNtYW5hZ2VkX3Rhc2tfb3V0cHV0GAYgASgIEhwKFGRlY2xhcmVkX3Rhc2tfb3V0cHV0GAcgASgIQhQKEl9uYXRpdmVfc2Vzc2lvbl9pZCIxChpHZXRDYXB0dXJlZEFydGlmYWN0UmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCSJUChxMaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSDQoFbGltaXQYAiABKA0SFAoMYmVmb3JlX29yZGVyGAMgASgEInMKHUxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlEjcKCWFydGlmYWN0cxgBIAMoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RTdW1tYXJ5EhkKEW5leHRfYmVmb3JlX29yZGVyGAIgASgEIpEBCg5BcnRpZmFjdFVwbG9hZBJCCgViZWdpbhgBIAEoCzIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdEgAEjMKBWNodW5rGAIgASgLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdENodW5rSABCBgoEcGFydCIxCg1BcnRpZmFjdENodW5rEhIKCmZpbGVfaW5kZXgYASABKA0SDAoEZGF0YRgCIAEoDCJAChtEb3dubG9hZEFydGlmYWN0RmlsZVJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSDAoEcGF0aBgCIAEoCSJeChBBcnRpZmFjdERvd25sb2FkEjEKBGZpbGUYASABKAsyIS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RmlsZUgAEg8KBWNodW5rGAIgASgMSABCBgoEcGFydCp0ChBBcnRpZmFjdERlbGl2ZXJ5EiEKHUFSVElGQUNUX0RFTElWRVJZX1VOU1BFQ0lGSUVEEAASGgoWQVJUSUZBQ1RfREVMSVZFUllfUkVBRBABEiEKHUFSVElGQUNUX0RFTElWRVJZX01BVEVSSUFMSVpFEAIq7AEKGEFydGlmYWN0QWNxdWlzaXRpb25TdGF0ZRIqCiZBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9VTlNQRUNJRklFRBAAEikKJUFSVElGQUNUX0FDUVVJU0lUSU9OX1NUQVRFX0FVVEhPUklaRUQQARIoCiRBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9ERUxJVkVSRUQQAhIlCiFBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9GQUlMRUQQAxIoCiRBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9VTkNFUlRBSU4QBDLfAQoPQXJ0aWZhY3RDYXRhbG9nEl0KA0dldBIvLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbQoETGlzdBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2Uy1AcKEUFydGlmYWN0RGlyZWN0b3J5EmoKDlJlc2VydmVDYXB0dXJlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5Db21taXRBcnRpZmFjdENhcHR1cmVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0EmkKDUNvbW1pdENhcHR1cmUSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbW1pdEFydGlmYWN0Q2FwdHVyZVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSXQoDR2V0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRDYXB0dXJlZEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJtCgRMaXN0EjEuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJ2Cg5GaW5kRm9yQXR0ZW1wdBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRmluZEF0dGVtcHRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJqCg1HZXRGb3JBdHRlbXB0EjIuc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJgCgdBY3F1aXJlEisuc3VwZXJ0YWcucnVudGltZS52Mi5BY3F1aXJlQXJ0aWZhY3RSZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEmkKBlNldHRsZRI1LnN1cGVydGFnLnJ1bnRpbWUudjIuU2V0dGxlQXJ0aWZhY3RBY3F1aXNpdGlvblJlcXVlc3QaKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb24SaQoPR2V0QWNxdWlyZWRGaWxlEjMuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRBY3F1aXJlZEFydGlmYWN0RmlsZVJlcXVlc3QaIS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RmlsZTKzAwoQQXR0ZW1wdEFydGlmYWN0cxJsCgRGaW5kEjAuc3VwZXJ0YWcucnVudGltZS52Mi5GaW5kQXR0ZW1wdEFydGlmYWN0c1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlEmQKB0luc3BlY3QSMi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0QXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0EmAKB0FjcXVpcmUSKy5zdXBlcnRhZy5ydW50aW1lLnYyLkFjcXVpcmVBcnRpZmFjdFJlcXVlc3QaKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb24SaQoGU2V0dGxlEjUuc3VwZXJ0YWcucnVudGltZS52Mi5TZXR0bGVBcnRpZmFjdEFjcXVpc2l0aW9uUmVxdWVzdBooLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvbjLTAgoRQXJ0aWZhY3RUcmFuc2ZlcnMSXQoNVXBsb2FkQ2FwdHVyZRIjLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RVcGxvYWQaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QoARJpCgxEb3dubG9hZEZpbGUSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkRvd25sb2FkQXJ0aWZhY3RGaWxlUmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REb3dubG9hZDABEnQKFERvd25sb2FkQWNxdWlyZWRGaWxlEjMuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRBY3F1aXJlZEFydGlmYWN0RmlsZVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RG93bmxvYWQwATKXBAoQSGFybmVzc0FydGlmYWN0cxJkCgdDYXB0dXJlEjIuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzQ2FwdHVyZUFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJsCgRGaW5kEjAuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzRmluZEFydGlmYWN0c1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlEmEKB0luc3BlY3QSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldENhcHR1cmVkQXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0EmEKBFJlYWQSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NSZWFkQXJ0aWZhY3RSZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzQXJ0aWZhY3RQYWdlEmkKBkF0dGFjaBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0F0dGFjaEFydGlmYWN0UmVxdWVzdBosLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0F0dGFjaGVkQXJ0aWZhY3RiBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL2FydGlmYWN0LnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIlQKE0FydGlmYWN0RGVzY3JpcHRpb24SDQoFdGl0bGUYASABKAkSDAoEa2luZBgCIAEoCRIUCgdzdW1tYXJ5GAMgASgJSACIAQFCCgoIX3N1bW1hcnkiigEKDEFydGlmYWN0RmlsZRIMCgRwYXRoGAEgASgJEjAKBGJsb2IYAiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkJsb2JSZWZlcmVuY2USOgoKZ2l0X291dHB1dBgDIAEoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0T3V0cHV0U25hcHNob3QipgEKEUdpdE91dHB1dFNuYXBzaG90EhQKDHN0YXJ0X2NvbW1pdBgBIAEoCRITCgtoZWFkX2NvbW1pdBgCIAEoCRITCgZyZW1vdGUYAyABKAlIAIgBARIVCg10cmFja2VkX3BhdGhzGAQgAygJEhUKDWRlbGV0ZWRfcGF0aHMYBSADKAkSGAoQcmVmZXJlbmNlZF9wYXRocxgGIAMoCUIJCgdfcmVtb3RlIvUBChBBcnRpZmFjdFByb2R1Y2VyEg8KB3Rhc2tfaWQYASABKAkSEgoKYXR0ZW1wdF9pZBgCIAEoCRIOCgZ0YWdfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRIZCgxvYmplY3RpdmVfaWQYBSABKAlIAIgBARI2CgxoYXJuZXNzX2tpbmQYBiABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NLaW5kEh4KEW5hdGl2ZV9zZXNzaW9uX2lkGAcgASgJSAGIAQFCDwoNX29iamVjdGl2ZV9pZEIUChJfbmF0aXZlX3Nlc3Npb25faWQi/QEKD0FydGlmYWN0U3VtbWFyeRITCgthcnRpZmFjdF9pZBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgCIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhI3Cghwcm9kdWNlchgDIAEoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RQcm9kdWNlchISCgpmaWxlX2NvdW50GAQgASgNEhMKC2J5dGVfbGVuZ3RoGAUgASgEEhYKDmNhcHR1cmVkX2F0X21zGAYgASgDEhwKFGRlY2xhcmVkX3Rhc2tfb3V0cHV0GAcgASgIIrMBChBDYXB0dXJlZEFydGlmYWN0EjUKB3N1bW1hcnkYASABKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U3VtbWFyeRIwCgVmaWxlcxgCIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEjYKBmlucHV0cxgDIAMoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RTZWxlY3Rpb24i/gIKE0FydGlmYWN0QWNxdWlzaXRpb24SFgoOYWNxdWlzaXRpb25faWQYASABKAkSFAoMb3BlcmF0aW9uX2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSEgoKYXR0ZW1wdF9pZBgEIAEoCRITCgthcnRpZmFjdF9pZBgFIAEoCRIwCgVmaWxlcxgGIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEjcKCGRlbGl2ZXJ5GAcgASgOMiUuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERlbGl2ZXJ5EhgKC2Rlc3RpbmF0aW9uGAggASgJSACIAQESPAoFc3RhdGUYCSABKA4yLS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb25TdGF0ZRIVCg1jcmVhdGVkX2F0X21zGAogASgDEhUKDXVwZGF0ZWRfYXRfbXMYCyABKANCDgoMX2Rlc3RpbmF0aW9uIq0BChtGaW5kQXR0ZW1wdEFydGlmYWN0c1JlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0Eg0KBXF1ZXJ5GAIgASgJEgwKBGtpbmQYAyABKAkSDwoHdGFza19pZBgEIAEoCRINCgVsaW1pdBgFIAEoDRIUCgxiZWZvcmVfb3JkZXIYBiABKAQicQodSW5zcGVjdEF0dGVtcHRBcnRpZmFjdFJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAIgASgJIvIBChZBY3F1aXJlQXJ0aWZhY3RSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYAiABKAkSEwoLYXJ0aWZhY3RfaWQYAyABKAkSDQoFcGF0aHMYBCADKAkSNwoIZGVsaXZlcnkYBSABKA4yJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVsaXZlcnkSGAoLZGVzdGluYXRpb24YBiABKAlIAIgBAUIOCgxfZGVzdGluYXRpb24itQEKIFNldHRsZUFydGlmYWN0QWNxdWlzaXRpb25SZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIWCg5hY3F1aXNpdGlvbl9pZBgCIAEoCRI8CgVzdGF0ZRgDIAEoDjItLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvblN0YXRlIoMBCh5HZXRBY3F1aXJlZEFydGlmYWN0RmlsZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhYKDmFjcXVpc2l0aW9uX2lkGAIgASgJEgwKBHBhdGgYAyABKAkicAobSGFybmVzc0ZpbmRBcnRpZmFjdHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEgwKBGtpbmQYAiABKAkSDwoHdGFza19pZBgDIAEoCRINCgVsaW1pdBgEIAEoDRIUCgxiZWZvcmVfb3JkZXIYBSABKAQidAoaSGFybmVzc1JlYWRBcnRpZmFjdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhMKC2FydGlmYWN0X2lkGAIgASgJEgwKBHBhdGgYAyABKAkSDgoGb2Zmc2V0GAQgASgEEg0KBWxpbWl0GAUgASgNIqgBChNIYXJuZXNzQXJ0aWZhY3RQYWdlEj0KC2FjcXVpc2l0aW9uGAEgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEgwKBHBhdGgYAiABKAkSDAoEdGV4dBgDIAEoCRIOCgZvZmZzZXQYBCABKAQSEwoLbmV4dF9vZmZzZXQYBSABKAQSEQoJdHJ1bmNhdGVkGAYgASgIIlgKHEhhcm5lc3NBdHRhY2hBcnRpZmFjdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhMKC2FydGlmYWN0X2lkGAIgASgJEg0KBXBhdGhzGAMgAygJImwKF0hhcm5lc3NBdHRhY2hlZEFydGlmYWN0Ej0KC2FjcXVpc2l0aW9uGAEgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEhIKCmxvY2FsX3BhdGgYAiABKAkiuQEKHUhhcm5lc3NDYXB0dXJlQXJ0aWZhY3RSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgCIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhINCgVwYXRocxgDIAMoCRIeChFuYXRpdmVfc2Vzc2lvbl9pZBgEIAEoCUgAiAEBQhQKEl9uYXRpdmVfc2Vzc2lvbl9pZCLTAgocQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEj0KC2Rlc2NyaXB0aW9uGAMgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERlc2NyaXB0aW9uEjAKBWZpbGVzGAQgAygLMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGUSHgoRbmF0aXZlX3Nlc3Npb25faWQYBSABKAlIAIgBARIbChNtYW5hZ2VkX3Rhc2tfb3V0cHV0GAYgASgIEhwKFGRlY2xhcmVkX3Rhc2tfb3V0cHV0GAcgASgIQhQKEl9uYXRpdmVfc2Vzc2lvbl9pZCIxChpHZXRDYXB0dXJlZEFydGlmYWN0UmVxdWVzdBITCgthcnRpZmFjdF9pZBgBIAEoCSJUChxMaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkSDQoFbGltaXQYAiABKA0SFAoMYmVmb3JlX29yZGVyGAMgASgEInMKHUxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlEjcKCWFydGlmYWN0cxgBIAMoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RTdW1tYXJ5EhkKEW5leHRfYmVmb3JlX29yZGVyGAIgASgEIpEBCg5BcnRpZmFjdFVwbG9hZBJCCgViZWdpbhgBIAEoCzIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdEgAEjMKBWNodW5rGAIgASgLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdENodW5rSABCBgoEcGFydCIxCg1BcnRpZmFjdENodW5rEhIKCmZpbGVfaW5kZXgYASABKA0SDAoEZGF0YRgCIAEoDCJAChtEb3dubG9hZEFydGlmYWN0RmlsZVJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkSDAoEcGF0aBgCIAEoCSJeChBBcnRpZmFjdERvd25sb2FkEjEKBGZpbGUYASABKAsyIS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RmlsZUgAEg8KBWNodW5rGAIgASgMSABCBgoEcGFydCJFCg5BcnRpZmFjdFZvbHVtZRIRCgl2b2x1bWVfaWQYASABKAkSDgoGc291cmNlGAIgASgJEhAKCHJldmlzaW9uGAMgASgEIm4KGFB1dEFydGlmYWN0Vm9sdW1lUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSEQoJdm9sdW1lX2lkGAIgASgJEg4KBnNvdXJjZRgDIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgEIAEoBCItChhHZXRBcnRpZmFjdFZvbHVtZVJlcXVlc3QSEQoJdm9sdW1lX2lkGAEgASgJIj0KGkxpc3RBcnRpZmFjdFZvbHVtZXNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgNEhAKCGFmdGVyX2lkGAIgASgJImoKG0xpc3RBcnRpZmFjdFZvbHVtZXNSZXNwb25zZRI0Cgd2b2x1bWVzGAEgAygLMiMuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFZvbHVtZRIVCg1uZXh0X2FmdGVyX2lkGAIgASgJImEKG0RlbGV0ZUFydGlmYWN0Vm9sdW1lUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSEQoJdm9sdW1lX2lkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEIi8KHERlbGV0ZUFydGlmYWN0Vm9sdW1lUmVzcG9uc2USDwoHZGVsZXRlZBgBIAEoCCK/AQobQ29weUFydGlmYWN0VG9Wb2x1bWVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIRCgl2b2x1bWVfaWQYAiABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKAQSEwoLYXJ0aWZhY3RfaWQYBCABKAkSDAoEcGF0aBgFIAEoCRI5Cg1leHBlY3RlZF9ibG9iGAYgASgLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5CbG9iUmVmZXJlbmNlIs8CChJBcnRpZmFjdFZvbHVtZUNvcHkSDwoHY29weV9pZBgBIAEoCRIUCgxvcGVyYXRpb25faWQYAiABKAkSMwoGdm9sdW1lGAMgASgLMiMuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFZvbHVtZRITCgthcnRpZmFjdF9pZBgEIAEoCRIvCgRmaWxlGAUgASgLMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGUSEwoLc3RvcmFnZV9rZXkYBiABKAkSOwoFc3RhdGUYByABKA4yLC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lQ29weVN0YXRlEhUKDWNyZWF0ZWRfYXRfbXMYCCABKAMSGwoOdmVyaWZpZWRfYXRfbXMYCSABKANIAIgBAUIRCg9fdmVyaWZpZWRfYXRfbXMibQofQ29tbWl0QXJ0aWZhY3RWb2x1bWVDb3B5UmVxdWVzdBIPCgdjb3B5X2lkGAEgASgJEjkKDXZlcmlmaWVkX2Jsb2IYAiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkJsb2JSZWZlcmVuY2UiLwocR2V0QXJ0aWZhY3RWb2x1bWVDb3B5UmVxdWVzdBIPCgdjb3B5X2lkGAEgASgJIlkKH0xpc3RBcnRpZmFjdFZvbHVtZUNvcGllc1JlcXVlc3QSEQoJdm9sdW1lX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEhQKDGJlZm9yZV9vcmRlchgDIAEoBCJ2CiBMaXN0QXJ0aWZhY3RWb2x1bWVDb3BpZXNSZXNwb25zZRI3CgZjb3BpZXMYASADKAsyJy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lQ29weRIZChFuZXh0X2JlZm9yZV9vcmRlchgCIAEoBCp0ChBBcnRpZmFjdERlbGl2ZXJ5EiEKHUFSVElGQUNUX0RFTElWRVJZX1VOU1BFQ0lGSUVEEAASGgoWQVJUSUZBQ1RfREVMSVZFUllfUkVBRBABEiEKHUFSVElGQUNUX0RFTElWRVJZX01BVEVSSUFMSVpFEAIq7AEKGEFydGlmYWN0QWNxdWlzaXRpb25TdGF0ZRIqCiZBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9VTlNQRUNJRklFRBAAEikKJUFSVElGQUNUX0FDUVVJU0lUSU9OX1NUQVRFX0FVVEhPUklaRUQQARIoCiRBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9ERUxJVkVSRUQQAhIlCiFBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9GQUlMRUQQAxIoCiRBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9VTkNFUlRBSU4QBCqXAQoXQXJ0aWZhY3RWb2x1bWVDb3B5U3RhdGUSKgomQVJUSUZBQ1RfVk9MVU1FX0NPUFlfU1RBVEVfVU5TUEVDSUZJRUQQABInCiNBUlRJRkFDVF9WT0xVTUVfQ09QWV9TVEFURV9SRVNFUlZFRBABEicKI0FSVElGQUNUX1ZPTFVNRV9DT1BZX1NUQVRFX1ZFUklGSUVEEAIy3wEKD0FydGlmYWN0Q2F0YWxvZxJdCgNHZXQSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldENhcHR1cmVkQXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0Em0KBExpc3QSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlMtQHChFBcnRpZmFjdERpcmVjdG9yeRJqCg5SZXNlcnZlQ2FwdHVyZRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJpCg1Db21taXRDYXB0dXJlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5Db21taXRBcnRpZmFjdENhcHR1cmVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0El0KA0dldBIvLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbQoETGlzdBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2USdgoORmluZEZvckF0dGVtcHQSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkZpbmRBdHRlbXB0QXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2USagoNR2V0Rm9yQXR0ZW1wdBIyLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSYAoHQWNxdWlyZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuQWNxdWlyZUFydGlmYWN0UmVxdWVzdBooLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvbhJpCgZTZXR0bGUSNS5zdXBlcnRhZy5ydW50aW1lLnYyLlNldHRsZUFydGlmYWN0QWNxdWlzaXRpb25SZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEmkKD0dldEFjcXVpcmVkRmlsZRIzLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QWNxdWlyZWRBcnRpZmFjdEZpbGVSZXF1ZXN0GiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGUyswMKEEF0dGVtcHRBcnRpZmFjdHMSbAoERmluZBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRmluZEF0dGVtcHRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJkCgdJbnNwZWN0EjIuc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJgCgdBY3F1aXJlEisuc3VwZXJ0YWcucnVudGltZS52Mi5BY3F1aXJlQXJ0aWZhY3RSZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEmkKBlNldHRsZRI1LnN1cGVydGFnLnJ1bnRpbWUudjIuU2V0dGxlQXJ0aWZhY3RBY3F1aXNpdGlvblJlcXVlc3QaKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb24y0wIKEUFydGlmYWN0VHJhbnNmZXJzEl0KDVVwbG9hZENhcHR1cmUSIy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0VXBsb2FkGiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0KAESaQoMRG93bmxvYWRGaWxlEjAuc3VwZXJ0YWcucnVudGltZS52Mi5Eb3dubG9hZEFydGlmYWN0RmlsZVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RG93bmxvYWQwARJ0ChREb3dubG9hZEFjcXVpcmVkRmlsZRIzLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QWNxdWlyZWRBcnRpZmFjdEZpbGVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERvd25sb2FkMAEylwQKEEhhcm5lc3NBcnRpZmFjdHMSZAoHQ2FwdHVyZRIyLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0NhcHR1cmVBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbAoERmluZBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0ZpbmRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJhCgdJbnNwZWN0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRDYXB0dXJlZEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJhCgRSZWFkEi8uc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzUmVhZEFydGlmYWN0UmVxdWVzdBooLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0FydGlmYWN0UGFnZRJpCgZBdHRhY2gSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NBdHRhY2hBcnRpZmFjdFJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NBdHRhY2hlZEFydGlmYWN0MtIGCg9BcnRpZmFjdFZvbHVtZXMSWQoDUHV0Ei0uc3VwZXJ0YWcucnVudGltZS52Mi5QdXRBcnRpZmFjdFZvbHVtZVJlcXVlc3QaIy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lElkKA0dldBItLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QXJ0aWZhY3RWb2x1bWVSZXF1ZXN0GiMuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFZvbHVtZRJpCgRMaXN0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXJ0aWZhY3RWb2x1bWVzUmVxdWVzdBowLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEFydGlmYWN0Vm9sdW1lc1Jlc3BvbnNlEm0KBkRlbGV0ZRIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlQXJ0aWZhY3RWb2x1bWVSZXF1ZXN0GjEuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVBcnRpZmFjdFZvbHVtZVJlc3BvbnNlEmEKBENvcHkSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkNvcHlBcnRpZmFjdFRvVm9sdW1lUmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RWb2x1bWVDb3B5EmUKB0dldENvcHkSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldEFydGlmYWN0Vm9sdW1lQ29weVJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lQ29weRJqCgxEb3dubG9hZENvcHkSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldEFydGlmYWN0Vm9sdW1lQ29weVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RG93bmxvYWQwARJ5CgpMaXN0Q29waWVzEjQuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXJ0aWZhY3RWb2x1bWVDb3BpZXNSZXF1ZXN0GjUuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXJ0aWZhY3RWb2x1bWVDb3BpZXNSZXNwb25zZTLiBgoXQXJ0aWZhY3RWb2x1bWVEaXJlY3RvcnkSWQoDUHV0Ei0uc3VwZXJ0YWcucnVudGltZS52Mi5QdXRBcnRpZmFjdFZvbHVtZVJlcXVlc3QaIy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lElkKA0dldBItLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QXJ0aWZhY3RWb2x1bWVSZXF1ZXN0GiMuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFZvbHVtZRJpCgRMaXN0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXJ0aWZhY3RWb2x1bWVzUmVxdWVzdBowLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEFydGlmYWN0Vm9sdW1lc1Jlc3BvbnNlEm0KBkRlbGV0ZRIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlQXJ0aWZhY3RWb2x1bWVSZXF1ZXN0GjEuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVBcnRpZmFjdFZvbHVtZVJlc3BvbnNlEmgKC1Jlc2VydmVDb3B5EjAuc3VwZXJ0YWcucnVudGltZS52Mi5Db3B5QXJ0aWZhY3RUb1ZvbHVtZVJlcXVlc3QaJy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0Vm9sdW1lQ29weRJrCgpDb21taXRDb3B5EjQuc3VwZXJ0YWcucnVudGltZS52Mi5Db21taXRBcnRpZmFjdFZvbHVtZUNvcHlSZXF1ZXN0Gicuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFZvbHVtZUNvcHkSZQoHR2V0Q29weRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QXJ0aWZhY3RWb2x1bWVDb3B5UmVxdWVzdBonLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RWb2x1bWVDb3B5EnkKCkxpc3RDb3BpZXMSNC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBcnRpZmFjdFZvbHVtZUNvcGllc1JlcXVlc3QaNS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBcnRpZmFjdFZvbHVtZUNvcGllc1Jlc3BvbnNlYgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.ArtifactDescription
@@ -886,6 +886,359 @@ export const ArtifactDownloadSchema: GenMessage<ArtifactDownload> = /*@__PURE__*
   messageDesc(file_supertag_runtime_v2_artifact, 25);
 
 /**
+ * @generated from message supertag.runtime.v2.ArtifactVolume
+ */
+export type ArtifactVolume = Message<"supertag.runtime.v2.ArtifactVolume"> & {
+  /**
+   * @generated from field: string volume_id = 1;
+   */
+  volumeId: string;
+
+  /**
+   * @generated from field: string source = 2;
+   */
+  source: string;
+
+  /**
+   * @generated from field: uint64 revision = 3;
+   */
+  revision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ArtifactVolume.
+ * Use `create(ArtifactVolumeSchema)` to create a new message.
+ */
+export const ArtifactVolumeSchema: GenMessage<ArtifactVolume> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 26);
+
+/**
+ * @generated from message supertag.runtime.v2.PutArtifactVolumeRequest
+ */
+export type PutArtifactVolumeRequest = Message<"supertag.runtime.v2.PutArtifactVolumeRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string volume_id = 2;
+   */
+  volumeId: string;
+
+  /**
+   * @generated from field: string source = 3;
+   */
+  source: string;
+
+  /**
+   * Zero creates; existing registrations require the exact current revision.
+   *
+   * @generated from field: uint64 expected_revision = 4;
+   */
+  expectedRevision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PutArtifactVolumeRequest.
+ * Use `create(PutArtifactVolumeRequestSchema)` to create a new message.
+ */
+export const PutArtifactVolumeRequestSchema: GenMessage<PutArtifactVolumeRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 27);
+
+/**
+ * @generated from message supertag.runtime.v2.GetArtifactVolumeRequest
+ */
+export type GetArtifactVolumeRequest = Message<"supertag.runtime.v2.GetArtifactVolumeRequest"> & {
+  /**
+   * @generated from field: string volume_id = 1;
+   */
+  volumeId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetArtifactVolumeRequest.
+ * Use `create(GetArtifactVolumeRequestSchema)` to create a new message.
+ */
+export const GetArtifactVolumeRequestSchema: GenMessage<GetArtifactVolumeRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 28);
+
+/**
+ * @generated from message supertag.runtime.v2.ListArtifactVolumesRequest
+ */
+export type ListArtifactVolumesRequest = Message<"supertag.runtime.v2.ListArtifactVolumesRequest"> & {
+  /**
+   * @generated from field: uint32 limit = 1;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: string after_id = 2;
+   */
+  afterId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListArtifactVolumesRequest.
+ * Use `create(ListArtifactVolumesRequestSchema)` to create a new message.
+ */
+export const ListArtifactVolumesRequestSchema: GenMessage<ListArtifactVolumesRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 29);
+
+/**
+ * @generated from message supertag.runtime.v2.ListArtifactVolumesResponse
+ */
+export type ListArtifactVolumesResponse = Message<"supertag.runtime.v2.ListArtifactVolumesResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.ArtifactVolume volumes = 1;
+   */
+  volumes: ArtifactVolume[];
+
+  /**
+   * @generated from field: string next_after_id = 2;
+   */
+  nextAfterId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListArtifactVolumesResponse.
+ * Use `create(ListArtifactVolumesResponseSchema)` to create a new message.
+ */
+export const ListArtifactVolumesResponseSchema: GenMessage<ListArtifactVolumesResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 30);
+
+/**
+ * @generated from message supertag.runtime.v2.DeleteArtifactVolumeRequest
+ */
+export type DeleteArtifactVolumeRequest = Message<"supertag.runtime.v2.DeleteArtifactVolumeRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string volume_id = 2;
+   */
+  volumeId: string;
+
+  /**
+   * @generated from field: uint64 expected_revision = 3;
+   */
+  expectedRevision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.DeleteArtifactVolumeRequest.
+ * Use `create(DeleteArtifactVolumeRequestSchema)` to create a new message.
+ */
+export const DeleteArtifactVolumeRequestSchema: GenMessage<DeleteArtifactVolumeRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 31);
+
+/**
+ * @generated from message supertag.runtime.v2.DeleteArtifactVolumeResponse
+ */
+export type DeleteArtifactVolumeResponse = Message<"supertag.runtime.v2.DeleteArtifactVolumeResponse"> & {
+  /**
+   * @generated from field: bool deleted = 1;
+   */
+  deleted: boolean;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.DeleteArtifactVolumeResponse.
+ * Use `create(DeleteArtifactVolumeResponseSchema)` to create a new message.
+ */
+export const DeleteArtifactVolumeResponseSchema: GenMessage<DeleteArtifactVolumeResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 32);
+
+/**
+ * @generated from message supertag.runtime.v2.CopyArtifactToVolumeRequest
+ */
+export type CopyArtifactToVolumeRequest = Message<"supertag.runtime.v2.CopyArtifactToVolumeRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string volume_id = 2;
+   */
+  volumeId: string;
+
+  /**
+   * @generated from field: uint64 expected_revision = 3;
+   */
+  expectedRevision: bigint;
+
+  /**
+   * @generated from field: string artifact_id = 4;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: string path = 5;
+   */
+  path: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.BlobReference expected_blob = 6;
+   */
+  expectedBlob?: BlobReference | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.CopyArtifactToVolumeRequest.
+ * Use `create(CopyArtifactToVolumeRequestSchema)` to create a new message.
+ */
+export const CopyArtifactToVolumeRequestSchema: GenMessage<CopyArtifactToVolumeRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 33);
+
+/**
+ * @generated from message supertag.runtime.v2.ArtifactVolumeCopy
+ */
+export type ArtifactVolumeCopy = Message<"supertag.runtime.v2.ArtifactVolumeCopy"> & {
+  /**
+   * @generated from field: string copy_id = 1;
+   */
+  copyId: string;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactVolume volume = 3;
+   */
+  volume?: ArtifactVolume | undefined;
+
+  /**
+   * @generated from field: string artifact_id = 4;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactFile file = 5;
+   */
+  file?: ArtifactFile | undefined;
+
+  /**
+   * @generated from field: string storage_key = 6;
+   */
+  storageKey: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactVolumeCopyState state = 7;
+   */
+  state: ArtifactVolumeCopyState;
+
+  /**
+   * @generated from field: int64 created_at_ms = 8;
+   */
+  createdAtMs: bigint;
+
+  /**
+   * @generated from field: optional int64 verified_at_ms = 9;
+   */
+  verifiedAtMs?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ArtifactVolumeCopy.
+ * Use `create(ArtifactVolumeCopySchema)` to create a new message.
+ */
+export const ArtifactVolumeCopySchema: GenMessage<ArtifactVolumeCopy> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 34);
+
+/**
+ * @generated from message supertag.runtime.v2.CommitArtifactVolumeCopyRequest
+ */
+export type CommitArtifactVolumeCopyRequest = Message<"supertag.runtime.v2.CommitArtifactVolumeCopyRequest"> & {
+  /**
+   * @generated from field: string copy_id = 1;
+   */
+  copyId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.BlobReference verified_blob = 2;
+   */
+  verifiedBlob?: BlobReference | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.CommitArtifactVolumeCopyRequest.
+ * Use `create(CommitArtifactVolumeCopyRequestSchema)` to create a new message.
+ */
+export const CommitArtifactVolumeCopyRequestSchema: GenMessage<CommitArtifactVolumeCopyRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 35);
+
+/**
+ * @generated from message supertag.runtime.v2.GetArtifactVolumeCopyRequest
+ */
+export type GetArtifactVolumeCopyRequest = Message<"supertag.runtime.v2.GetArtifactVolumeCopyRequest"> & {
+  /**
+   * @generated from field: string copy_id = 1;
+   */
+  copyId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetArtifactVolumeCopyRequest.
+ * Use `create(GetArtifactVolumeCopyRequestSchema)` to create a new message.
+ */
+export const GetArtifactVolumeCopyRequestSchema: GenMessage<GetArtifactVolumeCopyRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 36);
+
+/**
+ * @generated from message supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+ */
+export type ListArtifactVolumeCopiesRequest = Message<"supertag.runtime.v2.ListArtifactVolumeCopiesRequest"> & {
+  /**
+   * @generated from field: string volume_id = 1;
+   */
+  volumeId: string;
+
+  /**
+   * @generated from field: uint32 limit = 2;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: uint64 before_order = 3;
+   */
+  beforeOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListArtifactVolumeCopiesRequest.
+ * Use `create(ListArtifactVolumeCopiesRequestSchema)` to create a new message.
+ */
+export const ListArtifactVolumeCopiesRequestSchema: GenMessage<ListArtifactVolumeCopiesRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 37);
+
+/**
+ * @generated from message supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+ */
+export type ListArtifactVolumeCopiesResponse = Message<"supertag.runtime.v2.ListArtifactVolumeCopiesResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.ArtifactVolumeCopy copies = 1;
+   */
+  copies: ArtifactVolumeCopy[];
+
+  /**
+   * @generated from field: uint64 next_before_order = 2;
+   */
+  nextBeforeOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListArtifactVolumeCopiesResponse.
+ * Use `create(ListArtifactVolumeCopiesResponseSchema)` to create a new message.
+ */
+export const ListArtifactVolumeCopiesResponseSchema: GenMessage<ListArtifactVolumeCopiesResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 38);
+
+/**
  * @generated from enum supertag.runtime.v2.ArtifactDelivery
  */
 export enum ArtifactDelivery {
@@ -946,6 +1299,32 @@ export enum ArtifactAcquisitionState {
  */
 export const ArtifactAcquisitionStateSchema: GenEnum<ArtifactAcquisitionState> = /*@__PURE__*/
   enumDesc(file_supertag_runtime_v2_artifact, 1);
+
+/**
+ * @generated from enum supertag.runtime.v2.ArtifactVolumeCopyState
+ */
+export enum ArtifactVolumeCopyState {
+  /**
+   * @generated from enum value: ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ARTIFACT_VOLUME_COPY_STATE_RESERVED = 1;
+   */
+  RESERVED = 1,
+
+  /**
+   * @generated from enum value: ARTIFACT_VOLUME_COPY_STATE_VERIFIED = 2;
+   */
+  VERIFIED = 2,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.ArtifactVolumeCopyState.
+ */
+export const ArtifactVolumeCopyStateSchema: GenEnum<ArtifactVolumeCopyState> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_artifact, 2);
 
 /**
  * Operator catalog reads are scoped to the producing Task's audience.
@@ -1174,3 +1553,150 @@ export const HarnessArtifacts: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_artifact, 4);
+
+/**
+ * File Volumes are registered storage locations. Registration alone authorizes
+ * no write: the Gateway must explicitly map the exact Volume and source.
+ *
+ * @generated from service supertag.runtime.v2.ArtifactVolumes
+ */
+export const ArtifactVolumes: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.Put
+   */
+  put: {
+    methodKind: "unary";
+    input: typeof PutArtifactVolumeRequestSchema;
+    output: typeof ArtifactVolumeSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.Get
+   */
+  get: {
+    methodKind: "unary";
+    input: typeof GetArtifactVolumeRequestSchema;
+    output: typeof ArtifactVolumeSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.List
+   */
+  list: {
+    methodKind: "unary";
+    input: typeof ListArtifactVolumesRequestSchema;
+    output: typeof ListArtifactVolumesResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.Delete
+   */
+  delete: {
+    methodKind: "unary";
+    input: typeof DeleteArtifactVolumeRequestSchema;
+    output: typeof DeleteArtifactVolumeResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.Copy
+   */
+  copy: {
+    methodKind: "unary";
+    input: typeof CopyArtifactToVolumeRequestSchema;
+    output: typeof ArtifactVolumeCopySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.GetCopy
+   */
+  getCopy: {
+    methodKind: "unary";
+    input: typeof GetArtifactVolumeCopyRequestSchema;
+    output: typeof ArtifactVolumeCopySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.DownloadCopy
+   */
+  downloadCopy: {
+    methodKind: "server_streaming";
+    input: typeof GetArtifactVolumeCopyRequestSchema;
+    output: typeof ArtifactDownloadSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumes.ListCopies
+   */
+  listCopies: {
+    methodKind: "unary";
+    input: typeof ListArtifactVolumeCopiesRequestSchema;
+    output: typeof ListArtifactVolumeCopiesResponseSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_artifact, 5);
+
+/**
+ * Private metadata authority. Only the Gateway verifies and carries copy bytes.
+ *
+ * @generated from service supertag.runtime.v2.ArtifactVolumeDirectory
+ */
+export const ArtifactVolumeDirectory: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.Put
+   */
+  put: {
+    methodKind: "unary";
+    input: typeof PutArtifactVolumeRequestSchema;
+    output: typeof ArtifactVolumeSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.Get
+   */
+  get: {
+    methodKind: "unary";
+    input: typeof GetArtifactVolumeRequestSchema;
+    output: typeof ArtifactVolumeSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.List
+   */
+  list: {
+    methodKind: "unary";
+    input: typeof ListArtifactVolumesRequestSchema;
+    output: typeof ListArtifactVolumesResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.Delete
+   */
+  delete: {
+    methodKind: "unary";
+    input: typeof DeleteArtifactVolumeRequestSchema;
+    output: typeof DeleteArtifactVolumeResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy
+   */
+  reserveCopy: {
+    methodKind: "unary";
+    input: typeof CopyArtifactToVolumeRequestSchema;
+    output: typeof ArtifactVolumeCopySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy
+   */
+  commitCopy: {
+    methodKind: "unary";
+    input: typeof CommitArtifactVolumeCopyRequestSchema;
+    output: typeof ArtifactVolumeCopySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy
+   */
+  getCopy: {
+    methodKind: "unary";
+    input: typeof GetArtifactVolumeCopyRequestSchema;
+    output: typeof ArtifactVolumeCopySchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies
+   */
+  listCopies: {
+    methodKind: "unary";
+    input: typeof ListArtifactVolumeCopiesRequestSchema;
+    output: typeof ListArtifactVolumeCopiesResponseSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_artifact, 6);

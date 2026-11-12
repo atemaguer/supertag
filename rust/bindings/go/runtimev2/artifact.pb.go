@@ -125,6 +125,55 @@ func (ArtifactAcquisitionState) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{1}
 }
 
+type ArtifactVolumeCopyState int32
+
+const (
+	ArtifactVolumeCopyState_ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED ArtifactVolumeCopyState = 0
+	ArtifactVolumeCopyState_ARTIFACT_VOLUME_COPY_STATE_RESERVED    ArtifactVolumeCopyState = 1
+	ArtifactVolumeCopyState_ARTIFACT_VOLUME_COPY_STATE_VERIFIED    ArtifactVolumeCopyState = 2
+)
+
+// Enum value maps for ArtifactVolumeCopyState.
+var (
+	ArtifactVolumeCopyState_name = map[int32]string{
+		0: "ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED",
+		1: "ARTIFACT_VOLUME_COPY_STATE_RESERVED",
+		2: "ARTIFACT_VOLUME_COPY_STATE_VERIFIED",
+	}
+	ArtifactVolumeCopyState_value = map[string]int32{
+		"ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED": 0,
+		"ARTIFACT_VOLUME_COPY_STATE_RESERVED":    1,
+		"ARTIFACT_VOLUME_COPY_STATE_VERIFIED":    2,
+	}
+)
+
+func (x ArtifactVolumeCopyState) Enum() *ArtifactVolumeCopyState {
+	p := new(ArtifactVolumeCopyState)
+	*p = x
+	return p
+}
+
+func (x ArtifactVolumeCopyState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ArtifactVolumeCopyState) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_artifact_proto_enumTypes[2].Descriptor()
+}
+
+func (ArtifactVolumeCopyState) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_artifact_proto_enumTypes[2]
+}
+
+func (x ArtifactVolumeCopyState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ArtifactVolumeCopyState.Descriptor instead.
+func (ArtifactVolumeCopyState) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{2}
+}
+
 type ArtifactDescription struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
@@ -1977,6 +2026,787 @@ func (*ArtifactDownload_File) isArtifactDownload_Part() {}
 
 func (*ArtifactDownload_Chunk) isArtifactDownload_Part() {}
 
+type ArtifactVolume struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VolumeId      string                 `protobuf:"bytes,1,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Revision      uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactVolume) Reset() {
+	*x = ArtifactVolume{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactVolume) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactVolume) ProtoMessage() {}
+
+func (x *ArtifactVolume) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactVolume.ProtoReflect.Descriptor instead.
+func (*ArtifactVolume) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ArtifactVolume) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *ArtifactVolume) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ArtifactVolume) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+type PutArtifactVolumeRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	OperationId string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	VolumeId    string                 `protobuf:"bytes,2,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	Source      string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	// Zero creates; existing registrations require the exact current revision.
+	ExpectedRevision uint64 `protobuf:"varint,4,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PutArtifactVolumeRequest) Reset() {
+	*x = PutArtifactVolumeRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutArtifactVolumeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutArtifactVolumeRequest) ProtoMessage() {}
+
+func (x *PutArtifactVolumeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutArtifactVolumeRequest.ProtoReflect.Descriptor instead.
+func (*PutArtifactVolumeRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *PutArtifactVolumeRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *PutArtifactVolumeRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *PutArtifactVolumeRequest) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *PutArtifactVolumeRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+type GetArtifactVolumeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VolumeId      string                 `protobuf:"bytes,1,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetArtifactVolumeRequest) Reset() {
+	*x = GetArtifactVolumeRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetArtifactVolumeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetArtifactVolumeRequest) ProtoMessage() {}
+
+func (x *GetArtifactVolumeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetArtifactVolumeRequest.ProtoReflect.Descriptor instead.
+func (*GetArtifactVolumeRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetArtifactVolumeRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+type ListArtifactVolumesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	AfterId       string                 `protobuf:"bytes,2,opt,name=after_id,json=afterId,proto3" json:"after_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListArtifactVolumesRequest) Reset() {
+	*x = ListArtifactVolumesRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactVolumesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactVolumesRequest) ProtoMessage() {}
+
+func (x *ListArtifactVolumesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactVolumesRequest.ProtoReflect.Descriptor instead.
+func (*ListArtifactVolumesRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ListArtifactVolumesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListArtifactVolumesRequest) GetAfterId() string {
+	if x != nil {
+		return x.AfterId
+	}
+	return ""
+}
+
+type ListArtifactVolumesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Volumes       []*ArtifactVolume      `protobuf:"bytes,1,rep,name=volumes,proto3" json:"volumes,omitempty"`
+	NextAfterId   string                 `protobuf:"bytes,2,opt,name=next_after_id,json=nextAfterId,proto3" json:"next_after_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListArtifactVolumesResponse) Reset() {
+	*x = ListArtifactVolumesResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactVolumesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactVolumesResponse) ProtoMessage() {}
+
+func (x *ListArtifactVolumesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactVolumesResponse.ProtoReflect.Descriptor instead.
+func (*ListArtifactVolumesResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ListArtifactVolumesResponse) GetVolumes() []*ArtifactVolume {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
+func (x *ListArtifactVolumesResponse) GetNextAfterId() string {
+	if x != nil {
+		return x.NextAfterId
+	}
+	return ""
+}
+
+type DeleteArtifactVolumeRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	VolumeId         string                 `protobuf:"bytes,2,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DeleteArtifactVolumeRequest) Reset() {
+	*x = DeleteArtifactVolumeRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteArtifactVolumeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteArtifactVolumeRequest) ProtoMessage() {}
+
+func (x *DeleteArtifactVolumeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteArtifactVolumeRequest.ProtoReflect.Descriptor instead.
+func (*DeleteArtifactVolumeRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *DeleteArtifactVolumeRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *DeleteArtifactVolumeRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *DeleteArtifactVolumeRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+type DeleteArtifactVolumeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Deleted       bool                   `protobuf:"varint,1,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteArtifactVolumeResponse) Reset() {
+	*x = DeleteArtifactVolumeResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteArtifactVolumeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteArtifactVolumeResponse) ProtoMessage() {}
+
+func (x *DeleteArtifactVolumeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteArtifactVolumeResponse.ProtoReflect.Descriptor instead.
+func (*DeleteArtifactVolumeResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *DeleteArtifactVolumeResponse) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
+type CopyArtifactToVolumeRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	VolumeId         string                 `protobuf:"bytes,2,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	ArtifactId       string                 `protobuf:"bytes,4,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Path             string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	ExpectedBlob     *BlobReference         `protobuf:"bytes,6,opt,name=expected_blob,json=expectedBlob,proto3" json:"expected_blob,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CopyArtifactToVolumeRequest) Reset() {
+	*x = CopyArtifactToVolumeRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CopyArtifactToVolumeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CopyArtifactToVolumeRequest) ProtoMessage() {}
+
+func (x *CopyArtifactToVolumeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CopyArtifactToVolumeRequest.ProtoReflect.Descriptor instead.
+func (*CopyArtifactToVolumeRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *CopyArtifactToVolumeRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *CopyArtifactToVolumeRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *CopyArtifactToVolumeRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *CopyArtifactToVolumeRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *CopyArtifactToVolumeRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *CopyArtifactToVolumeRequest) GetExpectedBlob() *BlobReference {
+	if x != nil {
+		return x.ExpectedBlob
+	}
+	return nil
+}
+
+type ArtifactVolumeCopy struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	CopyId        string                  `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	OperationId   string                  `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Volume        *ArtifactVolume         `protobuf:"bytes,3,opt,name=volume,proto3" json:"volume,omitempty"`
+	ArtifactId    string                  `protobuf:"bytes,4,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	File          *ArtifactFile           `protobuf:"bytes,5,opt,name=file,proto3" json:"file,omitempty"`
+	StorageKey    string                  `protobuf:"bytes,6,opt,name=storage_key,json=storageKey,proto3" json:"storage_key,omitempty"`
+	State         ArtifactVolumeCopyState `protobuf:"varint,7,opt,name=state,proto3,enum=supertag.runtime.v2.ArtifactVolumeCopyState" json:"state,omitempty"`
+	CreatedAtMs   int64                   `protobuf:"varint,8,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	VerifiedAtMs  *int64                  `protobuf:"varint,9,opt,name=verified_at_ms,json=verifiedAtMs,proto3,oneof" json:"verified_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactVolumeCopy) Reset() {
+	*x = ArtifactVolumeCopy{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactVolumeCopy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactVolumeCopy) ProtoMessage() {}
+
+func (x *ArtifactVolumeCopy) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactVolumeCopy.ProtoReflect.Descriptor instead.
+func (*ArtifactVolumeCopy) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ArtifactVolumeCopy) GetCopyId() string {
+	if x != nil {
+		return x.CopyId
+	}
+	return ""
+}
+
+func (x *ArtifactVolumeCopy) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ArtifactVolumeCopy) GetVolume() *ArtifactVolume {
+	if x != nil {
+		return x.Volume
+	}
+	return nil
+}
+
+func (x *ArtifactVolumeCopy) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ArtifactVolumeCopy) GetFile() *ArtifactFile {
+	if x != nil {
+		return x.File
+	}
+	return nil
+}
+
+func (x *ArtifactVolumeCopy) GetStorageKey() string {
+	if x != nil {
+		return x.StorageKey
+	}
+	return ""
+}
+
+func (x *ArtifactVolumeCopy) GetState() ArtifactVolumeCopyState {
+	if x != nil {
+		return x.State
+	}
+	return ArtifactVolumeCopyState_ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED
+}
+
+func (x *ArtifactVolumeCopy) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *ArtifactVolumeCopy) GetVerifiedAtMs() int64 {
+	if x != nil && x.VerifiedAtMs != nil {
+		return *x.VerifiedAtMs
+	}
+	return 0
+}
+
+type CommitArtifactVolumeCopyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CopyId        string                 `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	VerifiedBlob  *BlobReference         `protobuf:"bytes,2,opt,name=verified_blob,json=verifiedBlob,proto3" json:"verified_blob,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitArtifactVolumeCopyRequest) Reset() {
+	*x = CommitArtifactVolumeCopyRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitArtifactVolumeCopyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitArtifactVolumeCopyRequest) ProtoMessage() {}
+
+func (x *CommitArtifactVolumeCopyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitArtifactVolumeCopyRequest.ProtoReflect.Descriptor instead.
+func (*CommitArtifactVolumeCopyRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *CommitArtifactVolumeCopyRequest) GetCopyId() string {
+	if x != nil {
+		return x.CopyId
+	}
+	return ""
+}
+
+func (x *CommitArtifactVolumeCopyRequest) GetVerifiedBlob() *BlobReference {
+	if x != nil {
+		return x.VerifiedBlob
+	}
+	return nil
+}
+
+type GetArtifactVolumeCopyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CopyId        string                 `protobuf:"bytes,1,opt,name=copy_id,json=copyId,proto3" json:"copy_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetArtifactVolumeCopyRequest) Reset() {
+	*x = GetArtifactVolumeCopyRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetArtifactVolumeCopyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetArtifactVolumeCopyRequest) ProtoMessage() {}
+
+func (x *GetArtifactVolumeCopyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetArtifactVolumeCopyRequest.ProtoReflect.Descriptor instead.
+func (*GetArtifactVolumeCopyRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *GetArtifactVolumeCopyRequest) GetCopyId() string {
+	if x != nil {
+		return x.CopyId
+	}
+	return ""
+}
+
+type ListArtifactVolumeCopiesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VolumeId      string                 `protobuf:"bytes,1,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	BeforeOrder   uint64                 `protobuf:"varint,3,opt,name=before_order,json=beforeOrder,proto3" json:"before_order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListArtifactVolumeCopiesRequest) Reset() {
+	*x = ListArtifactVolumeCopiesRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactVolumeCopiesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactVolumeCopiesRequest) ProtoMessage() {}
+
+func (x *ListArtifactVolumeCopiesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactVolumeCopiesRequest.ProtoReflect.Descriptor instead.
+func (*ListArtifactVolumeCopiesRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ListArtifactVolumeCopiesRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *ListArtifactVolumeCopiesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListArtifactVolumeCopiesRequest) GetBeforeOrder() uint64 {
+	if x != nil {
+		return x.BeforeOrder
+	}
+	return 0
+}
+
+type ListArtifactVolumeCopiesResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Copies          []*ArtifactVolumeCopy  `protobuf:"bytes,1,rep,name=copies,proto3" json:"copies,omitempty"`
+	NextBeforeOrder uint64                 `protobuf:"varint,2,opt,name=next_before_order,json=nextBeforeOrder,proto3" json:"next_before_order,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListArtifactVolumeCopiesResponse) Reset() {
+	*x = ListArtifactVolumeCopiesResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactVolumeCopiesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactVolumeCopiesResponse) ProtoMessage() {}
+
+func (x *ListArtifactVolumeCopiesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactVolumeCopiesResponse.ProtoReflect.Descriptor instead.
+func (*ListArtifactVolumeCopiesResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ListArtifactVolumeCopiesResponse) GetCopies() []*ArtifactVolumeCopy {
+	if x != nil {
+		return x.Copies
+	}
+	return nil
+}
+
+func (x *ListArtifactVolumeCopiesResponse) GetNextBeforeOrder() uint64 {
+	if x != nil {
+		return x.NextBeforeOrder
+	}
+	return 0
+}
+
 var File_supertag_runtime_v2_artifact_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
@@ -2143,7 +2973,63 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x10ArtifactDownload\x127\n" +
 	"\x04file\x18\x01 \x01(\v2!.supertag.runtime.v2.ArtifactFileH\x00R\x04file\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04part*t\n" +
+	"\x04part\"a\n" +
+	"\x0eArtifactVolume\x12\x1b\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x1a\n" +
+	"\brevision\x18\x03 \x01(\x04R\brevision\"\x9f\x01\n" +
+	"\x18PutArtifactVolumeRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1b\n" +
+	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12+\n" +
+	"\x11expected_revision\x18\x04 \x01(\x04R\x10expectedRevision\"7\n" +
+	"\x18GetArtifactVolumeRequest\x12\x1b\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\"M\n" +
+	"\x1aListArtifactVolumesRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x19\n" +
+	"\bafter_id\x18\x02 \x01(\tR\aafterId\"\x80\x01\n" +
+	"\x1bListArtifactVolumesResponse\x12=\n" +
+	"\avolumes\x18\x01 \x03(\v2#.supertag.runtime.v2.ArtifactVolumeR\avolumes\x12\"\n" +
+	"\rnext_after_id\x18\x02 \x01(\tR\vnextAfterId\"\x8a\x01\n" +
+	"\x1bDeleteArtifactVolumeRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1b\n" +
+	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\x12+\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"8\n" +
+	"\x1cDeleteArtifactVolumeResponse\x12\x18\n" +
+	"\adeleted\x18\x01 \x01(\bR\adeleted\"\x88\x02\n" +
+	"\x1bCopyArtifactToVolumeRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1b\n" +
+	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\x12+\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x1f\n" +
+	"\vartifact_id\x18\x04 \x01(\tR\n" +
+	"artifactId\x12\x12\n" +
+	"\x04path\x18\x05 \x01(\tR\x04path\x12G\n" +
+	"\rexpected_blob\x18\x06 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\fexpectedBlob\"\xac\x03\n" +
+	"\x12ArtifactVolumeCopy\x12\x17\n" +
+	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12;\n" +
+	"\x06volume\x18\x03 \x01(\v2#.supertag.runtime.v2.ArtifactVolumeR\x06volume\x12\x1f\n" +
+	"\vartifact_id\x18\x04 \x01(\tR\n" +
+	"artifactId\x125\n" +
+	"\x04file\x18\x05 \x01(\v2!.supertag.runtime.v2.ArtifactFileR\x04file\x12\x1f\n" +
+	"\vstorage_key\x18\x06 \x01(\tR\n" +
+	"storageKey\x12B\n" +
+	"\x05state\x18\a \x01(\x0e2,.supertag.runtime.v2.ArtifactVolumeCopyStateR\x05state\x12\"\n" +
+	"\rcreated_at_ms\x18\b \x01(\x03R\vcreatedAtMs\x12)\n" +
+	"\x0everified_at_ms\x18\t \x01(\x03H\x00R\fverifiedAtMs\x88\x01\x01B\x11\n" +
+	"\x0f_verified_at_ms\"\x83\x01\n" +
+	"\x1fCommitArtifactVolumeCopyRequest\x12\x17\n" +
+	"\acopy_id\x18\x01 \x01(\tR\x06copyId\x12G\n" +
+	"\rverified_blob\x18\x02 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\fverifiedBlob\"7\n" +
+	"\x1cGetArtifactVolumeCopyRequest\x12\x17\n" +
+	"\acopy_id\x18\x01 \x01(\tR\x06copyId\"w\n" +
+	"\x1fListArtifactVolumeCopiesRequest\x12\x1b\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\x12!\n" +
+	"\fbefore_order\x18\x03 \x01(\x04R\vbeforeOrder\"\x8f\x01\n" +
+	" ListArtifactVolumeCopiesResponse\x12?\n" +
+	"\x06copies\x18\x01 \x03(\v2'.supertag.runtime.v2.ArtifactVolumeCopyR\x06copies\x12*\n" +
+	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder*t\n" +
 	"\x10ArtifactDelivery\x12!\n" +
 	"\x1dARTIFACT_DELIVERY_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ARTIFACT_DELIVERY_READ\x10\x01\x12!\n" +
@@ -2153,7 +3039,11 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"%ARTIFACT_ACQUISITION_STATE_AUTHORIZED\x10\x01\x12(\n" +
 	"$ARTIFACT_ACQUISITION_STATE_DELIVERED\x10\x02\x12%\n" +
 	"!ARTIFACT_ACQUISITION_STATE_FAILED\x10\x03\x12(\n" +
-	"$ARTIFACT_ACQUISITION_STATE_UNCERTAIN\x10\x042\xdf\x01\n" +
+	"$ARTIFACT_ACQUISITION_STATE_UNCERTAIN\x10\x04*\x97\x01\n" +
+	"\x17ArtifactVolumeCopyState\x12*\n" +
+	"&ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED\x10\x00\x12'\n" +
+	"#ARTIFACT_VOLUME_COPY_STATE_RESERVED\x10\x01\x12'\n" +
+	"#ARTIFACT_VOLUME_COPY_STATE_VERIFIED\x10\x022\xdf\x01\n" +
 	"\x0fArtifactCatalog\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n" +
 	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xd4\a\n" +
@@ -2181,7 +3071,28 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x04Find\x120.supertag.runtime.v2.HarnessFindArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12a\n" +
 	"\aInspect\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12a\n" +
 	"\x04Read\x12/.supertag.runtime.v2.HarnessReadArtifactRequest\x1a(.supertag.runtime.v2.HarnessArtifactPage\x12i\n" +
-	"\x06Attach\x121.supertag.runtime.v2.HarnessAttachArtifactRequest\x1a,.supertag.runtime.v2.HarnessAttachedArtifactb\x06proto3"
+	"\x06Attach\x121.supertag.runtime.v2.HarnessAttachArtifactRequest\x1a,.supertag.runtime.v2.HarnessAttachedArtifact2\xd2\x06\n" +
+	"\x0fArtifactVolumes\x12Y\n" +
+	"\x03Put\x12-.supertag.runtime.v2.PutArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12Y\n" +
+	"\x03Get\x12-.supertag.runtime.v2.GetArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12i\n" +
+	"\x04List\x12/.supertag.runtime.v2.ListArtifactVolumesRequest\x1a0.supertag.runtime.v2.ListArtifactVolumesResponse\x12m\n" +
+	"\x06Delete\x120.supertag.runtime.v2.DeleteArtifactVolumeRequest\x1a1.supertag.runtime.v2.DeleteArtifactVolumeResponse\x12a\n" +
+	"\x04Copy\x120.supertag.runtime.v2.CopyArtifactToVolumeRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12e\n" +
+	"\aGetCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12j\n" +
+	"\fDownloadCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x01\x12y\n" +
+	"\n" +
+	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2\xe2\x06\n" +
+	"\x17ArtifactVolumeDirectory\x12Y\n" +
+	"\x03Put\x12-.supertag.runtime.v2.PutArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12Y\n" +
+	"\x03Get\x12-.supertag.runtime.v2.GetArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12i\n" +
+	"\x04List\x12/.supertag.runtime.v2.ListArtifactVolumesRequest\x1a0.supertag.runtime.v2.ListArtifactVolumesResponse\x12m\n" +
+	"\x06Delete\x120.supertag.runtime.v2.DeleteArtifactVolumeRequest\x1a1.supertag.runtime.v2.DeleteArtifactVolumeResponse\x12h\n" +
+	"\vReserveCopy\x120.supertag.runtime.v2.CopyArtifactToVolumeRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12k\n" +
+	"\n" +
+	"CommitCopy\x124.supertag.runtime.v2.CommitArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12e\n" +
+	"\aGetCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12y\n" +
+	"\n" +
+	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponseb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_artifact_proto_rawDescOnce sync.Once
@@ -2195,122 +3106,175 @@ func file_supertag_runtime_v2_artifact_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_artifact_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_supertag_runtime_v2_artifact_proto_goTypes = []any{
 	(ArtifactDelivery)(0),                    // 0: supertag.runtime.v2.ArtifactDelivery
 	(ArtifactAcquisitionState)(0),            // 1: supertag.runtime.v2.ArtifactAcquisitionState
-	(*ArtifactDescription)(nil),              // 2: supertag.runtime.v2.ArtifactDescription
-	(*ArtifactFile)(nil),                     // 3: supertag.runtime.v2.ArtifactFile
-	(*GitOutputSnapshot)(nil),                // 4: supertag.runtime.v2.GitOutputSnapshot
-	(*ArtifactProducer)(nil),                 // 5: supertag.runtime.v2.ArtifactProducer
-	(*ArtifactSummary)(nil),                  // 6: supertag.runtime.v2.ArtifactSummary
-	(*CapturedArtifact)(nil),                 // 7: supertag.runtime.v2.CapturedArtifact
-	(*ArtifactAcquisition)(nil),              // 8: supertag.runtime.v2.ArtifactAcquisition
-	(*FindAttemptArtifactsRequest)(nil),      // 9: supertag.runtime.v2.FindAttemptArtifactsRequest
-	(*InspectAttemptArtifactRequest)(nil),    // 10: supertag.runtime.v2.InspectAttemptArtifactRequest
-	(*AcquireArtifactRequest)(nil),           // 11: supertag.runtime.v2.AcquireArtifactRequest
-	(*SettleArtifactAcquisitionRequest)(nil), // 12: supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	(*GetAcquiredArtifactFileRequest)(nil),   // 13: supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	(*HarnessFindArtifactsRequest)(nil),      // 14: supertag.runtime.v2.HarnessFindArtifactsRequest
-	(*HarnessReadArtifactRequest)(nil),       // 15: supertag.runtime.v2.HarnessReadArtifactRequest
-	(*HarnessArtifactPage)(nil),              // 16: supertag.runtime.v2.HarnessArtifactPage
-	(*HarnessAttachArtifactRequest)(nil),     // 17: supertag.runtime.v2.HarnessAttachArtifactRequest
-	(*HarnessAttachedArtifact)(nil),          // 18: supertag.runtime.v2.HarnessAttachedArtifact
-	(*HarnessCaptureArtifactRequest)(nil),    // 19: supertag.runtime.v2.HarnessCaptureArtifactRequest
-	(*CommitArtifactCaptureRequest)(nil),     // 20: supertag.runtime.v2.CommitArtifactCaptureRequest
-	(*GetCapturedArtifactRequest)(nil),       // 21: supertag.runtime.v2.GetCapturedArtifactRequest
-	(*ListCapturedArtifactsRequest)(nil),     // 22: supertag.runtime.v2.ListCapturedArtifactsRequest
-	(*ListCapturedArtifactsResponse)(nil),    // 23: supertag.runtime.v2.ListCapturedArtifactsResponse
-	(*ArtifactUpload)(nil),                   // 24: supertag.runtime.v2.ArtifactUpload
-	(*ArtifactChunk)(nil),                    // 25: supertag.runtime.v2.ArtifactChunk
-	(*DownloadArtifactFileRequest)(nil),      // 26: supertag.runtime.v2.DownloadArtifactFileRequest
-	(*ArtifactDownload)(nil),                 // 27: supertag.runtime.v2.ArtifactDownload
-	(*BlobReference)(nil),                    // 28: supertag.runtime.v2.BlobReference
-	(HarnessKind)(0),                         // 29: supertag.runtime.v2.HarnessKind
-	(*ArtifactSelection)(nil),                // 30: supertag.runtime.v2.ArtifactSelection
-	(*InspectAttemptRequest)(nil),            // 31: supertag.runtime.v2.InspectAttemptRequest
+	(ArtifactVolumeCopyState)(0),             // 2: supertag.runtime.v2.ArtifactVolumeCopyState
+	(*ArtifactDescription)(nil),              // 3: supertag.runtime.v2.ArtifactDescription
+	(*ArtifactFile)(nil),                     // 4: supertag.runtime.v2.ArtifactFile
+	(*GitOutputSnapshot)(nil),                // 5: supertag.runtime.v2.GitOutputSnapshot
+	(*ArtifactProducer)(nil),                 // 6: supertag.runtime.v2.ArtifactProducer
+	(*ArtifactSummary)(nil),                  // 7: supertag.runtime.v2.ArtifactSummary
+	(*CapturedArtifact)(nil),                 // 8: supertag.runtime.v2.CapturedArtifact
+	(*ArtifactAcquisition)(nil),              // 9: supertag.runtime.v2.ArtifactAcquisition
+	(*FindAttemptArtifactsRequest)(nil),      // 10: supertag.runtime.v2.FindAttemptArtifactsRequest
+	(*InspectAttemptArtifactRequest)(nil),    // 11: supertag.runtime.v2.InspectAttemptArtifactRequest
+	(*AcquireArtifactRequest)(nil),           // 12: supertag.runtime.v2.AcquireArtifactRequest
+	(*SettleArtifactAcquisitionRequest)(nil), // 13: supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	(*GetAcquiredArtifactFileRequest)(nil),   // 14: supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	(*HarnessFindArtifactsRequest)(nil),      // 15: supertag.runtime.v2.HarnessFindArtifactsRequest
+	(*HarnessReadArtifactRequest)(nil),       // 16: supertag.runtime.v2.HarnessReadArtifactRequest
+	(*HarnessArtifactPage)(nil),              // 17: supertag.runtime.v2.HarnessArtifactPage
+	(*HarnessAttachArtifactRequest)(nil),     // 18: supertag.runtime.v2.HarnessAttachArtifactRequest
+	(*HarnessAttachedArtifact)(nil),          // 19: supertag.runtime.v2.HarnessAttachedArtifact
+	(*HarnessCaptureArtifactRequest)(nil),    // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest
+	(*CommitArtifactCaptureRequest)(nil),     // 21: supertag.runtime.v2.CommitArtifactCaptureRequest
+	(*GetCapturedArtifactRequest)(nil),       // 22: supertag.runtime.v2.GetCapturedArtifactRequest
+	(*ListCapturedArtifactsRequest)(nil),     // 23: supertag.runtime.v2.ListCapturedArtifactsRequest
+	(*ListCapturedArtifactsResponse)(nil),    // 24: supertag.runtime.v2.ListCapturedArtifactsResponse
+	(*ArtifactUpload)(nil),                   // 25: supertag.runtime.v2.ArtifactUpload
+	(*ArtifactChunk)(nil),                    // 26: supertag.runtime.v2.ArtifactChunk
+	(*DownloadArtifactFileRequest)(nil),      // 27: supertag.runtime.v2.DownloadArtifactFileRequest
+	(*ArtifactDownload)(nil),                 // 28: supertag.runtime.v2.ArtifactDownload
+	(*ArtifactVolume)(nil),                   // 29: supertag.runtime.v2.ArtifactVolume
+	(*PutArtifactVolumeRequest)(nil),         // 30: supertag.runtime.v2.PutArtifactVolumeRequest
+	(*GetArtifactVolumeRequest)(nil),         // 31: supertag.runtime.v2.GetArtifactVolumeRequest
+	(*ListArtifactVolumesRequest)(nil),       // 32: supertag.runtime.v2.ListArtifactVolumesRequest
+	(*ListArtifactVolumesResponse)(nil),      // 33: supertag.runtime.v2.ListArtifactVolumesResponse
+	(*DeleteArtifactVolumeRequest)(nil),      // 34: supertag.runtime.v2.DeleteArtifactVolumeRequest
+	(*DeleteArtifactVolumeResponse)(nil),     // 35: supertag.runtime.v2.DeleteArtifactVolumeResponse
+	(*CopyArtifactToVolumeRequest)(nil),      // 36: supertag.runtime.v2.CopyArtifactToVolumeRequest
+	(*ArtifactVolumeCopy)(nil),               // 37: supertag.runtime.v2.ArtifactVolumeCopy
+	(*CommitArtifactVolumeCopyRequest)(nil),  // 38: supertag.runtime.v2.CommitArtifactVolumeCopyRequest
+	(*GetArtifactVolumeCopyRequest)(nil),     // 39: supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	(*ListArtifactVolumeCopiesRequest)(nil),  // 40: supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	(*ListArtifactVolumeCopiesResponse)(nil), // 41: supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	(*BlobReference)(nil),                    // 42: supertag.runtime.v2.BlobReference
+	(HarnessKind)(0),                         // 43: supertag.runtime.v2.HarnessKind
+	(*ArtifactSelection)(nil),                // 44: supertag.runtime.v2.ArtifactSelection
+	(*InspectAttemptRequest)(nil),            // 45: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
-	28, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
-	4,  // 1: supertag.runtime.v2.ArtifactFile.git_output:type_name -> supertag.runtime.v2.GitOutputSnapshot
-	29, // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	2,  // 3: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	5,  // 4: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
-	6,  // 5: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
-	3,  // 6: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
-	30, // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
-	3,  // 8: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
+	42, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
+	5,  // 1: supertag.runtime.v2.ArtifactFile.git_output:type_name -> supertag.runtime.v2.GitOutputSnapshot
+	43, // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	3,  // 3: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	6,  // 4: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	7,  // 5: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
+	4,  // 6: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
+	44, // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
+	4,  // 8: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
 	0,  // 9: supertag.runtime.v2.ArtifactAcquisition.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
 	1,  // 10: supertag.runtime.v2.ArtifactAcquisition.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	31, // 11: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	31, // 12: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	31, // 13: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	45, // 11: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	45, // 12: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	45, // 13: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	0,  // 14: supertag.runtime.v2.AcquireArtifactRequest.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
-	31, // 15: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	45, // 15: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	1,  // 16: supertag.runtime.v2.SettleArtifactAcquisitionRequest.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	31, // 17: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	8,  // 18: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
-	8,  // 19: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
-	2,  // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	31, // 21: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	2,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	3,  // 23: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
-	6,  // 24: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
-	20, // 25: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	25, // 26: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
-	3,  // 27: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
-	21, // 28: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	22, // 29: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	20, // 30: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	20, // 31: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	21, // 32: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	22, // 33: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	9,  // 34: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	10, // 35: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	11, // 36: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	12, // 37: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	13, // 38: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	9,  // 39: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	10, // 40: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	11, // 41: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	12, // 42: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	24, // 43: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
-	26, // 44: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
-	13, // 45: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	19, // 46: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
-	14, // 47: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
-	21, // 48: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	15, // 49: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
-	17, // 50: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
-	7,  // 51: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	23, // 52: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	7,  // 53: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	7,  // 54: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	7,  // 55: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	23, // 56: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	23, // 57: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	7,  // 58: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
-	8,  // 59: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	8,  // 60: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	3,  // 61: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
-	23, // 62: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	7,  // 63: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	8,  // 64: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	8,  // 65: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	7,  // 66: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	27, // 67: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	27, // 68: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	7,  // 69: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
-	23, // 70: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	7,  // 71: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	16, // 72: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
-	18, // 73: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
-	51, // [51:74] is the sub-list for method output_type
-	28, // [28:51] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	45, // 17: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	9,  // 18: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	9,  // 19: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	3,  // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	45, // 21: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	3,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	4,  // 23: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
+	7,  // 24: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
+	21, // 25: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	26, // 26: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
+	4,  // 27: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
+	29, // 28: supertag.runtime.v2.ListArtifactVolumesResponse.volumes:type_name -> supertag.runtime.v2.ArtifactVolume
+	42, // 29: supertag.runtime.v2.CopyArtifactToVolumeRequest.expected_blob:type_name -> supertag.runtime.v2.BlobReference
+	29, // 30: supertag.runtime.v2.ArtifactVolumeCopy.volume:type_name -> supertag.runtime.v2.ArtifactVolume
+	4,  // 31: supertag.runtime.v2.ArtifactVolumeCopy.file:type_name -> supertag.runtime.v2.ArtifactFile
+	2,  // 32: supertag.runtime.v2.ArtifactVolumeCopy.state:type_name -> supertag.runtime.v2.ArtifactVolumeCopyState
+	42, // 33: supertag.runtime.v2.CommitArtifactVolumeCopyRequest.verified_blob:type_name -> supertag.runtime.v2.BlobReference
+	37, // 34: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
+	22, // 35: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	23, // 36: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	21, // 37: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	21, // 38: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	22, // 39: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	23, // 40: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	10, // 41: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	11, // 42: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	12, // 43: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	13, // 44: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	14, // 45: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	10, // 46: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	11, // 47: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	12, // 48: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	13, // 49: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	25, // 50: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
+	27, // 51: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
+	14, // 52: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	20, // 53: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
+	15, // 54: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
+	22, // 55: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	16, // 56: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
+	18, // 57: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
+	30, // 58: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	31, // 59: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	32, // 60: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	34, // 61: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	36, // 62: supertag.runtime.v2.ArtifactVolumes.Copy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
+	39, // 63: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	39, // 64: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	40, // 65: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	30, // 66: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	31, // 67: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	32, // 68: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	34, // 69: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	36, // 70: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
+	38, // 71: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:input_type -> supertag.runtime.v2.CommitArtifactVolumeCopyRequest
+	39, // 72: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	40, // 73: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	8,  // 74: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	24, // 75: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	8,  // 76: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	8,  // 77: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	8,  // 78: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	24, // 79: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	24, // 80: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	8,  // 81: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
+	9,  // 82: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	9,  // 83: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	4,  // 84: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
+	24, // 85: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	8,  // 86: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	9,  // 87: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	9,  // 88: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	8,  // 89: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	28, // 90: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	28, // 91: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	8,  // 92: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
+	24, // 93: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	8,  // 94: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	17, // 95: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
+	19, // 96: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
+	29, // 97: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	29, // 98: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	33, // 99: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	35, // 100: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	37, // 101: supertag.runtime.v2.ArtifactVolumes.Copy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	37, // 102: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	28, // 103: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:output_type -> supertag.runtime.v2.ArtifactDownload
+	41, // 104: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	29, // 105: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	29, // 106: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	33, // 107: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	35, // 108: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	37, // 109: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	37, // 110: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	37, // 111: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	41, // 112: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	74, // [74:113] is the sub-list for method output_type
+	35, // [35:74] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_artifact_proto_init() }
@@ -2334,15 +3298,16 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 		(*ArtifactDownload_File)(nil),
 		(*ArtifactDownload_Chunk)(nil),
 	}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[34].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_artifact_proto_rawDesc), len(file_supertag_runtime_v2_artifact_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   26,
+			NumEnums:      3,
+			NumMessages:   39,
 			NumExtensions: 0,
-			NumServices:   5,
+			NumServices:   7,
 		},
 		GoTypes:           file_supertag_runtime_v2_artifact_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_artifact_proto_depIdxs,

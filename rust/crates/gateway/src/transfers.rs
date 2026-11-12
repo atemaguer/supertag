@@ -31,6 +31,7 @@ use tonic::{Request, Response, Status, Streaming, transport::Channel};
 use crate::Gateway;
 
 mod artifacts;
+pub mod volumes;
 
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(25);
 const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -45,6 +46,7 @@ pub struct GatewayTransfers {
     directory: Option<PathBuf>,
     capacity: Arc<Semaphore>,
     github_sources: Option<crate::github::workspaces::GithubWorkspaceSources>,
+    volumes: volumes::ArtifactVolumeMappings,
 }
 
 impl GatewayTransfers {
@@ -68,6 +70,7 @@ impl GatewayTransfers {
             directory,
             capacity: Arc::new(Semaphore::new(16)),
             github_sources: None,
+            volumes: volumes::ArtifactVolumeMappings::default(),
         })
     }
 

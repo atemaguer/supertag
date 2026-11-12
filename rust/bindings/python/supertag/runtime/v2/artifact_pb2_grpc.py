@@ -1172,3 +1172,758 @@ class HarnessArtifacts:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class ArtifactVolumesStub:
+    """File Volumes are registered storage locations. Registration alone authorizes
+    no write: the Gateway must explicitly map the exact Volume and source.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Put = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/Put',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+                _registered_method=True)
+        self.Get = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/Get',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+                _registered_method=True)
+        self.List = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/List',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.FromString,
+                _registered_method=True)
+        self.Delete = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/Delete',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
+                _registered_method=True)
+        self.Copy = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/Copy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+                _registered_method=True)
+        self.GetCopy = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/GetCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+                _registered_method=True)
+        self.DownloadCopy = channel.unary_stream(
+                '/supertag.runtime.v2.ArtifactVolumes/DownloadCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
+                _registered_method=True)
+        self.ListCopies = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumes/ListCopies',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.FromString,
+                _registered_method=True)
+
+
+class ArtifactVolumesServicer:
+    """File Volumes are registered storage locations. Registration alone authorizes
+    no write: the Gateway must explicitly map the exact Volume and source.
+    """
+
+    def Put(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Get(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def List(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Delete(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Copy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetCopy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadCopy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListCopies(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ArtifactVolumesServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Put': grpc.unary_unary_rpc_method_handler(
+                    servicer.Put,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.SerializeToString,
+            ),
+            'Get': grpc.unary_unary_rpc_method_handler(
+                    servicer.Get,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.SerializeToString,
+            ),
+            'List': grpc.unary_unary_rpc_method_handler(
+                    servicer.List,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.SerializeToString,
+            ),
+            'Delete': grpc.unary_unary_rpc_method_handler(
+                    servicer.Delete,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.SerializeToString,
+            ),
+            'Copy': grpc.unary_unary_rpc_method_handler(
+                    servicer.Copy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            ),
+            'GetCopy': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            ),
+            'DownloadCopy': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.SerializeToString,
+            ),
+            'ListCopies': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCopies,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.ArtifactVolumes', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.ArtifactVolumes', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ArtifactVolumes:
+    """File Volumes are registered storage locations. Registration alone authorizes
+    no write: the Gateway must explicitly map the exact Volume and source.
+    """
+
+    @staticmethod
+    def Put(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/Put',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Get(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/Get',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def List(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/List',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Delete(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/Delete',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Copy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/Copy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/GetCopy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/DownloadCopy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCopies(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumes/ListCopies',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class ArtifactVolumeDirectoryStub:
+    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Put = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/Put',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+                _registered_method=True)
+        self.Get = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/Get',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+                _registered_method=True)
+        self.List = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/List',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.FromString,
+                _registered_method=True)
+        self.Delete = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/Delete',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
+                _registered_method=True)
+        self.ReserveCopy = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/ReserveCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+                _registered_method=True)
+        self.CommitCopy = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/CommitCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+                _registered_method=True)
+        self.GetCopy = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/GetCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+                _registered_method=True)
+        self.ListCopies = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.FromString,
+                _registered_method=True)
+
+
+class ArtifactVolumeDirectoryServicer:
+    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """
+
+    def Put(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Get(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def List(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Delete(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReserveCopy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitCopy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetCopy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListCopies(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ArtifactVolumeDirectoryServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Put': grpc.unary_unary_rpc_method_handler(
+                    servicer.Put,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.SerializeToString,
+            ),
+            'Get': grpc.unary_unary_rpc_method_handler(
+                    servicer.Get,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.SerializeToString,
+            ),
+            'List': grpc.unary_unary_rpc_method_handler(
+                    servicer.List,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.SerializeToString,
+            ),
+            'Delete': grpc.unary_unary_rpc_method_handler(
+                    servicer.Delete,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.SerializeToString,
+            ),
+            'ReserveCopy': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            ),
+            'CommitCopy': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            ),
+            'GetCopy': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.SerializeToString,
+            ),
+            'ListCopies': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCopies,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.ArtifactVolumeDirectory', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.ArtifactVolumeDirectory', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ArtifactVolumeDirectory:
+    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """
+
+    @staticmethod
+    def Put(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/Put',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.PutArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Get(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/Get',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolume.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def List(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/List',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Delete(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/Delete',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.DeleteArtifactVolumeResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReserveCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/ReserveCopy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CopyArtifactToVolumeRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/CommitCopy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactVolumeCopyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/GetCopy',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactVolumeCopyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactVolumeCopy.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCopies(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactVolumeCopiesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

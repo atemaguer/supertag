@@ -1,3 +1,4 @@
+pub mod volumes;
 use subtle::ConstantTimeEq;
 use tonic::{Request, Status, metadata::MetadataValue};
 

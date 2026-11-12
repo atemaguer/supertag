@@ -177,7 +177,7 @@ pub async fn download(
     .await
 }
 
-async fn publish_download<M: 'static>(
+pub(crate) async fn publish_download<M: 'static>(
     output: &Path,
     blob: &BlobReference,
     mut stream: tonic::Streaming<M>,

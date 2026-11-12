@@ -244,3 +244,72 @@ message ArtifactDownload {
     bytes chunk = 2;
   }
 }
+
+// File Volumes are registered storage locations. Registration alone authorizes
+// no write: the Gateway must explicitly map the exact Volume and source.
+service ArtifactVolumes {
+  rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
+  rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
+  rpc Copy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
+  rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc DownloadCopy(GetArtifactVolumeCopyRequest) returns (stream ArtifactDownload);
+  rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
+}
+// Private metadata authority. Only the Gateway verifies and carries copy bytes.
+service ArtifactVolumeDirectory {
+  rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
+  rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
+  rpc ReserveCopy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
+  rpc CommitCopy(CommitArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
+}
+message ArtifactVolume {
+  string volume_id = 1;
+  string source = 2;
+  uint64 revision = 3;
+}
+message PutArtifactVolumeRequest {
+  string operation_id = 1;
+  string volume_id = 2;
+  string source = 3;
+  // Zero creates; existing registrations require the exact current revision.
+  uint64 expected_revision = 4;
+}
+message GetArtifactVolumeRequest { string volume_id = 1; }
+message ListArtifactVolumesRequest { uint32 limit = 1; string after_id = 2; }
+message ListArtifactVolumesResponse { repeated ArtifactVolume volumes = 1; string next_after_id = 2; }
+message DeleteArtifactVolumeRequest { string operation_id = 1; string volume_id = 2; uint64 expected_revision = 3; }
+message DeleteArtifactVolumeResponse { bool deleted = 1; }
+message CopyArtifactToVolumeRequest {
+  string operation_id = 1;
+  string volume_id = 2;
+  uint64 expected_revision = 3;
+  string artifact_id = 4;
+  string path = 5;
+  BlobReference expected_blob = 6;
+}
+enum ArtifactVolumeCopyState {
+  ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED = 0;
+  ARTIFACT_VOLUME_COPY_STATE_RESERVED = 1;
+  ARTIFACT_VOLUME_COPY_STATE_VERIFIED = 2;
+}
+message ArtifactVolumeCopy {
+  string copy_id = 1;
+  string operation_id = 2;
+  ArtifactVolume volume = 3;
+  string artifact_id = 4;
+  ArtifactFile file = 5;
+  string storage_key = 6;
+  ArtifactVolumeCopyState state = 7;
+  int64 created_at_ms = 8;
+  optional int64 verified_at_ms = 9;
+}
+message CommitArtifactVolumeCopyRequest { string copy_id = 1; BlobReference verified_blob = 2; }
+message GetArtifactVolumeCopyRequest { string copy_id = 1; }
+message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
+message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }

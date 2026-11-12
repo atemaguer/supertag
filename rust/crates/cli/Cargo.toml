@@ -129,3 +129,8 @@ required-features = ["test-fixtures"]
 name = "github_workspace_runtime"
 path = "tests/github_workspace_runtime.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "artifact_volume_runtime"
+path = "tests/artifact_volume_runtime.rs"
+required-features = ["test-fixtures"]

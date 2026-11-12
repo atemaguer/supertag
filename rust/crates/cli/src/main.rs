@@ -16,6 +16,7 @@ mod replies;
 mod surface_policy;
 mod teams;
 mod tui;
+mod volumes;
 mod work_sessions;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
@@ -47,6 +48,7 @@ use supertag_protocol::{
         ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest,
         SubmitTaskRequest, Tag, Task, WorkspaceSpec,
         artifact_directory_server::ArtifactDirectoryServer,
+        artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
         attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
@@ -200,6 +202,9 @@ enum Command {
         control_plane: String,
         #[arg(long)]
         checkpoint_directory: Option<PathBuf>,
+        /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
+        #[arg(long = "artifact-volume")]
+        artifact_volumes: Vec<String>,
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
         #[arg(long, requires = "slack_listen")]
@@ -436,6 +441,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
     },
+    /// Register Volumes and copy immutable artifact files into explicitly mapped storage.
+    Volume {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: volumes::VolumeCommand,
+    },
     /// Inspect or download files captured by a Task.
     Artifact {
         #[command(flatten)]
@@ -648,6 +660,7 @@ async fn run(command: Command) -> Result<()> {
             listen,
             control_plane,
             checkpoint_directory,
+            artifact_volumes,
             slack_listen,
             slack_state_directory,
             github_listen,
@@ -664,6 +677,7 @@ async fn run(command: Command) -> Result<()> {
                 control_plane,
                 checkpoint_directory,
                 GatewayConnectors {
+                    artifact_volumes,
                     slack: slack_listen.zip(slack_state_directory),
                     github: github_listen.zip(github_state_directory),
                     github_workspace: github_workspace_directory,
@@ -1094,6 +1108,10 @@ async fn run(command: Command) -> Result<()> {
         } => {
             artifacts::download(connection, task_id, kind, &output).await?;
         }
+        Command::Volume {
+            connection,
+            command,
+        } => volumes::run(connection, command).await?,
         Command::Artifact {
             connection,
             command,
@@ -1330,6 +1348,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(
+            ArtifactVolumeDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
             ArtifactDirectoryServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -1390,6 +1413,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
 }
 
 struct GatewayConnectors {
+    artifact_volumes: Vec<String>,
     slack: Option<(SocketAddr, PathBuf)>,
     github: Option<(SocketAddr, PathBuf)>,
     github_workspace: Option<PathBuf>,
@@ -1478,7 +1502,8 @@ async fn gateway(
     health
         .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
-    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?;
+    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?
+        .with_artifact_volumes(volumes::mappings(connectors.artifact_volumes)?)?;
     let mut source_reader = None;
     let publication = if let Some(directory) = connectors.github_workspace {
         let sources = github_workspace_sources(directory.clone())?;
@@ -1543,6 +1568,7 @@ async fn gateway(
         .add_service(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
         .add_service(transfers.artifact_catalog_service())
+        .add_service(transfers.artifact_volumes_service())
         .add_service(transfers.attempt_artifacts_service())
         .add_service(transfers.artifact_transfer_service())
         .add_service(transfers.service())
