@@ -43,14 +43,11 @@ const CAPABILITIES = [
 
 /**
  * A Worker that reports `cost()` minor units of provider cost for each turn and answers it,
- * holding the turn while the Objective's outcome says HOLD.
+ * holding only the Task selected by the fixture.
  */
-function scriptedWorklet(cost: () => number | undefined) {
-  let release!: () => void;
-  const blocked = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const seen = { started: 0, completed: 0, aborted: 0 };
+function scriptedWorklet(cost: () => number | undefined, heldTaskId?: Promise<string | undefined>) {
+  const blocked = Promise.withResolvers<void>();
+  const abortedTaskIds: string[] = [];
   const worklet: Worklet = {
     id: "limits-worklet",
     describe: async () => ({
@@ -86,7 +83,6 @@ function scriptedWorklet(cost: () => number | undefined) {
     async *execute(spec: TaskAttemptSpec, signal): AsyncIterable<TaskAttemptEvent> {
       const identity = { taskId: spec.taskId, attemptId: spec.attemptId };
       const at = () => new Date().toISOString();
-      seen.started++;
       yield { ...identity, at: at(), type: "execution.started", workerId: "limits-worker" };
       const amountMinor = cost();
       yield {
@@ -102,16 +98,15 @@ function scriptedWorklet(cost: () => number | undefined) {
           ...(amountMinor === undefined ? {} : { reportedCost: { amountMinor, currency: "USD" } }),
         },
       };
-      if (spec.input.messages.some((message) => message.text.includes("HOLD")))
+      if (heldTaskId && (await heldTaskId) === spec.taskId && !signal?.aborted)
         await new Promise<void>((resolve) => {
-          void blocked.then(resolve);
+          void blocked.promise.then(resolve);
           signal?.addEventListener("abort", () => resolve(), { once: true });
         });
       if (signal?.aborted) {
-        seen.aborted++;
+        abortedTaskIds.push(spec.taskId);
         throw signal.reason;
       }
-      seen.completed++;
       yield {
         ...identity,
         at: at(),
@@ -121,7 +116,7 @@ function scriptedWorklet(cost: () => number | undefined) {
       yield { ...identity, at: at(), type: "execution.completed" };
     },
   };
-  return { worklet, seen, release: () => release() };
+  return { worklet, abortedTaskIds, release: blocked.resolve };
 }
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
@@ -136,7 +131,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
       async function fixture(
         definition: Record<string, unknown> = {},
-        options: { readonly cost?: number; readonly outcome?: string } = {},
+        options: { readonly cost?: number; readonly holdStart?: boolean } = {},
       ) {
         const directory = await mkdtemp(join(tmpdir(), "supertag-limits-"));
         cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -151,7 +146,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await store.connect();
         cleanups.push(() => store.disconnect());
         let cost = options.cost;
-        const script = scriptedWorklet(() => cost);
+        const heldTaskId = options.holdStart
+          ? Promise.withResolvers<string | undefined>()
+          : undefined;
+        const script = scriptedWorklet(() => cost, heldTaskId?.promise);
         const controlPlane = new ControlPlane({
           store: new DrizzleStore({ url }),
           credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
@@ -162,7 +160,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await controlPlane.start();
         cleanups.push(() => controlPlane.stop());
         // Released before the Control Plane stops, so a failed test cannot hold its drain.
-        cleanups.push(() => script.release());
+        cleanups.push(() => {
+          heldTaskId?.resolve(undefined);
+          script.release();
+        });
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
         await store.bindTagWorkerHost(owner.id, "limits-host");
         const session = await startObjectiveSession({
@@ -173,10 +174,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           // exactly which turns run and what they spend.
           objective: {
             ongoing: true,
-            outcome: options.outcome ?? "Ship the release",
+            outcome: "Ship the release",
             ...definition,
           },
         });
+        heldTaskId?.resolve(session.startTaskId);
         const objective = session.objective;
         const reload = () => store.getObjective(objective.id);
         const operator = async (update: Record<string, unknown>) =>
@@ -325,7 +327,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("lets a running turn overrun the budget instead of cancelling it", async () => {
         const f = await fixture(
           { budgetLimitMinor: 500, budgetCurrency: "USD" },
-          { cost: 700, outcome: "Ship the release; HOLD until released" },
+          { cost: 700, holdStart: true },
         );
         const running = await f.session.waitForOwnerTurn({
           reason: "objective_start",
@@ -349,7 +351,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         // The running Attempt keeps its authority; a spent Objective is limited only once
         // nothing of it runs.
         expect((await f.reload()).status).toBe("working");
-        expect(f.script.seen.aborted).toBe(0);
+        expect(f.script.abortedTaskIds).toEqual([]);
         f.script.release();
         await expect
           .poll(async () => (await f.store.findTaskById(running.task.id))?.status, {
@@ -358,14 +360,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           .toBe("completed");
         await f.sweep();
         expect((await f.reload()).status).toBe("limited");
-        expect(f.script.seen.aborted).toBe(0);
+        expect(f.script.abortedTaskIds).toEqual([]);
       });
 
       it("stops a running turn once the deadline grace period ends, then limits the Objective", async () => {
-        const f = await fixture(
-          { deadline: minutesFromNow(60) },
-          { cost: 0, outcome: "Ship the release; HOLD until released" },
-        );
+        const f = await fixture({ deadline: minutesFromNow(60) }, { cost: 0, holdStart: true });
         const running = await f.session.waitForOwnerTurn({
           reason: "objective_start",
           unsettled: true,
@@ -379,7 +378,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await f.operator({ deadline: minutesFromNow(-5) });
         await f.sweep();
         expect((await f.reload()).status).toBe("working");
-        expect(f.script.seen.aborted).toBe(0);
+        expect((await f.store.findTaskById(running.task.id))?.status).toBe("running");
+        expect(f.script.abortedTaskIds).not.toContain(running.task.id);
 
         // Past it, SuperTag stops the Attempt and the Objective becomes limited.
         await f.operator({ deadline: minutesFromNow(-20) });
@@ -389,11 +389,18 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             timeout: 10_000,
           })
           .toBe("cancelled");
-        // Cancellation can settle after the first sweep checks for running Tasks.
-        // Reconcile after the Task drains instead of racing the scheduled sweep interval.
-        await f.sweep();
-        expect((await f.reload()).status).toBe("limited");
-        expect(f.script.seen.aborted).toBe(1);
+        // A queued notice may still be settling while the Objective drains.
+        await expect
+          .poll(
+            async () => {
+              await f.sweep();
+              return (await f.reload()).status;
+            },
+            { timeout: 10_000 },
+          )
+          .toBe("limited");
+        // A deadline notice is a separate Task. It may also be cancelled as the Objective drains.
+        expect(f.script.abortedTaskIds.filter((id) => id === running.task.id)).toHaveLength(1);
         f.script.release();
       });
 
