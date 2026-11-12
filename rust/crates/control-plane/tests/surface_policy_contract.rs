@@ -296,6 +296,7 @@ async fn contract(url: &str) {
         Some(admitted.clone())
     );
     let mut generic = AcceptEventRequest {
+        requested_execution: None,
         account_id: "editing".into(),
         event_id: first.event_id,
         tag_id: admitted.tag_id.clone(),

@@ -2419,20 +2419,22 @@ class ReplyDestination(_message.Message):
     def __init__(self, conversation_id: _Optional[str] = ..., thread_id: _Optional[str] = ...) -> None: ...
 
 class AcceptEventRequest(_message.Message):
-    __slots__ = ("account_id", "event_id", "tag_id", "session_id", "prompt", "destination")
+    __slots__ = ("account_id", "event_id", "tag_id", "session_id", "prompt", "destination", "requested_execution")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     event_id: str
     tag_id: str
     session_id: str
     prompt: str
     destination: ReplyDestination
-    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ...) -> None: ...
+    requested_execution: ExecutionSelection
+    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ..., requested_execution: _Optional[_Union[ExecutionSelection, _Mapping]] = ...) -> None: ...
 
 class AcceptSlackEventRequest(_message.Message):
     __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id")

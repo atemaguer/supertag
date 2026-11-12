@@ -66,9 +66,17 @@ async fn run(
     host: &HostAuthority,
     task_id: &str,
     harness: HarnessKind,
+    profile: Option<&HarnessExecutionProfile>,
 ) -> InspectAttemptRequest {
     let claim = store
-        .claim_task_for_host(host, &Uuid::new_v4().to_string(), &[], harness)
+        .claim_task_with_profile(
+            host,
+            &Uuid::new_v4().to_string(),
+            &[],
+            harness,
+            &[],
+            profile,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -217,7 +225,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         )
         .await
         .unwrap();
-    let parent = run(store, host, &parent.task_id, OWNER_HARNESS).await;
+    let parent = run(store, host, &parent.task_id, OWNER_HARNESS, None).await;
     let work = store
         .start_work_session(host, &delegate(&parent, "builder"))
         .await
@@ -260,14 +268,28 @@ async fn contract(url: &str) {
         OWNER_HARNESS,
     )
     .await;
-    tag(
-        &store,
-        "builder",
-        "Member instructions",
-        &child_actions,
-        CHILD_HARNESS,
-    )
-    .await;
+    let original_model = "builder-original";
+    let child_profile = HarnessExecutionProfile {
+        model_ids: vec![original_model.into()],
+        default_model: Some(original_model.into()),
+        ..Default::default()
+    };
+    let mut builder = PutTagRequest {
+        tag_id: "builder".into(),
+        instructions: "Member instructions".into(),
+        allowed_actions: child_actions
+            .iter()
+            .map(|action| (*action).into())
+            .collect(),
+        harness_kind: CHILD_HARNESS.into(),
+        execution: Some(PolicyExecutionSettings {
+            models: vec![original_model.into()],
+            efforts: vec!["high".into()],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    store.put_tag_spec(builder.clone()).await.unwrap();
     tag(&store, "outsider", "Outside the Team", &[], CHILD_HARNESS).await;
     let role = store
         .put_role(
@@ -315,7 +337,7 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    let attempt = run(&store, &owner_host, &ordinary.task_id, OWNER_HARNESS).await;
+    let attempt = run(&store, &owner_host, &ordinary.task_id, OWNER_HARNESS, None).await;
     assert!(matches!(
         store
             .start_work_session(&owner_host, &delegate(&attempt, "builder"))
@@ -363,6 +385,7 @@ async fn contract(url: &str) {
         &owner_host,
         &objective.starting_task_id,
         OWNER_HARNESS,
+        None,
     )
     .await;
     assert!(matches!(
@@ -392,6 +415,9 @@ async fn contract(url: &str) {
     );
     let task = store.get_task(&work.latest_task_id).await.unwrap();
     assert_eq!(task.harness_kind(), CHILD_HARNESS);
+    let previous_execution = task.execution_selection.as_ref().unwrap().clone();
+    assert_eq!(previous_execution.model.as_deref(), Some(original_model));
+    assert_eq!(previous_execution.effort.as_deref(), Some("high"));
     assert!(task.instructions.contains("Member instructions"));
     assert!(
         task.instructions
@@ -415,7 +441,14 @@ async fn contract(url: &str) {
 
     assert!(
         store
-            .claim_task_for_host(&builder_host, "team-capacity", &[], CHILD_HARNESS)
+            .claim_task_with_profile(
+                &builder_host,
+                "team-capacity",
+                &[],
+                CHILD_HARNESS,
+                &[],
+                Some(&child_profile)
+            )
             .await
             .unwrap()
             .is_none()
@@ -426,12 +459,26 @@ async fn contract(url: &str) {
         .unwrap();
     assert!(
         store
-            .claim_task_for_host(&owner_host, "wrong-tag-host", &[], CHILD_HARNESS)
+            .claim_task_with_profile(
+                &owner_host,
+                "wrong-tag-host",
+                &[],
+                CHILD_HARNESS,
+                &[],
+                Some(&child_profile)
+            )
             .await
             .unwrap()
             .is_none()
     );
-    let child = run(&store, &builder_host, &work.latest_task_id, CHILD_HARNESS).await;
+    let child = run(
+        &store,
+        &builder_host,
+        &work.latest_task_id,
+        CHILD_HARNESS,
+        Some(&child_profile),
+    )
+    .await;
     assert!(matches!(
         store
             .start_work_session(&builder_host, &delegate(&child, "owner"))
@@ -464,7 +511,7 @@ async fn contract(url: &str) {
     assert_eq!(report.tag_id, "owner");
     assert_eq!(report.session_id, objective.session_id);
     assert!(report.instructions.contains("Owner instructions"));
-    let report_attempt = run(&store, &owner_host, &first_report, OWNER_HARNESS).await;
+    let report_attempt = run(&store, &owner_host, &first_report, OWNER_HARNESS, None).await;
     let continuation = ContinueWorkSessionRequest {
         attempt: Some(report_attempt.clone()),
         operation_id: "continue-builder".into(),
@@ -496,14 +543,14 @@ async fn contract(url: &str) {
         Err(StoreError::FailedPrecondition(_))
     ));
     let all_tags = support::register_host(&store, "all-tags-host").await;
-    tag(
-        &store,
-        "builder",
-        "Member instructions changed",
-        &["files:read"],
-        CHILD_HARNESS,
-    )
-    .await;
+    builder.instructions = "Member instructions changed".into();
+    store
+        .put_tag_spec(PutTagRequest {
+            allowed_actions: vec!["files:read".into()],
+            ..builder.clone()
+        })
+        .await
+        .unwrap();
     assert!(matches!(
         store
             .continue_work_session(&owner_host, &continuation)
@@ -518,14 +565,11 @@ async fn contract(url: &str) {
             .latest_task_id,
         work.latest_task_id
     );
-    tag(
-        &store,
-        "builder",
-        "Member instructions changed",
-        &child_actions,
-        CHILD_HARNESS,
-    )
-    .await;
+    store.put_tag_spec(builder.clone()).await.unwrap();
+    let execution = builder.execution.as_mut().unwrap();
+    execution.models = vec!["builder-replacement".into()];
+    execution.efforts = vec!["low".into()];
+    store.put_tag_spec(builder).await.unwrap();
     let continued = store
         .continue_work_session(&owner_host, &continuation)
         .await
@@ -536,6 +580,8 @@ async fn contract(url: &str) {
     assert_ne!(continued.latest_task_id, work.latest_task_id);
     let task = store.get_task(&continued.latest_task_id).await.unwrap();
     assert_eq!(task.allowed_actions, ["files:read", "files:write"]);
+    assert_eq!(task.harness_kind(), CHILD_HARNESS);
+    assert_eq!(task.execution_selection.as_ref(), Some(&previous_execution));
     assert_eq!(
         task.policy_snapshot
             .unwrap()
@@ -550,7 +596,14 @@ async fn contract(url: &str) {
         .finish_task(&owner_host, &finish(&report_attempt))
         .await
         .unwrap();
-    let attempt = run(&store, &all_tags, &continued.latest_task_id, CHILD_HARNESS).await;
+    let attempt = run(
+        &store,
+        &all_tags,
+        &continued.latest_task_id,
+        CHILD_HARNESS,
+        Some(&child_profile),
+    )
+    .await;
     store
         .finish_task(&all_tags, &finish(&attempt))
         .await
@@ -573,7 +626,7 @@ async fn contract(url: &str) {
             .status(),
         ObjectiveStatus::Working
     );
-    let attempt = run(&store, &owner_host, &next_report, OWNER_HARNESS).await;
+    let attempt = run(&store, &owner_host, &next_report, OWNER_HARNESS, None).await;
     store
         .finish_task(&owner_host, &finish(&attempt))
         .await

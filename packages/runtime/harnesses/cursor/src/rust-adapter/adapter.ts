@@ -144,8 +144,11 @@ export async function runAdapter(
     const model = task.attemptExecution
       ? (task.attemptExecution.selection?.model ?? "auto")
       : (configuration.model ?? admittedModels[0] ?? "auto");
-    if (admittedModels.length && !admittedModels.includes(model))
-      throw new Error("Cursor model is outside the accepted policy");
+    const acceptedModel = task.executionSelection?.model;
+    const invalidModel = task.attemptExecution
+      ? acceptedModel !== undefined && model !== acceptedModel
+      : admittedModels.length > 0 && !admittedModels.includes(model);
+    if (invalidModel) throw new Error("Cursor model is outside the accepted policy");
 
     const secrets = [bootstrap.token, apiKey];
     const context = await createWorkspace(

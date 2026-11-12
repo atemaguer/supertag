@@ -1,7 +1,7 @@
 use prost::Message;
 use supertag_protocol::v2::{
     AttemptExecutionSelection, ExecutionSelection, HarnessExecutionProfile, HarnessKind,
-    ModelSource, Task, TaskPolicySnapshot,
+    ModelSource, PolicyExecutionSettings, Task, TaskPolicySnapshot,
 };
 
 use super::{Result, invalid};
@@ -48,6 +48,53 @@ pub(super) fn accepted(snapshot: Option<&TaskPolicySnapshot>) -> ExecutionSelect
         model,
         effort: Some(effort),
     }
+}
+
+pub(super) fn normalize_request(
+    selection: Option<&ExecutionSelection>,
+) -> Result<Option<ExecutionSelection>> {
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    Ok(
+        crate::policy::normalize_execution(Some(PolicyExecutionSettings {
+            models: selection.model.iter().cloned().collect(),
+            efforts: selection.effort.iter().cloned().collect(),
+            harness: None,
+        }))?
+        .map(|range| ExecutionSelection {
+            model: range.models.into_iter().next(),
+            effort: range.efforts.into_iter().next(),
+        }),
+    )
+}
+
+pub(super) fn select(
+    snapshot: &TaskPolicySnapshot,
+    requested: Option<&ExecutionSelection>,
+) -> Result<ExecutionSelection> {
+    let mut selected = accepted(Some(snapshot));
+    let Some(requested) = requested else {
+        return Ok(selected);
+    };
+    let range = snapshot.execution.as_ref();
+    if let Some(model) = &requested.model {
+        if range.is_some_and(|range| !range.models.is_empty() && !range.models.contains(model)) {
+            return Err(invalid(
+                "requested model is outside the Tag's execution range",
+            ));
+        }
+        selected.model = Some(model.clone());
+    }
+    if let Some(effort) = &requested.effort {
+        if range.is_some_and(|range| !range.efforts.is_empty() && !range.efforts.contains(effort)) {
+            return Err(invalid(
+                "requested effort is outside the Tag's execution range",
+            ));
+        }
+        selected.effort = Some(effort.clone());
+    }
+    Ok(selected)
 }
 
 pub(super) fn resolve_attempt(

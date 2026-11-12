@@ -299,6 +299,7 @@ impl Store {
         .await?;
         if target != parent.tag_id {
             require_unchanged_authority(&child, &next, true)?;
+            crate::store::preserve_execution_in(&mut tx, &mut next, &child).await?;
         }
         let base = if target == parent.tag_id {
             parent.execution_limits.as_ref()

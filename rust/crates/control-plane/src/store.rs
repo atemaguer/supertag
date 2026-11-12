@@ -32,10 +32,10 @@ use sqlx::{
 use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
-        ContextContract, ExecutionLimits, FinishTaskRequest, HarnessExecutionProfile, HarnessKind,
-        PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
-        SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent, TaskState,
-        WorkspaceSpec,
+        ContextContract, ExecutionLimits, ExecutionSelection, FinishTaskRequest,
+        HarnessExecutionProfile, HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply,
+        ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag,
+        Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -70,7 +70,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 36;
+        const SCHEMA_VERSION: i64 = 37;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -157,6 +157,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0034_cursor_harness.sql"),
                 include_str!("../migrations/sqlite/0035_execution_selection.sql"),
                 include_str!("../migrations/sqlite/0036_tag_execution.sql"),
+                include_str!("../migrations/sqlite/0037_accepted_execution.sql"),
             ]
         } else {
             [
@@ -196,6 +197,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0034_cursor_harness.sql"),
                 include_str!("../migrations/postgresql/0035_execution_selection.sql"),
                 include_str!("../migrations/postgresql/0036_tag_execution.sql"),
+                include_str!("../migrations/postgresql/0037_accepted_execution.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -891,23 +893,26 @@ impl Store {
         if let Some(thread) = &destination.thread_id {
             name("thread ID", thread)?;
         }
-        let digest = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                &input.tag_id,
-                &input.session_id,
-                &input.prompt,
-                &destination.conversation_id,
-                &destination.thread_id,
-            ))?)
+        let requested_execution = execution::normalize_request(input.requested_execution.as_ref())?;
+        let delivery = (
+            &input.tag_id,
+            &input.session_id,
+            &input.prompt,
+            &destination.conversation_id,
+            &destination.thread_id,
         );
+        let digest_input = match &requested_execution {
+            Some(selection) => serde_json::to_vec(&(delivery, selection.encode_to_vec()))?,
+            None => serde_json::to_vec(&delivery)?,
+        };
+        let digest = format!("{:x}", Sha256::digest(digest_input));
         let (mut transaction, order) = self.write().await?;
         let prior = sqlx::query("SELECT request_digest, task_id FROM supertag_v2_inbound_events WHERE account_id = $1 AND event_id = $2")
             .bind(account).bind(&input.event_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             if prior.try_get::<String, _>("request_digest")? != digest {
                 return Err(StoreError::Conflict(
-                    "event ID was used with different content or routing".into(),
+                    "event ID was used with different content, routing, or execution".into(),
                 ));
             }
             let task = task_in(&mut transaction, &prior.try_get::<String, _>("task_id")?).await?;
@@ -922,13 +927,17 @@ impl Store {
             self.execution_now_ms(),
         )
         .await?;
-        let task = insert_task(
+        let task = Box::pin(insert_task_options(
             &mut transaction,
             order,
             &input.tag_id,
             &input.session_id,
             &input.prompt,
-        )
+            TaskAdmission {
+                requested_execution: requested_execution.as_ref(),
+                ..Default::default()
+            },
+        ))
         .await?;
         crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
         sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id, event_id, request_digest, task_id, conversation_id, thread_id) VALUES ($1,$2,$3,$4,$5,$6)")
@@ -1127,6 +1136,7 @@ pub(crate) async fn insert_owed_task(
 struct TaskAdmission<'a> {
     surface: Option<&'a crate::surface_policy::AdmissionSurface>,
     execution_limits: Option<&'a ExecutionLimits>,
+    requested_execution: Option<&'a ExecutionSelection>,
     owed: bool,
 }
 
@@ -1182,8 +1192,16 @@ async fn insert_task_options(
         options.owed,
     )
     .await?;
-    let mut task =
-        insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await?;
+    let mut task = insert_accepted_task(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        accepted,
+        options.requested_execution,
+    )
+    .await?;
     crate::budget_pool::set_in(transaction, &mut task, limits).await?;
     Ok(task)
 }
@@ -1375,7 +1393,16 @@ pub(crate) async fn insert_delegated_task_in(
         objective.try_get::<i64, _>("revision")? as u64,
         &objective_actions,
     )?;
-    insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await
+    insert_accepted_task(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        accepted,
+        None,
+    )
+    .await
 }
 
 async fn insert_accepted_task(
@@ -1385,6 +1412,7 @@ async fn insert_accepted_task(
     session_id: &str,
     prompt: &str,
     accepted: AcceptedTag,
+    requested_execution: Option<&ExecutionSelection>,
 ) -> Result<Task> {
     text("Task prompt", prompt, MAX_TASK_PROMPT_BYTES)?;
     let AcceptedTag {
@@ -1392,8 +1420,9 @@ async fn insert_accepted_task(
         workspace,
         policy,
     } = accepted;
+    let selection = execution::select(&policy.snapshot, requested_execution)?;
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
         .bind(revision).bind(TaskState::Queued as i64).bind(order)
@@ -1403,6 +1432,7 @@ async fn insert_accepted_task(
         .bind(stored_approval_rules(&policy.approval_rules)?)
         .bind(policy.snapshot.encode_to_vec())
         .bind(policy.effective_digest)
+        .bind(selection.encode_to_vec())
         .execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
 }
@@ -1419,14 +1449,32 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
     .bind(&source.task_id).execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
+}
+
+pub(crate) async fn preserve_execution_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &mut Task,
+    source: &Task,
+) -> Result<()> {
+    if let Some(selection) = &source.execution_selection
+        && task.execution_selection.as_ref() != Some(selection)
+    {
+        sqlx::query("UPDATE supertag_v2_tasks SET execution_selection=$1 WHERE task_id=$2")
+            .bind(selection.encode_to_vec())
+            .bind(&task.task_id)
+            .execute(&mut **transaction)
+            .await?;
+        task.execution_selection = Some(selection.clone());
+    }
+    Ok(())
 }
 
 pub(crate) async fn next_order(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
@@ -1542,7 +1590,14 @@ pub(crate) async fn owned(
 
 pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
     let policy_snapshot = crate::policy::snapshot_from_row(row)?;
-    let execution_selection = Some(execution::accepted(policy_snapshot.as_ref()));
+    let stored_selection = row.try_get::<Option<Vec<u8>>, _>("execution_selection")?;
+    let execution_selection = Some(
+        stored_selection
+            .as_deref()
+            .map(crate::policy::decode)
+            .transpose()?
+            .unwrap_or_else(|| execution::accepted(policy_snapshot.as_ref())),
+    );
     let attempt_id: Option<String> = row.try_get("attempt_id")?;
     let attempt_execution = if attempt_id.is_some() {
         execution::read_attempt(row.try_get("attempt_execution")?)?

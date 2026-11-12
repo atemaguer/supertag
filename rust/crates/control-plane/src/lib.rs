@@ -760,6 +760,7 @@ mod tests {
             cp.accept_event(
                 authenticated_request(
                     AcceptEventRequest {
+                        requested_execution: None,
                         account_id: "account-a".into(),
                         event_id: "event".into(),
                         tag_id: "tag".into(),

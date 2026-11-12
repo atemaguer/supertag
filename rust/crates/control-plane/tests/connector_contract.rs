@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 fn event(account: &str, id: &str) -> AcceptEventRequest {
     AcceptEventRequest {
+        requested_execution: None,
         account_id: account.into(),
         event_id: id.into(),
         tag_id: "reviewer".into(),

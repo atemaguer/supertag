@@ -1611,6 +1611,8 @@ message AcceptEventRequest {
   string session_id = 4;
   string prompt = 5;
   ReplyDestination destination = 6;
+  // Optional programmatic choice, validated against the accepted Tag policy.
+  ExecutionSelection requested_execution = 7;
 }
 
 message AcceptSlackEventRequest {

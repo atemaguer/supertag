@@ -442,7 +442,7 @@ fn references(input: &[String]) -> Result<Vec<String>> {
         .collect::<Result<BTreeSet<_>>>()
         .map(|s| s.into_iter().collect())
 }
-fn normalize_execution(
+pub(crate) fn normalize_execution(
     input: Option<PolicyExecutionSettings>,
 ) -> Result<Option<PolicyExecutionSettings>> {
     let Some(mut execution) = input else {

@@ -142,6 +142,7 @@ async fn contract(url: String) {
             .accept_event(
                 "connector:fixture",
                 &AcceptEventRequest {
+                    requested_execution: None,
                     account_id: "fixture".into(),
                     event_id: "forged-child".into(),
                     tag_id: "owner".into(),

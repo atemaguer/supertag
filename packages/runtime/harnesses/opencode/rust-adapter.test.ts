@@ -213,6 +213,24 @@ it("requires Worker Host opt-in before handing commands to native OpenCode", () 
   expect(taskModel(ownedRun(), configuration).model).toBe("openai/test");
 });
 
+it("uses the frozen execution selection when a Work Session's current range has changed", () => {
+  const run = ownedRun();
+  if (!run.task) throw new Error("Missing fixture Task");
+  run.task.executionSelection = create(rustHarness.ExecutionSelectionSchema, {
+    model: "openai/original",
+  });
+  run.task.attemptExecution = create(rustHarness.AttemptExecutionSelectionSchema, {
+    selection: { model: "openai/original" },
+  });
+  run.task.policySnapshot = create(rustHarness.TaskPolicySnapshotSchema, {
+    execution: { models: ["openai/replacement"] },
+  });
+  expect(taskModel(run, configuration).model).toBe("openai/original");
+  if (!run.task?.attemptExecution?.selection) throw new Error("Missing fixture selection");
+  run.task.attemptExecution.selection.model = "openai/replacement";
+  expect(() => taskModel(run, configuration)).toThrow(/accepted model/u);
+});
+
 it("does not probe the native version for ordinary project files", async () => {
   const { workspace, environment } = await sandbox();
   const project = join(workspace, ".opencode");

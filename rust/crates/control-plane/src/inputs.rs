@@ -9,7 +9,9 @@ use uuid::Uuid;
 use crate::{
     Store, StoreError,
     objectives::{objective_admission_in, objective_link_task_in},
-    store::{HostAuthority, Result, insert_task, invalid, lease_is_live, name, owned, text},
+    store::{
+        HostAuthority, Result, insert_task, invalid, lease_is_live, name, owned, task_in, text,
+    },
 };
 
 const ACKNOWLEDGEMENT_MS: i64 = 10_000;
@@ -396,7 +398,12 @@ async fn compatible_policy_in(
     .bind(follower_id)
     .fetch_one(&mut **tx)
     .await?;
-    Ok(matches != 0)
+    if matches == 0 {
+        return Ok(false);
+    }
+    let active = task_in(tx, task_id).await?;
+    let follower = task_in(tx, follower_id).await?;
+    Ok(active.execution_selection == follower.execution_selection)
 }
 
 pub(crate) async fn input_for_follower_in(

@@ -69,8 +69,12 @@ export function taskModel(run: HarnessRun, configuration: AdapterOptions) {
   const model = task.attemptExecution
     ? task.attemptExecution.selection?.model
     : configuration.model;
-  const accepted = task.policySnapshot?.execution?.models ?? [];
-  if (!model || !/^[^\s/]+\/[^\s]+$/u.test(model) || (accepted.length && !accepted.includes(model)))
+  const range = task.policySnapshot?.execution?.models ?? [];
+  const acceptedModel = task.executionSelection?.model;
+  const invalidModel = task.attemptExecution
+    ? acceptedModel !== undefined && model !== acceptedModel
+    : model !== undefined && range.length > 0 && !range.includes(model);
+  if (!model || !/^[^\s/]+\/[^\s]+$/u.test(model) || invalidModel)
     throw new SafeOpenCodeFailure("OpenCode Worker Host does not serve an accepted model.");
   if (!Number.isSafeInteger(configuration.timeoutMs) || configuration.timeoutMs <= 0)
     throw new SafeOpenCodeFailure("OpenCode Worker Host has an invalid execution timeout.");
