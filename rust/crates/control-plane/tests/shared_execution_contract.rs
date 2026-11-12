@@ -162,9 +162,63 @@ async fn contract(url: &str) {
     let mut mixed = tag("commands", Some("root-a"));
     mixed.allowed_actions.push("commands:execute".into());
     store.put_tag_spec(mixed).await.unwrap();
+    let command_task = store
+        .submit_task(OPERATOR, &submit("commands", "session", "remote-command"))
+        .await
+        .unwrap();
+    let file_host = support::register_host(&store, "file-only-host").await;
     assert!(
         store
-            .submit_task(OPERATOR, &submit("commands", "session", "no-commands"))
+            .claim_task_with_profile(
+                &file_host,
+                "file-host",
+                &[],
+                HarnessKind::Cursor,
+                &[],
+                Some(&exact)
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let command_host = support::register_host(&store, "command-host").await;
+    let command_profile = profile(
+        "root-a",
+        &[
+            SharedExecutionTool::Read,
+            SharedExecutionTool::Write,
+            SharedExecutionTool::Command,
+        ],
+    );
+    let command = store
+        .claim_task_with_profile(
+            &command_host,
+            "command-host",
+            &[],
+            HarnessKind::Cursor,
+            &[],
+            Some(&command_profile),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .task
+        .unwrap();
+    assert_eq!(command.task_id, command_task.task_id);
+    assert_eq!(
+        command.attempt_execution.unwrap().shared_execution,
+        command_profile.shared_execution
+    );
+
+    let mut without_write = tag("command-without-write", Some("root-a"));
+    without_write.allowed_actions = vec!["commands:execute".into()];
+    store.put_tag_spec(without_write).await.unwrap();
+    assert!(
+        store
+            .submit_task(
+                OPERATOR,
+                &submit("command-without-write", "session", "denied")
+            )
             .await
             .is_err()
     );

@@ -267,7 +267,7 @@ Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","h
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval are refused. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
         mcp_catalog: Option<PathBuf>,
-        /// gRPC origin of a standalone shared execution provider for Cursor file tools.
+        /// gRPC origin of a standalone shared execution provider for Cursor.
         #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
         shared_execution_endpoint: Option<String>,
         /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
@@ -275,6 +275,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         shared_execution_environment: Option<String>,
         #[arg(long, requires = "shared_execution_endpoint")]
         shared_execution_ca_file: Option<PathBuf>,
+        /// Enable lease-bound commands on an operator-trusted Linux shared execution provider.
+        #[arg(
+            long,
+            requires = "shared_execution_endpoint",
+            long_help = "Enable lease-bound commands on an operator-trusted Linux shared execution provider. Commands start in the fixed root with an empty credential environment and run with the provider's configured workload UID and GID. That identity's OS filesystem and network permissions also apply."
+        )]
+        shared_execution_commands: bool,
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
@@ -686,6 +693,7 @@ async fn run(command: Command) -> Result<()> {
             shared_execution_endpoint,
             shared_execution_environment,
             shared_execution_ca_file,
+            shared_execution_commands,
             skill_catalog,
             attempt_timeout_seconds,
             once,
@@ -772,6 +780,7 @@ async fn run(command: Command) -> Result<()> {
                     environment,
                     admin,
                     ca,
+                    shared_execution_commands,
                 )
                 .await?;
                 execution_profile.shared_execution = Some(config.capability().clone());

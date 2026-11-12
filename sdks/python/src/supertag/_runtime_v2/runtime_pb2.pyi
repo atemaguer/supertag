@@ -159,6 +159,7 @@ class SharedExecutionTool(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SHARED_EXECUTION_TOOL_UNSPECIFIED: _ClassVar[SharedExecutionTool]
     SHARED_EXECUTION_TOOL_READ: _ClassVar[SharedExecutionTool]
     SHARED_EXECUTION_TOOL_WRITE: _ClassVar[SharedExecutionTool]
+    SHARED_EXECUTION_TOOL_COMMAND: _ClassVar[SharedExecutionTool]
 
 class ModelSource(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -336,6 +337,7 @@ OUTPUT_GIT_MODE_IGNORE: OutputGitMode
 SHARED_EXECUTION_TOOL_UNSPECIFIED: SharedExecutionTool
 SHARED_EXECUTION_TOOL_READ: SharedExecutionTool
 SHARED_EXECUTION_TOOL_WRITE: SharedExecutionTool
+SHARED_EXECUTION_TOOL_COMMAND: SharedExecutionTool
 MODEL_SOURCE_UNSPECIFIED: ModelSource
 MODEL_SOURCE_TASK: ModelSource
 MODEL_SOURCE_HOST_DEFAULT: ModelSource

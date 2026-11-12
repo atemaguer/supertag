@@ -24,8 +24,7 @@ pub(crate) fn run() -> Result<()> {
         unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL) } != libc::SIG_ERR,
         "initialize guardian child reaping"
     );
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
+    let mut input = File::from(io::stdin().as_fd().try_clone_to_owned()?);
     let owner: Owner = frame(&mut input)?;
     ensure!(
         owner.proofs.is_absolute()
@@ -37,9 +36,8 @@ pub(crate) fn run() -> Result<()> {
     let result = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
     ensure!(result == 0, "enable guardian child ownership");
     let launch: Result<Launch> = frame(&mut input);
-    drop(input);
     let outcome = match launch {
-        Ok(launch) => supervise(&stdin, launch).unwrap_or(Outcome::LaunchFailed),
+        Ok(launch) => supervise(&mut input, launch).unwrap_or(Outcome::LaunchFailed),
         Err(_) => Outcome::LaunchFailed,
     };
     reap_descendants()?;
@@ -93,7 +91,7 @@ fn frame<T: DeserializeOwned>(input: &mut impl Read) -> Result<T> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-fn supervise(stdin: &io::Stdin, launch: Launch) -> Result<Outcome> {
+fn supervise(owner: &mut File, launch: Launch) -> Result<Outcome> {
     ensure!(
         launch.uid > 0 && launch.gid > 0,
         "invalid workload identity"
@@ -104,8 +102,10 @@ fn supervise(stdin: &io::Stdin, launch: Launch) -> Result<Outcome> {
         "fixed execution root changed before launch"
     );
     let cwd = root.directory(&launch.cwd)?;
-    let lifeline = stdin.as_fd().try_clone_to_owned()?;
-    let deadline = launch.deadline_ns;
+    let lifeline = owner.as_fd().try_clone_to_owned()?;
+    let deadline = launch
+        .lease_deadline_ns
+        .map_or(launch.deadline_ns, |lease| lease.min(launch.deadline_ns));
     check_owner(lifeline.as_raw_fd(), deadline)?;
     let mut input = tempfile::tempfile()?;
     input.write_all(&launch.stdin)?;
@@ -136,28 +136,60 @@ fn supervise(stdin: &io::Stdin, launch: Launch) -> Result<Outcome> {
         });
     }
     let mut child = command.spawn()?;
-    Ok(wait_child(&mut child, stdin.as_fd().as_raw_fd(), deadline).unwrap_or(Outcome::Unobserved))
+    Ok(wait_child(
+        &mut child,
+        owner,
+        launch.deadline_ns,
+        launch.lease_deadline_ns,
+    )
+    .unwrap_or(Outcome::Unobserved))
 }
 
-fn wait_child(child: &mut Child, owner: RawFd, deadline: u64) -> io::Result<Outcome> {
+fn wait_child(
+    child: &mut Child,
+    owner: &mut File,
+    deadline: u64,
+    mut lease: Option<u64>,
+) -> io::Result<Outcome> {
+    let fd = owner.as_raw_fd();
+    // SAFETY: fd is the exclusive guardian read pipe. Updates are fixed-size atomic writes.
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
     loop {
+        let until = lease.map_or(deadline, |lease| lease.min(deadline));
+        if monotonic_now_ns()? >= until {
+            return Ok(Outcome::TimedOut);
+        }
+        let flags = owner_events(fd, 0)?;
+        if disconnected(flags) {
+            return Ok(Outcome::Cancelled);
+        }
+        if flags & libc::POLLIN != 0 {
+            if lease.is_none() {
+                return Ok(Outcome::Cancelled);
+            }
+            let mut bytes = [0; 8];
+            owner.read_exact(&mut bytes)?;
+            // Never resurrect an expired lease even if a frame was already queued.
+            if monotonic_now_ns()? >= until {
+                return Ok(Outcome::TimedOut);
+            }
+            lease = Some(u64::from_le_bytes(bytes));
+            continue;
+        }
         if let Some(status) = child.try_wait()? {
             return Ok(Outcome::Exited {
                 code: status.code(),
                 signal: status.signal(),
             });
         }
-        if monotonic_now_ns()? >= deadline {
-            return Ok(Outcome::TimedOut);
-        }
-        if owner_closed(owner, 10)? {
-            return Ok(Outcome::Cancelled);
-        }
+        owner_events(fd, 10)?;
     }
 }
 
 fn check_owner(fd: RawFd, deadline: u64) -> io::Result<()> {
-    if owner_closed(fd, 0)? {
+    if disconnected(owner_events(fd, 0)?) {
         return Err(io::Error::from_raw_os_error(libc::EPIPE));
     }
     if monotonic_now_ns()? >= deadline {
@@ -166,7 +198,11 @@ fn check_owner(fd: RawFd, deadline: u64) -> io::Result<()> {
     Ok(())
 }
 
-fn owner_closed(fd: RawFd, wait_ms: i32) -> io::Result<bool> {
+fn disconnected(flags: i16) -> bool {
+    flags & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+}
+
+fn owner_events(fd: RawFd, wait_ms: i32) -> io::Result<i16> {
     let mut descriptor = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -177,8 +213,7 @@ fn owner_closed(fd: RawFd, wait_ms: i32) -> io::Result<bool> {
     if ready < 0 {
         return Err(io::Error::last_os_error());
     }
-    // No messages are valid after the launch frame. Any readiness closes authority.
-    Ok(ready != 0)
+    Ok(descriptor.revents)
 }
 
 fn reap_descendants() -> Result<()> {

@@ -319,6 +319,7 @@ impl Journal {
                 )
                 && uuid::Uuid::parse_str(&record.incarnation_id).is_ok()
                 && uuid::Uuid::parse_str(&record.access_id).is_ok()
+                && (0..=2).contains(&record.command_mode)
                 && (1_000..=86_400_000).contains(&record.ttl_ms),
             "invalid shared execution access journal"
         );

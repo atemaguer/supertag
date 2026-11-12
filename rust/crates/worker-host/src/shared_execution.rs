@@ -1,4 +1,13 @@
-use std::{net::IpAddr, time::Duration};
+mod command;
+
+use std::{
+    net::IpAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result, ensure};
 use hmac::{Hmac, Mac};
@@ -13,9 +22,9 @@ use supertag_protocol::{
     },
 };
 use supertag_shared_execution::v2::{
-    AccessReceipt, AccessState, DescribeEnvironmentRequest, EndAccessRequest, ExecuteRequest,
-    InspectOperationRequest, IssueAccessRequest, OperationReceipt, OperationState, ReadFile,
-    WriteFile, execute_request::Operation, operation_receipt::Result as Effect,
+    AccessCommandMode, AccessReceipt, AccessState, DescribeEnvironmentRequest, EndAccessRequest,
+    ExecuteRequest, InspectOperationRequest, IssueAccessRequest, OperationReceipt, OperationState,
+    ReadFile, WriteFile, execute_request::Operation, operation_receipt::Result as Effect,
     shared_execution_client::SharedExecutionClient,
 };
 use tonic::{
@@ -55,12 +64,16 @@ pub(crate) struct AccessRecord {
     pub(crate) access_id: String,
     pub(crate) ttl_ms: u64,
     pub(crate) ended: bool,
+    #[serde(default)]
+    pub(crate) command_mode: i32,
 }
 
 #[derive(Clone)]
 pub(crate) struct Access {
     client: SharedExecutionClient<Channel>,
     token: String,
+    access_id: String,
+    commands_blocked: Arc<AtomicBool>,
     capability: SharedExecutionCapability,
     pub(crate) summary: SharedExecutionAccessSummary,
 }
@@ -71,6 +84,7 @@ impl SharedExecutionConfig {
         environment_id: String,
         admin_token: String,
         ca: Option<Vec<u8>>,
+        allow_commands: bool,
     ) -> Result<Self> {
         ensure!(
             supertag_protocol::shared_execution::valid_environment_id(&environment_id)
@@ -133,6 +147,13 @@ impl SharedExecutionConfig {
         if info.file_write {
             tools.push(SharedExecutionTool::Write as i32);
         }
+        if allow_commands {
+            ensure!(
+                info.lease_bound_commands,
+                "shared execution provider does not support lease-bound commands"
+            );
+            tools.push(SharedExecutionTool::Command as i32);
+        }
         let mut capability = SharedExecutionCapability {
             environment_id,
             tools,
@@ -180,6 +201,9 @@ impl SharedExecutionConfig {
             &record.incarnation_id,
             record.ttl_ms,
         ))?);
+        if record.command_mode != 0 {
+            signer.update(&record.command_mode.to_le_bytes());
+        }
         Ok(format!("{:x}", signer.finalize().into_bytes()))
     }
 
@@ -194,6 +218,7 @@ impl SharedExecutionConfig {
                 tag_id: record.tag_id.clone(),
                 ttl_ms: record.ttl_ms,
                 expected_incarnation_id: Some(record.incarnation_id.clone()),
+                command_mode: record.command_mode,
             },
             &self.admin_token,
         )?;
@@ -261,6 +286,15 @@ pub(crate) async fn prepare(
             .clamp(Duration::from_secs(1), Duration::from_secs(86_400))
             .as_millis() as u64,
         ended: false,
+        command_mode: if task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+        {
+            AccessCommandMode::LeaseBound as i32
+        } else {
+            AccessCommandMode::Disabled as i32
+        },
     };
     journal.save_shared_access(&record)?;
     let (receipt, token) = config.issue(&record).await?;
@@ -271,6 +305,8 @@ pub(crate) async fn prepare(
     Ok(Access {
         client: config.client.clone(),
         token,
+        access_id: record.access_id,
+        commands_blocked: Arc::default(),
         capability: config.capability.clone(),
         summary: SharedExecutionAccessSummary {
             environment_id: record.environment_id,
@@ -342,21 +378,34 @@ fn request<T>(body: T, token: &str) -> Result<Request<T>, Status> {
 }
 
 impl Access {
+    fn allows(&self, tool: SharedExecutionTool) -> bool {
+        self.capability.tools.contains(&(tool as i32))
+    }
+
+    fn require_no_pending_command(&self) -> Result<(), Status> {
+        if self.commands_blocked.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition(
+                "shared command cleanup has not been verified",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn execute(
         &self,
         input: HarnessWorkspaceRequest,
     ) -> Result<HarnessWorkspaceResult, Status> {
+        self.require_no_pending_command()?;
         let operation_id = Uuid::new_v4().to_string();
-        let allows = |tool: SharedExecutionTool| self.capability.tools.contains(&(tool as i32));
         let (operation, read, bytes) = match input.operation {
-            Some(Tool::Read(read)) if allows(SharedExecutionTool::Read) => {
+            Some(Tool::Read(read)) if self.allows(SharedExecutionTool::Read) => {
                 let file = ReadFile {
                     path: read.path.clone(),
                     maximum_bytes: MAX_FILE_BYTES as u32,
                 };
                 (Operation::ReadFile(file), Some(read), None)
             }
-            Some(Tool::Write(write)) if allows(SharedExecutionTool::Write) => {
+            Some(Tool::Write(write)) if self.allows(SharedExecutionTool::Write) => {
                 if write.content.len() > MAX_FILE_BYTES {
                     return Err(Status::resource_exhausted(
                         "shared file write exceeds its bound",

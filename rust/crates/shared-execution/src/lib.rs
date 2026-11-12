@@ -1,3 +1,4 @@
+mod command_lease;
 mod guardian;
 mod journal;
 mod process;
@@ -53,6 +54,7 @@ struct Inner {
     shutdown: CancellationToken,
     process_identity: Option<(u32, u32)>,
     processes: Mutex<BTreeMap<String, process::Runtime>>,
+    command_leases: Mutex<BTreeMap<String, command_lease::Lease>>,
 }
 
 impl Provider {
@@ -86,6 +88,7 @@ impl Provider {
             shutdown: CancellationToken::new(),
             process_identity: config.process_identity,
             processes: Mutex::default(),
+            command_leases: Mutex::default(),
         })))
     }
 
@@ -150,6 +153,13 @@ impl Provider {
         let _lock = self.0.admission.lock().await;
         self.accepting()?;
         let journal = &self.0.journal;
+        let command_mode = AccessCommandMode::try_from(input.command_mode)
+            .map_err(|_| Status::invalid_argument("invalid execution command mode"))?;
+        if command_mode == AccessCommandMode::LeaseBound && self.0.process_identity.is_none() {
+            return Err(Status::failed_precondition(
+                "shared execution command lane is disabled",
+            ));
+        }
         if input.environment_id != journal.environment_id
             || input
                 .expected_incarnation_id
@@ -224,7 +234,7 @@ impl Provider {
             cleanup_verified: false,
         };
         journal
-            .insert_access(&receipt, &token_hash, fingerprint.as_slice())
+            .insert_access(&receipt, &token_hash, fingerprint.as_slice(), command_mode)
             .await
             .map_err(journal_error)?;
         Ok(receipt)
@@ -237,7 +247,9 @@ impl Provider {
     ) -> Result<OperationReceipt, Status> {
         let _lock = self.0.admission.lock().await;
         self.accepting()?;
-        let access = self.auth(&token_hash, true).await?.receipt;
+        let access = self.auth(&token_hash, true).await?;
+        let command_mode = access.command_mode;
+        let access = access.receipt;
         let journal = &self.0.journal;
         if !identifier(&input.operation_id) {
             return Err(Status::invalid_argument("invalid operation ID"));
@@ -304,6 +316,9 @@ impl Provider {
         };
         let operation = match operation {
             Operation::StartProcess(process) => {
+                let lease_deadline = self
+                    .process_deadline(&entry.access_id, command_mode)
+                    .await?;
                 if !guardian::validate(&process) {
                     return Err(Status::invalid_argument(
                         "invalid bounded process specification",
@@ -316,7 +331,7 @@ impl Provider {
                 entry.receipt.process_id = Some(Uuid::new_v4().to_string());
                 entry.receipt.cleanup_verified = true;
                 return self
-                    .launch_process(entry, process, access.expires_at_ms)
+                    .launch_process(entry, process, access.expires_at_ms, lease_deadline)
                     .await;
             }
             Operation::StopProcess(stop) => {
@@ -417,6 +432,7 @@ impl Provider {
             .set_access(&id, pending)
             .await
             .map_err(journal_error)?;
+        self.0.command_leases.lock().await.remove(&id);
         drop(lock);
         for runtime in self
             .0
@@ -484,6 +500,7 @@ impl SharedExecution for Provider {
             incarnation_id: self.0.journal.incarnation_id.clone(),
             file_read: true,
             file_write: true,
+            lease_bound_commands: self.0.process_identity.is_some(),
         }))
     }
 
@@ -508,6 +525,28 @@ impl SharedExecution for Provider {
             tokio::spawn(async move { provider.issue_owned(input, hash).await })
                 .await
                 .map_err(|_| Status::internal("access issuance interrupted"))??,
+        ))
+    }
+
+    async fn prepare_command_lease(
+        &self,
+        request: Request<PrepareCommandLeaseRequest>,
+    ) -> Result<Response<CommandLeaseChallenge>, Status> {
+        let hash = bearer_hash(&request)?;
+        Ok(Response::new(
+            self.prepare_command_lease_owned(&request.into_inner().access_id, &hash)
+                .await?,
+        ))
+    }
+
+    async fn renew_command_lease(
+        &self,
+        request: Request<RenewCommandLeaseRequest>,
+    ) -> Result<Response<CommandLeaseReceipt>, Status> {
+        let hash = bearer_hash(&request)?;
+        Ok(Response::new(
+            self.renew_command_lease_owned(request.into_inner(), &hash)
+                .await?,
         ))
     }
     async fn release_access(

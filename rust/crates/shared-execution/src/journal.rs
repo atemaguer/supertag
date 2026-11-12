@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 use crate::{
     root::Root,
-    v2::{AccessReceipt, AccessState, OperationReceipt, OperationState, ProcessChunk},
+    v2::{
+        AccessCommandMode, AccessReceipt, AccessState, OperationReceipt, OperationState,
+        ProcessChunk,
+    },
 };
 
 const SCHEMA: &str = r#"
@@ -35,6 +38,10 @@ CREATE TABLE IF NOT EXISTS accesses (
   tag_id TEXT NOT NULL,
   expires_at_ms INTEGER NOT NULL,
   state INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS access_command_modes (
+  access_id TEXT PRIMARY KEY REFERENCES accesses(id),
+  mode INTEGER NOT NULL CHECK(mode IN (1,2))
 );
 CREATE TABLE IF NOT EXISTS operations (
   id TEXT PRIMARY KEY,
@@ -67,6 +74,7 @@ pub(crate) struct Journal {
 pub(crate) struct Access {
     pub(crate) receipt: AccessReceipt,
     pub(crate) fingerprint: Vec<u8>,
+    pub(crate) command_mode: AccessCommandMode,
 }
 
 pub(crate) struct Entry {
@@ -149,7 +157,7 @@ impl Journal {
     }
 
     pub(crate) async fn access(&self, id: &str) -> Result<Option<Access>> {
-        let row = sqlx::query("SELECT * FROM accesses WHERE id=?")
+        let row = sqlx::query("SELECT a.*, COALESCE(m.mode,0) AS command_mode FROM accesses a LEFT JOIN access_command_modes m ON m.access_id=a.id WHERE a.id=?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
@@ -157,7 +165,7 @@ impl Journal {
     }
 
     pub(crate) async fn authenticate(&self, token_hash: &[u8]) -> Result<Option<Access>> {
-        let row = sqlx::query("SELECT * FROM accesses WHERE token_hash=?")
+        let row = sqlx::query("SELECT a.*, COALESCE(m.mode,0) AS command_mode FROM accesses a LEFT JOIN access_command_modes m ON m.access_id=a.id WHERE a.token_hash=?")
             .bind(token_hash)
             .fetch_optional(&self.pool)
             .await?;
@@ -191,6 +199,7 @@ impl Journal {
                 ),
             },
             fingerprint: row.try_get("fingerprint")?,
+            command_mode: AccessCommandMode::try_from(row.try_get::<i32, _>("command_mode")?)?,
         })
     }
 
@@ -199,7 +208,9 @@ impl Journal {
         access: &AccessReceipt,
         token_hash: &[u8],
         fingerprint: &[u8],
+        command_mode: AccessCommandMode,
     ) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
         sqlx::query("INSERT INTO accesses VALUES (?,?,?,?,?,?,?,?)")
             .bind(&access.access_id)
             .bind(token_hash)
@@ -209,8 +220,16 @@ impl Journal {
             .bind(&access.tag_id)
             .bind(access.expires_at_ms)
             .bind(access.state)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+        if command_mode != AccessCommandMode::Unspecified {
+            sqlx::query("INSERT INTO access_command_modes VALUES (?,?)")
+                .bind(&access.access_id)
+                .bind(command_mode as i32)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 

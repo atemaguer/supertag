@@ -144,7 +144,6 @@ export async function runAdapter(
     if (shared) {
       if (
         task.workspace ||
-        task.allowedActions.includes("commands:execute") ||
         !shared.tools.length ||
         !sharedSummary ||
         !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(sharedSummary.incarnationId)
@@ -153,8 +152,14 @@ export async function runAdapter(
       for (const tool of shared.tools) {
         if (tool === SharedExecutionTool.READ) sharedTools.add("read");
         else if (tool === SharedExecutionTool.WRITE) sharedTools.add("write");
+        else if (tool === SharedExecutionTool.COMMAND) sharedTools.add("command");
         else throw new Error("Unknown Cursor shared execution file tool");
       }
+      if (
+        task.allowedActions.includes("commands:execute") &&
+        (!sharedTools.has("command") || !task.allowedActions.includes("files:write"))
+      )
+        throw new Error("Invalid Cursor shared command placement");
     }
     validateActions(
       task.allowedActions,

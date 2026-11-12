@@ -1,7 +1,10 @@
 use std::{os::unix::fs::PermissionsExt, path::Path};
 
 use super::*;
-use supertag_shared_execution::v2::{StartProcess, StopProcess, WatchProcessRequest};
+use supertag_shared_execution::v2::{
+    AccessCommandMode, PrepareCommandLeaseRequest, RenewCommandLeaseRequest, StartProcess,
+    StopProcess, WatchProcessRequest,
+};
 
 async fn wait_pid(path: &Path) -> Result<u32> {
     time::timeout(WAIT, async {
@@ -37,6 +40,109 @@ fn workload_fixture() -> Result<Fixture> {
     std::os::unix::fs::chown(&fixture.root, Some(65534), Some(65534))?;
     std::fs::set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o700))?;
     Ok(fixture)
+}
+
+#[tokio::test]
+#[ignore = "requires isolated Linux root and util-linux setsid to launch a distinct workload UID"]
+async fn expired_command_lease_reaps_detached_work_while_provider_is_stopped() -> Result<()> {
+    let fixture = workload_fixture()?;
+    let mut running = fixture.start(true).await?;
+    let token = "lease-fixture-private-access-token-0123456789";
+    let mut access = issue("lease", token, "attempt-lease");
+    access.get_mut().command_mode = AccessCommandMode::LeaseBound as i32;
+    running.client.issue_access(access).await?;
+    let command = || {
+        execute(
+            "lease-process",
+            shell("/usr/bin/setsid /bin/sh -c 'echo $$ > lease.pid; exec /bin/sleep 30' & wait"),
+            token,
+        )
+    };
+    assert_eq!(
+        running.client.execute(command()).await.unwrap_err().code(),
+        Code::FailedPrecondition
+    );
+    let prepare = || {
+        request(
+            PrepareCommandLeaseRequest {
+                access_id: "lease".into(),
+            },
+            token,
+        )
+    };
+    let first = running
+        .client
+        .prepare_command_lease(prepare())
+        .await?
+        .into_inner();
+    let renewal = |challenge_id: String, valid_for_ms| {
+        request(
+            RenewCommandLeaseRequest {
+                access_id: "lease".into(),
+                challenge_id,
+                valid_for_ms,
+            },
+            token,
+        )
+    };
+    running
+        .client
+        .renew_command_lease(renewal(first.challenge_id.clone(), 3_000))
+        .await?;
+    assert!(
+        running
+            .client
+            .renew_command_lease(renewal(first.challenge_id, 5_000))
+            .await
+            .is_err()
+    );
+    let started = running.client.execute(command()).await?.into_inner();
+    let pid = wait_pid(&fixture.root.join("lease.pid")).await?;
+    let second = running
+        .client
+        .prepare_command_lease(prepare())
+        .await?
+        .into_inner();
+    running
+        .client
+        .renew_command_lease(renewal(second.challenge_id, 5_000))
+        .await?;
+    time::sleep(Duration::from_millis(3_100)).await;
+    assert!(
+        Path::new(&format!("/proc/{pid}")).exists(),
+        "command ignored renewal"
+    );
+    let owner = running.child.id().context("provider process ID")? as libc::pid_t;
+    assert_eq!(unsafe { libc::kill(owner, libc::SIGSTOP) }, 0);
+    let removed = time::timeout(WAIT, async {
+        while Path::new(&format!("/proc/{pid}")).exists() {
+            time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await;
+    assert_eq!(unsafe { libc::kill(owner, libc::SIGCONT) }, 0);
+    removed.context("detached command survived authority expiry while provider was stopped")?;
+    let revoked = running
+        .client
+        .revoke_access(request(
+            EndAccessRequest {
+                access_id: "lease".into(),
+            },
+            ADMIN,
+        ))
+        .await?
+        .into_inner();
+    assert!(revoked.cleanup_verified);
+    let receipt = running
+        .client
+        .inspect_operation(inspect("lease-process", token))
+        .await?
+        .into_inner();
+    assert_eq!(receipt.process_id, started.process_id);
+    assert!(receipt.cleanup_verified);
+    assert_eq!(receipt.state(), OperationState::Failed);
+    running.child.kill().await?;
+    Ok(())
 }
 
 #[tokio::test]

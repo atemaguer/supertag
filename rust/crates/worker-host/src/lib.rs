@@ -104,10 +104,11 @@ impl Attempt {
                 matches!(
                     attempt.harness_kind(),
                     HarnessKind::Opencode | HarnessKind::Cursor
-                ) && task
-                    .allowed_actions
-                    .iter()
-                    .any(|action| action == "commands:execute")
+                ) && attempt.shared_execution.is_none()
+                    && task
+                        .allowed_actions
+                        .iter()
+                        .any(|action| action == "commands:execute")
             });
         Ok(Self {
             task_id: task.task_id,
@@ -199,7 +200,7 @@ pub async fn run(
                     && options.remote_provider.is_none()
                     && options.execution_profile.mcp_servers.is_empty()
                     && !options.execution_profile.allow_unsandboxed_commands)),
-        "shared execution requires a Cursor Worker Host with the exact file-only provider profile"
+        "shared execution requires a Cursor Worker Host with the exact provider profile"
     );
     ensure!(
         !matches!(

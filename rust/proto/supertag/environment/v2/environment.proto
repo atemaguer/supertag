@@ -6,6 +6,8 @@ package supertag.environment.v2;
 service SharedExecution {
   rpc Describe(DescribeEnvironmentRequest) returns (EnvironmentInfo);
   rpc IssueAccess(IssueAccessRequest) returns (AccessReceipt);
+  rpc PrepareCommandLease(PrepareCommandLeaseRequest) returns (CommandLeaseChallenge);
+  rpc RenewCommandLease(RenewCommandLeaseRequest) returns (CommandLeaseReceipt);
   rpc ReleaseAccess(EndAccessRequest) returns (AccessReceipt);
   rpc RevokeAccess(EndAccessRequest) returns (AccessReceipt);
   rpc Execute(ExecuteRequest) returns (OperationReceipt);
@@ -19,6 +21,7 @@ message EnvironmentInfo {
   string incarnation_id = 2;
   bool file_read = 3;
   bool file_write = 4;
+  bool lease_bound_commands = 5;
 }
 
 // An admin bearer authorizes issuance. x-supertag-grant-token carries the client-selected access
@@ -31,7 +34,24 @@ message IssueAccessRequest {
   string tag_id = 5;
   uint64 ttl_ms = 6;
   optional string expected_incarnation_id = 7;
+  AccessCommandMode command_mode = 8;
 }
+
+enum AccessCommandMode {
+  // A standalone administrative grant uses its original bounded process deadline.
+  ACCESS_COMMAND_MODE_UNSPECIFIED = 0;
+  ACCESS_COMMAND_MODE_DISABLED = 1;
+  ACCESS_COMMAND_MODE_LEASE_BOUND = 2;
+}
+
+message PrepareCommandLeaseRequest { string access_id = 1; }
+message CommandLeaseChallenge { string access_id = 1; string challenge_id = 2; }
+message RenewCommandLeaseRequest {
+  string access_id = 1;
+  string challenge_id = 2;
+  uint64 valid_for_ms = 3;
+}
+message CommandLeaseReceipt { string access_id = 1; uint64 valid_for_ms = 2; }
 
 enum AccessState {
   ACCESS_STATE_UNSPECIFIED = 0;

@@ -29,6 +29,7 @@ pub(crate) struct Launch {
     pub(crate) uid: u32,
     pub(crate) gid: u32,
     pub(crate) deadline_ns: u64,
+    pub(crate) lease_deadline_ns: Option<u64>,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: String,
@@ -98,9 +99,13 @@ pub(crate) fn read_proof(directory: &Path, process_id: &str, nonce: &str) -> Res
 }
 
 pub(crate) fn monotonic_now_ns() -> io::Result<u64> {
+    #[cfg(target_os = "linux")]
+    let clock = libc::CLOCK_BOOTTIME;
+    #[cfg(not(target_os = "linux"))]
+    let clock = libc::CLOCK_MONOTONIC;
     let mut value = std::mem::MaybeUninit::uninit();
     // SAFETY: clock_gettime initializes the provided timespec on success.
-    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, value.as_mut_ptr()) } != 0 {
+    if unsafe { libc::clock_gettime(clock, value.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: successful clock_gettime initialized the timespec.

@@ -99,6 +99,7 @@ fn issue(id: &str, token: &str, attempt: &str) -> Request<IssueAccessRequest> {
             tag_id: "fixture-tag".into(),
             ttl_ms: 60_000,
             expected_incarnation_id: None,
+            command_mode: 0,
         },
         ADMIN,
     );
@@ -199,6 +200,24 @@ async fn fixed_root_access_preserves_exact_receipts_and_refuses_cross_access_or_
     );
     let (token, first) = grant(&mut running.client, "first").await?;
     assert_eq!(first.incarnation_id, description.incarnation_id);
+    let file_only = "file-only-fixture-private-access-token-0123456789";
+    let mut file_access = issue("file-only", file_only, "attempt-file-only");
+    file_access.get_mut().command_mode =
+        supertag_shared_execution::v2::AccessCommandMode::Disabled as i32;
+    running.client.issue_access(file_access).await?;
+    let refused = running
+        .client
+        .execute(execute(
+            "denied-command",
+            Operation::StartProcess(supertag_shared_execution::v2::StartProcess {
+                command: "/bin/sh".into(),
+                ..Default::default()
+            }),
+            file_only,
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
     let (other, _) = grant(&mut running.client, "other").await?;
     assert_eq!(
         running

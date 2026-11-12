@@ -1266,9 +1266,14 @@ impl AcceptedTag {
             .allowed_actions
             .iter()
             .any(|action| action == "commands:execute")
+            && !self
+                .policy
+                .allowed_actions
+                .iter()
+                .any(|action| action == "files:write")
         {
             return Err(StoreError::FailedPrecondition(
-                "shared execution currently supports admitted file tools only".into(),
+                "shared execution commands require files:write".into(),
             ));
         }
         Ok(())

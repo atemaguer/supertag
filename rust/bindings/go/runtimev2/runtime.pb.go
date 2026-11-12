@@ -1017,6 +1017,7 @@ const (
 	SharedExecutionTool_SHARED_EXECUTION_TOOL_UNSPECIFIED SharedExecutionTool = 0
 	SharedExecutionTool_SHARED_EXECUTION_TOOL_READ        SharedExecutionTool = 1
 	SharedExecutionTool_SHARED_EXECUTION_TOOL_WRITE       SharedExecutionTool = 2
+	SharedExecutionTool_SHARED_EXECUTION_TOOL_COMMAND     SharedExecutionTool = 3
 )
 
 // Enum value maps for SharedExecutionTool.
@@ -1025,11 +1026,13 @@ var (
 		0: "SHARED_EXECUTION_TOOL_UNSPECIFIED",
 		1: "SHARED_EXECUTION_TOOL_READ",
 		2: "SHARED_EXECUTION_TOOL_WRITE",
+		3: "SHARED_EXECUTION_TOOL_COMMAND",
 	}
 	SharedExecutionTool_value = map[string]int32{
 		"SHARED_EXECUTION_TOOL_UNSPECIFIED": 0,
 		"SHARED_EXECUTION_TOOL_READ":        1,
 		"SHARED_EXECUTION_TOOL_WRITE":       2,
+		"SHARED_EXECUTION_TOOL_COMMAND":     3,
 	}
 )
 
@@ -19054,11 +19057,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1bOUTPUT_GIT_MODE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19OUTPUT_GIT_MODE_REFERENCE\x10\x01\x12\x1b\n" +
 	"\x17OUTPUT_GIT_MODE_CAPTURE\x10\x02\x12\x1a\n" +
-	"\x16OUTPUT_GIT_MODE_IGNORE\x10\x03*}\n" +
+	"\x16OUTPUT_GIT_MODE_IGNORE\x10\x03*\xa0\x01\n" +
 	"\x13SharedExecutionTool\x12%\n" +
 	"!SHARED_EXECUTION_TOOL_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aSHARED_EXECUTION_TOOL_READ\x10\x01\x12\x1f\n" +
-	"\x1bSHARED_EXECUTION_TOOL_WRITE\x10\x02*\x83\x01\n" +
+	"\x1bSHARED_EXECUTION_TOOL_WRITE\x10\x02\x12!\n" +
+	"\x1dSHARED_EXECUTION_TOOL_COMMAND\x10\x03*\x83\x01\n" +
 	"\vModelSource\x12\x1c\n" +
 	"\x18MODEL_SOURCE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MODEL_SOURCE_TASK\x10\x01\x12\x1d\n" +

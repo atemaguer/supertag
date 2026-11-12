@@ -137,6 +137,7 @@ pub(super) fn resolve_attempt(
     }
     if matches!(harness, HarnessKind::Opencode | HarnessKind::Cursor)
         && !profile.allow_unsandboxed_commands
+        && profile.shared_execution.is_none()
         && task
             .allowed_actions
             .iter()

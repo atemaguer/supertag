@@ -22,11 +22,13 @@ pub fn normalize(profile: &mut SharedExecutionCapability) -> bool {
         || !uuid::Uuid::parse_str(&profile.incarnation_id)
             .is_ok_and(|id| id.to_string() == profile.incarnation_id)
         || profile.tools.is_empty()
-        || profile.tools.len() > 2
+        || profile.tools.len() > 3
         || profile.tools.iter().any(|tool| {
             !matches!(
                 SharedExecutionTool::try_from(*tool),
-                Ok(SharedExecutionTool::Read | SharedExecutionTool::Write)
+                Ok(SharedExecutionTool::Read
+                    | SharedExecutionTool::Write
+                    | SharedExecutionTool::Command)
             )
         })
     {
@@ -34,7 +36,10 @@ pub fn normalize(profile: &mut SharedExecutionCapability) -> bool {
     }
     profile.tools.sort_unstable();
     profile.tools.dedup();
-    true
+    !profile
+        .tools
+        .contains(&(SharedExecutionTool::Command as i32))
+        || profile.tools.contains(&(SharedExecutionTool::Write as i32))
 }
 
 pub fn supports(
@@ -58,7 +63,15 @@ pub fn supports(
                         "files:write" => capability
                             .tools
                             .contains(&(SharedExecutionTool::Write as i32)),
-                        "commands:execute" => false,
+                        "commands:execute" => {
+                            capability
+                                .tools
+                                .contains(&(SharedExecutionTool::Command as i32))
+                                && task
+                                    .allowed_actions
+                                    .iter()
+                                    .any(|action| action == "files:write")
+                        }
                         _ => true,
                     })
         }

@@ -99,12 +99,14 @@ async function runFixture() {
         "remote-resume",
         "shared-first",
         "shared-resume",
+        "shared-command",
         "baseline",
         "cancel",
         "after-cancel",
       ].includes(mode),
     );
     const shared = mode.startsWith("shared-");
+    const sharedCommand = mode === "shared-command";
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
@@ -115,8 +117,8 @@ async function runFixture() {
     assert.ok(toolNames.includes("read"));
     assert.equal(toolNames.includes("write"), writes || shared);
     assert.equal(toolNames.includes("edit"), writes && !shared);
-    assert.equal(toolNames.includes("command"), mode === "first");
-    if (shared) assert.deepEqual(toolNames.sort(), ["read", "write"]);
+    assert.equal(toolNames.includes("command"), mode === "first" || sharedCommand);
+    if (shared) assert.deepEqual(toolNames.sort(), sharedCommand ? ["command", "read", "write"] : ["read", "write"]);
 
     const cwd = await realpath(request.workspace);
     assert.notEqual(cwd, await realpath(process.cwd()));
@@ -171,10 +173,18 @@ async function runFixture() {
     assert.equal((await call("read", { file_path: "../outside.txt" })).isError, true);
     const command = await call("command", {
       command:
-        'test -z "$CURSOR_API_KEY$OPENAI_API_KEY$SUPERTAG_HOST_TOKEN$SUPERTAG_OPERATOR_TOKEN" && printf cursor-command-safe',
+        'test -z "$CURSOR_API_KEY$OPENAI_API_KEY$SUPERTAG_HOST_TOKEN$SUPERTAG_OPERATOR_TOKEN$SUPERTAG_EXECUTION_ADMIN_TOKEN" && printf cursor-command-safe' +
+        (sharedCommand ? " && sleep 6" : ""),
     });
-    assert.equal(command.isError, mode !== "first");
-    if (mode === "first") assert.ok(command.text.includes("cursor-command-safe"));
+    assert.equal(command.isError, !(mode === "first" || sharedCommand));
+    if (mode === "first" || sharedCommand) assert.ok(command.text.includes("cursor-command-safe"));
+    if (sharedCommand) {
+      const blocked = await call("command", {
+        command: "/usr/bin/setsid /bin/sh -c 'echo $$ > lease.pid; exec /bin/sleep 60' & wait",
+        timeout: 50_000,
+      });
+      assert.equal(blocked.isError, true);
+    }
     const write = await call("write", {
       file_path: "workspace.txt",
       content: "first-turn-content\n",

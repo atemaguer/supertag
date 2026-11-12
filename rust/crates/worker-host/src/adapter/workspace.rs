@@ -5,6 +5,7 @@ use supertag_protocol::{
     v2::{
         HarnessWorkspaceRequest, HarnessWorkspaceResult, SharedExecutionAccessSummary, TaskState,
         harness_workspace_client::HarnessWorkspaceClient,
+        harness_workspace_request::Operation,
         harness_workspace_server::{HarnessWorkspace, HarnessWorkspaceServer},
     },
     validate_workspace_operation,
@@ -67,9 +68,19 @@ impl RemoteWorkspace {
         &self,
         input: HarnessWorkspaceRequest,
         deadline: Instant,
+        bridge: &Bridge,
     ) -> Result<HarnessWorkspaceResult, Status> {
         match &self.provider {
-            Provider::Shared(access) => access.execute(input).await,
+            Provider::Shared(access) => match input {
+                HarnessWorkspaceRequest {
+                    operation: Some(Operation::Command(command)),
+                } => {
+                    access
+                        .command(command, deadline, || bridge.fresh_command_authority())
+                        .await
+                }
+                input => access.execute(input).await,
+            },
             Provider::Sandbox { client, token } => {
                 let mut downstream = authenticated_request(input, token, None)?;
                 downstream.set_timeout(deadline.saturating_duration_since(Instant::now()));
@@ -84,6 +95,38 @@ impl Bridge {
         HarnessWorkspaceServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
+    }
+
+    async fn fresh_command_authority(&self) -> Result<u64, Status> {
+        let sent = Instant::now();
+        let timeout = Duration::from_millis(1_500);
+        let mut authority = authenticated_request(self.attempt(), &self.host_token, None)?;
+        authority.set_timeout(timeout);
+        let authority = time::timeout(timeout, self.host.clone().renew_attempt(authority))
+            .await
+            .map_err(|_| Status::deadline_exceeded("Task authority renewal timed out"))?
+            .map_err(|_| Status::failed_precondition("Task authority renewal was refused"))?
+            .into_inner();
+        if !authority.task.is_some_and(|task| {
+            task.state() == TaskState::Running
+                && task.task_id == self.task_id()
+                && task.attempt_id.as_deref() == Some(self.assignment.attempt_id.as_str())
+        }) {
+            return Err(Status::failed_precondition(
+                "Control Plane ended command authority",
+            ));
+        }
+        let elapsed = u64::try_from(sent.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let remaining = authority
+            .valid_for_ms
+            .saturating_sub(elapsed)
+            .saturating_sub(100);
+        if remaining == 0 {
+            return Err(Status::failed_precondition(
+                "Control Plane ended command authority",
+            ));
+        }
+        Ok(remaining)
     }
 }
 
@@ -123,7 +166,7 @@ impl HarnessWorkspace for Bridge {
                     "workspace execution authority expired",
                 ));
             }
-            let result = workspace.execute(input, tool_deadline).await?;
+            let result = workspace.execute(input, tool_deadline, self).await?;
             if result.text.len() > MAX_WORKSPACE_TOOL_OUTPUT_BYTES {
                 return Err(Status::data_loss(
                     "workspace provider returned oversized output",

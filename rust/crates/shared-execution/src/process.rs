@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, Command},
-    sync::mpsc,
+    sync::{mpsc, watch},
     time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
@@ -30,6 +30,7 @@ pub(crate) const CLEANUP_WAIT: Duration = Duration::from_secs(8);
 pub(crate) struct Runtime {
     pub(crate) access_id: String,
     pub(crate) stop: CancellationToken,
+    pub(crate) lease: Option<watch::Sender<u64>>,
 }
 
 impl Provider {
@@ -38,6 +39,7 @@ impl Provider {
         mut entry: Entry,
         process: StartProcess,
         expires_at: i64,
+        lease_deadline_ns: Option<u64>,
     ) -> Result<OperationReceipt, Status> {
         let (uid, gid) = self.0.process_identity.ok_or_else(|| {
             Status::failed_precondition("shared execution process lane is disabled")
@@ -88,6 +90,7 @@ impl Provider {
             deadline_ns: now
                 .checked_add(remaining * 1_000_000)
                 .ok_or_else(|| Status::internal("process deadline overflow"))?,
+            lease_deadline_ns,
             command: process.command,
             args: process.args,
             cwd: process.cwd,
@@ -130,18 +133,26 @@ impl Provider {
             return Err(journal_error(error));
         }
         let stop = self.0.shutdown.child_token();
+        let (lease, updates) = match lease_deadline_ns {
+            Some(deadline) => {
+                let (lease, updates) = watch::channel(deadline);
+                (Some(lease), Some(updates))
+            }
+            None => (None, None),
+        };
         self.0.processes.lock().await.insert(
             process_id,
             Runtime {
                 access_id: entry.access_id.clone(),
                 stop: stop.clone(),
+                lease,
             },
         );
         let receipt = entry.receipt.clone();
         let provider = self.clone();
         tokio::spawn(async move {
             provider
-                .supervise_guardian(child, lifeline, launch_frame, entry, stop)
+                .supervise_guardian(child, lifeline, launch_frame, entry, stop, updates)
                 .await;
         });
         Ok(receipt)
@@ -165,6 +176,7 @@ impl Provider {
         frame: Vec<u8>,
         mut entry: Entry,
         stop: CancellationToken,
+        mut lease: Option<watch::Receiver<u64>>,
     ) {
         let journal = &self.0.journal;
         let id = entry
@@ -188,6 +200,15 @@ impl Provider {
         while stdout_open || stderr_open || !exited {
             let (lane, read, bytes) = tokio::select! {
                 _ = stop.cancelled(), if lifeline.is_some() => { lifeline.take(); continue; }
+                deadline = next_lease(&mut lease), if lease.is_some() && lifeline.is_some() => {
+                    if let (Some(deadline), Some(writer)) = (deadline, lifeline.as_mut()) {
+                        if matches!(time::timeout(Duration::from_millis(300), writer.write_all(&deadline.to_le_bytes())).await, Ok(Ok(()))) {
+                            continue;
+                        }
+                    }
+                    lifeline.take();
+                    continue;
+                }
                 read = stdout.read(&mut out), if stdout_open => (OutputStream::Stdout,read,&out),
                 read = stderr.read(&mut err), if stderr_open => (OutputStream::Stderr,read,&err),
                 result = child.wait(), if !exited => {
@@ -441,4 +462,11 @@ impl Provider {
             terminal,
         }))
     }
+}
+
+async fn next_lease(lease: &mut Option<watch::Receiver<u64>>) -> Option<u64> {
+    let lease = lease.as_mut()?;
+    lease.changed().await.ok()?;
+    let deadline = *lease.borrow_and_update();
+    Some(deadline)
 }
