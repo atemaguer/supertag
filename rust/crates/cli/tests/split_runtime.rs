@@ -1,5 +1,6 @@
 //! Exercises the shipped binary entry points in independent OS processes.
 use std::{
+    error::Error as _,
     fs::File,
     io::{BufRead, BufReader},
     net::SocketAddr,
@@ -2039,7 +2040,10 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         gateway,
         endpoint: public_endpoint.clone(),
     };
-    let mut operator = services.client().await?;
+    let mut operator = services
+        .client()
+        .await
+        .context("connect to initial Gateway")?;
     operator
         .put_tag(credentials.request(PutTagRequest {
             name: None,
@@ -2150,8 +2154,9 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         .await?;
     let mut private_operator = OperatorClient::new(private_channel);
     let deadline = partitioned_at + Duration::from_secs(45);
+    let mut last_state = running.state();
     loop {
-        let observed = private_operator
+        match private_operator
             .get_task(authenticated_request(
                 GetTaskRequest {
                     task_id: accepted.task_id.clone(),
@@ -2159,13 +2164,20 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
                 &credentials.gateway,
                 Some("operator:local"),
             )?)
-            .await?
-            .into_inner();
+            .await
+        {
+            Ok(response) => last_state = response.into_inner().state(),
+            Err(error)
+                if Instant::now() < deadline
+                    && (matches!(error.code(), Code::Unavailable | Code::DeadlineExceeded)
+                        || error.code() == Code::Cancelled && error.source().is_some()) => {}
+            Err(error) => return Err(error).context("poll Task state during Gateway partition"),
+        }
         let mut alive = false;
         for pid in &cleanup.0 {
             alive |= process_exists(*pid)?;
         }
-        if !alive && observed.state() == TaskState::Uncertain {
+        if !alive && last_state == TaskState::Uncertain {
             break;
         }
         ensure!(
@@ -2222,7 +2234,10 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     services.gateway = Process::spawn(command, directory.path(), "restored-gateway", true)?;
     assert_eq!(services.gateway.endpoint().await?, public_endpoint);
     host.successful_exit().await?;
-    let mut operator = services.client().await?;
+    let mut operator = services
+        .client()
+        .await
+        .context("connect to replacement Gateway")?;
     let uncertain = task(&mut operator, &credentials, &accepted.task_id).await?;
     assert_eq!(uncertain.state(), TaskState::Uncertain);
     assert_eq!(uncertain.attempt_id, running.attempt_id);
@@ -2239,7 +2254,8 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let mut host_client = WorkerHostClient::new(host_channel);
     let receipt = host_client
         .get_attempt_resolution(credentials.host_request(old_attempt.clone())?)
-        .await?
+        .await
+        .context("inspect cleanup receipt through replacement Gateway")?
         .into_inner();
     assert!(receipt.resolution.is_none());
     let mut no_replay =
