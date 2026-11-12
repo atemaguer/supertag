@@ -292,9 +292,10 @@ type model struct {
 	objectiveMessages map[string]*objectiveMessage
 	// item is the inbox item the inbox pane shows, kept after it leaves the inbox; itemNote is
 	// what came of acting on it.
-	item     *operatorv1.InboxItem
-	itemNote note
-	decision decision
+	item         *operatorv1.InboxItem
+	itemNote     note
+	fullQuestion string
+	decision     decision
 	// drafts keeps unsent input per pane.
 	drafts map[string]string
 
@@ -311,9 +312,10 @@ type model struct {
 
 	// hosts are the Worker Hosts as last read; hostsKnown is false until a read succeeds and
 	// after one fails.
-	hosts      []*operatorv1.WorkerHost
-	hostsKnown bool
-	hostReload *reload
+	hosts           []*operatorv1.WorkerHost
+	hostPhaseLabels map[string]string
+	hostsKnown      bool
+	hostReload      *reload
 
 	// switchable says the status bar offers switching to another Control Plane.
 	switchable bool
@@ -399,7 +401,7 @@ func (m model) reloadObjectives() tea.Cmd {
 }
 
 func (m model) reloadInbox() tea.Cmd {
-	if m.client.RuntimeV2() || !m.inboxReload.start() {
+	if !m.inboxReload.start() {
 		return nil
 	}
 	return m.inboxCmd()
@@ -612,6 +614,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, again
 
+	case inboxQuestionMsg:
+		if m.pane == paneInbox && m.item.GetOccurrence() == msg.occurrence {
+			m.fullQuestion = msg.text
+			m.refresh()
+		}
+		return m, nil
+
 	case overviewMsg:
 		var again tea.Cmd
 		if m.overviewReload.done() && m.pane == paneObjective {
@@ -659,7 +668,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.client.RuntimeV2() {
 				// The selected Objective also shows spend, which can advance
 				// between Task status notices.
-				return m, tea.Batch(m.reloadOverview(), m.retryRuntimeHistory(), m.pollAfter())
+				return m, tea.Batch(m.reloadOverview(), m.reloadInbox(), m.retryRuntimeHistory(), m.pollAfter())
 			}
 			m.polling = false
 			return m, nil
@@ -1378,7 +1387,9 @@ func (m *model) choose() tea.Cmd {
 		cmd = m.reloadOverview()
 	case rowInbox:
 		m.pane, m.item = paneInbox, m.inbox.Items[r.index]
+		m.fullQuestion = ""
 		m.input.Placeholder = "Type your answer"
+		cmd = m.readInboxQuestion()
 	case rowTeam:
 		m.pane, m.teamID = paneTeam, m.teams[r.index].GetId()
 		cmd = m.reloadTeam()

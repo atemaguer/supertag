@@ -1,5 +1,7 @@
 mod artifacts;
 mod harness;
+mod host_status;
+mod inbox;
 mod inputs;
 mod local;
 mod network;
@@ -34,12 +36,12 @@ use supertag_protocol::{
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
-        host_enrollment_server::HostEnrollmentServer, live_inputs_server::LiveInputsServer,
-        mailbox_server::MailboxServer, objectives_server::ObjectivesServer,
-        operator_client::OperatorClient, operator_events_server::OperatorEventsServer,
-        operator_server::OperatorServer, teams_server::TeamsServer,
-        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
-        workspace_directory_server::WorkspaceDirectoryServer,
+        host_enrollment_server::HostEnrollmentServer, inbox_server::InboxServer,
+        live_inputs_server::LiveInputsServer, mailbox_server::MailboxServer,
+        objectives_server::ObjectivesServer, operator_client::OperatorClient,
+        operator_events_server::OperatorEventsServer, operator_server::OperatorServer,
+        teams_server::TeamsServer, transfers_server::TransfersServer,
+        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -76,6 +78,20 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Read Worker Host readiness and manage draining.
+    Host {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: host_status::HostCommand,
+    },
+    /// Read and answer work waiting on an operator.
+    Inbox {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: inbox::InboxCommand,
+    },
     /// Read the messages sent to or from a Tag.
     Mailbox {
         #[command(flatten)]
@@ -329,6 +345,14 @@ fn main() -> Result<()> {
 
 async fn run(command: Command) -> Result<()> {
     match command {
+        Command::Host {
+            connection,
+            command,
+        } => host_status::run(connection, command).await?,
+        Command::Inbox {
+            connection,
+            command,
+        } => inbox::run(connection, command).await?,
         Command::Mailbox {
             connection,
             tag_id,
@@ -783,6 +807,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .set_serving::<AttemptWorkstreamsServer<ControlPlane>>()
         .await;
     health.set_serving::<MailboxServer<ControlPlane>>().await;
+    health.set_serving::<InboxServer<ControlPlane>>().await;
     health
         .set_serving::<AttemptMailboxServer<ControlPlane>>()
         .await;
@@ -853,6 +878,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.teams_service())
         .add_service(plane.attempt_workstreams_service())
         .add_service(plane.mailbox_service())
+        .add_service(plane.inbox_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
@@ -975,6 +1001,7 @@ async fn gateway(
         .set_serving::<AttemptWorkstreamsServer<Gateway>>()
         .await;
     health.set_serving::<MailboxServer<Gateway>>().await;
+    health.set_serving::<InboxServer<Gateway>>().await;
     health.set_serving::<AttemptMailboxServer<Gateway>>().await;
     health
         .set_serving::<OperatorEventsServer<GatewayWatch>>()
@@ -1007,6 +1034,7 @@ async fn gateway(
         .add_service(gateway.teams_service())
         .add_service(gateway.attempt_workstreams_service())
         .add_service(gateway.mailbox_service())
+        .add_service(gateway.inbox_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {

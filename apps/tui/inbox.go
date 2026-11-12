@@ -4,10 +4,30 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
+
+type inboxQuestionMsg struct {
+	occurrence string
+	text       string
+}
+
+func (m model) readInboxQuestion() tea.Cmd {
+	if !m.client.RuntimeV2() || !m.item.GetQuestion().GetTruncated() {
+		return nil
+	}
+	key, occurrence := m.item.GetKey(), m.item.GetOccurrence()
+	return func() tea.Msg {
+		text, err := m.client.ReadObjectiveQuestion(m.ctx, key)
+		if err != nil {
+			return nil
+		}
+		return inboxQuestionMsg{occurrence: occurrence, text: text}
+	}
+}
 
 // inboxRow is how the rail lists an inbox item: "?" for a question, "!" for an approval request,
 // "·" for anything else, then what it is about.
@@ -85,7 +105,7 @@ func inboxHeadline(item *operatorv1.InboxItem) string {
 		if attempt := item.GetUncertainAttempt(); attempt != nil {
 			host := attempt.GetWorkerHostId()
 			if host == "" {
-				host = "unknown"
+				return fmt.Sprintf("Task %s is uncertain: Attempt %s may have executed", task, attempt.GetAttemptId())
 			}
 			return fmt.Sprintf("Task %s is uncertain: Attempt %s may have executed, and only an operator on Worker Host %s can recover it",
 				task, attempt.GetAttemptId(), host)
@@ -131,17 +151,25 @@ func (m model) renderItem() string {
 	switch item.GetKind() {
 	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		question := item.GetQuestion()
-		if question.GetText() == "" {
+		text := question.GetText()
+		if m.fullQuestion != "" {
+			text = m.fullQuestion
+		}
+		if text == "" {
 			add("", "The question is not shown to this credential.")
 			break
 		}
 		add("", "The owner's Task finished its turn; its Session waits for your answer as its next turn.")
 		add("", "The owner asks:", "")
-		for _, line := range strings.Split(terminalLines(question.GetText()), "\n") {
+		for _, line := range strings.Split(terminalLines(text), "\n") {
 			add("  " + line)
 		}
-		if question.GetTruncated() {
-			add("", "The question was cut short; supertag describe objective "+shellWord(item.GetObjectiveId())+" shows all of it.")
+		if question.GetTruncated() && m.fullQuestion == "" {
+			command := "supertag describe objective " + shellWord(item.GetObjectiveId())
+			if m.client.RuntimeV2() {
+				command = "supertag inbox question " + shellWord(strings.TrimPrefix(item.GetKey(), "question:"))
+			}
+			add("", "The question was cut short. "+command+" shows all of it.")
 		}
 	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		approval := item.GetApproval()

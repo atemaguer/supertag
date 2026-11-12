@@ -139,7 +139,7 @@ type Inbox struct {
 // ListInbox returns the inbox items an operator decides.
 func (c *Client) ListInbox(ctx context.Context) (Inbox, error) {
 	if c.RuntimeV2() {
-		return Inbox{}, unavailable("The operator inbox")
+		return c.runtime.listInbox(ctx)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
@@ -206,7 +206,7 @@ func (c *Client) Deny(ctx context.Context, id, reason string) (*operatorv1.Appro
 // reuses the same idempotency key, so the owner gets the answer once.
 func (c *Client) AnswerQuestion(ctx context.Context, key, text string) (*operatorv1.MessageObjectiveResponse, error) {
 	if c.RuntimeV2() {
-		return nil, unavailable("Answering inbox questions")
+		return c.runtime.answerQuestion(ctx, key, text)
 	}
 	idempotency, err := idempotencyKey()
 	if err != nil {

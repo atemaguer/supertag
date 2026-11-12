@@ -29,6 +29,8 @@ const (
 	OperatorEventsName = "supertag.runtime.v2.OperatorEvents"
 	// ObjectivesName is the fully-qualified name of the Objectives service.
 	ObjectivesName = "supertag.runtime.v2.Objectives"
+	// InboxName is the fully-qualified name of the Inbox service.
+	InboxName = "supertag.runtime.v2.Inbox"
 	// TeamsName is the fully-qualified name of the Teams service.
 	TeamsName = "supertag.runtime.v2.Teams"
 	// AttemptWorkstreamsName is the fully-qualified name of the AttemptWorkstreams service.
@@ -57,6 +59,8 @@ const (
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
+	// HarnessQuestionsName is the fully-qualified name of the HarnessQuestions service.
+	HarnessQuestionsName = "supertag.runtime.v2.HarnessQuestions"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -71,6 +75,13 @@ const (
 	OperatorCreateAuthKeyProcedure = "/supertag.runtime.v2.Operator/CreateAuthKey"
 	// OperatorRevokeHostProcedure is the fully-qualified name of the Operator's RevokeHost RPC.
 	OperatorRevokeHostProcedure = "/supertag.runtime.v2.Operator/RevokeHost"
+	// OperatorListHostsProcedure is the fully-qualified name of the Operator's ListHosts RPC.
+	OperatorListHostsProcedure = "/supertag.runtime.v2.Operator/ListHosts"
+	// OperatorGetHostProcedure is the fully-qualified name of the Operator's GetHost RPC.
+	OperatorGetHostProcedure = "/supertag.runtime.v2.Operator/GetHost"
+	// OperatorSetHostDrainingProcedure is the fully-qualified name of the Operator's SetHostDraining
+	// RPC.
+	OperatorSetHostDrainingProcedure = "/supertag.runtime.v2.Operator/SetHostDraining"
 	// OperatorPutTagProcedure is the fully-qualified name of the Operator's PutTag RPC.
 	OperatorPutTagProcedure = "/supertag.runtime.v2.Operator/PutTag"
 	// OperatorListTagsProcedure is the fully-qualified name of the Operator's ListTags RPC.
@@ -127,6 +138,12 @@ const (
 	// ObjectivesReviewObjectiveProcedure is the fully-qualified name of the Objectives's
 	// ReviewObjective RPC.
 	ObjectivesReviewObjectiveProcedure = "/supertag.runtime.v2.Objectives/ReviewObjective"
+	// InboxListItemsProcedure is the fully-qualified name of the Inbox's ListItems RPC.
+	InboxListItemsProcedure = "/supertag.runtime.v2.Inbox/ListItems"
+	// InboxGetQuestionProcedure is the fully-qualified name of the Inbox's GetQuestion RPC.
+	InboxGetQuestionProcedure = "/supertag.runtime.v2.Inbox/GetQuestion"
+	// InboxAnswerQuestionProcedure is the fully-qualified name of the Inbox's AnswerQuestion RPC.
+	InboxAnswerQuestionProcedure = "/supertag.runtime.v2.Inbox/AnswerQuestion"
 	// TeamsCreateTeamProcedure is the fully-qualified name of the Teams's CreateTeam RPC.
 	TeamsCreateTeamProcedure = "/supertag.runtime.v2.Teams/CreateTeam"
 	// TeamsGetTeamProcedure is the fully-qualified name of the Teams's GetTeam RPC.
@@ -153,6 +170,8 @@ const (
 	AttemptMailboxReadMailboxProcedure = "/supertag.runtime.v2.AttemptMailbox/ReadMailbox"
 	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
 	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
+	// WorkerHostReportHostProcedure is the fully-qualified name of the WorkerHost's ReportHost RPC.
+	WorkerHostReportHostProcedure = "/supertag.runtime.v2.WorkerHost/ReportHost"
 	// WorkerHostClaimTaskProcedure is the fully-qualified name of the WorkerHost's ClaimTask RPC.
 	WorkerHostClaimTaskProcedure = "/supertag.runtime.v2.WorkerHost/ClaimTask"
 	// WorkerHostStartTaskProcedure is the fully-qualified name of the WorkerHost's StartTask RPC.
@@ -170,6 +189,8 @@ const (
 	WorkerHostReportAttemptUsageProcedure = "/supertag.runtime.v2.WorkerHost/ReportAttemptUsage"
 	// WorkerHostAppendEventProcedure is the fully-qualified name of the WorkerHost's AppendEvent RPC.
 	WorkerHostAppendEventProcedure = "/supertag.runtime.v2.WorkerHost/AppendEvent"
+	// WorkerHostAskQuestionProcedure is the fully-qualified name of the WorkerHost's AskQuestion RPC.
+	WorkerHostAskQuestionProcedure = "/supertag.runtime.v2.WorkerHost/AskQuestion"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
 	WorkerHostFinishTaskProcedure = "/supertag.runtime.v2.WorkerHost/FinishTask"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
@@ -263,12 +284,18 @@ const (
 	HarnessReportUsageProcedure = "/supertag.runtime.v2.Harness/ReportUsage"
 	// HarnessCompleteProcedure is the fully-qualified name of the Harness's Complete RPC.
 	HarnessCompleteProcedure = "/supertag.runtime.v2.Harness/Complete"
+	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
+	// AskQuestion RPC.
+	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
 type OperatorClient interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error)
+	GetHost(context.Context, *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
+	SetHostDraining(context.Context, *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
@@ -300,6 +327,24 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			httpClient,
 			baseURL+OperatorRevokeHostProcedure,
 			connect.WithSchema(operatorMethods.ByName("RevokeHost")),
+			connect.WithClientOptions(opts...),
+		),
+		listHosts: connect.NewClient[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse](
+			httpClient,
+			baseURL+OperatorListHostsProcedure,
+			connect.WithSchema(operatorMethods.ByName("ListHosts")),
+			connect.WithClientOptions(opts...),
+		),
+		getHost: connect.NewClient[runtimev2.GetHostRequest, runtimev2.WorkerHostStatus](
+			httpClient,
+			baseURL+OperatorGetHostProcedure,
+			connect.WithSchema(operatorMethods.ByName("GetHost")),
+			connect.WithClientOptions(opts...),
+		),
+		setHostDraining: connect.NewClient[runtimev2.SetHostDrainingRequest, runtimev2.WorkerHostStatus](
+			httpClient,
+			baseURL+OperatorSetHostDrainingProcedure,
+			connect.WithSchema(operatorMethods.ByName("SetHostDraining")),
 			connect.WithClientOptions(opts...),
 		),
 		putTag: connect.NewClient[runtimev2.PutTagRequest, runtimev2.Tag](
@@ -357,6 +402,9 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 type operatorClient struct {
 	createAuthKey   *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
 	revokeHost      *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
+	listHosts       *connect.Client[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse]
+	getHost         *connect.Client[runtimev2.GetHostRequest, runtimev2.WorkerHostStatus]
+	setHostDraining *connect.Client[runtimev2.SetHostDrainingRequest, runtimev2.WorkerHostStatus]
 	putTag          *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
 	listTags        *connect.Client[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse]
 	submitTask      *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
@@ -375,6 +423,21 @@ func (c *operatorClient) CreateAuthKey(ctx context.Context, req *connect.Request
 // RevokeHost calls supertag.runtime.v2.Operator.RevokeHost.
 func (c *operatorClient) RevokeHost(ctx context.Context, req *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
 	return c.revokeHost.CallUnary(ctx, req)
+}
+
+// ListHosts calls supertag.runtime.v2.Operator.ListHosts.
+func (c *operatorClient) ListHosts(ctx context.Context, req *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error) {
+	return c.listHosts.CallUnary(ctx, req)
+}
+
+// GetHost calls supertag.runtime.v2.Operator.GetHost.
+func (c *operatorClient) GetHost(ctx context.Context, req *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return c.getHost.CallUnary(ctx, req)
+}
+
+// SetHostDraining calls supertag.runtime.v2.Operator.SetHostDraining.
+func (c *operatorClient) SetHostDraining(ctx context.Context, req *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return c.setHostDraining.CallUnary(ctx, req)
 }
 
 // PutTag calls supertag.runtime.v2.Operator.PutTag.
@@ -421,6 +484,9 @@ func (c *operatorClient) ResolveAttempt(ctx context.Context, req *connect.Reques
 type OperatorHandler interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error)
+	GetHost(context.Context, *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
+	SetHostDraining(context.Context, *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
@@ -448,6 +514,24 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		OperatorRevokeHostProcedure,
 		svc.RevokeHost,
 		connect.WithSchema(operatorMethods.ByName("RevokeHost")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorListHostsHandler := connect.NewUnaryHandler(
+		OperatorListHostsProcedure,
+		svc.ListHosts,
+		connect.WithSchema(operatorMethods.ByName("ListHosts")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorGetHostHandler := connect.NewUnaryHandler(
+		OperatorGetHostProcedure,
+		svc.GetHost,
+		connect.WithSchema(operatorMethods.ByName("GetHost")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorSetHostDrainingHandler := connect.NewUnaryHandler(
+		OperatorSetHostDrainingProcedure,
+		svc.SetHostDraining,
+		connect.WithSchema(operatorMethods.ByName("SetHostDraining")),
 		connect.WithHandlerOptions(opts...),
 	)
 	operatorPutTagHandler := connect.NewUnaryHandler(
@@ -504,6 +588,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorCreateAuthKeyHandler.ServeHTTP(w, r)
 		case OperatorRevokeHostProcedure:
 			operatorRevokeHostHandler.ServeHTTP(w, r)
+		case OperatorListHostsProcedure:
+			operatorListHostsHandler.ServeHTTP(w, r)
+		case OperatorGetHostProcedure:
+			operatorGetHostHandler.ServeHTTP(w, r)
+		case OperatorSetHostDrainingProcedure:
+			operatorSetHostDrainingHandler.ServeHTTP(w, r)
 		case OperatorPutTagProcedure:
 			operatorPutTagHandler.ServeHTTP(w, r)
 		case OperatorListTagsProcedure:
@@ -535,6 +625,18 @@ func (UnimplementedOperatorHandler) CreateAuthKey(context.Context, *connect.Requ
 
 func (UnimplementedOperatorHandler) RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.RevokeHost is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ListHosts is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) GetHost(context.Context, *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.GetHost is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) SetHostDraining(context.Context, *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.SetHostDraining is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error) {
@@ -1065,6 +1167,128 @@ func (UnimplementedObjectivesHandler) ReviewObjective(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ReviewObjective is not implemented"))
 }
 
+// InboxClient is a client for the supertag.runtime.v2.Inbox service.
+type InboxClient interface {
+	ListItems(context.Context, *connect.Request[runtimev2.ListInboxItemsRequest]) (*connect.Response[runtimev2.ListInboxItemsResponse], error)
+	GetQuestion(context.Context, *connect.Request[runtimev2.GetQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
+	AnswerQuestion(context.Context, *connect.Request[runtimev2.AnswerQuestionRequest]) (*connect.Response[runtimev2.Task], error)
+}
+
+// NewInboxClient constructs a client for the supertag.runtime.v2.Inbox service. By default, it uses
+// the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewInboxClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) InboxClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	inboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Inbox").Methods()
+	return &inboxClient{
+		listItems: connect.NewClient[runtimev2.ListInboxItemsRequest, runtimev2.ListInboxItemsResponse](
+			httpClient,
+			baseURL+InboxListItemsProcedure,
+			connect.WithSchema(inboxMethods.ByName("ListItems")),
+			connect.WithClientOptions(opts...),
+		),
+		getQuestion: connect.NewClient[runtimev2.GetQuestionRequest, runtimev2.ObjectiveQuestion](
+			httpClient,
+			baseURL+InboxGetQuestionProcedure,
+			connect.WithSchema(inboxMethods.ByName("GetQuestion")),
+			connect.WithClientOptions(opts...),
+		),
+		answerQuestion: connect.NewClient[runtimev2.AnswerQuestionRequest, runtimev2.Task](
+			httpClient,
+			baseURL+InboxAnswerQuestionProcedure,
+			connect.WithSchema(inboxMethods.ByName("AnswerQuestion")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// inboxClient implements InboxClient.
+type inboxClient struct {
+	listItems      *connect.Client[runtimev2.ListInboxItemsRequest, runtimev2.ListInboxItemsResponse]
+	getQuestion    *connect.Client[runtimev2.GetQuestionRequest, runtimev2.ObjectiveQuestion]
+	answerQuestion *connect.Client[runtimev2.AnswerQuestionRequest, runtimev2.Task]
+}
+
+// ListItems calls supertag.runtime.v2.Inbox.ListItems.
+func (c *inboxClient) ListItems(ctx context.Context, req *connect.Request[runtimev2.ListInboxItemsRequest]) (*connect.Response[runtimev2.ListInboxItemsResponse], error) {
+	return c.listItems.CallUnary(ctx, req)
+}
+
+// GetQuestion calls supertag.runtime.v2.Inbox.GetQuestion.
+func (c *inboxClient) GetQuestion(ctx context.Context, req *connect.Request[runtimev2.GetQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return c.getQuestion.CallUnary(ctx, req)
+}
+
+// AnswerQuestion calls supertag.runtime.v2.Inbox.AnswerQuestion.
+func (c *inboxClient) AnswerQuestion(ctx context.Context, req *connect.Request[runtimev2.AnswerQuestionRequest]) (*connect.Response[runtimev2.Task], error) {
+	return c.answerQuestion.CallUnary(ctx, req)
+}
+
+// InboxHandler is an implementation of the supertag.runtime.v2.Inbox service.
+type InboxHandler interface {
+	ListItems(context.Context, *connect.Request[runtimev2.ListInboxItemsRequest]) (*connect.Response[runtimev2.ListInboxItemsResponse], error)
+	GetQuestion(context.Context, *connect.Request[runtimev2.GetQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
+	AnswerQuestion(context.Context, *connect.Request[runtimev2.AnswerQuestionRequest]) (*connect.Response[runtimev2.Task], error)
+}
+
+// NewInboxHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewInboxHandler(svc InboxHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	inboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Inbox").Methods()
+	inboxListItemsHandler := connect.NewUnaryHandler(
+		InboxListItemsProcedure,
+		svc.ListItems,
+		connect.WithSchema(inboxMethods.ByName("ListItems")),
+		connect.WithHandlerOptions(opts...),
+	)
+	inboxGetQuestionHandler := connect.NewUnaryHandler(
+		InboxGetQuestionProcedure,
+		svc.GetQuestion,
+		connect.WithSchema(inboxMethods.ByName("GetQuestion")),
+		connect.WithHandlerOptions(opts...),
+	)
+	inboxAnswerQuestionHandler := connect.NewUnaryHandler(
+		InboxAnswerQuestionProcedure,
+		svc.AnswerQuestion,
+		connect.WithSchema(inboxMethods.ByName("AnswerQuestion")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Inbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case InboxListItemsProcedure:
+			inboxListItemsHandler.ServeHTTP(w, r)
+		case InboxGetQuestionProcedure:
+			inboxGetQuestionHandler.ServeHTTP(w, r)
+		case InboxAnswerQuestionProcedure:
+			inboxAnswerQuestionHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedInboxHandler returns CodeUnimplemented from all methods.
+type UnimplementedInboxHandler struct{}
+
+func (UnimplementedInboxHandler) ListItems(context.Context, *connect.Request[runtimev2.ListInboxItemsRequest]) (*connect.Response[runtimev2.ListInboxItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Inbox.ListItems is not implemented"))
+}
+
+func (UnimplementedInboxHandler) GetQuestion(context.Context, *connect.Request[runtimev2.GetQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Inbox.GetQuestion is not implemented"))
+}
+
+func (UnimplementedInboxHandler) AnswerQuestion(context.Context, *connect.Request[runtimev2.AnswerQuestionRequest]) (*connect.Response[runtimev2.Task], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Inbox.AnswerQuestion is not implemented"))
+}
+
 // TeamsClient is a client for the supertag.runtime.v2.Teams service.
 type TeamsClient interface {
 	CreateTeam(context.Context, *connect.Request[runtimev2.CreateTeamRequest]) (*connect.Response[runtimev2.Team], error)
@@ -1505,6 +1729,7 @@ func (UnimplementedAttemptMailboxHandler) ReadMailbox(context.Context, *connect.
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
 type WorkerHostClient interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	ReportHost(context.Context, *connect.Request[runtimev2.ReportHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
@@ -1512,6 +1737,7 @@ type WorkerHostClient interface {
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
@@ -1530,6 +1756,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+WorkerHostRegisterHostProcedure,
 			connect.WithSchema(workerHostMethods.ByName("RegisterHost")),
+			connect.WithClientOptions(opts...),
+		),
+		reportHost: connect.NewClient[runtimev2.ReportHostRequest, runtimev2.WorkerHostStatus](
+			httpClient,
+			baseURL+WorkerHostReportHostProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportHost")),
 			connect.WithClientOptions(opts...),
 		),
 		claimTask: connect.NewClient[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse](
@@ -1574,6 +1806,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("AppendEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		askQuestion: connect.NewClient[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion](
+			httpClient,
+			baseURL+WorkerHostAskQuestionProcedure,
+			connect.WithSchema(workerHostMethods.ByName("AskQuestion")),
+			connect.WithClientOptions(opts...),
+		),
 		finishTask: connect.NewClient[runtimev2.FinishTaskRequest, runtimev2.Task](
 			httpClient,
 			baseURL+WorkerHostFinishTaskProcedure,
@@ -1586,6 +1824,7 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 // workerHostClient implements WorkerHostClient.
 type workerHostClient struct {
 	registerHost         *connect.Client[runtimev2.RegisterHostRequest, runtimev2.HostRecord]
+	reportHost           *connect.Client[runtimev2.ReportHostRequest, runtimev2.WorkerHostStatus]
 	claimTask            *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
 	startTask            *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
 	inspectAttempt       *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
@@ -1593,12 +1832,18 @@ type workerHostClient struct {
 	getAttemptResolution *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse]
 	reportAttemptUsage   *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
 	appendEvent          *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
+	askQuestion          *connect.Client[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion]
 	finishTask           *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
 func (c *workerHostClient) RegisterHost(ctx context.Context, req *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
 	return c.registerHost.CallUnary(ctx, req)
+}
+
+// ReportHost calls supertag.runtime.v2.WorkerHost.ReportHost.
+func (c *workerHostClient) ReportHost(ctx context.Context, req *connect.Request[runtimev2.ReportHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return c.reportHost.CallUnary(ctx, req)
 }
 
 // ClaimTask calls supertag.runtime.v2.WorkerHost.ClaimTask.
@@ -1636,6 +1881,11 @@ func (c *workerHostClient) AppendEvent(ctx context.Context, req *connect.Request
 	return c.appendEvent.CallUnary(ctx, req)
 }
 
+// AskQuestion calls supertag.runtime.v2.WorkerHost.AskQuestion.
+func (c *workerHostClient) AskQuestion(ctx context.Context, req *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return c.askQuestion.CallUnary(ctx, req)
+}
+
 // FinishTask calls supertag.runtime.v2.WorkerHost.FinishTask.
 func (c *workerHostClient) FinishTask(ctx context.Context, req *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return c.finishTask.CallUnary(ctx, req)
@@ -1644,6 +1894,7 @@ func (c *workerHostClient) FinishTask(ctx context.Context, req *connect.Request[
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	ReportHost(context.Context, *connect.Request[runtimev2.ReportHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
@@ -1651,6 +1902,7 @@ type WorkerHostHandler interface {
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
@@ -1665,6 +1917,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		WorkerHostRegisterHostProcedure,
 		svc.RegisterHost,
 		connect.WithSchema(workerHostMethods.ByName("RegisterHost")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostReportHostHandler := connect.NewUnaryHandler(
+		WorkerHostReportHostProcedure,
+		svc.ReportHost,
+		connect.WithSchema(workerHostMethods.ByName("ReportHost")),
 		connect.WithHandlerOptions(opts...),
 	)
 	workerHostClaimTaskHandler := connect.NewUnaryHandler(
@@ -1709,6 +1967,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("AppendEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostAskQuestionHandler := connect.NewUnaryHandler(
+		WorkerHostAskQuestionProcedure,
+		svc.AskQuestion,
+		connect.WithSchema(workerHostMethods.ByName("AskQuestion")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workerHostFinishTaskHandler := connect.NewUnaryHandler(
 		WorkerHostFinishTaskProcedure,
 		svc.FinishTask,
@@ -1719,6 +1983,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
 			workerHostRegisterHostHandler.ServeHTTP(w, r)
+		case WorkerHostReportHostProcedure:
+			workerHostReportHostHandler.ServeHTTP(w, r)
 		case WorkerHostClaimTaskProcedure:
 			workerHostClaimTaskHandler.ServeHTTP(w, r)
 		case WorkerHostStartTaskProcedure:
@@ -1733,6 +1999,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReportAttemptUsageHandler.ServeHTTP(w, r)
 		case WorkerHostAppendEventProcedure:
 			workerHostAppendEventHandler.ServeHTTP(w, r)
+		case WorkerHostAskQuestionProcedure:
+			workerHostAskQuestionHandler.ServeHTTP(w, r)
 		case WorkerHostFinishTaskProcedure:
 			workerHostFinishTaskHandler.ServeHTTP(w, r)
 		default:
@@ -1746,6 +2014,10 @@ type UnimplementedWorkerHostHandler struct{}
 
 func (UnimplementedWorkerHostHandler) RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.RegisterHost is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportHost(context.Context, *connect.Request[runtimev2.ReportHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportHost is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error) {
@@ -1774,6 +2046,10 @@ func (UnimplementedWorkerHostHandler) ReportAttemptUsage(context.Context, *conne
 
 func (UnimplementedWorkerHostHandler) AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.AppendEvent is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.AskQuestion is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error) {
@@ -3086,4 +3362,74 @@ func (UnimplementedHarnessHandler) ReportUsage(context.Context, *connect.Request
 
 func (UnimplementedHarnessHandler) Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Complete is not implemented"))
+}
+
+// HarnessQuestionsClient is a client for the supertag.runtime.v2.HarnessQuestions service.
+type HarnessQuestionsClient interface {
+	AskQuestion(context.Context, *connect.Request[runtimev2.HarnessAskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
+}
+
+// NewHarnessQuestionsClient constructs a client for the supertag.runtime.v2.HarnessQuestions
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHarnessQuestionsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HarnessQuestionsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	harnessQuestionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessQuestions").Methods()
+	return &harnessQuestionsClient{
+		askQuestion: connect.NewClient[runtimev2.HarnessAskQuestionRequest, runtimev2.ObjectiveQuestion](
+			httpClient,
+			baseURL+HarnessQuestionsAskQuestionProcedure,
+			connect.WithSchema(harnessQuestionsMethods.ByName("AskQuestion")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// harnessQuestionsClient implements HarnessQuestionsClient.
+type harnessQuestionsClient struct {
+	askQuestion *connect.Client[runtimev2.HarnessAskQuestionRequest, runtimev2.ObjectiveQuestion]
+}
+
+// AskQuestion calls supertag.runtime.v2.HarnessQuestions.AskQuestion.
+func (c *harnessQuestionsClient) AskQuestion(ctx context.Context, req *connect.Request[runtimev2.HarnessAskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return c.askQuestion.CallUnary(ctx, req)
+}
+
+// HarnessQuestionsHandler is an implementation of the supertag.runtime.v2.HarnessQuestions service.
+type HarnessQuestionsHandler interface {
+	AskQuestion(context.Context, *connect.Request[runtimev2.HarnessAskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
+}
+
+// NewHarnessQuestionsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHarnessQuestionsHandler(svc HarnessQuestionsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	harnessQuestionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessQuestions").Methods()
+	harnessQuestionsAskQuestionHandler := connect.NewUnaryHandler(
+		HarnessQuestionsAskQuestionProcedure,
+		svc.AskQuestion,
+		connect.WithSchema(harnessQuestionsMethods.ByName("AskQuestion")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HarnessQuestions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HarnessQuestionsAskQuestionProcedure:
+			harnessQuestionsAskQuestionHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHarnessQuestionsHandler returns CodeUnimplemented from all methods.
+type UnimplementedHarnessQuestionsHandler struct{}
+
+func (UnimplementedHarnessQuestionsHandler) AskQuestion(context.Context, *connect.Request[runtimev2.HarnessAskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessQuestions.AskQuestion is not implemented"))
 }

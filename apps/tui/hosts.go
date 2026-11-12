@@ -16,8 +16,9 @@ var hostRefresh = 15 * time.Second
 
 type (
 	hostsMsg struct {
-		hosts []*operatorv1.WorkerHost
-		err   error
+		hosts       []*operatorv1.WorkerHost
+		err         error
+		phaseLabels map[string]string
 	}
 	hostTickMsg struct{}
 )
@@ -36,14 +37,11 @@ var hostPhases = []struct {
 }
 
 func (m model) hostsAfter() tea.Cmd {
-	if m.client.RuntimeV2() {
-		return nil
-	}
 	return tea.Tick(hostRefresh, func(time.Time) tea.Msg { return hostTickMsg{} })
 }
 
 func (m model) reloadHosts() tea.Cmd {
-	if m.client.RuntimeV2() || !m.hostReload.start() {
+	if !m.hostReload.start() {
 		return nil
 	}
 	return m.hostsCmd()
@@ -51,6 +49,10 @@ func (m model) reloadHosts() tea.Cmd {
 
 func (m model) hostsCmd() tea.Cmd {
 	return func() tea.Msg {
+		if m.client.RuntimeV2() {
+			hosts, labels, err := m.client.ListWorkerHostReadiness(m.ctx)
+			return hostsMsg{hosts: hosts, phaseLabels: labels, err: err}
+		}
 		hosts, err := m.client.ListWorkerHosts(m.ctx)
 		return hostsMsg{hosts: hosts, err: err}
 	}
@@ -65,20 +67,22 @@ func (m *model) hostsRead(msg hostsMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		m.hosts, m.hostsKnown = nil, false
+		m.hostPhaseLabels = nil
 		return again
 	}
 	m.hosts, m.hostsKnown = msg.hosts, true
+	m.hostPhaseLabels = msg.phaseLabels
 	return again
 }
 
 // hostSummary is what the status bar says of the Worker Hosts, such as
 // "Worker Hosts: 2 ready, 1 unreachable"; empty until they are read.
 func (m model) hostSummary() string {
-	if m.client.RuntimeV2() {
-		return "Worker Host status unavailable"
-	}
 	if !m.hostsKnown {
 		return ""
+	}
+	if m.hostPhaseLabels != nil {
+		return runtimeHostSummary(m.hosts, m.hostPhaseLabels)
 	}
 	counts := map[operatorv1.WorkerHostPhase]int{}
 	total := 0
@@ -103,6 +107,30 @@ func (m model) hostSummary() string {
 		if n := counts[p.phase]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, p.label))
 		}
+	}
+	return "Worker Hosts: " + strings.Join(parts, ", ")
+}
+
+func runtimeHostSummary(hosts []*operatorv1.WorkerHost, labels map[string]string) string {
+	counts := map[string]int{}
+	for _, host := range hosts {
+		label := labels[host.GetMetadata().GetId()]
+		if label == "revoked" {
+			continue
+		}
+		if label == "" {
+			label = "unknown"
+		}
+		counts[label]++
+	}
+	var parts []string
+	for _, label := range []string{"ready", "busy", "pending", "suppressed", "draining", "offline", "unknown"} {
+		if n := counts[label]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	if len(parts) == 0 {
+		return "no Worker Hosts"
 	}
 	return "Worker Hosts: " + strings.Join(parts, ", ")
 }

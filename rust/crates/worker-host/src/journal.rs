@@ -168,6 +168,23 @@ impl Journal {
         &self.directory
     }
 
+    /// Persist before transmission so a restarted incarnation never reuses a
+    /// sequence for different observations, even after an unacknowledged report.
+    pub(crate) fn next_report_sequence(&self) -> Result<u64> {
+        let path = self.directory.join("presence-sequence");
+        let prior = match fs::read_to_string(&path) {
+            Ok(value) => value.parse::<u64>().context("read host report sequence")?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        let next = prior
+            .checked_add(1)
+            .filter(|value| *value <= i64::MAX as u64)
+            .context("host report sequence exhausted")?;
+        self.write(&path, |file| Ok(write!(file, "{next}")?))?;
+        Ok(next)
+    }
+
     fn entry_path(&self) -> PathBuf {
         self.directory.join("attempt.json")
     }
@@ -252,6 +269,20 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presence_sequence_survives_restart_and_rejects_corruption() -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let journal = Journal::open(state.path())?;
+        assert_eq!(journal.next_report_sequence()?, 1);
+        assert_eq!(journal.next_report_sequence()?, 2);
+        drop(journal);
+        let journal = Journal::open(state.path())?;
+        assert_eq!(journal.next_report_sequence()?, 3);
+        fs::write(state.path().join("presence-sequence"), "bad counter")?;
+        assert!(journal.next_report_sequence().is_err());
+        Ok(())
+    }
 
     #[test]
     fn journal_is_exclusive_and_persists_execution_intent() -> Result<()> {

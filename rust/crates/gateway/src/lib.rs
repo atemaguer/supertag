@@ -3,11 +3,14 @@
 mod conversations;
 mod delivery_journal;
 pub mod github;
+mod inbox;
 mod inputs;
 pub mod lark;
 pub mod linear;
 mod mailbox;
 pub mod microsoft_teams;
+#[cfg(test)]
+mod readiness_tests;
 pub mod slack;
 mod teams;
 pub mod transfers;
@@ -473,6 +476,42 @@ impl Objectives for Gateway {
 
 #[tonic::async_trait]
 impl Operator for Gateway {
+    async fn list_hosts(
+        &self,
+        request: Request<ListHostsRequest>,
+    ) -> Result<Response<ListHostsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).list_hosts(request).await },
+        )
+        .await
+    }
+
+    async fn get_host(
+        &self,
+        request: Request<GetHostRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).get_host(request).await },
+        )
+        .await
+    }
+
+    async fn set_host_draining(
+        &self,
+        request: Request<SetHostDrainingRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).set_host_draining(request).await },
+        )
+        .await
+    }
+
     async fn create_auth_key(
         &self,
         request: Request<CreateAuthKeyRequest>,
@@ -616,6 +655,26 @@ impl HostEnrollment for Gateway {
 
 #[tonic::async_trait]
 impl WorkerHost for Gateway {
+    async fn report_host(
+        &self,
+        request: Request<ReportHostRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).report_host(request).await
+        })
+        .await
+    }
+
+    async fn ask_question(
+        &self,
+        request: Request<AskQuestionRequest>,
+    ) -> Result<Response<ObjectiveQuestion>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).ask_question(request).await
+        })
+        .await
+    }
+
     async fn register_host(
         &self,
         request: Request<RegisterHostRequest>,

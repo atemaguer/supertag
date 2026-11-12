@@ -24,12 +24,45 @@ class WatchReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WATCH_REASON_CHANGED: _ClassVar[WatchReason]
     WATCH_REASON_DELETED: _ClassVar[WatchReason]
 
+class InboxItemKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    INBOX_ITEM_KIND_UNSPECIFIED: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_QUESTION: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_OBJECTIVE_BUDGET: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_OBJECTIVE_LIMIT: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_TASK_ATTENTION: _ClassVar[InboxItemKind]
+
 class TagMessageState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     TAG_MESSAGE_STATE_UNSPECIFIED: _ClassVar[TagMessageState]
     TAG_MESSAGE_STATE_PENDING: _ClassVar[TagMessageState]
     TAG_MESSAGE_STATE_HANDLED: _ClassVar[TagMessageState]
     TAG_MESSAGE_STATE_FAILED: _ClassVar[TagMessageState]
+
+class HostPhase(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    HOST_PHASE_UNSPECIFIED: _ClassVar[HostPhase]
+    HOST_PHASE_PENDING: _ClassVar[HostPhase]
+    HOST_PHASE_READY: _ClassVar[HostPhase]
+    HOST_PHASE_BUSY: _ClassVar[HostPhase]
+    HOST_PHASE_SUPPRESSED: _ClassVar[HostPhase]
+    HOST_PHASE_OFFLINE: _ClassVar[HostPhase]
+    HOST_PHASE_DRAINING: _ClassVar[HostPhase]
+    HOST_PHASE_REVOKED: _ClassVar[HostPhase]
+
+class HostReadiness(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    HOST_READINESS_UNSPECIFIED: _ClassVar[HostReadiness]
+    HOST_READINESS_PENDING: _ClassVar[HostReadiness]
+    HOST_READINESS_READY: _ClassVar[HostReadiness]
+    HOST_READINESS_SUPPRESSED: _ClassVar[HostReadiness]
+
+class HostReadinessReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    HOST_READINESS_REASON_UNSPECIFIED: _ClassVar[HostReadinessReason]
+    HOST_READINESS_REASON_STARTING: _ClassVar[HostReadinessReason]
+    HOST_READINESS_REASON_RECOVERY_REQUIRED: _ClassVar[HostReadinessReason]
+    HOST_READINESS_REASON_STOPPING: _ClassVar[HostReadinessReason]
 
 class LiveInputState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -155,10 +188,31 @@ WATCH_REASON_UNSPECIFIED: WatchReason
 WATCH_REASON_CREATED: WatchReason
 WATCH_REASON_CHANGED: WatchReason
 WATCH_REASON_DELETED: WatchReason
+INBOX_ITEM_KIND_UNSPECIFIED: InboxItemKind
+INBOX_ITEM_KIND_QUESTION: InboxItemKind
+INBOX_ITEM_KIND_OBJECTIVE_BUDGET: InboxItemKind
+INBOX_ITEM_KIND_OBJECTIVE_LIMIT: InboxItemKind
+INBOX_ITEM_KIND_TASK_ATTENTION: InboxItemKind
 TAG_MESSAGE_STATE_UNSPECIFIED: TagMessageState
 TAG_MESSAGE_STATE_PENDING: TagMessageState
 TAG_MESSAGE_STATE_HANDLED: TagMessageState
 TAG_MESSAGE_STATE_FAILED: TagMessageState
+HOST_PHASE_UNSPECIFIED: HostPhase
+HOST_PHASE_PENDING: HostPhase
+HOST_PHASE_READY: HostPhase
+HOST_PHASE_BUSY: HostPhase
+HOST_PHASE_SUPPRESSED: HostPhase
+HOST_PHASE_OFFLINE: HostPhase
+HOST_PHASE_DRAINING: HostPhase
+HOST_PHASE_REVOKED: HostPhase
+HOST_READINESS_UNSPECIFIED: HostReadiness
+HOST_READINESS_PENDING: HostReadiness
+HOST_READINESS_READY: HostReadiness
+HOST_READINESS_SUPPRESSED: HostReadiness
+HOST_READINESS_REASON_UNSPECIFIED: HostReadinessReason
+HOST_READINESS_REASON_STARTING: HostReadinessReason
+HOST_READINESS_REASON_RECOVERY_REQUIRED: HostReadinessReason
+HOST_READINESS_REASON_STOPPING: HostReadinessReason
 LIVE_INPUT_STATE_UNSPECIFIED: LiveInputState
 LIVE_INPUT_STATE_PENDING: LiveInputState
 LIVE_INPUT_STATE_DISPATCHING: LiveInputState
@@ -279,6 +333,108 @@ class WatchChange(_message.Message):
     reason: WatchReason
     def __init__(self, kind: _Optional[_Union[WatchKind, str]] = ..., id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., team_id: _Optional[str] = ..., conversation: _Optional[str] = ..., changed_at_ms: _Optional[int] = ..., reason: _Optional[_Union[WatchReason, str]] = ...) -> None: ...
 
+class ListInboxItemsRequest(_message.Message):
+    __slots__ = ("objective_id", "kind", "page_size", "cursor")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    kind: InboxItemKind
+    page_size: int
+    cursor: str
+    def __init__(self, objective_id: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., page_size: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListInboxItemsResponse(_message.Message):
+    __slots__ = ("as_of_ms", "items", "next_cursor", "truncated_kinds")
+    AS_OF_MS_FIELD_NUMBER: _ClassVar[int]
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    TRUNCATED_KINDS_FIELD_NUMBER: _ClassVar[int]
+    as_of_ms: int
+    items: _containers.RepeatedCompositeFieldContainer[InboxItem]
+    next_cursor: str
+    truncated_kinds: _containers.RepeatedScalarFieldContainer[InboxItemKind]
+    def __init__(self, as_of_ms: _Optional[int] = ..., items: _Optional[_Iterable[_Union[InboxItem, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., truncated_kinds: _Optional[_Iterable[_Union[InboxItemKind, str]]] = ...) -> None: ...
+
+class InboxItem(_message.Message):
+    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question")
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    OCCURRENCE_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_ELIGIBLE_FIELD_NUMBER: _ClassVar[int]
+    ACTIONABLE_SINCE_MS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    key: str
+    occurrence: str
+    kind: InboxItemKind
+    objective_id: str
+    task_id: str
+    attempt_id: str
+    operator_eligible: bool
+    actionable_since_ms: int
+    reason: str
+    question: InboxQuestion
+    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ...) -> None: ...
+
+class InboxQuestion(_message.Message):
+    __slots__ = ("text", "asked_at_ms", "truncated")
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    ASKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    asked_at_ms: int
+    truncated: bool
+    def __init__(self, text: _Optional[str] = ..., asked_at_ms: _Optional[int] = ..., truncated: _Optional[bool] = ...) -> None: ...
+
+class GetQuestionRequest(_message.Message):
+    __slots__ = ("task_id",)
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    def __init__(self, task_id: _Optional[str] = ...) -> None: ...
+
+class AnswerQuestionRequest(_message.Message):
+    __slots__ = ("task_id", "operation_id", "text")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    operation_id: str
+    text: str
+    def __init__(self, task_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class ObjectiveQuestion(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "objective_id", "text", "asked_at_ms", "published_at_ms", "answer_task_id")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    ASKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    PUBLISHED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    ANSWER_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    objective_id: str
+    text: str
+    asked_at_ms: int
+    published_at_ms: int
+    answer_task_id: str
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., text: _Optional[str] = ..., asked_at_ms: _Optional[int] = ..., published_at_ms: _Optional[int] = ..., answer_task_id: _Optional[str] = ...) -> None: ...
+
+class AskQuestionRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "text")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    text: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
 class TagMessage(_message.Message):
     __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms")
     MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
@@ -332,6 +488,94 @@ class ReadMailboxRequest(_message.Message):
     limit: int
     cursor: str
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ReportHostRequest(_message.Message):
+    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids")
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    CAPACITY_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
+    READINESS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
+    sequence: int
+    capacity: int
+    available_slots: int
+    readiness: HostReadiness
+    reason: HostReadinessReason
+    harness_kind: HarnessKind
+    workspace_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class WorkerHostStatus(_message.Message):
+    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    DRAINING_FIELD_NUMBER: _ClassVar[int]
+    CAPACITY_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
+    ENROLLED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    PRESENCE_EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    generation: int
+    phase: HostPhase
+    draining: bool
+    capacity: int
+    available_slots: int
+    active_attempts: int
+    reason: HostReadinessReason
+    harness_kind: HarnessKind
+    workspace_ids: _containers.RepeatedScalarFieldContainer[str]
+    enrolled_at_ms: int
+    last_seen_at_ms: int
+    presence_expires_at_ms: int
+    revoked_at_ms: int
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListHostsRequest(_message.Message):
+    __slots__ = ("limit", "cursor")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    cursor: str
+    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListHostsResponse(_message.Message):
+    __slots__ = ("hosts", "next_cursor")
+    HOSTS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    hosts: _containers.RepeatedCompositeFieldContainer[WorkerHostStatus]
+    next_cursor: str
+    def __init__(self, hosts: _Optional[_Iterable[_Union[WorkerHostStatus, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class GetHostRequest(_message.Message):
+    __slots__ = ("host_id",)
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    def __init__(self, host_id: _Optional[str] = ...) -> None: ...
+
+class SetHostDrainingRequest(_message.Message):
+    __slots__ = ("host_id", "draining")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    DRAINING_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    draining: bool
+    def __init__(self, host_id: _Optional[str] = ..., draining: _Optional[bool] = ...) -> None: ...
+
+class HarnessAskQuestionRequest(_message.Message):
+    __slots__ = ("operation_id", "text")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    text: str
+    def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class QueueInputRequest(_message.Message):
     __slots__ = ("task_id", "operation_id", "text")

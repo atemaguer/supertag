@@ -1,5 +1,6 @@
 mod checkpoints;
 mod conversations;
+mod inbox;
 mod inputs;
 mod mailbox;
 pub mod objective_limits;
@@ -88,6 +89,39 @@ impl From<StoreError> for Status {
 
 #[tonic::async_trait]
 impl operator_server::Operator for ControlPlane {
+    async fn list_hosts(
+        &self,
+        request: Request<ListHostsRequest>,
+    ) -> Result<Response<ListHostsResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.list_hosts(&request.into_inner()).await?,
+        ))
+    }
+
+    async fn get_host(
+        &self,
+        request: Request<GetHostRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.get_host(&request.into_inner().host_id).await?,
+        ))
+    }
+
+    async fn set_host_draining(
+        &self,
+        request: Request<SetHostDrainingRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        Ok(Response::new(
+            self.store
+                .set_host_draining(&input.host_id, input.draining)
+                .await?,
+        ))
+    }
+
     async fn create_auth_key(
         &self,
         request: Request<CreateAuthKeyRequest>,
@@ -215,6 +249,30 @@ impl operator_server::Operator for ControlPlane {
 
 #[tonic::async_trait]
 impl worker_host_server::WorkerHost for ControlPlane {
+    async fn report_host(
+        &self,
+        request: Request<ReportHostRequest>,
+    ) -> Result<Response<WorkerHostStatus>, Status> {
+        let authority = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .report_host(&authority, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn ask_question(
+        &self,
+        request: Request<AskQuestionRequest>,
+    ) -> Result<Response<ObjectiveQuestion>, Status> {
+        let authority = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .ask_question(&authority, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn register_host(
         &self,
         request: Request<RegisterHostRequest>,

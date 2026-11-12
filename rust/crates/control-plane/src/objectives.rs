@@ -154,6 +154,10 @@ fn record_row(row: &AnyRow) -> Result<Record> {
     })
 }
 
+pub(crate) fn inbox_limits_row(row: &AnyRow) -> Result<limits::ObjectiveLimits> {
+    Ok(record_row(row)?.limits)
+}
+
 async fn get_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Record> {
     let row = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id = $1")
         .bind(id)
@@ -830,6 +834,9 @@ pub(crate) async fn objective_finish_in(
         return Err(StoreError::PermissionDenied);
     }
     if signal == ObjectiveSignal::Progress {
+        if crate::inbox::task_waits_in(tx, &task.task_id).await? {
+            return Ok(());
+        }
         if !record.value.ongoing
             && record.value.status == ObjectiveStatus::Working as i32
             && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none()

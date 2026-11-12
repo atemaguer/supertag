@@ -642,3 +642,184 @@ async fn watch_replays_private_conversations_after_services_restart() -> Result<
     stop(&mut gateway).await?;
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
+    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
+        .context("version-matched terminal UI binary required")?;
+    let directory = tempfile::Builder::new()
+        .prefix("inbox-v2-")
+        .tempdir_in("/tmp")?;
+    let state = directory.path().join("state");
+    let mut up = command(&[
+        "up",
+        "--adapter",
+        ADAPTER,
+        "--adapter-arg=--objective-question",
+    ]);
+    up.arg("--state-directory").arg(&state);
+    let (mut runtime, endpoint) = service(up).await?;
+    let mut put = command(&[
+        "put-tag",
+        "engineer",
+        "--instructions",
+        "Release engineering",
+    ]);
+    put.arg("--state-directory").arg(&state);
+    let output = timeout(WAIT, put.output()).await??;
+    ensure!(
+        output.status.success(),
+        "fixture Tag: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut create = command(&["objective", "--state-directory"]);
+    create.arg(&state).args([
+        "create",
+        "release",
+        "--owner",
+        "engineer",
+        "Ask which branch to release",
+    ]);
+    let output = timeout(WAIT, create.output()).await??;
+    ensure!(
+        output.status.success(),
+        "fixture Objective: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let objective: Value = serde_json::from_slice(&output.stdout)?;
+    let initial_task = objective["starting_task_id"]
+        .as_str()
+        .context("starting Task missing")?
+        .to_owned();
+    let credentials: Value =
+        serde_json::from_slice(&std::fs::read(state.join("credentials.json"))?)?;
+    let token = credentials["operator_token"]
+        .as_str()
+        .context("test operator credential missing")?;
+    let channel = channel(&endpoint).await?;
+    let mut inbox = inbox_client::InboxClient::new(channel.clone());
+    timeout(WAIT, async {
+        loop {
+            let result = inbox
+                .list_items(authenticated_request(
+                    ListInboxItemsRequest {
+                        kind: InboxItemKind::Question.into(),
+                        ..Default::default()
+                    },
+                    token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if let Some(item) = result.items.first() {
+                ensure!(item.task_id == initial_task);
+                ensure!(
+                    item.question
+                        .as_ref()
+                        .is_some_and(|question| question.text == "Which branch should I release?")
+                );
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+
+    let mut read = command(&["inbox", "--state-directory"]);
+    read.arg(&state).args(["question", &initial_task]);
+    let output = timeout(WAIT, read.output()).await??;
+    ensure!(
+        output.status.success(),
+        "read the fixture question: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout)?["text"],
+        "Which branch should I release?"
+    );
+
+    let tmux = Tmux {
+        socket: directory.path().join("tmux.sock"),
+    };
+    let shell = format!(
+        "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_STATE_DIR={} SUPERTAG_TUI_BINARY={} {}",
+        shell_path(directory.path())?,
+        shell_path(&state)?,
+        shell_path(Path::new(&binary))?,
+        shell_path(Path::new(BINARY))?,
+    );
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "runtime",
+        "-x",
+        "160",
+        "-y",
+        "45",
+        &shell,
+    ])
+    .await?;
+    tmux.wait_for("Waiting on you (1)").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Tab", "Down", "Down", "Tab"])
+        .await?;
+    tmux.wait_for("The owner asks:").await?;
+    tmux.wait_for("Which branch should I release?").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "-l", "release-main"])
+        .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("takes your answer as its next turn").await?;
+
+    let question = inbox
+        .get_question(authenticated_request(
+            GetQuestionRequest {
+                task_id: initial_task,
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let answer_id = question
+        .answer_task_id
+        .context("answer was not linked to the question")?;
+    let mut operator = operator_client::OperatorClient::new(channel);
+    timeout(WAIT, async {
+        loop {
+            let task = operator
+                .get_task(authenticated_request(
+                    GetTaskRequest {
+                        task_id: answer_id.clone(),
+                    },
+                    token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if task.state() == TaskState::Succeeded {
+                ensure!(
+                    task.result
+                        .as_deref()
+                        .is_some_and(|result| result.contains("release-main"))
+                );
+                return Ok::<_, anyhow::Error>(());
+            }
+            ensure!(matches!(
+                task.state(),
+                TaskState::Queued | TaskState::Claimed | TaskState::Running
+            ));
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+
+    tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
+    if let Some(pid) = runtime.id() {
+        // SAFETY: this is the disposable supervisor started by this test.
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+    assert!(timeout(WAIT, runtime.wait()).await??.success());
+    Ok(())
+}

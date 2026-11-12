@@ -14,6 +14,7 @@ mod lark_events;
 mod linear_events;
 #[path = "microsoft_teams.rs"]
 mod microsoft_teams;
+mod readiness;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 pub(crate) use authority::lease_is_live;
@@ -65,7 +66,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 18;
+        const SCHEMA_VERSION: i64 = 20;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -134,6 +135,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0016_operator_watch.sql"),
                 include_str!("../migrations/sqlite/0017_microsoft_teams.sql"),
                 include_str!("../migrations/sqlite/0018_mailbox.sql"),
+                include_str!("../migrations/sqlite/0019_host_readiness.sql"),
+                include_str!("../migrations/sqlite/0020_objective_inbox.sql"),
             ]
         } else {
             [
@@ -155,6 +158,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0016_operator_watch.sql"),
                 include_str!("../migrations/postgresql/0017_microsoft_teams.sql"),
                 include_str!("../migrations/postgresql/0018_mailbox.sql"),
+                include_str!("../migrations/postgresql/0019_host_readiness.sql"),
+                include_str!("../migrations/postgresql/0020_objective_inbox.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -428,6 +433,10 @@ impl Store {
             transaction.commit().await?;
             return Ok(assignment);
         }
+        if !readiness::accepting_in(&mut transaction, host.id()).await? {
+            transaction.commit().await?;
+            return Ok(None);
+        }
         let Some(id) = authority::claim_candidate(
             &mut transaction,
             now,
@@ -685,6 +694,7 @@ impl Store {
         let task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
+            crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
             crate::objectives::objective_finish_in(
                 &mut transaction,
                 &task,

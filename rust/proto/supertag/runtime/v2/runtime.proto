@@ -7,6 +7,9 @@ package supertag.runtime.v2;
 service Operator {
   rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
   rpc RevokeHost(RevokeHostRequest) returns (HostRecord);
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
+  rpc GetHost(GetHostRequest) returns (WorkerHostStatus);
+  rpc SetHostDraining(SetHostDrainingRequest) returns (WorkerHostStatus);
   rpc PutTag(PutTagRequest) returns (Tag);
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
   rpc SubmitTask(SubmitTaskRequest) returns (Task);
@@ -88,6 +91,77 @@ service Objectives {
   rpc ReviewObjective(ReviewObjectiveRequest) returns (Objective);
 }
 
+service Inbox {
+  rpc ListItems(ListInboxItemsRequest) returns (ListInboxItemsResponse);
+  rpc GetQuestion(GetQuestionRequest) returns (ObjectiveQuestion);
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (Task);
+}
+
+enum InboxItemKind {
+  INBOX_ITEM_KIND_UNSPECIFIED = 0;
+  INBOX_ITEM_KIND_QUESTION = 1;
+  INBOX_ITEM_KIND_OBJECTIVE_BUDGET = 2;
+  INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 3;
+  INBOX_ITEM_KIND_TASK_ATTENTION = 4;
+}
+
+message ListInboxItemsRequest {
+  string objective_id = 1;
+  InboxItemKind kind = 2;
+  uint32 page_size = 3;
+  string cursor = 4;
+}
+
+message ListInboxItemsResponse {
+  int64 as_of_ms = 1;
+  repeated InboxItem items = 2;
+  string next_cursor = 3;
+  repeated InboxItemKind truncated_kinds = 4;
+}
+
+message InboxItem {
+  string key = 1;
+  string occurrence = 2;
+  InboxItemKind kind = 3;
+  string objective_id = 4;
+  string task_id = 5;
+  optional string attempt_id = 6;
+  bool operator_eligible = 7;
+  int64 actionable_since_ms = 8;
+  string reason = 9;
+  InboxQuestion question = 10;
+}
+
+message InboxQuestion {
+  string text = 1;
+  int64 asked_at_ms = 2;
+  bool truncated = 3;
+}
+
+message GetQuestionRequest { string task_id = 1; }
+
+message AnswerQuestionRequest {
+  string task_id = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message ObjectiveQuestion {
+  string task_id = 1;
+  string attempt_id = 2;
+  string objective_id = 3;
+  string text = 4;
+  int64 asked_at_ms = 5;
+  optional int64 published_at_ms = 6;
+  optional string answer_task_id = 7;
+}
+
+message AskQuestionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
 service Teams {
   rpc CreateTeam(CreateTeamRequest) returns (Team);
   rpc GetTeam(GetTeamRequest) returns (Team);
@@ -150,6 +224,7 @@ message ReadMailboxRequest {
 
 service WorkerHost {
   rpc RegisterHost(RegisterHostRequest) returns (HostRecord);
+  rpc ReportHost(ReportHostRequest) returns (WorkerHostStatus);
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
@@ -157,7 +232,77 @@ service WorkerHost {
   rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
   rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
   rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
+  rpc AskQuestion(AskQuestionRequest) returns (ObjectiveQuestion);
   rpc FinishTask(FinishTaskRequest) returns (Task);
+}
+
+enum HostPhase {
+  HOST_PHASE_UNSPECIFIED = 0;
+  HOST_PHASE_PENDING = 1;
+  HOST_PHASE_READY = 2;
+  HOST_PHASE_BUSY = 3;
+  HOST_PHASE_SUPPRESSED = 4;
+  HOST_PHASE_OFFLINE = 5;
+  HOST_PHASE_DRAINING = 6;
+  HOST_PHASE_REVOKED = 7;
+}
+
+enum HostReadiness {
+  HOST_READINESS_UNSPECIFIED = 0;
+  HOST_READINESS_PENDING = 1;
+  HOST_READINESS_READY = 2;
+  HOST_READINESS_SUPPRESSED = 3;
+}
+
+enum HostReadinessReason {
+  HOST_READINESS_REASON_UNSPECIFIED = 0;
+  HOST_READINESS_REASON_STARTING = 1;
+  HOST_READINESS_REASON_RECOVERY_REQUIRED = 2;
+  HOST_READINESS_REASON_STOPPING = 3;
+}
+
+message ReportHostRequest {
+  uint64 sequence = 1;
+  uint32 capacity = 2;
+  uint32 available_slots = 3;
+  HostReadiness readiness = 4;
+  HostReadinessReason reason = 5;
+  HarnessKind harness_kind = 6;
+  repeated string workspace_ids = 7;
+}
+
+message WorkerHostStatus {
+  string host_id = 1;
+  uint64 generation = 2;
+  HostPhase phase = 3;
+  bool draining = 4;
+  uint32 capacity = 5;
+  uint32 available_slots = 6;
+  uint32 active_attempts = 7;
+  HostReadinessReason reason = 8;
+  HarnessKind harness_kind = 9;
+  repeated string workspace_ids = 10;
+  int64 enrolled_at_ms = 11;
+  optional int64 last_seen_at_ms = 12;
+  optional int64 presence_expires_at_ms = 13;
+  optional int64 revoked_at_ms = 14;
+}
+
+message ListHostsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message ListHostsResponse {
+  repeated WorkerHostStatus hosts = 1;
+  string next_cursor = 2;
+}
+
+message GetHostRequest { string host_id = 1; }
+
+message SetHostDrainingRequest {
+  string host_id = 1;
+  bool draining = 2;
 }
 
 // Operator commands and durable history for input directed into a running Task.
@@ -231,6 +376,16 @@ service Harness {
   rpc Publish(HarnessPublishRequest) returns (TaskEvent);
   rpc ReportUsage(HarnessUsageRequest) returns (ReportAttemptUsageResponse);
   rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
+}
+
+// The supervising Worker Host supplies the Attempt identity for this call.
+service HarnessQuestions {
+  rpc AskQuestion(HarnessAskQuestionRequest) returns (ObjectiveQuestion);
+}
+
+message HarnessAskQuestionRequest {
+  string operation_id = 1;
+  string text = 2;
 }
 
 enum LiveInputState {

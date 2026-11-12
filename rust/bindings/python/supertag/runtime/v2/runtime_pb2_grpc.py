@@ -46,6 +46,21 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
                 _registered_method=True)
+        self.ListHosts = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/ListHosts',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsResponse.FromString,
+                _registered_method=True)
+        self.GetHost = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/GetHost',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
+                _registered_method=True)
+        self.SetHostDraining = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/SetHostDraining',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetHostDrainingRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
+                _registered_method=True)
         self.PutTag = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/PutTag',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PutTagRequest.SerializeToString,
@@ -100,6 +115,24 @@ class OperatorServicer:
         raise NotImplementedError('Method not implemented!')
 
     def RevokeHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListHosts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetHostDraining(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -165,6 +198,21 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.RevokeHost,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
+            'ListHosts': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListHosts,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsResponse.SerializeToString,
+            ),
+            'GetHost': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetHost,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.SerializeToString,
+            ),
+            'SetHostDraining': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetHostDraining,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetHostDrainingRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.SerializeToString,
             ),
             'PutTag': grpc.unary_unary_rpc_method_handler(
                     servicer.PutTag,
@@ -263,6 +311,87 @@ class Operator:
             '/supertag.runtime.v2.Operator/RevokeHost',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListHosts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/ListHosts',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetHost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/GetHost',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetHostDraining(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/SetHostDraining',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetHostDrainingRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1185,6 +1314,164 @@ class Objectives:
             _registered_method=True)
 
 
+class InboxStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ListItems = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/ListItems',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsResponse.FromString,
+                _registered_method=True)
+        self.GetQuestion = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/GetQuestion',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
+                _registered_method=True)
+        self.AnswerQuestion = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/AnswerQuestion',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
+
+
+class InboxServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def ListItems(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetQuestion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AnswerQuestion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_InboxServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ListItems': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListItems,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsResponse.SerializeToString,
+            ),
+            'GetQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetQuestion,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.SerializeToString,
+            ),
+            'AnswerQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.AnswerQuestion,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Inbox', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Inbox', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Inbox:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ListItems(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/ListItems',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListInboxItemsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/GetQuestion',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AnswerQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/AnswerQuestion',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class TeamsStub:
     """Missing associated documentation comment in .proto file."""
 
@@ -1745,6 +2032,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
                 _registered_method=True)
+        self.ReportHost = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportHost',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
+                _registered_method=True)
         self.ClaimTask = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/ClaimTask',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimTaskRequest.SerializeToString,
@@ -1780,6 +2072,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
                 _registered_method=True)
+        self.AskQuestion = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/AskQuestion',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
+                _registered_method=True)
         self.FinishTask = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/FinishTask',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FinishTaskRequest.SerializeToString,
@@ -1791,6 +2088,12 @@ class WorkerHostServicer:
     """Missing associated documentation comment in .proto file."""
 
     def RegisterHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReportHost(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1838,6 +2141,12 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AskQuestion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def FinishTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1851,6 +2160,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.RegisterHost,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
+            'ReportHost': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportHost,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.SerializeToString,
             ),
             'ClaimTask': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimTask,
@@ -1887,6 +2201,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.SerializeToString,
             ),
+            'AskQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.AskQuestion,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.SerializeToString,
+            ),
             'FinishTask': grpc.unary_unary_rpc_method_handler(
                     servicer.FinishTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FinishTaskRequest.FromString,
@@ -1920,6 +2239,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/RegisterHost',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportHost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportHost',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkerHostStatus.FromString,
             options,
             channel_credentials,
             insecure,
@@ -2109,6 +2455,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/AppendEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AskQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/AskQuestion',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
             options,
             channel_credentials,
             insecure,
@@ -3935,6 +4308,81 @@ class Harness:
             '/supertag.runtime.v2.Harness/Complete',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessCompleteRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessCompleteResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HarnessQuestionsStub:
+    """The supervising Worker Host supplies the Attempt identity for this call.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.AskQuestion = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessQuestions/AskQuestion',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
+                _registered_method=True)
+
+
+class HarnessQuestionsServicer:
+    """The supervising Worker Host supplies the Attempt identity for this call.
+    """
+
+    def AskQuestion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HarnessQuestionsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'AskQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.AskQuestion,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HarnessQuestions', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HarnessQuestions', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HarnessQuestions:
+    """The supervising Worker Host supplies the Attempt identity for this call.
+    """
+
+    @staticmethod
+    def AskQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessQuestions/AskQuestion',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
             options,
             channel_credentials,
             insecure,

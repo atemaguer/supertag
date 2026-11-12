@@ -1,4 +1,5 @@
 mod inputs;
+mod questions;
 
 use std::{
     ffi::OsStr,
@@ -264,6 +265,7 @@ pub(crate) async fn execute(
                     .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
                     .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
             )
+            .add_service(bridge.questions_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

@@ -420,3 +420,243 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     plane.kill().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn objective_questions_survive_gateway_restart_and_answer_once() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane_command = command(&["control-plane"]);
+    plane_command
+        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("questions.db").display()
+            ),
+        );
+    let (mut plane, private) = service(plane_command).await?;
+    let gateway_command = || {
+        let mut cmd = command(&["gateway", "--control-plane", &private]);
+        cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+        cmd
+    };
+    let (mut gateway, public) = service(gateway_command()).await?;
+    cli(
+        &[
+            "put-tag",
+            "--gateway",
+            &public,
+            "owner",
+            "--instructions",
+            "Ask before choosing a release route",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let objective = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "question-flow",
+            "--owner",
+            "owner",
+            "Choose a release route",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let channel = Channel::from_shared(public.clone())?
+        .timeout(WAIT)
+        .connect()
+        .await?;
+    let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
+    let mut inbox = inbox_client::InboxClient::new(channel);
+    let host = worker
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "inbox-runtime-host".into(),
+            },
+            &host_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let assignment = worker
+        .claim_task(host_request(
+            ClaimTaskRequest {
+                operation_id: "claim-question".into(),
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("Objective starting Task")?;
+    let task = assignment.task.context("Task")?;
+    assert_eq!(task.task_id, objective["starting_task_id"]);
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    worker
+        .start_task(host_request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?;
+    let ask = AskQuestionRequest {
+        attempt: Some(attempt.clone()),
+        operation_id: "ask-route".into(),
+        text: "Which release route should I use?".into(),
+    };
+    assert_eq!(
+        worker
+            .ask_question(host_request(ask.clone(), &operator_token, host.generation)?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    let staged = worker
+        .ask_question(host_request(ask.clone(), &host_token, host.generation)?)
+        .await?
+        .into_inner();
+    assert!(staged.published_at_ms.is_none());
+    assert!(
+        inbox
+            .list_items(authenticated_request(
+                ListInboxItemsRequest::default(),
+                &operator_token,
+                None
+            )?)
+            .await?
+            .into_inner()
+            .items
+            .is_empty()
+    );
+    worker
+        .finish_task(host_request(
+            FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                result: "Waiting for the release route".into(),
+                succeeded: true,
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?;
+    assert!(
+        worker
+            .ask_question(host_request(ask, &host_token, host.generation)?)
+            .await?
+            .into_inner()
+            .published_at_ms
+            .is_some()
+    );
+    let listed = cli(&["inbox", "--gateway", &public, "list"], &operator_token).await?;
+    assert_eq!(listed["items"].as_array().context("Inbox items")?.len(), 1);
+    assert_eq!(listed["items"][0]["task_id"], attempt.task_id);
+    assert_eq!(
+        inbox
+            .get_question(authenticated_request(
+                GetQuestionRequest {
+                    task_id: attempt.task_id.clone()
+                },
+                &host_token,
+                Some("operator:local")
+            )?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    // The durable question is owned by the Control Plane and remains answerable
+    // after the entire public ingress process is replaced.
+    gateway.kill().await?;
+    let (restarted, public) = service(gateway_command()).await?;
+    gateway = restarted;
+    let question = cli(
+        &["inbox", "--gateway", &public, "question", &attempt.task_id],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(question["text"], "Which release route should I use?");
+    let answer_args = [
+        "inbox",
+        "--gateway",
+        &public,
+        "answer",
+        &attempt.task_id,
+        "Use the staged route",
+        "--operation-id",
+        "answer-route",
+    ];
+    let answer = cli(&answer_args, &operator_token).await?;
+    assert_eq!(answer["tag_id"], "owner");
+    let replay = cli(&answer_args, &operator_token).await?;
+    assert_eq!(replay["task_id"], answer["task_id"]);
+    assert!(
+        cli(&["inbox", "--gateway", &public, "list"], &operator_token).await?["items"]
+            .as_array()
+            .context("Inbox items")?
+            .is_empty()
+    );
+    let channel = Channel::from_shared(public)?
+        .timeout(WAIT)
+        .connect()
+        .await?;
+    let mut worker = worker_host_client::WorkerHostClient::new(channel);
+    let next = worker
+        .claim_task(host_request(
+            ClaimTaskRequest {
+                operation_id: "claim-answer".into(),
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("one answer continuation")?;
+    let next_task = next.task.context("answer Task")?;
+    assert_eq!(next_task.task_id, answer["task_id"]);
+    assert_eq!(next_task.session_id, objective["session_id"]);
+    assert_eq!(next_task.prompt, "Use the staged route");
+    assert!(
+        worker
+            .claim_task(host_request(
+                ClaimTaskRequest {
+                    operation_id: "no-second-answer".into(),
+                    ..Default::default()
+                },
+                &host_token,
+                host.generation
+            )?)
+            .await?
+            .into_inner()
+            .assignment
+            .is_none()
+    );
+    gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}

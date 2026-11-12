@@ -5,9 +5,10 @@ use prost::Message;
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest,
-        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
-        LiveInputState, harness_client::HarnessClient,
+        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
+        HarnessPublishRequest, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
+        LiveInput, LiveInputReceipt, LiveInputState, harness_client::HarnessClient,
+        harness_questions_client::HarnessQuestionsClient,
     },
 };
 use tokio::time::{Instant, sleep, timeout};
@@ -22,7 +23,7 @@ async fn main() -> Result<()> {
         "bootstrap exceeds the fixture limit"
     );
     let bootstrap = AdapterBootstrap::decode(bootstrap.as_slice())?;
-    let mut harness = HarnessClient::connect(bootstrap.endpoint).await?;
+    let mut harness = HarnessClient::connect(bootstrap.endpoint.clone()).await?;
     let take_and_wait = std::env::args().any(|arg| arg == "--take-then-wait");
     let take_live = take_and_wait || std::env::args().any(|arg| arg == "--take-live-input");
     if take_live {
@@ -56,6 +57,40 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.context("fixture received no Task")?;
+    if std::env::args().any(|arg| arg == "--objective-question")
+        && task.prompt.contains("Ask which branch to release")
+    {
+        let mut questions = HarnessQuestionsClient::connect(bootstrap.endpoint).await?;
+        let input = HarnessAskQuestionRequest {
+            operation_id: "fixture-question".into(),
+            text: "Which branch should I release?".into(),
+        };
+        let unauthorized = questions
+            .ask_question(Request::new(input.clone()))
+            .await
+            .expect_err("question without execution credential");
+        ensure!(
+            unauthorized.code() == Code::Unauthenticated,
+            "unexpected question authorization result"
+        );
+        let staged = questions
+            .ask_question(authenticated_request(
+                input.clone(),
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(
+            staged.task_id == task.task_id && staged.published_at_ms.is_none(),
+            "question was not staged for the attached Task"
+        );
+        let replay = questions
+            .ask_question(authenticated_request(input, &bootstrap.token, None)?)
+            .await?
+            .into_inner();
+        ensure!(replay == staged, "question replay changed its receipt");
+    }
     harness
         .publish(authenticated_request(
             HarnessPublishRequest {

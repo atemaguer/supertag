@@ -18,7 +18,9 @@ Open Objectives show their status, owner, deadline, and available spend informat
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
 message its owner. You can select a Team in the Objective form and read its members, concurrency
 limit, and recent Workstream posts from the rail. Work uses the Workspace configured on the owner
-Tag. Inbox, Worker Host status, and Session delivery details are unavailable on this Gateway.
+Tag. The rail lists questions waiting for an operator. Select a question to answer the owner in
+the same Session, its thread of work. The status bar shows whether Worker Hosts, the machines or
+sandboxes that run Tasks, are ready, busy, draining, or offline.
 
 ## Node launcher
 

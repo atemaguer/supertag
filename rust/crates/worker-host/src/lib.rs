@@ -3,13 +3,14 @@ mod checkpoints;
 mod enrollment;
 mod guardian;
 mod journal;
+mod readiness;
 mod workspaces;
 
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
 
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail, ensure};
 use journal::{Attempt, Entry, Journal};
@@ -108,7 +109,8 @@ pub async fn run(
         !options.attempt_timeout.is_zero(),
         "attempt timeout must be positive"
     );
-    let journal = Journal::open(&options.state_directory)?;
+    let shutdown = shutdown.child_token();
+    let journal = Arc::new(Journal::open(&options.state_directory)?);
     let workspaces =
         workspaces::Workspaces::new(&options.state_directory, options.workspace.clone())?;
     // Terminal proof is durable; finishing local cleanup needs neither the source
@@ -166,6 +168,15 @@ pub async fn run(
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let presence = readiness::Presence::start(
+        journal.clone(),
+        host.clone(),
+        token.clone(),
+        options.harness as i32,
+        workspaces.ids(),
+        shutdown.clone(),
+    );
+    let outcome = async {
     let mut ready = Some(ready);
     while !shutdown.is_cancelled() {
         let entry = match journal.load()? {
@@ -178,6 +189,11 @@ pub async fn run(
                 entry
             }
         };
+        presence.set(match &entry {
+            Entry::Claim { .. } => readiness::State::Ready,
+            Entry::Executing { .. } => readiness::State::Recovery,
+            _ => readiness::State::Busy,
+        });
         match entry {
             Entry::Claim { operation_id } => {
                 let response = host
@@ -511,6 +527,9 @@ pub async fn run(
         }
     }
     Ok(())
+    }.await;
+    let stopped = presence.stop().await;
+    outcome.and(stopped)
 }
 
 fn cleanup_terminal(

@@ -241,17 +241,13 @@ func (m model) renderRail(height int) string {
 			add(row{rowObjective, i}, objectiveName(objective), objectiveState(objective, m.client.RuntimeV2()))
 		}
 	}
-	if m.client.RuntimeV2() {
-		section("Inbox unavailable", "")
-	} else {
-		waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
-		if m.inbox.Truncated {
-			waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
-		}
-		section(waiting, m.inboxErr)
-		for i, item := range m.inbox.Items {
-			add(row{rowInbox, i}, m.inboxRow(item), "")
-		}
+	waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
+	if m.inbox.Truncated {
+		waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
+	}
+	section(waiting, m.inboxErr)
+	for i, item := range m.inbox.Items {
+		add(row{rowInbox, i}, m.inboxRow(item), "")
 	}
 	if len(m.teams) > 0 || m.teamsErr != "" {
 		section("Teams", m.teamsErr)
@@ -379,9 +375,9 @@ func (m model) paneHint() string {
 	case paneObjective:
 		if m.client.RuntimeV2() {
 			if m.canMessageObjective() {
-				return "m message the owner"
+				return "m message the owner · answer questions under Waiting on you"
 			}
-			return "Objective status refreshes automatically"
+			return "Answer questions under Waiting on you"
 		}
 		if m.canMessageObjective() {
 			return "m message the owner · answer questions under Waiting on you"
