@@ -135,6 +135,7 @@ class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HARNESS_KIND_CODEX: _ClassVar[HarnessKind]
     HARNESS_KIND_CLAUDE_CODE: _ClassVar[HarnessKind]
     HARNESS_KIND_OPENAI_AGENTS: _ClassVar[HarnessKind]
+    HARNESS_KIND_OPENCODE: _ClassVar[HarnessKind]
 
 class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -292,6 +293,7 @@ HARNESS_KIND_UNSPECIFIED: HarnessKind
 HARNESS_KIND_CODEX: HarnessKind
 HARNESS_KIND_CLAUDE_CODE: HarnessKind
 HARNESS_KIND_OPENAI_AGENTS: HarnessKind
+HARNESS_KIND_OPENCODE: HarnessKind
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
@@ -1763,21 +1765,39 @@ class AdapterBootstrap(_message.Message):
     token: str
     def __init__(self, endpoint: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
 
+class AttemptHistoryEntry(_message.Message):
+    __slots__ = ("task_id", "prompt", "result")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    prompt: str
+    result: str
+    def __init__(self, task_id: _Optional[str] = ..., prompt: _Optional[str] = ..., result: _Optional[str] = ...) -> None: ...
+
+class AttemptHistory(_message.Message):
+    __slots__ = ("entries",)
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    entries: _containers.RepeatedCompositeFieldContainer[AttemptHistoryEntry]
+    def __init__(self, entries: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
+
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     COORDINATION_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_SKILLS_FIELD_NUMBER: _ClassVar[int]
+    HISTORY_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
     may_ask_objective_question: bool
     coordination: AttemptCapabilities
     resolved_skills: _containers.RepeatedCompositeFieldContainer[ResolvedSkill]
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ...) -> None: ...
+    history: _containers.RepeatedCompositeFieldContainer[AttemptHistoryEntry]
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
 
 class ContextContract(_message.Message):
     __slots__ = ("type", "version")

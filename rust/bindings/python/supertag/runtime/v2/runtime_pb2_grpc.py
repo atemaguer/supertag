@@ -2677,6 +2677,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
                 _registered_method=True)
+        self.GetAttemptHistory = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/GetAttemptHistory',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.FromString,
+                _registered_method=True)
         self.GetContextPins = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/GetContextPins',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
@@ -2753,6 +2758,12 @@ class WorkerHostServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetAttemptCapabilities(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAttemptHistory(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2838,6 +2849,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.GetAttemptCapabilities,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.SerializeToString,
+            ),
+            'GetAttemptHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAttemptHistory,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.SerializeToString,
             ),
             'GetContextPins': grpc.unary_unary_rpc_method_handler(
                     servicer.GetContextPins,
@@ -3042,6 +3058,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAttemptHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/GetAttemptHistory',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptHistory.FromString,
             options,
             channel_credentials,
             insecure,

@@ -18,6 +18,10 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@supertag/worker-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@connectrpc/connect-node": "2.2.0"
   }
 }

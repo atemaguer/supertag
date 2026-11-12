@@ -266,7 +266,7 @@ fn supports_execution_limits(harness: HarnessKind, task: &Task) -> bool {
                     .as_ref()
                     .is_none_or(|limit| limit.currency == "USD")
         }
-        HarnessKind::OpenaiAgents => false,
+        HarnessKind::OpenaiAgents | HarnessKind::Opencode => false,
     }
 }
 
@@ -279,6 +279,12 @@ pub(super) async fn claim_candidate(
     harness: HarnessKind,
     context_contracts: &[supertag_protocol::v2::ContextContract],
 ) -> Result<Option<String>> {
+    let context_contracts = if matches!(harness, HarnessKind::Opencode | HarnessKind::OpenaiAgents)
+    {
+        &[]
+    } else {
+        context_contracts
+    };
     let mut after = 0_i64;
     loop {
         let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")

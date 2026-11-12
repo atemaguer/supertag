@@ -42,6 +42,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         options.gateway_listen.ip().is_loopback(),
         "local Gateway must listen on loopback"
     );
+    options.adapter.provider_environment()?;
     let mut directories = DirBuilder::new();
     directories
         .recursive(true)
@@ -163,7 +164,9 @@ impl Children {
             host.arg("--skill-catalog").arg(catalog);
         }
         host.envs(
-            supertag_worker_host::provider_environment(options.adapter.harness_kind())
+            options
+                .adapter
+                .provider_environment()?
                 .iter()
                 .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
         );

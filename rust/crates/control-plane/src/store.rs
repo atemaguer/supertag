@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 32;
+        const SCHEMA_VERSION: i64 = 33;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -151,6 +151,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0030_commit_reviews.sql"),
                 include_str!("../migrations/sqlite/0031_execution_limits.sql"),
                 include_str!("../migrations/sqlite/0032_attempt_usage.sql"),
+                include_str!("../migrations/sqlite/0033_opencode_harness.sql"),
             ]
         } else {
             [
@@ -186,6 +187,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0030_commit_reviews.sql"),
                 include_str!("../migrations/postgresql/0031_execution_limits.sql"),
                 include_str!("../migrations/postgresql/0032_attempt_usage.sql"),
+                include_str!("../migrations/postgresql/0033_opencode_harness.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

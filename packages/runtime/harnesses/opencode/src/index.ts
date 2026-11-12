@@ -306,7 +306,6 @@ export class OpenCodeHarness implements Harness {
       typeof plan.metadata["timeoutMs"] === "number"
         ? plan.metadata["timeoutMs"]
         : (this.#options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const admittedPermission = openCodePermissions(input.attempt.authorization.runtimeActions);
     const managerCoordination = input.tools.some(
       (tool) => tool.audience === "manager" && isControlPlaneCoordinationTool(tool),
     );
@@ -315,11 +314,6 @@ export class OpenCodeHarness implements Harness {
         "OpenCode manager-only coordination requires a local Worker-owned credential proxy",
       );
     }
-    const permission: Record<string, unknown> = {
-      ...admittedPermission,
-      task: { "*": "deny", general: "allow", explore: "allow" },
-    };
-    const childToolDenials: Record<string, "deny"> = {};
     for (const tool of input.tools) {
       if (tool.binding.kind === "worker-local")
         throw new Error(
@@ -327,17 +321,7 @@ export class OpenCodeHarness implements Harness {
         );
       if (!isControlPlaneCoordinationTool(tool) || tool.binding.kind !== "mcp-http")
         throw new Error("OpenCode cannot enforce this MCP policy");
-      const binding = tool.binding;
-      if (!/^[\w-]+$/u.test(binding.name)) throw new Error("Invalid MCP server name");
-      if (tool.audience === "manager") {
-        childToolDenials[`${binding.name}_*`] = "deny";
-        childToolDenials[`${binding.name.replace(/[^a-zA-Z0-9_]/gu, "_")}_*`] = "deny";
-      }
-      // The Control Plane independently enforces Task authority for every tool invocation.
-      for (const operation of tool.capability.operations) {
-        permission[`${binding.name}_${operation.name}`] = "allow";
-        permission[`${binding.name.replace(/[^a-zA-Z0-9_]/gu, "_")}_${operation.name}`] = "allow";
-      }
+      if (!/^[\w-]+$/u.test(tool.binding.name)) throw new Error("Invalid MCP server name");
     }
     const provider = model.split("/")[0] as string;
     const selectedKey =
@@ -363,57 +347,21 @@ export class OpenCodeHarness implements Harness {
       input.tools.filter((tool) => !this.#options.runner || tool.audience === "manager"),
     );
     const request = await buildWithPolicyProxyCleanup(policyProxies, () => {
-      const mcp: Record<string, unknown> = {};
+      const tools: OpenCodeMcpTool[] = [];
       for (const tool of input.tools) {
         if (tool.binding.kind !== "mcp-http") continue;
         const binding = tool.binding;
         const policy = policyProxies.find((candidate) => candidate.name === binding.name);
-        mcp[binding.name] = {
-          type: "remote",
+        tools.push({
+          name: binding.name,
           url: policy?.proxy.url ?? binding.url,
           headers:
             policy === undefined ? (binding.runtimeHeaders ?? {}) : { ...policy.proxy.headers },
-          enabled: true,
-          oauth: false,
-        };
+          operations: tool.capability.operations.map(({ name }) => name),
+          ...(tool.audience === undefined ? {} : { audience: tool.audience }),
+        });
       }
       const home = environment.resolvePath(".opencode-home");
-      const generalPermission = {
-        ...admittedPermission,
-        ...childToolDenials,
-        ...(managerCoordination
-          ? { bash: "deny" as const, webfetch: "deny" as const, websearch: "deny" as const }
-          : {}),
-        task: "deny",
-      };
-      const explorePermission = {
-        ...generalPermission,
-        edit: "deny",
-        bash: "deny",
-      };
-      const config = {
-        $schema: "https://opencode.ai/config.json",
-        model,
-        share: "disabled",
-        autoupdate: false,
-        plugin: [],
-        mcp,
-        permission,
-        agent: {
-          build: { mode: "primary", permission },
-          plan: { disable: true },
-          general: {
-            mode: "subagent",
-            description: "Execute a bounded local subtask without SuperTag coordination authority",
-            permission: generalPermission,
-          },
-          explore: {
-            mode: "subagent",
-            description: "Inspect the admitted workspace without modifying it",
-            permission: explorePermission,
-          },
-        },
-      };
       return {
         prompt: inPlace
           ? `${prompt}\n\nYour working directory ${JSON.stringify(workspace)} is this Task's own git worktree on its Task branch. Edit files there directly. Inputs are under ${JSON.stringify(environment.resolvePath("inputs"))}. SuperTag commits any remaining changes to the Task branch after this Attempt; do not push, force-push, rewrite history, or change other branches.`
@@ -432,16 +380,11 @@ export class OpenCodeHarness implements Harness {
           XDG_CONFIG_HOME: home,
           XDG_DATA_HOME: home,
           XDG_CACHE_HOME: home,
-          OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
-          OPENCODE_PERMISSION: JSON.stringify(permission),
-          OPENCODE_DISABLE_AUTOUPDATE: "true",
-          OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-          OPENCODE_DISABLE_CLAUDE_CODE: "true",
-          // An in-place run starts in the repository checkout. Without this, OpenCode merges
-          // the repository's opencode.json and .opencode/ config, including their MCP servers,
-          // which would bypass the Task's admitted tools and policy proxy.
-          OPENCODE_DISABLE_PROJECT_CONFIG: "true",
-          OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
+          ...openCodeConfigurationEnvironment(
+            model,
+            input.attempt.authorization.runtimeActions,
+            tools,
+          ),
         },
       } satisfies OpenCodeRunRequest;
     });
@@ -501,6 +444,89 @@ export function openCodePermissions(actions: readonly string[]): Record<string, 
     question: "deny",
     skill: "deny",
     lsp: "deny",
+  };
+}
+
+export interface OpenCodeMcpTool {
+  readonly name: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly operations: readonly string[];
+  readonly audience?: "manager";
+}
+
+/** Project only admitted tools and operations into OpenCode's native permission layers. */
+export function openCodeConfigurationEnvironment(
+  model: string,
+  actions: readonly string[],
+  tools: readonly OpenCodeMcpTool[],
+  disableAuxiliaryProcesses = false,
+): Readonly<Record<string, string>> {
+  const admittedPermission = openCodePermissions(actions);
+  const permission: Record<string, unknown> = {
+    ...admittedPermission,
+    task: { "*": "deny", general: "allow", explore: "allow" },
+  };
+  const mcp: Record<string, unknown> = Object.create(null);
+  const childToolDenials: Record<string, "deny"> = {};
+  for (const tool of tools) {
+    if (!/^[\w-]+$/u.test(tool.name)) throw new Error("Invalid MCP server name");
+    const aliases = new Set([tool.name, tool.name.replace(/[^a-zA-Z0-9_]/gu, "_")]);
+    for (const alias of aliases) {
+      if (tool.audience === "manager") childToolDenials[`${alias}_*`] = "deny";
+      // The Control Plane independently checks execution authority for each invocation.
+      for (const operation of tool.operations) permission[`${alias}_${operation}`] = "allow";
+    }
+    mcp[tool.name] = {
+      type: "remote",
+      url: tool.url,
+      headers: tool.headers,
+      enabled: true,
+      oauth: false,
+    };
+  }
+  const generalPermission = {
+    ...admittedPermission,
+    ...childToolDenials,
+    ...(tools.some(({ audience }) => audience === "manager")
+      ? { bash: "deny", webfetch: "deny", websearch: "deny" }
+      : {}),
+    task: "deny",
+  };
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    model,
+    share: "disabled",
+    autoupdate: false,
+    plugin: [],
+    // File tools also invoke these integrations outside the bash permission check.
+    ...(disableAuxiliaryProcesses ? { formatter: false, lsp: false } : {}),
+    mcp,
+    permission,
+    agent: {
+      build: { mode: "primary", permission },
+      plan: { disable: true },
+      general: {
+        mode: "subagent",
+        description: "Execute a bounded local subtask without SuperTag coordination authority",
+        permission: generalPermission,
+      },
+      explore: {
+        mode: "subagent",
+        description: "Inspect the admitted workspace without modifying it",
+        permission: { ...generalPermission, edit: "deny", bash: "deny" },
+      },
+    },
+  };
+  return {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+    OPENCODE_PERMISSION: JSON.stringify(permission),
+    OPENCODE_DISABLE_AUTOUPDATE: "true",
+    OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+    OPENCODE_DISABLE_CLAUDE_CODE: "true",
+    // The Task worktree may contain untrusted OpenCode configuration and plugins.
+    OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+    OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
   };
 }
 
@@ -583,15 +609,31 @@ export function createOpenCodeWorker(options: CreateOpenCodeWorkerOptions): Work
   });
 }
 
+export interface OpenCodeCompletionPart {
+  readonly id: string;
+  readonly text: string;
+}
+
+type RecoverOpenCodeCompletion = (
+  sessionId: string,
+  signal: AbortSignal,
+) => Promise<readonly OpenCodeCompletionPart[]>;
+
 export async function* runOpenCode(
   request: OpenCodeRunRequest,
-  environment: ExecutionEnvironment,
+  environment: Pick<ExecutionEnvironment, "spawn">,
   signal?: AbortSignal,
+  recoverCompletion?: RecoverOpenCodeCompletion,
 ): AsyncIterable<HarnessEvent> {
   const timeout = AbortSignal.timeout(request.timeoutMs);
   const cancellation = signal ? AbortSignal.any([signal, timeout]) : timeout;
   cancellation.throwIfAborted();
   let handle: ProcessHandle | undefined;
+  const completion: { sessionId?: string; latestStepHasText: boolean } = {
+    latestStepHasText: false,
+  };
+  const streamedParts = new Map<string, string>();
+  const anonymousText = new Set<string>();
   try {
     handle = await environment.spawn(
       {
@@ -622,7 +664,27 @@ export async function* runOpenCode(
       const record = raw as Record<string, unknown>;
       if (record["type"] === "error") throw new Error("OpenCode session failed");
       const part = record["part"] as Record<string, unknown> | undefined;
-      if (record["type"] === "step_start") finished = false;
+      if (recoverCompletion) {
+        if (
+          Array.isArray(raw) ||
+          typeof record["type"] !== "string" ||
+          (record["type"] === "text" && typeof part?.["text"] !== "string") ||
+          (record["type"] === "step_finish" && typeof part?.["reason"] !== "string")
+        )
+          throw new Error("Invalid OpenCode event");
+        for (const identity of [record["sessionID"], part?.["sessionID"]]) {
+          if (identity === undefined) continue;
+          if (typeof identity !== "string" || !/^ses_[A-Za-z0-9]{1,120}$/u.test(identity))
+            throw new Error("Invalid OpenCode Session identity");
+          if (completion.sessionId !== undefined && identity !== completion.sessionId)
+            throw new Error("OpenCode stream mixed Session identities");
+          completion.sessionId = identity;
+        }
+      }
+      if (record["type"] === "step_start") {
+        finished = false;
+        completion.latestStepHasText = false;
+      }
       if (record["type"] === "step_finish") finished = part?.["reason"] === "stop";
       if (
         record["type"] === "tool_use" &&
@@ -658,10 +720,23 @@ export async function* runOpenCode(
         }
       }
       if (record["type"] === "text" && typeof part?.["text"] === "string") {
-        responseBytes += Buffer.byteLength(part["text"]);
+        const text = part["text"];
+        responseBytes += Buffer.byteLength(text);
         if (responseBytes > MAX_RESPONSE_BYTES) throw new Error("OpenCode response exceeds limit");
-        textSeen = textSeen || Boolean(part["text"].trim());
-        return { type: "output.message", text: part["text"] };
+        textSeen ||= Boolean(text.trim());
+        if (recoverCompletion && text) {
+          completion.latestStepHasText ||= Boolean(text.trim());
+          const id = part["id"];
+          if (typeof id === "string" && /^prt_[A-Za-z0-9]{1,120}$/u.test(id)) {
+            const previous = streamedParts.get(id);
+            if (previous !== undefined && previous !== text)
+              throw new Error("OpenCode stream changed a completed text part");
+            streamedParts.set(id, text);
+          } else anonymousText.add(text);
+          if (streamedParts.size + anonymousText.size > 4096)
+            throw new Error("OpenCode response has too many text parts");
+        }
+        return { type: "output.message", text };
       }
     };
     for await (const chunk of handle.output) {
@@ -688,7 +763,7 @@ export async function* runOpenCode(
     const result = await handle.wait();
     cancellation.throwIfAborted();
     if (result.exitCode !== 0 || result.signal) throw new Error("OpenCode process failed");
-    if (!finished || !textSeen) throw new Error("OpenCode ended without a complete final response");
+    if (finished && (recoverCompletion ? completion.latestStepHasText : textSeen)) return;
   } finally {
     if (handle) {
       handle.kill();
@@ -697,14 +772,33 @@ export async function* runOpenCode(
       await handle.wait();
     }
   }
+  if (!recoverCompletion || !completion.sessionId)
+    throw new Error("OpenCode ended without a complete final response");
+  const recovered = await recoverCompletion(completion.sessionId, cancellation);
+  cancellation.throwIfAborted();
+  for (const { id, text } of recovered) {
+    const previous = streamedParts.get(id);
+    if (previous !== undefined && previous !== text)
+      throw new Error("OpenCode export changed a streamed text part");
+    if (previous === undefined && !anonymousText.has(text)) yield { type: "output.message", text };
+  }
 }
 
-async function readProviderApiKey(path: string, provider: string): Promise<string> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+export async function readProviderApiKey(
+  path: string,
+  provider: string,
+  privateFile = false,
+): Promise<string> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await file.stat();
     if (!info.isFile() || info.size > 1024 * 1024)
       throw new Error("OpenCode auth source must be a regular file no larger than 1 MiB");
+    if (
+      privateFile &&
+      ((info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid()))
+    )
+      throw new Error("OpenCode auth source must be privately owned");
     const buffer = Buffer.alloc(1024 * 1024 + 1);
     const { bytesRead } = await file.read(buffer);
     if (bytesRead > 1024 * 1024) throw new Error("OpenCode auth source exceeds 1 MiB");

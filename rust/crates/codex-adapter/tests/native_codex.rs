@@ -124,6 +124,7 @@ impl Harness for HarnessFixture {
             may_ask_objective_question: self.may_ask,
             coordination: self.coordination,
             resolved_skills: observed.resolved_skills.clone(),
+            history: vec![],
         }))
     }
     async fn confirm_execution_limits(

@@ -512,6 +512,7 @@ service WorkerHost {
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
   rpc GetAttemptCapabilities(InspectAttemptRequest) returns (AttemptCapabilities);
+  rpc GetAttemptHistory(InspectAttemptRequest) returns (AttemptHistory);
   rpc GetContextPins(InspectAttemptRequest) returns (ContextResolutionManifest);
   rpc CommitContextResolution(CommitContextResolutionRequest) returns (ContextResolutionManifest);
   rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
@@ -888,6 +889,7 @@ enum HarnessKind {
   HARNESS_KIND_CODEX = 1;
   HARNESS_KIND_CLAUDE_CODE = 2;
   HARNESS_KIND_OPENAI_AGENTS = 3;
+  HARNESS_KIND_OPENCODE = 4;
 }
 
 message PutTagRequest {
@@ -1182,6 +1184,16 @@ message AdapterBootstrap {
   string token = 2;
 }
 
+message AttemptHistoryEntry {
+  string task_id = 1;
+  string prompt = 2;
+  optional string result = 3;
+}
+
+message AttemptHistory {
+  repeated AttemptHistoryEntry entries = 1;
+}
+
 message HarnessRun {
   Task task = 1;
   string attempt_id = 2;
@@ -1189,6 +1201,8 @@ message HarnessRun {
   bool may_ask_objective_question = 4;
   AttemptCapabilities coordination = 5;
   repeated ResolvedSkill resolved_skills = 6;
+  // Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
+  repeated AttemptHistoryEntry history = 7;
 }
 
 message ContextContract {

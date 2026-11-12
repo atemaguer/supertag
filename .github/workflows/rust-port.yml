@@ -4,11 +4,29 @@ on:
   pull_request:
     paths:
       - 'rust/**'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'packages/operator-api/go/**'
+      - 'apps/tui/**'
+      - 'sdks/python/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
       - '.github/workflows/rust-port.yml'
   push:
     branches: [main]
     paths:
       - 'rust/**'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'packages/operator-api/go/**'
+      - 'apps/tui/**'
+      - 'sdks/python/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
       - '.github/workflows/rust-port.yml'
 
 permissions:
@@ -38,6 +56,47 @@ jobs:
       SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: |
+            apps/tui/go.sum
+            packages/operator-api/go/go.sum
+            rust/bindings/go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install fixture runtime dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          python -m pip install uv==0.9.5
+          pnpm install --frozen-lockfile
+          uv venv "$RUNNER_TEMP/supertag-python-runtime" --python 3.13
+          uv pip install --python "$RUNNER_TEMP/supertag-python-runtime/bin/python" './sdks/python[runtime,agents]'
+          npm install --prefix "$RUNNER_TEMP/supertag-codex-probe" --no-audit --no-fund @openai/codex@0.163.0
+          native_codex="$RUNNER_TEMP/supertag-codex-probe/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+          test -x "$native_codex"
+          env -i PATH=/usr/bin:/bin "$native_codex" --version
+          printf 'SUPERTAG_TEST_CODEX_BINARY=%s\n' "$native_codex" >> "$GITHUB_ENV"
+      - name: Build native harness bridges and version-matched terminal UI
+        working-directory: .
+        run: |
+          pnpm --filter @supertag/worker-claude-code build
+          pnpm --filter @supertag/worker-opencode build
+          sh apps/tui/build.sh
+          printf 'SUPERTAG_RUST_TEST_NODE=%s\n' "$(command -v node)" >> "$GITHUB_ENV"
+          printf 'SUPERTAG_RUST_TEST_AGENTS_PYTHON=%s\n' "$RUNNER_TEMP/supertag-python-runtime/bin/python" >> "$GITHUB_ENV"
+          printf 'SUPERTAG_RUST_TEST_TUI=%s\n' "$GITHUB_WORKSPACE/apps/tui/dist/supertag-tui-linux-amd64" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test the Rust runtime with SQLite and PostgreSQL
@@ -45,7 +104,10 @@ jobs:
           umask 077
           export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
           printf '%s' "$SUPERTAG_RUST_TEST_DATABASE_URL" > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
-          cargo test --locked --workspace --all-features -- --include-ignored
+          # Ignored database/language/tmux fixtures run here; real provider calls stay opt-in.
+          cargo test --locked --workspace --all-features -- --include-ignored \
+            --skip installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint \
+            --skip installed_native_objective_question_and_pinned_tool_resume
 
   bindings:
     runs-on: ubuntu-latest

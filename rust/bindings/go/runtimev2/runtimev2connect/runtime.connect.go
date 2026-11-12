@@ -223,6 +223,9 @@ const (
 	// WorkerHostGetAttemptCapabilitiesProcedure is the fully-qualified name of the WorkerHost's
 	// GetAttemptCapabilities RPC.
 	WorkerHostGetAttemptCapabilitiesProcedure = "/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities"
+	// WorkerHostGetAttemptHistoryProcedure is the fully-qualified name of the WorkerHost's
+	// GetAttemptHistory RPC.
+	WorkerHostGetAttemptHistoryProcedure = "/supertag.runtime.v2.WorkerHost/GetAttemptHistory"
 	// WorkerHostGetContextPinsProcedure is the fully-qualified name of the WorkerHost's GetContextPins
 	// RPC.
 	WorkerHostGetContextPinsProcedure = "/supertag.runtime.v2.WorkerHost/GetContextPins"
@@ -2240,6 +2243,7 @@ type WorkerHostClient interface {
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
 	GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error)
+	GetAttemptHistory(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptHistory], error)
 	GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	CommitContextResolution(context.Context, *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
@@ -2295,6 +2299,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+WorkerHostGetAttemptCapabilitiesProcedure,
 			connect.WithSchema(workerHostMethods.ByName("GetAttemptCapabilities")),
+			connect.WithClientOptions(opts...),
+		),
+		getAttemptHistory: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.AttemptHistory](
+			httpClient,
+			baseURL+WorkerHostGetAttemptHistoryProcedure,
+			connect.WithSchema(workerHostMethods.ByName("GetAttemptHistory")),
 			connect.WithClientOptions(opts...),
 		),
 		getContextPins: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.ContextResolutionManifest](
@@ -2356,6 +2366,7 @@ type workerHostClient struct {
 	startTask               *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
 	inspectAttempt          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
 	getAttemptCapabilities  *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptCapabilities]
+	getAttemptHistory       *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptHistory]
 	getContextPins          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.ContextResolutionManifest]
 	commitContextResolution *connect.Client[runtimev2.CommitContextResolutionRequest, runtimev2.ContextResolutionManifest]
 	renewAttempt            *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority]
@@ -2394,6 +2405,11 @@ func (c *workerHostClient) InspectAttempt(ctx context.Context, req *connect.Requ
 // GetAttemptCapabilities calls supertag.runtime.v2.WorkerHost.GetAttemptCapabilities.
 func (c *workerHostClient) GetAttemptCapabilities(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error) {
 	return c.getAttemptCapabilities.CallUnary(ctx, req)
+}
+
+// GetAttemptHistory calls supertag.runtime.v2.WorkerHost.GetAttemptHistory.
+func (c *workerHostClient) GetAttemptHistory(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptHistory], error) {
+	return c.getAttemptHistory.CallUnary(ctx, req)
 }
 
 // GetContextPins calls supertag.runtime.v2.WorkerHost.GetContextPins.
@@ -2444,6 +2460,7 @@ type WorkerHostHandler interface {
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
 	GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error)
+	GetAttemptHistory(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptHistory], error)
 	GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	CommitContextResolution(context.Context, *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
@@ -2495,6 +2512,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		WorkerHostGetAttemptCapabilitiesProcedure,
 		svc.GetAttemptCapabilities,
 		connect.WithSchema(workerHostMethods.ByName("GetAttemptCapabilities")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostGetAttemptHistoryHandler := connect.NewUnaryHandler(
+		WorkerHostGetAttemptHistoryProcedure,
+		svc.GetAttemptHistory,
+		connect.WithSchema(workerHostMethods.ByName("GetAttemptHistory")),
 		connect.WithHandlerOptions(opts...),
 	)
 	workerHostGetContextPinsHandler := connect.NewUnaryHandler(
@@ -2559,6 +2582,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostInspectAttemptHandler.ServeHTTP(w, r)
 		case WorkerHostGetAttemptCapabilitiesProcedure:
 			workerHostGetAttemptCapabilitiesHandler.ServeHTTP(w, r)
+		case WorkerHostGetAttemptHistoryProcedure:
+			workerHostGetAttemptHistoryHandler.ServeHTTP(w, r)
 		case WorkerHostGetContextPinsProcedure:
 			workerHostGetContextPinsHandler.ServeHTTP(w, r)
 		case WorkerHostCommitContextResolutionProcedure:
@@ -2606,6 +2631,10 @@ func (UnimplementedWorkerHostHandler) InspectAttempt(context.Context, *connect.R
 
 func (UnimplementedWorkerHostHandler) GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetAttemptCapabilities is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) GetAttemptHistory(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptHistory], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetAttemptHistory is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error) {

@@ -10,18 +10,21 @@ import {
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ExecutionCleanupError } from "@supertag/worker-sdk";
+import {
+  type AdapterBootstrap,
+  ExecutionLimitEnforcement,
+  type ExecutionLimits,
+  harnessClient,
+  LiveInputReceipt,
+  receipt,
+  redact,
+  TaskState,
+} from "@supertag/worker-sdk/internal/rust-harness";
 import { ClaudeProcessTree } from "../process-tree.js";
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "../query.js";
 import { ClaudeSessionStore, readClaudeTranscripts } from "../session-store.js";
 import { claudeUsageTracker } from "../usage.js";
-import {
-  captureCheckpoint,
-  redact,
-  restoreCheckpoint,
-  resumedCostUsd,
-  validUsd,
-} from "./checkpoint.js";
-import { harnessClient, receipt } from "./client.js";
+import { captureCheckpoint, restoreCheckpoint, resumedCostUsd, validUsd } from "./checkpoint.js";
 import {
   COORDINATION_PREFIX,
   COORDINATION_SERVER,
@@ -30,13 +33,6 @@ import {
   WORKSTREAM_POST_ACTION,
 } from "./coordination.js";
 import { CREDENTIAL_KEYS, nativeEnvironment } from "./environment.js";
-import {
-  type AdapterBootstrap,
-  ExecutionLimitEnforcement,
-  type ExecutionLimits,
-  LiveInputReceipt,
-  TaskState,
-} from "./gen/supertag/runtime/v2/runtime_pb.js";
 import { selectSkills, stageSkills } from "./skills.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {

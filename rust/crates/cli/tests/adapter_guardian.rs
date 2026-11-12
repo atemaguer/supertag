@@ -115,6 +115,68 @@ fn an_expired_launch_frame_cannot_start_the_adapter() -> Result<()> {
 }
 
 #[test]
+fn closing_the_host_pipe_allows_the_adapter_to_reap_its_native_child() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("native-pid");
+    let (mut guardian, mut pipe) = Guardian::launch(
+        "cat >/dev/null; sleep 60 & native=$!; trap 'kill \"$native\"; wait \"$native\"; printf reaped > \"$1.reaped\"; exit 0' TERM; printf '%s\\n' \"$native\" > \"$1\"; wait \"$native\"",
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let pid: i32 = loop {
+        if let Ok(contents) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = contents.trim().parse()
+        {
+            break pid;
+        }
+        ensure!(Instant::now() < deadline, "native child did not start");
+        thread::sleep(Duration::from_millis(10));
+    };
+    drop(pipe);
+    assert!(!guardian.wait_for_exit()?.success());
+    assert!(
+        pid_file.with_extension("reaped").exists(),
+        "adapter did not reap its native child before guardian exit"
+    );
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    Ok(())
+}
+
+#[test]
+fn an_adapter_that_ignores_termination_is_forcibly_reaped() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("adapter-pid");
+    let (mut guardian, mut pipe) = Guardian::launch(
+        "cat >/dev/null; trap '' TERM; printf '%s\\n' \"$$\" > \"$1\"; exec sleep 60",
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let pid: i32 = loop {
+        if let Ok(contents) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = contents.trim().parse()
+        {
+            break pid;
+        }
+        ensure!(Instant::now() < deadline, "adapter did not start");
+        thread::sleep(Duration::from_millis(10));
+    };
+    drop(pipe);
+    assert!(!guardian.wait_for_exit()?.success());
+    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    Ok(())
+}
+
+#[test]
 fn a_stopped_guardian_cannot_launch_after_its_host_pipe_closes() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("adapter-started");

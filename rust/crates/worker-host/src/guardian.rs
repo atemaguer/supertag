@@ -12,12 +12,13 @@ use std::{
     path::Path,
     process::{Child, Command, Stdio},
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, ensure};
 
 pub(crate) const MAX_BOOTSTRAP_BYTES: usize = 4096;
+pub(crate) const ADAPTER_STOP_GRACE: Duration = Duration::from_secs(2);
 pub(crate) const ADAPTER_SCRATCH_PARENT: &str = "SUPERTAG_ADAPTER_SCRATCH_PARENT";
 pub const ADAPTER_STATE_DIRECTORY: &str = "SUPERTAG_ADAPTER_STATE_DIRECTORY";
 
@@ -183,8 +184,7 @@ fn stop_group(
     scratch: &mut Option<tempfile::TempDir>,
     group: i32,
 ) -> Result<()> {
-    let _ = child.kill();
-    let reaped = child.wait();
+    let reaped = stop_adapter(child);
     if let Some(directory) = scratch.take() {
         let _ = directory.close();
     }
@@ -193,4 +193,29 @@ fn stop_group(
     unsafe { libc::kill(-group, libc::SIGKILL) };
     reaped.context("reap harness adapter after Host exit")?;
     anyhow::bail!("could not stop the adapter process group")
+}
+
+fn stop_adapter(child: &mut Child) -> io::Result<()> {
+    // Let the adapter's cancellation handler stop and reap its native children
+    // before terminating their parent. Killing the parent first can leave orphan
+    // zombies that macOS refuses to signal, preventing the Host's cleanup proof.
+    let pid = i32::try_from(child.id()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    // SAFETY: this is our unreaped direct child, so its PID cannot be reused.
+    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
+    }
+    let deadline = Instant::now() + ADAPTER_STOP_GRACE;
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            return child.wait().map(|_| ());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }

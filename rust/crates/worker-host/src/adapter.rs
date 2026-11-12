@@ -128,6 +128,18 @@ impl Harness for Bridge {
             .get_attempt_capabilities(upstream)
             .await?
             .into_inner();
+        let history = if self.harness == HarnessKind::Opencode {
+            let mut upstream = authenticated_request(self.attempt(), &self.host_token, None)?;
+            upstream.set_timeout(Duration::from_secs(5));
+            self.host
+                .clone()
+                .get_attempt_history(upstream)
+                .await?
+                .into_inner()
+                .entries
+        } else {
+            vec![]
+        };
         self.attached.store(true, Ordering::Release);
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
@@ -136,6 +148,7 @@ impl Harness for Bridge {
             may_ask_objective_question: capabilities.may_ask_objective_question,
             coordination: Some(capabilities),
             resolved_skills: self.resolved_skills.clone(),
+            history,
         }))
     }
 
@@ -459,7 +472,7 @@ async fn supervise(
             .context("resolve private Worker Host state")?,
     );
     command.envs(
-        crate::provider_environment(options.harness)
+        crate::provider_environment_for(options.harness, options.provider_model.as_deref())?
             .iter()
             .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
     );
@@ -499,7 +512,11 @@ async fn supervise(
     bridge.inputs.close();
     if child.try_wait()?.is_none() {
         // Give the guardian time to reap the adapter before forcing down the group.
-        let _ = time::timeout(Duration::from_millis(500), child.wait()).await;
+        let _ = time::timeout(
+            crate::guardian::ADAPTER_STOP_GRACE + Duration::from_millis(250),
+            child.wait(),
+        )
+        .await;
     }
     let survivors = signal_group(group, libc::SIGKILL)?;
     time::timeout(Duration::from_secs(2), async {
@@ -645,5 +662,5 @@ fn signal_group(group: u32, signal: i32) -> Result<bool> {
     if error.raw_os_error() == Some(libc::ESRCH) {
         return Ok(false);
     }
-    Err(error.into())
+    Err(error).with_context(|| format!("signal {signal} to adapter process group {group}"))
 }

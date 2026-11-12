@@ -690,6 +690,18 @@ impl HostEnrollment for Gateway {
 
 #[tonic::async_trait]
 impl WorkerHost for Gateway {
+    async fn get_attempt_history(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptHistory>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .get_attempt_history(request)
+                .await
+        })
+        .await
+    }
+
     async fn get_context_pins(
         &self,
         request: Request<InspectAttemptRequest>,

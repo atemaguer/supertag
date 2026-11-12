@@ -129,6 +129,7 @@ mod tests {
             HarnessKind::Codex,
             HarnessKind::ClaudeCode,
             HarnessKind::OpenaiAgents,
+            HarnessKind::Opencode,
         ] {
             assert!(verify_confirmation(harness, Some(&accepted), &applied).is_err());
         }

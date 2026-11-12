@@ -1,12 +1,14 @@
 mod adapter;
 mod checkpoints;
 pub mod context;
+mod credentials;
 mod enrollment;
 mod guardian;
 mod journal;
 mod readiness;
 mod workspaces;
 
+pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
@@ -36,22 +38,6 @@ use tonic::{
 };
 use uuid::Uuid;
 
-/// Model provider environment accepted by each first-party adapter.
-pub fn provider_environment(harness: HarnessKind) -> &'static [&'static str] {
-    match harness {
-        HarnessKind::Codex => &["HOME", "CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"],
-        HarnessKind::ClaudeCode => &[
-            "HOME",
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-        ],
-        HarnessKind::OpenaiAgents => &["OPENAI_API_KEY"],
-        HarnessKind::Unspecified => &[],
-    }
-}
-
 pub struct HostOptions {
     pub gateway: Endpoint,
     pub token: Option<String>,
@@ -60,6 +46,7 @@ pub struct HostOptions {
     pub adapter: PathBuf,
     pub adapter_args: Vec<OsString>,
     pub harness: HarnessKind,
+    pub provider_model: Option<String>,
     pub attempt_timeout: Duration,
     pub wait_for_recovery: bool,
     pub once: bool,
@@ -120,6 +107,14 @@ pub async fn run(
     ensure!(
         !options.attempt_timeout.is_zero(),
         "attempt timeout must be positive"
+    );
+    provider_environment_for(options.harness, options.provider_model.as_deref())?;
+    ensure!(
+        !matches!(
+            options.harness,
+            HarnessKind::Opencode | HarnessKind::OpenaiAgents
+        ) || options.context_catalog.supported_contracts().is_empty(),
+        "the selected harness does not load Skills"
     );
     let shutdown = shutdown.child_token();
     let journal = Arc::new(Journal::open(&options.state_directory)?);

@@ -555,9 +555,11 @@ async fn run(command: Command) -> Result<()> {
         } => {
             let harness = adapter.harness_kind();
             ensure!(
-                skill_catalog.is_none() || harness != HarnessKind::OpenaiAgents,
-                "This Worker Host's OpenAI Agents harness does not load Skills"
+                skill_catalog.is_none()
+                    || !matches!(harness, HarnessKind::OpenaiAgents | HarnessKind::Opencode),
+                "this Worker Host's selected harness does not load Skills"
             );
+            let provider_model = adapter.provider_model();
             let workspace = adapter.workspace_mapping();
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
@@ -568,6 +570,7 @@ async fn run(command: Command) -> Result<()> {
                 adapter,
                 adapter_args,
                 harness,
+                provider_model,
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,

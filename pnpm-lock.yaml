@@ -311,9 +311,16 @@ importers:
 
   packages/runtime/harnesses/opencode:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)
       '@supertag/worker-sdk':
         specifier: workspace:*
         version: link:../../sdk
+    devDependencies:
+      '@connectrpc/connect-node':
+        specifier: 2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.15.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.15.0))
 
   packages/runtime/resources/github:
     dependencies:
@@ -332,6 +339,15 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1131.0
         version: 3.1131.0
+      '@bufbuild/protobuf':
+        specifier: 2.15.0
+        version: 2.15.0
+      '@connectrpc/connect':
+        specifier: 2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.15.0)
+      '@connectrpc/connect-node':
+        specifier: 2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.15.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.15.0))
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)
@@ -341,6 +357,9 @@ importers:
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/better-sqlite3':
         specifier: 7.6.13

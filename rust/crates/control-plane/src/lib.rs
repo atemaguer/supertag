@@ -4,6 +4,7 @@ mod checkpoints;
 mod commit_reviews;
 mod context;
 mod conversations;
+mod history;
 mod inbox;
 mod inputs;
 mod mailbox;
@@ -249,6 +250,18 @@ impl operator_server::Operator for ControlPlane {
 
 #[tonic::async_trait]
 impl worker_host_server::WorkerHost for ControlPlane {
+    async fn get_attempt_history(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptHistory>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_attempt_history(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn get_context_pins(
         &self,
         request: Request<InspectAttemptRequest>,

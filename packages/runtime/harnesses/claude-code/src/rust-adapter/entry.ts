@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
+import { readBootstrap } from "@supertag/worker-sdk/internal/rust-harness";
 import { runAdapter } from "./adapter.js";
-import { readBootstrap } from "./client.js";
 
 const controller = new AbortController();
 const stop = () => controller.abort();

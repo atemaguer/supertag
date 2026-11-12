@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
-import { type ClaudeTranscript, readClaudeTranscripts } from "../session-store.js";
 import {
+  redact,
   type SessionCheckpoint,
   SessionCheckpointSchema,
   type Task,
-} from "./gen/supertag/runtime/v2/runtime_pb.js";
+} from "@supertag/worker-sdk/internal/rust-harness";
+import { type ClaudeTranscript, readClaudeTranscripts } from "../session-store.js";
 
 const FORMAT = "claude-agent-sdk-v2";
 const MAX_BYTES = 9 * 1024 * 1024;
@@ -17,13 +18,6 @@ interface Archive {
   nativeSessionId: string;
   transcripts: ClaudeTranscript[];
   totalCostUsd?: number;
-}
-
-export function redact(value: string, secrets: readonly string[]): string {
-  let output = value;
-  for (const secret of secrets)
-    if (secret.length >= 8) output = output.split(secret).join("[REDACTED]");
-  return output;
 }
 
 function digest(payload: Uint8Array): string {

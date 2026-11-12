@@ -26,8 +26,8 @@ BINDINGS = RUST / "bindings"
 PYTHON_SDK = REPO / "sdks" / "python" / "src" / "supertag" / "_runtime_v2"
 PYTHON_PROTO = Path("python/supertag/runtime/v2")
 TYPESCRIPT_PROTO = Path("typescript/supertag/runtime/v2")
-CLAUDE_PROTO = (
-    REPO / "packages/runtime/harnesses/claude-code/src/rust-adapter/gen"
+ADAPTER_PROTO = (
+    REPO / "packages/runtime/sdk/src/rust-harness/gen"
     / "supertag/runtime/v2"
 )
 GO_MODULE = "github.com/atemaguer/supertag/rust/bindings/go"
@@ -129,7 +129,7 @@ def main() -> None:
     checked_in = inventory(BINDINGS)
     package_bindings = {
         **python_sdk_messages(expected),
-        **{CLAUDE_PROTO / f"{module}_pb.ts": expected[TYPESCRIPT_PROTO / f"{module}_pb.ts"]
+        **{ADAPTER_PROTO / f"{module}_pb.ts": expected[TYPESCRIPT_PROTO / f"{module}_pb.ts"]
            for module in MODULES},
     }
     if args.check:

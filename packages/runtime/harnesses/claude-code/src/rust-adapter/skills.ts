@@ -1,8 +1,8 @@
 import { cp, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import { digestContextPackage } from "@supertag/worker-sdk";
+import type { ResolvedSkill, Task } from "@supertag/worker-sdk/internal/rust-harness";
 import { parse } from "yaml";
-import type { ResolvedSkill, Task } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 const PLUGIN = "supertag-context";
 const PACKAGE_LIMITS = { maxFiles: 2048, maxBytes: 64 * 1024 * 1024 };

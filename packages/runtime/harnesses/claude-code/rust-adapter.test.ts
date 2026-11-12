@@ -9,12 +9,6 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { digestContextPackage } from "@supertag/worker-sdk";
-import { afterEach, expect, it } from "vitest";
-import { permissionHook } from "./src/rust-adapter/adapter.js";
-import {
-  type TaskPolicySnapshot,
-  TaskPolicySnapshotSchema,
-} from "./src/rust-adapter/gen/supertag/runtime/v2/policy_pb.js";
 import {
   AdapterBootstrapSchema,
   type AppliedExecutionLimits,
@@ -45,9 +39,13 @@ import {
   type ResolvedSkill,
   type SessionCheckpoint,
   TagMessageOrigin,
+  type TaskPolicySnapshot,
+  TaskPolicySnapshotSchema,
   TaskSchema,
   TaskState,
-} from "./src/rust-adapter/gen/supertag/runtime/v2/runtime_pb.js";
+} from "@supertag/worker-sdk/internal/rust-harness";
+import { afterEach, expect, it } from "vitest";
+import { permissionHook } from "./src/rust-adapter/adapter.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const native = join(here, "fixtures/rust-native-claude.mjs");
