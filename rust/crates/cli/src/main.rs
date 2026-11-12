@@ -2,6 +2,7 @@ mod artifacts;
 mod github_publications;
 mod github_workspaces;
 mod harness;
+mod health;
 mod host_status;
 mod inbox;
 mod inputs;
@@ -98,6 +99,8 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check a public or private gRPC service using the configured TLS trust.
+    Health(health::HealthArgs),
     /// Manage GitHub Workspace sources pinned to one repository and commit.
     GithubPublication {
         #[command(flatten)]
@@ -546,6 +549,7 @@ fn main() -> Result<()> {
 
 async fn run(command: Command) -> Result<()> {
     match command {
+        Command::Health(args) => health::run(args).await?,
         Command::Policy {
             connection,
             command,

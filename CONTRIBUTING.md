@@ -151,6 +151,8 @@ Regenerate the Go, TypeScript, and Python runtime bindings after changing the Ru
 contract. See [binding generation and conformance checks](rust/bindings/README.md).
 The [behavioral baseline](tests/rust-port-baseline/README.md) exercises selected scenarios
 against the TypeScript implementation during the port.
+The [native split-service rehearsal](tests/native-deployment/README.md) checks the
+complete-archive images, TLS, gRPC health, and restart persistence on disposable PostgreSQL.
 
 ## Test your change
 
