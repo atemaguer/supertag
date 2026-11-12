@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["PyYAML==6.0.3"]
+# dependencies = ["PyYAML==6.0.3", "grpcio==1.85.1", "grpcio-tools==1.85.1", "protobuf==7.36.2"]
 # ///
 """Install into a disposable HOME and use its normal command link for real Tasks."""
 import argparse
@@ -15,6 +15,7 @@ from native_archive import ArchiveError, REPO, digest, require
 from release_archive import validate_release
 from smoke_native_archive import smoke
 from smoke_native_release import installed_bridge
+from smoke_shared_provider import smoke_provider
 
 
 def smoke_install(archive, fixture, node, opencode_fixture=None):
@@ -36,6 +37,9 @@ def smoke_install(archive, fixture, node, opencode_fixture=None):
         require(command == home / ".local/bin/supertag" and command.is_symlink(), "normal command path was not installed")
         again = install(archive, env=env, node=node)
         require(again["reused"] and again["installation"] == first["installation"], "reinstall was not idempotent")
+        provider_path = Path(first["shared_execution_provider"])
+        require(provider_path == package / "supertag-shared-execution", "provider installation path differs")
+        provider = smoke_provider(provider_path, root / "shared-provider")
         runtime = root / "runtime"
         runtime.mkdir(mode=0o700)
         installed_bridge(package, node, opencode_fixture, runtime, cli_override=command)
@@ -43,6 +47,7 @@ def smoke_install(archive, fixture, node, opencode_fixture=None):
         require(digest(old_data) == before and set(state.iterdir()) == {old_data}, "installation changed old state")
         return {"archive_sha256": digest(archive), "version": first["version"], "platform": first["platform"],
                 "normal_install_paths": True, "fresh_home": True, "idempotent_reinstall": True,
+                "shared_execution_provider": provider,
                 "old_state_preserved": True, "installed_opencode_task": True,
                 "installed_tui_task": ui["real_ui_task_round_trip"], "clean_service_shutdown": ui["clean_service_shutdown"],
                 "fixture_adapter_sha256": digest(fixture), "synthetic_native_fixture_sha256": digest(opencode_fixture),

@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["PyYAML==6.0.3"]
+# dependencies = ["PyYAML==6.0.3", "grpcio==1.85.1", "grpcio-tools==1.85.1", "protobuf==7.36.2"]
 # ///
 """Exercise an extracted native release in a fresh HOME with no provider calls."""
 import argparse
@@ -15,6 +15,7 @@ from native_archive import (ArchiveError, REPO, digest, native_platform, require
 from node_bridges import PACKAGES, smoke_entry, verify_node, verify_relocatable_tree
 from release_archive import extract_release, validate_release
 from smoke_native_archive import smoke, wait_until
+from smoke_shared_provider import smoke_provider, PROTO
 
 
 def installed_bridge(package, node, fixture_source, scratch, *, cli_override=None):
@@ -70,7 +71,7 @@ def installed_bridge(package, node, fixture_source, scratch, *, cli_override=Non
                     service.wait(timeout=5)
 
 
-def smoke_release(archive, fixture, node, opencode_fixture=None):
+def smoke_release(archive, fixture, node, opencode_fixture=None, provider_proto=PROTO):
     opencode_fixture = opencode_fixture or REPO / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs"
     verify_node(node)
     with tempfile.TemporaryDirectory(prefix="supertag-complete-smoke-") as temporary:
@@ -81,11 +82,13 @@ def smoke_release(archive, fixture, node, opencode_fixture=None):
         verify_relocatable_tree(package)
         for kind, name in PACKAGES.items():
             smoke_entry(node, kind, package / "node-bridges/node_modules" / name)
+        provider = smoke_provider(package / "supertag-shared-execution", scratch / "shared-provider", provider_proto)
         installed_bridge(package, node, opencode_fixture, scratch)
         round_trip = smoke(archive, fixture, validator=validate_release, extractor=extract_release)
     return {"archive_sha256": digest(archive), "source": manifest["source"], "platform": manifest["platform"],
             "version": manifest["version"], "profile": manifest["profile"],
             "node_helpers_bootstrap": sorted(PACKAGES), "provider_credentials": "external; not used",
+            "shared_execution_provider": provider,
             "installed_opencode_task": True, "synthetic_native_fixture_sha256": digest(opencode_fixture),
             "fixture_adapter_sha256": round_trip["fixture_adapter_sha256"],
             "real_ui_task_round_trip": round_trip["real_ui_task_round_trip"],

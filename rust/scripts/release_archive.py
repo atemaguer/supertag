@@ -7,16 +7,28 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import tarfile
 import tempfile
 import zlib
 
-from native_archive import (ArchiveError, BINARIES, MAX_BINARY_BYTES, check_architecture,
+from native_archive import (ArchiveError, BINARIES as CLI_TUI_BINARIES, MAX_BINARY_BYTES, check_architecture,
                             copy_bounded, copy_stream_bounded, digest, package_root,
                             publish_files, require, validate_metadata, validate_tar_footer,
                             write_checksum)
 
 FORMAT = "supertag-native-release-v1"
+# The small CLI/TUI fixture archive intentionally keeps its existing two files.
+BINARIES = (*CLI_TUI_BINARIES, "supertag-shared-execution")
+
+
+def check_provider_version(binary, version):
+    with tempfile.TemporaryDirectory(prefix="supertag-provider-version-") as home:
+        result = subprocess.run([str(binary), "--version"], env={"PATH": os.defpath, "HOME": home},
+                                capture_output=True, text=True, timeout=10, check=False)
+        require(result.returncode == 0 and result.stdout.strip() == f"supertag-shared-execution {version}",
+                "shared execution provider does not report the package version")
+
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_MANIFEST_BYTES = 32 * 1024**2

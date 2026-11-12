@@ -26,7 +26,7 @@ class NativeInstallContracts(unittest.TestCase):
         self.node.chmod(0o755)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-tui"):
+        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():
@@ -37,7 +37,7 @@ class NativeInstallContracts(unittest.TestCase):
         self.source = {"commit": "a" * 40, "archive_sha256": "b" * 64,
                        "lockfiles": {name: "c" * 64 for name in ("pnpm-lock.yaml", "rust/Cargo.lock", "apps/tui/go.sum")}}
         self.archive = self.package("0.1.0")
-        for name in ("verify_node", "check_versions", "smoke_entry"):
+        for name in ("verify_node", "check_versions", "check_provider_version", "smoke_entry"):
             context = patch.object(installer, name)
             context.start()
             self.addCleanup(context.stop)
@@ -62,6 +62,8 @@ class NativeInstallContracts(unittest.TestCase):
         target = Path(installed["installation"])
         self.assertEqual(command.readlink(), target / "supertag")
         self.assertEqual(target.parent, self.home / ".local/share/supertag/versions")
+        self.assertEqual(installed["shared_execution_provider"], str(target / "supertag-shared-execution"))
+        self.assertFalse((self.home / ".local/bin/supertag-shared-execution").exists())
         self.assertFalse(installed["reused"])
         self.assertTrue(self.install()["reused"])
         self.assertEqual(len(list(target.parent.glob("native-*"))), 1)
@@ -98,6 +100,15 @@ class NativeInstallContracts(unittest.TestCase):
         self.assertEqual(command.readlink(), Path(installed["installation"]) / "supertag")
         self.assertTrue(Path(first["installation"]).is_dir())
         self.assertNotEqual(installed["installation"], first["installation"])
+
+    def test_provider_version_failure_does_not_switch_the_installed_command(self):
+        first = self.install()
+        command = Path(first["command"])
+        with patch.object(installer, "check_provider_version", side_effect=ArchiveError("provider version differs")):
+            with self.assertRaisesRegex(ArchiveError, "provider version differs"):
+                self.install(self.package("0.1.1"))
+        self.assertEqual(command.readlink(), Path(first["installation"]) / "supertag")
+        self.assertEqual(len(list(Path(first["installation"]).parent.glob("native-*"))), 1)
 
     def test_known_npm_install_is_retained_when_command_switches(self):
         root = self.home / ".local/share/supertag"

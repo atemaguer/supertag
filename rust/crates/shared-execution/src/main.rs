@@ -9,6 +9,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 #[derive(Parser)]
 #[command(
+    version,
     about = "Serve one shared execution root over gRPC",
     long_about = "Serve one shared execution root over gRPC. Set SUPERTAG_EXECUTION_ADMIN_TOKEN in the service environment. File operations use paths relative to the fixed root. Linux process mode requires a separate non-root workload identity and trusts workloads that share the root."
 )]

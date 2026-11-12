@@ -1,11 +1,11 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["PyYAML==6.0.3"]
+# dependencies = ["PyYAML==6.0.3", "grpcio==1.85.1", "grpcio-tools==1.85.1", "protobuf==7.36.2"]
 # ///
 """Assemble a complete unpublished native release from an exact clean commit.
 
 Builds happen in disposable source, HOME, Cargo target, and Go cache directories.
-The output includes CLI, matching Go TUI, and all five private Node runtime helpers.
+The output includes CLI, matching Go TUI, shared execution provider, and all five private Node runtime helpers.
 Node 22.13+ (22.x), Git, and optional provider credentials remain external.
 No installer, registry publication, signing, or state migration is performed.
 """
@@ -22,7 +22,7 @@ import tomllib
 from native_archive import (ArchiveError, REPO, build_binaries, check_versions, copy_bounded,
                             digest, native_platform, publish_files, require, version_from_repo, MAX_BINARY_BYTES)
 from node_bridges import PACKAGES, stage_workspace
-from release_archive import create_release, extract_release, validate_release
+from release_archive import check_provider_version, create_release, extract_release, validate_release
 
 
 def snapshot(repo, commit, scratch):
@@ -59,6 +59,15 @@ def build_environment(scratch):
     return env
 
 
+def build_shared_provider(source, env, profile):
+    command = ["cargo", "build", "--locked", "--manifest-path", str(source / "rust/Cargo.toml"),
+               "-p", "supertag-shared-execution", "--bin", "supertag-shared-execution"]
+    if profile == "release":
+        command.append("--release")
+    subprocess.run(command, cwd=source, env=env, check=True)
+    return Path(env["CARGO_TARGET_DIR"]) / ("release" if profile == "release" else "debug") / "supertag-shared-execution"
+
+
 def assemble(repo, commit, output, profile="release", *, smoke=False):
     output = output.resolve()
     with tempfile.TemporaryDirectory(prefix="supertag-release-build-") as temporary:
@@ -69,9 +78,11 @@ def assemble(repo, commit, output, profile="release", *, smoke=False):
         stage = scratch / "release"
         stage.mkdir()
         cli, tui = build_binaries(scratch, profile, [], source, env)
+        provider = build_shared_provider(source, env, profile)
         version = version_from_repo(source)
         check_versions(cli, tui, version)
-        for name, path in (("supertag", cli), ("supertag-tui", tui)):
+        check_provider_version(provider, version)
+        for name, path in (("supertag", cli), ("supertag-tui", tui), ("supertag-shared-execution", provider)):
             copy_bounded(path, stage / name, MAX_BINARY_BYTES)
             (stage / name).chmod(0o755)
         for name in ("LICENSE", "NOTICE"):
@@ -104,7 +115,8 @@ def smoke_built_release(archive, source, env, profile, node):
     fixture = Path(env["CARGO_TARGET_DIR"]) / ("release" if profile == "release" else "debug") / "supertag-fixture-adapter"
     from smoke_native_release import smoke_release
     receipt = smoke_release(archive, fixture, Path(node),
-                            source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs")
+                            source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs",
+                            source / "rust/proto/supertag/environment/v2/environment.proto")
     with Path(str(archive) + ".smoke.json").open("x") as target:
         json.dump(receipt, target, indent=2, sort_keys=True)
         target.write("\n")

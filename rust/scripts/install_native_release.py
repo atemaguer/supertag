@@ -25,7 +25,7 @@ import uuid
 
 from native_archive import ArchiveError, check_versions, copy_bounded, digest, native_platform, require
 from node_bridges import PACKAGES, smoke_entry, verify_node
-from release_archive import (MAX_ARCHIVE_BYTES, MAX_ENTRIES, MAX_MANIFEST_BYTES, extract_release,
+from release_archive import (check_provider_version, MAX_ARCHIVE_BYTES, MAX_ENTRIES, MAX_MANIFEST_BYTES, extract_release,
                              unique_object, validate_manifest, validate_release)
 
 RECEIPT = ".supertag-install.json"
@@ -201,6 +201,7 @@ def verify_installed(package, manifest, archive_hash):
 
 def probe(package, manifest, node):
     check_versions(package / "supertag", package / "supertag-tui", manifest["version"])
+    check_provider_version(package / "supertag-shared-execution", manifest["version"])
     for kind, name in PACKAGES.items():
         smoke_entry(node, kind, package / "node-bridges/node_modules" / name)
 
@@ -292,6 +293,7 @@ def install_verified(archive, *, env=None, node=None, expected_sha256=None):
             temporary_link.unlink(missing_ok=True)
     return {"version": manifest["version"], "platform": manifest["platform"], "archive_sha256": archive_hash,
             "command": str(command), "installation": str(target), "reused": reused,
+            "shared_execution_provider": str(target / "supertag-shared-execution"),
             "previous_command": before[2] if before else None, "runtime_state_unchanged": True}
 
 

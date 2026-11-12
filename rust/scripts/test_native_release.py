@@ -25,7 +25,7 @@ class NativeReleaseContracts(unittest.TestCase):
         self.root = Path(temporary.name)
         self.stage = self.root / "stage"
         self.stage.mkdir()
-        for name in ("supertag", "supertag-tui"):
+        for name in ("supertag", "supertag-tui", "supertag-shared-execution"):
             (self.stage / name).write_bytes(elf() + name.encode())
             (self.stage / name).chmod(0o755)
         for kind, package in PACKAGES.items():
@@ -63,6 +63,31 @@ class NativeReleaseContracts(unittest.TestCase):
         self.assertEqual((extracted / "node-bridges/node_modules/alias/dist/rust-adapter/entry.js").read_text(), "compiled helper")
         self.assertEqual((extracted / "supertag").stat().st_mode & 0o777, 0o755)
         self.assertEqual(manifest["source"], self.source)
+
+    def test_shared_provider_is_required_and_executable(self):
+        provider = self.stage / "supertag-shared-execution"
+        provider.unlink()
+        with self.assertRaisesRegex(ArchiveError, "missing a required file"):
+            self.package()
+        provider.write_bytes(elf())
+        provider.chmod(0o644)
+        with self.assertRaisesRegex(ArchiveError, "not executable"):
+            self.package()
+
+    def test_shared_provider_architecture_is_verified_before_publication(self):
+        (self.stage / "supertag-shared-execution").write_bytes(b"wrong executable" * 8)
+        with self.assertRaisesRegex(ArchiveError, "architecture"):
+            self.package()
+        self.assertFalse(list((self.root / "out").glob("*.tar.gz")))
+
+    def test_shared_provider_version_probe_has_no_ambient_credentials(self):
+        with patch.dict(os.environ, {"SUPERTAG_EXECUTION_ADMIN_TOKEN": "synthetic-secret"}), \
+             patch.object(release.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "supertag-shared-execution 0.1.0\n", "")) as run:
+            release.check_provider_version(self.stage / "supertag-shared-execution", "0.1.0")
+        self.assertEqual(set(run.call_args.kwargs["env"]), {"PATH", "HOME"})
+        with patch.object(release.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "supertag-shared-execution 0.0.9\n", "")):
+            with self.assertRaisesRegex(ArchiveError, "package version"):
+                release.check_provider_version(self.stage / "supertag-shared-execution", "0.1.0")
 
     def test_provider_entries_come_from_private_environment_packages(self):
         for kind in ("modal", "e2b"):
@@ -137,6 +162,8 @@ class NativeReleaseContracts(unittest.TestCase):
             return target, Path("/verified/node")
         with patch.object(assembly, "snapshot", return_value=(source, self.source)), \
              patch.object(assembly, "build_binaries", return_value=(self.stage / "supertag", self.stage / "supertag-tui")), \
+             patch.object(assembly, "build_shared_provider", return_value=self.stage / "supertag-shared-execution"), \
+             patch.object(assembly, "check_provider_version"), \
              patch.object(assembly, "check_versions"), \
              patch.object(assembly, "native_platform", return_value="linux-arm64"), \
              patch.object(assembly, "stage_workspace", side_effect=stage_helpers), \
