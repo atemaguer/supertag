@@ -6,8 +6,9 @@
 //! credential name; each Gateway maps a Volume ID to its storage endpoint and credentials. So
 //! the CLI and the Control Plane refuse every setting in a source, and storage that two
 //! endpoints could alias can only be reached through Gateway mappings, never through a Volume
-//! that a Task mounts. Workspace data Volumes are file Volumes, and a path alias of artifact
-//! storage is refused in both directions.
+//! that a Task mounts. A Workspace data Volume is a file Volume, or an S3 Volume that names the
+//! credential its Worker Hosts map; a path alias, or an S3 bucket and prefix, of artifact storage
+//! is refused in both directions.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -237,17 +238,44 @@ async fn workspace_data_volumes_cannot_alias_artifact_storage(database: String) 
             output.stderr
         );
     }
-    // Object storage cannot be mounted as Workspace data, so an endpoint alias cannot reach it.
-    for source in [
-        "s3://acme-data/datasets/v3",
-        "s3://zzz?endpoint=https://acme-data.s3.amazonaws.com",
-        "gs://acme-data/datasets/v3",
+    // S3 Workspace data names a credential, and cannot reach S3 artifact
+    // storage by bucket and prefix on any endpoint, since sources carry none.
+    for (source, credential, reason) in [
+        (
+            "s3://acme-data/datasets/v3",
+            "",
+            "requires a credential name",
+        ),
+        (
+            "s3://acme-data/datasets/v3",
+            "acme",
+            "Workspace Volume overlaps artifact storage",
+        ),
+        (
+            "s3://acme-data/datasets",
+            "acme",
+            "Workspace Volume overlaps artifact storage",
+        ),
+        (
+            "s3://zzz?endpoint=https://acme-data.s3.amazonaws.com",
+            "acme",
+            "canonical s3://bucket/prefix",
+        ),
+        (
+            "gs://acme-data/datasets/v3",
+            "",
+            "canonical absolute file URL",
+        ),
     ] {
-        let output = put("data", source).await?;
+        let mut args = vec!["workspace-volume", "put", "data", "--source", source];
+        if !credential.is_empty() {
+            args.extend(["--credential", credential]);
+        }
+        let output = services.run(&args).await?;
         assert!(!output.success, "{source} was registered");
         assert!(
-            output.stderr.contains("canonical absolute file URL"),
-            "{}",
+            output.stderr.contains(reason),
+            "{source}: {}",
             output.stderr
         );
     }

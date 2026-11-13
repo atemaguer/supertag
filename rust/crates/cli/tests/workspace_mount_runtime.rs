@@ -1,5 +1,6 @@
 //! Separate Control Plane, Gateway and Worker Host processes stage a read-only
-//! Workspace Volume copy for a real Codex Task, then remove it at cleanup.
+//! Workspace Volume copy for a real Codex Task, then remove it at cleanup, and
+//! write a read-write copy's changes back to its Volume.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -165,6 +166,16 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     )?;
     let declarations = directory.join("mounts.json");
     let destination = root.join("data");
+    let editable = directory.join("editable.json");
+    std::fs::write(
+        &editable,
+        serde_json::to_vec(&json!([{
+            "volumeId": "data",
+            "destination": destination,
+            "maxBytes": 1_048_576,
+            "access": "read-write",
+        }]))?,
+    )?;
     std::fs::write(
         &declarations,
         serde_json::to_vec(&json!([{
@@ -196,7 +207,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     .await?;
     assert_eq!(volume["revision"], 1);
     let declarations = declarations.to_str().context("path is not UTF-8")?;
-    let put_tag = |id: &str, allow: &[&str]| {
+    let editable = editable.to_str().context("path is not UTF-8")?;
+    let put_tag_with = |id: &str, allow: &[&str], declarations: &str| {
         let mut args = vec![
             "tag",
             "put",
@@ -217,6 +229,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         }
         credentials.operator(&args, &public)
     };
+    let put_tag = |id: &str, allow: &[&str]| put_tag_with(id, allow, declarations);
     json_output(put_tag("reader", &["files:read"])).await?;
     let tag = json_output(credentials.operator(&["get", "tag", "reader"], &public)).await?;
     assert_eq!(
@@ -225,22 +238,18 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         "{tag}"
     );
     assert!(tag["workspace_mounts"][0]["volume"].is_null(), "{tag}");
-    // Tags that could write or execute are refused at admission.
-    json_output(put_tag("writer", &["files:read", "files:write"])).await?;
-    let refused = output(credentials.operator(
-        &[
-            "task",
-            "submit",
-            "--tag",
-            "writer",
-            "--session",
-            "w",
-            "Write",
-        ],
-        &public,
-    ))
-    .await?;
-    ensure!(!refused.status.success(), "a writable Tag admitted mounts");
+    // Tags that could run commands, or write a read-write copy without
+    // files:write, are refused at admission.
+    json_output(put_tag("runner", &["files:read", "commands:execute"])).await?;
+    json_output(put_tag_with("unwritable", &["files:read"], editable)).await?;
+    for tag in ["runner", "unwritable"] {
+        let refused = output(credentials.operator(
+            &["task", "submit", "--tag", tag, "--session", "w", "Write"],
+            &public,
+        ))
+        .await?;
+        ensure!(!refused.status.success(), "{tag} admitted mounts");
+    }
 
     let task = json_output(credentials.operator(
         &[
@@ -304,6 +313,70 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         "id,value\n1,42\n"
     );
     assert!(!source.join("new.txt").exists());
+
+    // A read-write copy's changes are written back to the Volume directly,
+    // and the Task records only the summary.
+    json_output(put_tag_with(
+        "editor",
+        &["files:read", "files:write"],
+        editable,
+    ))
+    .await?;
+    let edit = json_output(credentials.operator(
+        &[
+            "task",
+            "submit",
+            "--tag",
+            "editor",
+            "--session",
+            "edit",
+            "Edit the data",
+        ],
+        &public,
+    ))
+    .await?;
+    let edit_id = edit["task_id"].as_str().context("missing Task ID")?;
+    assert_eq!(edit["workspace"]["mounts"][0]["access"], "read-write");
+    let ran = output(worker()).await?;
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    ensure!(ran.status.success(), "Worker Host failed: {stderr}");
+    let edited = json_output(credentials.operator(&["get", "task", edit_id], &public)).await?;
+    assert_eq!(edited["state"], "TASK_STATE_SUCCEEDED", "{edited} {stderr}");
+    assert_eq!(edited["result"], "edited data");
+    assert_eq!(
+        std::fs::read_to_string(source.join("rows.csv"))?,
+        "id,value\n1,43\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(source.join("reports/new.txt"))?,
+        "created"
+    );
+    // Deletions are not written back.
+    assert!(source.join("nested/notes.txt").exists());
+    let writes = &edited["workspace_mount_writes"];
+    assert_eq!(writes.as_array().map(Vec::len), Some(1), "{edited}");
+    assert_eq!(writes[0]["attempt_id"], edited["attempt_id"]);
+    let write = &writes[0]["writes"][0];
+    assert_eq!(write["status"], "complete", "{write}");
+    assert_eq!(write["volume_id"], "data");
+    assert_eq!(write["skipped"], 0);
+    let mut keys: Vec<_> = write["files"]
+        .as_array()
+        .context("missing files")?
+        .iter()
+        .map(|file| file["key"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    keys.sort();
+    assert_eq!(keys, ["reports/new.txt", "rows.csv"]);
+    let described = json_output(
+        credentials.operator(&["describe", "task", edit_id, "--output", "json"], &public),
+    )
+    .await?;
+    assert_eq!(described["workspace_mount_writes"], *writes);
+    assert_eq!(std::fs::read_dir(&root)?.count(), 0);
+    // Restore the source for the cases below.
+    std::fs::write(source.join("rows.csv"), "id,value\n1,42\n")?;
+    std::fs::remove_dir_all(source.join("reports"))?;
 
     // Cancellation and a Host crash during execution both end with the copy removed.
     for case in ["cancel", "crash"] {
@@ -444,10 +517,12 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    stages_a_read_only_workspace_copy_for_a_codex_task;
+    stages_workspace_copies_and_writes_read_write_changes_back;
 }
 
-async fn stages_a_read_only_workspace_copy_for_a_codex_task(database: String) -> Result<()> {
+async fn stages_workspace_copies_and_writes_read_write_changes_back(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     exercise(&database, directory.path()).await
 }
