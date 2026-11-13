@@ -453,6 +453,8 @@ fn http_server(
             endpoint,
             headers,
             oauth: false,
+            minted: None,
+            github_api: Box::new(reqwest::Url::parse(super::auth::GITHUB_API)?),
         }),
         Declaration::Http {
             url: declared_url.to_owned(),

@@ -107,6 +107,100 @@ export interface McpServerStart {
 }
 
 const MCP_PATH = "/usr/local/bin:/usr/bin:/bin";
+/**
+ * How long a Workspace MCP server may take to stop once its input ends: the supervisor's own
+ * grace, terminate, and kill steps, plus margin. A server still running after it leaves the
+ * Workspace unsettled, so capture refuses rather than waits.
+ */
+const MCP_STOP_MS = 5_000;
+
+/**
+ * Runs one Workspace MCP server in its own process group and forwards this process's input to
+ * it. When the input ends, the server gets half a second to exit, then SIGTERM, then two seconds,
+ * then the whole group gets SIGKILL, so children the server forked cannot hold its output open
+ * or outlive it. The same happens when the server exits by itself. Stopping a server never stops
+ * the sandbox: on Modal a process's terminate is the sandbox's.
+ */
+const MCP_SUPERVISOR = `import os, select, signal, sys, threading
+command = sys.argv[1:]
+environment = {"PATH": "${MCP_PATH}", "LANG": "C.UTF-8"}
+reader, writer = os.pipe()
+pid = os.fork()
+if pid == 0:
+    try:
+        os.setpgid(0, 0)
+        os.dup2(reader, 0)
+        os.close(reader)
+        os.close(writer)
+        for number in (signal.SIGPIPE, signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(number, signal.SIG_DFL)
+        os.execvpe(command[0], command, environment)
+    finally:
+        os._exit(127)
+os.close(reader)
+try:
+    os.setpgid(pid, pid)
+except OSError:
+    pass
+exited = threading.Event()
+status = [1]
+def group(number):
+    try:
+        os.killpg(pid, number)
+    except OSError:
+        pass
+def stopped(number, frame):
+    group(signal.SIGKILL)
+    os._exit(128 + number)
+for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+    signal.signal(number, stopped)
+def reap():
+    code = os.waitpid(pid, 0)[1]
+    status[0] = os.WEXITSTATUS(code) if os.WIFEXITED(code) else 128 + os.WTERMSIG(code)
+    exited.set()
+threading.Thread(target=reap, daemon=True).start()
+# One loop reads input and writes it on without blocking, so the end of input is seen even
+# while a busy server leaves its stdin pipe full. Input it has not taken is dropped at stop.
+os.set_blocking(writer, False)
+pending = bytearray()
+open_ = True
+while not exited.is_set():
+    try:
+        readable, writable = select.select([0], [writer] if open_ and pending else [], [], 0.1)[:2]
+    except InterruptedError:
+        continue
+    if writable:
+        try:
+            del pending[:os.write(writer, pending)]
+        except BlockingIOError:
+            pass
+        except OSError:
+            open_ = False
+            pending.clear()
+    if readable:
+        try:
+            data = os.read(0, 65536)
+        except OSError:
+            data = b""
+        if not data:
+            break
+        if open_:
+            pending += data
+            # A server this far behind its input is stuck: stop it as if its input ended.
+            if len(pending) > 16777216:
+                break
+if not exited.is_set():
+    try:
+        os.close(writer)
+    except OSError:
+        pass
+    if not exited.wait(0.5):
+        group(signal.SIGTERM)
+        exited.wait(2)
+group(signal.SIGKILL)
+exited.wait(1)
+os._exit(status[0])
+`;
 
 function validMcpStart({ name, command, args }: McpServerStart): boolean {
   const text = (value: string, maximum: number) =>
@@ -237,6 +331,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let captured: CapturedTree | undefined;
   let mcpStaged = false;
   const mcpServers = new Set<ProcessHandle>();
+  const mcpStops = new WeakMap<ProcessHandle, Promise<boolean>>();
   let uncertain = false;
   let allocationStarted = false;
   let hostRecordedSandbox = false;
@@ -259,16 +354,45 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
     );
   }
 
-  /** Workspace MCP servers end before capture or Stop, so none can change the tree after. */
+  /**
+   * Ends a Workspace MCP server's input, so its supervisor stops the server's process group, and
+   * waits at most MCP_STOP_MS for it to exit. Never kills the process: on Modal that stops the
+   * sandbox. Resolves false when the exit was not confirmed in time.
+   */
+  function stopMcpServer(server: ProcessHandle): Promise<boolean> {
+    let stopping = mcpStops.get(server);
+    if (stopping === undefined) {
+      stopping = (async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            (async () => {
+              await server.endInput?.().catch(() => undefined);
+              await server.wait().catch(() => undefined);
+              return true;
+            })(),
+            new Promise<false>((resolve) => {
+              timer = setTimeout(() => resolve(false), MCP_STOP_MS);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      })();
+      mcpStops.set(server, stopping);
+    }
+    return stopping;
+  }
+
+  /**
+   * Workspace MCP servers end before capture or Stop, so none can change the tree after. A server
+   * that did not stop in time leaves the Workspace unsettled, so capture refuses.
+   */
   async function stopMcpServers(): Promise<void> {
     const running = [...mcpServers];
     mcpServers.clear();
-    await Promise.all(
-      running.map(async (server) => {
-        server.kill("SIGKILL");
-        await server.wait().catch(() => undefined);
-      }),
-    );
+    const stopped = await Promise.all(running.map(stopMcpServer));
+    if (stopped.includes(false)) uncertain = true;
   }
 
   async function stop(request: { owner: SandboxOwner; sandboxId?: string }) {
@@ -491,38 +615,55 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
      * Starts one Workspace stdio MCP server in the trusted copy beside the checkout, with only a
      * fixed PATH and LANG: no Worker Host variable and no variable a Harness plan set.
      */
+    /** Stops a server startMcpServer returned; see stopMcpServer. */
+    async stopMcpServer(server: ProcessHandle): Promise<void> {
+      if (!(await stopMcpServer(server))) uncertain = true;
+    },
     async startMcpServer(start: McpServerStart, caller?: AbortSignal): Promise<ProcessHandle> {
       if (phase !== "staged" || !sandbox || !root)
         throw workspaceError("must be staged before an MCP server starts");
       if (!mcpStaged) throw workspaceError("has no trusted MCP copy");
       if (!validMcpStart(start)) throw workspaceError("MCP server launch is invalid");
-      const signal = caller ? AbortSignal.any([lifetime.signal, caller]) : lifetime.signal;
-      signal.throwIfAborted();
+      caller?.throwIfAborted();
+      lifetime.signal.throwIfAborted();
+      // Only the session's end cancels the process; a caller's end stops it through its input.
       const server = await sandbox.environment(root).spawn(
         {
           command: "/usr/bin/env",
-          args: ["-i", `PATH=${MCP_PATH}`, "LANG=C.UTF-8", start.command, ...start.args],
+          args: [
+            "-i",
+            `PATH=${MCP_PATH}`,
+            "LANG=C.UTF-8",
+            "python3",
+            "-I",
+            "-S",
+            "-c",
+            MCP_SUPERVISOR,
+            start.command,
+            ...start.args,
+          ],
           cwd: "mcp",
           environment: {},
           replaceEnvironment: true,
           streamInput: true,
           streamOutput: true,
         },
-        signal,
+        lifetime.signal,
       );
-      if (!server.write || !server.endInput || !server.output) {
-        server.kill("SIGKILL");
-        throw workspaceError("cannot stream MCP server input and output");
-      }
-      if (phase !== "staged") {
-        server.kill("SIGKILL");
-        throw workspaceError("tools were sealed");
-      }
       mcpServers.add(server);
       void server.wait().then(
         () => mcpServers.delete(server),
         () => mcpServers.delete(server),
       );
+      const refuse = async (message: string) => {
+        if (!(await stopMcpServer(server))) uncertain = true;
+        return workspaceError(message);
+      };
+      if (!server.write || !server.endInput || !server.output)
+        throw await refuse("cannot stream MCP server input and output");
+      if (phase !== "staged") throw await refuse("tools were sealed");
+      caller?.addEventListener("abort", () => void stopMcpServer(server), { once: true });
+      if (caller?.aborted) void stopMcpServer(server);
       return server;
     },
     async capture(caller?: AbortSignal): Promise<CapturedTree> {

@@ -20,6 +20,10 @@ pub enum McpCommand {
     /// Log in to an "oauth": true server in the browser (OAuth with PKCE). SuperTag stores the
     /// tokens in this host's MCP login store and the Worker Host refreshes them.
     Login {
+        /// Run the same browser login, store nothing, and print the refresh token once, for
+        /// "oauth": {"refreshTokenEnv": VAR} on a remote Worker Host.
+        #[arg(long)]
+        export: bool,
         name: String,
         /// The Worker Host's owner-only MCP catalog.
         #[arg(long)]
@@ -41,6 +45,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
             Ok(())
         }
         McpCommand::Login {
+            export,
             name,
             mcp_catalog,
             no_browser,
@@ -57,10 +62,15 @@ pub async fn run(command: McpCommand) -> Result<()> {
                     "MCP server {name} is a stdio server, so it has no login; the Worker Host starts it with its env"
                 );
             }
-            let Some(url) = &entry.login_url else {
-                bail!(
+            let url = match (&entry.login_url, export) {
+                (Some(url), _) => url,
+                (None, true) if entry.auth == "oauth refresh token" => &entry.target,
+                (None, true) => bail!(
+                    "MCP server {name} does not use OAuth; --export needs \"oauth\": true or \"oauth\": {{\"refreshTokenEnv\": VAR}}"
+                ),
+                (None, false) => bail!(
                     "MCP server {name} does not use \"oauth\": true, so it has no login to store; declare it with \"oauth\": true to log in"
-                );
+                ),
             };
             let mut write = |text: &str| crate::terminal::write_stderr(text);
             let login = run_mcp_login(
@@ -73,6 +83,25 @@ pub async fn run(command: McpCommand) -> Result<()> {
                 },
             )
             .await?;
+            if export {
+                let variable = format!(
+                    "{}_MCP_REFRESH_TOKEN",
+                    name.to_ascii_uppercase()
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                );
+                let mut exported = serde_json::json!({
+                    "refresh_token": login.refresh_token,
+                    "client_id": login.client_id,
+                });
+                if let Some(secret) = &login.client_secret {
+                    exported["client_secret"] = secret.clone().into();
+                }
+                outln!("{exported}");
+                outln!(
+                    "Store this value as a secret on the remote Worker Host, such as {variable}, and give the server \"oauth\": {{\"refreshTokenEnv\": \"{variable}\"}} in its MCP catalog. It is not stored here and is not shown again."
+                );
+                return Ok(());
+            }
             logins.store(&name, &login)?;
             outln!(
                 "Logged in to MCP server {name}. The Worker Host refreshes the login on this host."

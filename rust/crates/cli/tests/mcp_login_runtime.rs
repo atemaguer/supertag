@@ -367,3 +367,120 @@ async fn login_runs_pkce_with_registration_and_stores_only_the_login() -> Result
     assert!(!listed.contains(ACCESS) && !listed.contains(REFRESH));
     Ok(())
 }
+
+/// Follows the authorization URL a running `mcp login` prints, then returns its output.
+async fn complete_login(mut login: Command, origin: &str) -> Result<(bool, String, String)> {
+    let mut child = login
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stderr = BufReader::new(child.stderr.take().context("login stderr")?);
+    let mut printed = String::new();
+    let authorize = loop {
+        let mut line = String::new();
+        ensure!(
+            timeout(Duration::from_secs(20), stderr.read_line(&mut line)).await?? > 0,
+            "login exited before printing the authorization URL: {printed}"
+        );
+        printed.push_str(&line);
+        if let Some(found) = line.trim().strip_prefix(&format!("{origin}/authorize?")) {
+            break format!("{origin}/authorize?{found}");
+        }
+    };
+    let finished = reqwest::Client::new().get(&authorize).send().await?;
+    assert_eq!(finished.status(), reqwest::StatusCode::OK);
+    let status = timeout(Duration::from_secs(20), child.wait()).await??;
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .context("login stdout")?
+        .read_to_string(&mut stdout)
+        .await?;
+    stderr.read_to_string(&mut printed).await?;
+    Ok((status.success(), stdout, printed))
+}
+
+#[tokio::test]
+async fn export_prints_the_refresh_token_once_and_stores_nothing() -> Result<()> {
+    let (origin, _authorization) = authorization_server().await?;
+    let directory = tempfile::tempdir()?;
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state)?;
+    let catalog = directory.path().join("catalog.json");
+    private_file(
+        &catalog,
+        &json!({"version":1,"servers":[
+            {"name":"docs","url":format!("{origin}/mcp"),"oauth":{"refreshTokenEnv":"DOCS_MCP_REFRESH_TOKEN"}},
+            {"name":"plain","url":"https://plain.example.test/mcp","headerEnv":{"Authorization":"PLAIN_AUTH"}}
+        ]})
+        .to_string(),
+    )?;
+    let catalog_arg = catalog.to_str().context("catalog path")?;
+    let (ok, listed, _) = output(command(
+        &state,
+        &["mcp", "list", "--mcp-catalog", catalog_arg],
+    ))
+    .await?;
+    ensure!(ok, "mcp list failed");
+    let docs = listed
+        .lines()
+        .find(|line| line.starts_with("docs"))
+        .context("docs row")?;
+    assert!(
+        docs.contains("oauth refresh token") && docs.ends_with("missing: DOCS_MCP_REFRESH_TOKEN"),
+        "{listed}"
+    );
+    // A refresh-token server keeps no login here, and only an OAuth server can be exported.
+    for (server, export, message) in [
+        ("docs", false, "does not use \"oauth\": true"),
+        ("plain", true, "--export needs \"oauth\": true"),
+    ] {
+        let mut args = vec![
+            "mcp",
+            "login",
+            server,
+            "--mcp-catalog",
+            catalog_arg,
+            "--no-browser",
+        ];
+        if export {
+            args.push("--export");
+        }
+        let (ok, _, stderr) = output(command(&state, &args)).await?;
+        assert!(!ok && stderr.contains(message), "{server}: {stderr}");
+    }
+    let (ok, stdout, stderr) = complete_login(
+        command(
+            &state,
+            &[
+                "mcp",
+                "login",
+                "docs",
+                "--mcp-catalog",
+                catalog_arg,
+                "--no-browser",
+                "--export",
+            ],
+        ),
+        &origin,
+    )
+    .await?;
+    ensure!(ok, "export failed: {stderr}");
+    let mut lines = stdout.lines();
+    let exported: Value = serde_json::from_str(lines.next().context("exported value")?)?;
+    // The value names the client, never the token endpoint, which the remote host pins itself.
+    assert_eq!(
+        exported,
+        json!({"refresh_token": REFRESH, "client_id": "fixture-client"})
+    );
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.contains("\"refreshTokenEnv\": \"DOCS_MCP_REFRESH_TOKEN\"")),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(ACCESS) && !stderr.contains(ACCESS) && !stderr.contains(REFRESH));
+    assert!(!state.join("mcp-logins/docs.json").exists());
+    Ok(())
+}

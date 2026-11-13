@@ -8,7 +8,10 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
-use super::oauth::McpLoginStore;
+use super::{
+    auth::{self, AuthConfig, ClientCredentialsConfig, GithubAppConfig, MintedAuth, OAuthConfig},
+    oauth::McpLoginStore,
+};
 use prost::Message;
 use reqwest::{
     Url,
@@ -53,6 +56,11 @@ pub(super) struct HttpServer {
     pub(super) headers: HeaderMap,
     /// Whether the Authorization header comes from this host's `supertag mcp login`.
     pub(super) oauth: bool,
+    /// Headers minted for each Attempt: client credentials, a GitHub App, a helper, or a
+    /// refresh token from a Worker Host variable.
+    pub(super) minted: Option<std::sync::Arc<MintedAuth>>,
+    /// GitHub's REST API, for App installation tokens.
+    pub(super) github_api: Box<Url>,
 }
 
 /// A server the Worker Host launches for each Task Attempt. Only `env`, resolved from the
@@ -94,9 +102,12 @@ fn decode(bytes: &[u8]) -> Result<Config> {
     Ok(config)
 }
 
-/// The official HTTP servers SuperTag knows, as in the TypeScript host service. A preset fixes
+/// The official servers SuperTag knows, as in the TypeScript host service. An HTTP preset fixes
 /// the URL its resource mapping was written for, so Permission Set grants on its tools can name
-/// a `resource`. The Teams server's URL names the Microsoft tenant.
+/// a `resource`. The Teams server's URL names the Microsoft tenant. The `lark` preset is a stdio
+/// server: it runs `lark-mcp` from the official `@larksuiteoapi/lark-mcp` package on the Worker
+/// Host's PATH, with the App credentials the server's `env` names (`APP_ID`, `APP_SECRET`, and
+/// optionally `LARK_DOMAIN`).
 fn apply_preset(server: &mut ServerConfig) -> Result<()> {
     let Some(preset) = server.preset.as_deref() else {
         ensure!(
@@ -107,8 +118,13 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
         return Ok(());
     };
     ensure!(
-        server.url.is_none() && server.command.is_none(),
+        server.url.is_none(),
         "MCP server {}: url must not be set with a preset; the {preset} preset uses its official URL and resource mapping. For another server, drop preset and give url",
+        server.name
+    );
+    ensure!(
+        server.command.is_none(),
+        "MCP server {}: command must not be set with a preset; the {preset} preset runs its official server. For another server, drop preset and give command",
         server.name
     );
     ensure!(
@@ -130,6 +146,45 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
             .collect(),
         when: None,
     };
+    if preset == "lark" {
+        ensure!(
+            server.tenant_id.is_none(),
+            "MCP server {}: tenantId belongs only with preset teams",
+            server.name
+        );
+        server.command = Some(
+            ["lark-mcp", "mcp", "--tool-name-case", "snake"]
+                .map(str::to_owned)
+                .to_vec(),
+        );
+        // Only a chat recipient is checkable; a user or email recipient names no chat resource.
+        let chat = |argument: &str, equals: &str, path: &str| ResourceRule {
+            prefix: "chat:".into(),
+            separator: String::new(),
+            components: vec![Component {
+                arguments: vec![path.into()],
+            }],
+            when: Some(Condition {
+                argument: argument.into(),
+                equals: equals.into(),
+            }),
+        };
+        server.resources.tools = BTreeMap::from([
+            (
+                "im_v1_message_list".to_owned(),
+                vec![chat(
+                    "params.container_id_type",
+                    "chat",
+                    "params.container_id",
+                )],
+            ),
+            (
+                "im_v1_message_create".to_owned(),
+                vec![chat("params.receive_id_type", "chat_id", "data.receive_id")],
+            ),
+        ]);
+        return Ok(());
+    }
     let (url, tools, rule) = match preset {
         "github" => (
             "https://api.githubcopilot.com/mcp/".to_owned(),
@@ -193,7 +248,7 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
             )
         }
         _ => anyhow::bail!(
-            "MCP server {}: preset must be github, slack, linear, or teams",
+            "MCP server {}: preset must be github, slack, linear, teams, or lark",
             server.name
         ),
     };
@@ -243,14 +298,22 @@ fn read_private(path: &Path) -> Result<Vec<u8>> {
 pub(super) struct ServerConfig {
     pub(super) name: String,
     pub(super) url: Option<String>,
-    /// An official HTTP server SuperTag knows: `github`, `slack`, `linear`, or `teams`.
+    /// An official server SuperTag knows: HTTP `github`, `slack`, `linear`, or `teams`, or
+    /// stdio `lark`.
     pub(super) preset: Option<String>,
     /// The Microsoft Entra tenant, for the `teams` preset only.
     pub(super) tenant_id: Option<String>,
     #[serde(default)]
     pub(super) header_env: BTreeMap<String, String>,
+    /// `true` for this host's `supertag mcp login`, or `{"refreshTokenEnv": VAR}`.
     #[serde(default)]
-    pub(super) oauth: bool,
+    pub(super) oauth: OAuthConfig,
+    /// An OAuth client-credentials grant with a client secret or a JWT client assertion.
+    pub(super) client_credentials: Option<ClientCredentialsConfig>,
+    /// A GitHub App installation token.
+    pub(super) github_app: Option<GithubAppConfig>,
+    /// A host command that prints a JSON object of request headers.
+    pub(super) helper: Option<Vec<String>>,
     /// A stdio server: the executable and its arguments.
     pub(super) command: Option<Vec<String>>,
     /// A stdio server's environment: each variable it receives, mapped to the Worker Host
@@ -259,6 +322,18 @@ pub(super) struct ServerConfig {
     pub(super) env: BTreeMap<String, String>,
     #[serde(default)]
     resources: ResourceMapping,
+}
+
+impl ServerConfig {
+    pub(super) fn auth(&self) -> AuthConfig<'_> {
+        AuthConfig {
+            name: &self.name,
+            oauth: &self.oauth,
+            client_credentials: self.client_credentials.as_ref(),
+            github_app: self.github_app.as_ref(),
+            helper: self.helper.as_deref(),
+        }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -316,7 +391,12 @@ impl McpCatalog {
                 let sources: Vec<_> = if server.command.is_some() {
                     server.env.values().cloned().collect()
                 } else {
-                    server.header_env.values().cloned().collect()
+                    server
+                        .header_env
+                        .values()
+                        .cloned()
+                        .chain(server.auth().variables())
+                        .collect()
                 };
                 let missing = sources
                     .into_iter()
@@ -333,15 +413,15 @@ impl McpCatalog {
                         if server.env.is_empty() { "none" } else { "env" },
                         None,
                     ),
-                    (Some(url), None) if server.oauth => {
+                    (Some(url), None) if server.auth().oauth_login() => {
                         (url.clone(), "oauth login", Some(url.clone()))
                     }
                     (Some(url), None) => (
                         url.clone(),
-                        if server.header_env.is_empty() {
-                            "none"
-                        } else {
-                            "headers"
+                        match server.auth().label() {
+                            Some(label) => label,
+                            None if server.header_env.is_empty() => "none",
+                            None => "headers",
                         },
                         None,
                     ),
@@ -441,7 +521,7 @@ impl McpCatalog {
                 }
                 (None, Some(command)) => {
                     ensure!(
-                        server.header_env.is_empty() && !server.oauth,
+                        server.header_env.is_empty() && !server.auth().any(),
                         "MCP server {}: a stdio server has no HTTP authentication; pass its credentials in env",
                         server.name
                     );
@@ -452,6 +532,7 @@ impl McpCatalog {
                     server.name
                 ),
             };
+            let auth_identity = server.auth().identity(&environment);
             let resources: BTreeMap<_, Vec<McpResourceRule>> = server
                 .resources
                 .tools
@@ -492,6 +573,11 @@ impl McpCatalog {
                     if http.oauth {
                         identity.update(b"\0oauth-login\0");
                         identity.update(server.name.as_bytes());
+                    }
+                    // A minted form's binding names its settings and credential digests.
+                    if http.minted.is_some() {
+                        identity.update(b"\0minted-auth\0");
+                        identity.update(serde_json::to_vec(&auth_identity)?);
                     }
                 }
                 Transport::Stdio(stdio) => {
@@ -581,8 +667,8 @@ fn http_server(
             "invalid MCP request header binding"
         );
         ensure!(
-            !(server.oauth && name == reqwest::header::AUTHORIZATION),
-            "MCP server {}: with oauth, its login supplies the Authorization header",
+            !(server.auth().any() && name == reqwest::header::AUTHORIZATION),
+            "MCP server {}: its oauth, clientCredentials, githubApp, or helper supplies the Authorization header",
             server.name
         );
         let value = environment(variable)
@@ -607,11 +693,14 @@ fn http_server(
         }
         secrets.insert(value);
     }
+    let minted = auth::resolve(&server.auth(), url, environment, secrets)?.map(std::sync::Arc::new);
     Ok(HttpServer {
         name: server.name.clone(),
         endpoint,
         headers,
-        oauth: server.oauth,
+        oauth: server.auth().oauth_login(),
+        minted,
+        github_api: Box::new(Url::parse(auth::GITHUB_API)?),
     })
 }
 
@@ -865,14 +954,18 @@ mod tests {
 
     #[test]
     fn presets_use_the_official_url_and_resource_mapping() {
-        let environment =
-            |name: &str| (name == "GITHUB_MCP_AUTH").then(|| "Bearer preset-secret-value".into());
+        let environment = |name: &str| match name {
+            "GITHUB_MCP_AUTH" => Some("Bearer preset-secret-value".into()),
+            "LARK_APP_ID" | "LARK_APP_SECRET" => Some(format!("{name}-fixture-value")),
+            _ => None,
+        };
         let catalog = McpCatalog::parse(
             json!({"version":1,"servers":[
                 {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}},
                 {"name":"slack","preset":"slack"},
                 {"name":"linear","preset":"linear"},
                 {"name":"teams","preset":"teams","tenantId":"contoso.onmicrosoft.com"},
+                {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}},
                 {"name":"custom","url":"https://mcp.example.com/mcp"}
             ]})
             .to_string()
@@ -950,6 +1043,39 @@ mod tests {
             .unwrap();
         assert_eq!(github.mapped_tools.len(), 7);
         assert!(catalog.servers["custom"].resources.is_empty());
+        // The Lark preset is a stdio server running the official package's lark-mcp, with the
+        // App credentials its env names, and chat resources only for chat recipients.
+        let Transport::Stdio(lark) = &catalog.servers["lark"].transport else {
+            panic!("stdio server expected");
+        };
+        assert_eq!(
+            lark.command,
+            ["lark-mcp", "mcp", "--tool-name-case", "snake"]
+        );
+        assert_eq!(
+            lark.env.keys().collect::<Vec<_>>(),
+            ["APP_ID", "APP_SECRET"]
+        );
+        assert_eq!(
+            tools("lark"),
+            ["im_v1_message_create", "im_v1_message_list"]
+        );
+        let rule = &catalog.servers["lark"].resources["im_v1_message_create"][0];
+        assert_eq!(rule.prefix, "chat:");
+        assert_eq!(rule.components[0].arguments, ["data.receive_id"]);
+        let when = rule.when.as_ref().unwrap();
+        assert_eq!(
+            (when.argument.as_str(), when.equals.as_str()),
+            ("params.receive_id_type", "chat_id")
+        );
+        let when = catalog.servers["lark"].resources["im_v1_message_list"][0]
+            .when
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            (when.argument.as_str(), when.equals.as_str()),
+            ("params.container_id_type", "chat")
+        );
         for (server, message) in [
             (
                 json!({"name":"github","preset":"github","url":"https://example.com/mcp"}),
@@ -976,6 +1102,18 @@ mod tests {
                 "belongs only with preset teams",
             ),
             (json!({"name":"x","preset":"jira"}), "preset must be github"),
+            (
+                json!({"name":"lark","preset":"lark","command":["node","lark.js"]}),
+                "command must not be set with a preset",
+            ),
+            (
+                json!({"name":"lark","preset":"lark","url":"https://example.com/mcp"}),
+                "url must not be set with a preset",
+            ),
+            (
+                json!({"name":"lark","preset":"lark","headerEnv":{"X":"LARK_X"}}),
+                "a stdio server has no HTTP authentication",
+            ),
         ] {
             let error = McpCatalog::parse(
                 json!({"version":1,"servers":[server]})

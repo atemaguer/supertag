@@ -182,7 +182,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           await endInput.call(server);
         })();
         // Never wait on the Host's input once the server ended: ending the call releases it.
-        forwarded.catch(() => server.kill("SIGKILL"));
+        forwarded.catch(() => session.stopMcpServer(server));
         const encoder = new TextEncoder();
         try {
           for await (const chunk of output) {
@@ -191,8 +191,8 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
               yield { stdout: encoder.encode(chunk.text) };
           }
         } finally {
-          server.kill("SIGKILL");
-          await server.wait().catch(() => undefined);
+          // Ends its input, so its supervisor stops its process group, never the sandbox.
+          await session.stopMcpServer(server);
         }
       },
       async stop(request) {

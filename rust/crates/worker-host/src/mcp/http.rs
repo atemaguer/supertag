@@ -30,6 +30,8 @@ pub(super) struct Session {
     pub(super) unconfirmed_call: bool,
     login: Option<McpLoginStore>,
     access_token: Option<header::HeaderValue>,
+    /// Headers a minted form supplied for this Attempt.
+    minted: Box<header::HeaderMap>,
     /// Every access token this session sent; all are withheld from Task-visible output.
     pub(super) tokens: Vec<String>,
 }
@@ -55,8 +57,37 @@ impl Session {
             unconfirmed_call: false,
             login,
             access_token: None,
+            minted: Box::default(),
             tokens: Vec::new(),
         }
+    }
+
+    /// Whether this server's credentials can be fetched again after a refusal.
+    fn renewable(&self) -> bool {
+        self.login.is_some() || self.server.minted.is_some()
+    }
+
+    /// Mints this server's headers: again when the server refused `rejected`.
+    async fn mint(&mut self, rejected: Option<&str>) -> Result<(), Failure> {
+        let Some(minted) = self.server.minted.clone() else {
+            return Ok(());
+        };
+        let minted = minted
+            .headers(
+                &self.client,
+                &self.server.endpoint,
+                &self.server.github_api,
+                rejected,
+            )
+            .await
+            .map_err(|_| Failure::Unavailable)?;
+        for secret in minted.secrets {
+            if !secret.is_empty() && !self.tokens.contains(&secret) {
+                self.tokens.push(secret);
+            }
+        }
+        *self.minted = minted.headers;
+        Ok(())
     }
 
     /// Takes the access token from this host's login, refreshing it when it expires or when
@@ -107,6 +138,7 @@ impl Session {
             .client
             .request(method, self.server.endpoint.clone())
             .headers(self.server.headers.clone())
+            .headers((*self.minted).clone())
             .header(header::ACCEPT, "application/json, text/event-stream")
             .header(PROTOCOL, self.version);
         if let Some(token) = &self.access_token {
@@ -122,6 +154,7 @@ impl Session {
         if self.server.oauth {
             self.authorize(None).await?;
         }
+        self.mint(None).await?;
         let initialized = self.rpc("initialize", json!({
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
@@ -163,10 +196,15 @@ impl Session {
         if matches!(
             response.status(),
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-        ) && self.login.is_some()
+        ) && self.renewable()
         {
-            let rejected = self.access_token_text();
-            self.authorize(rejected.as_deref()).await?;
+            if self.login.is_some() {
+                let rejected = self.access_token_text();
+                self.authorize(rejected.as_deref()).await?;
+            } else {
+                let rejected = self.minted_token_text();
+                self.mint(Some(&rejected)).await?;
+            }
             response = self
                 .request(Method::POST)
                 .json(&body)
@@ -214,6 +252,16 @@ impl Session {
             .ok()?
             .strip_prefix("Bearer ")
             .map(str::to_owned)
+    }
+
+    /// The bearer token a minted form last supplied, or empty for other headers.
+    fn minted_token_text(&self) -> String {
+        self.minted
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .unwrap_or_default()
+            .to_owned()
     }
 
     pub(super) fn session_id(&self) -> Option<&str> {

@@ -674,6 +674,105 @@ it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, w
   }
 }, 20_000);
 
+/**
+ * A Workspace MCP server that ignores SIGTERM and forks a child that ignores it too and holds
+ * the server's output open. Returns the server's start and the child's pid, once written.
+ */
+async function forkingMcpServer() {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-mcp-fork-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const pidFile = join(directory, "child.pid");
+  const script = `trap '' TERM; sh -c 'trap "" TERM; echo $$ > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60' "${pidFile}" & echo ready; while :; do sleep 1; done`;
+  const childPid = async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const text = await readFile(pidFile, "utf8").catch(() => "");
+      if (text.trim()) return Number(text.trim());
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("the forked child never started");
+  };
+  const exited = async (pid: number) => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return false;
+  };
+  return { start: { name: "tools", command: "sh", args: ["-c", script] }, childPid, exited };
+}
+
+it("stops a Workspace MCP server's process group before capture, even children ignoring SIGTERM", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const server = forkingMcpServer();
+  const { start, childPid, exited } = await server;
+  const process_ = await session.startMcpServer(start);
+  const pid = await childPid();
+  const started = Date.now();
+  const captured = await session.capture();
+  // Half a second after its input ends, SIGTERM; two seconds later, SIGKILL to the group.
+  expect(Date.now() - started).toBeLessThan(4_500);
+  expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  expect(await exited(pid)).toBe(true);
+  await expect(process_.wait()).resolves.toBeDefined();
+}, 20_000);
+
+it("stops a Workspace MCP server that is not reading its input before capture", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const server = await session.startMcpServer({
+    name: "tools",
+    command: "sh",
+    args: ["-c", "exec sleep 60"],
+  });
+  // More input than a pipe holds, which a server busy elsewhere never takes.
+  await server.write?.(new Uint8Array(256 * 1024));
+  const started = Date.now();
+  const captured = await session.capture();
+  expect(Date.now() - started).toBeLessThan(4_500);
+  expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  await expect(server.wait()).resolves.toBeDefined();
+}, 20_000);
+
+it("refuses capture rather than wait for an MCP server descendant that left its group", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const directory = await mkdtemp(join(tmpdir(), "supertag-mcp-escape-"));
+  const pidFile = join(directory, "escaped.pid");
+  cleanups.push(async () => {
+    const pid = Number((await readFile(pidFile, "utf8").catch(() => "")).trim());
+    if (pid > 0) process.kill(pid, "SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+  });
+  // The descendant starts its own session, so no process group signal reaches it, and it
+  // holds the server's output open.
+  const escaping = `import os, sys; os.setsid(); open(sys.argv[1], "w").write(str(os.getpid())); os.execvp("sleep", ["sleep", "60"])`;
+  await session.startMcpServer({
+    name: "tools",
+    command: "sh",
+    args: ["-c", `python3 -c '${escaping}' "${pidFile}" & exec sleep 60`],
+  });
+  for (
+    let attempt = 0;
+    attempt < 200 && !(await readFile(pidFile, "utf8").catch(() => ""));
+    attempt++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  const started = Date.now();
+  await expect(session.capture()).rejects.toThrow(/could not be captured/u);
+  expect(Date.now() - started).toBeLessThan(7_000);
+}, 20_000);
+
 it("refuses a Workspace MCP server without a trusted copy", async () => {
   const { session } = await fixture();
   const { header, bytes } = await bundle();
