@@ -78,7 +78,7 @@ Recorded on November 12, 2026, macOS ARM64, at branch `codex/rust-capability-led
 | --- | --- | --- | --- | --- |
 | Fresh schema on both backends, reopen, refuse legacy or unknown schemas | `packages/store/migration-readiness.test.ts`, `tests/control-plane-schema-readiness.test.ts`, `tests/migration-cli.test.ts` | `store_contract.rs` `sqlite_store_contract_and_reopen`, `postgres_store_contract_and_reopen`, `refuses_existing_legacy_sqlite_database`, `refuses_unknown_schema_without_modifying_it` | Both DBs | Legacy refusal is tested on SQLite only |
 | Old-data migration and `supertag migrate database` | `tests/migration-cli.test.ts`, `packages/store/inbound-event-key-upgrade.test.ts` | — | Dropped | Approved: fresh Rust state, archive old data, no importer (design §1). Rust-to-Rust upgrades are tested by `work_session_migration_contract.rs` (both) |
-| Transaction rollback and uniqueness | `packages/store/dialect-transaction.test.ts`, `tests/storage-durability.test.ts` | `store_contract.rs` (both); every `*_contract.rs` writes through the same store | Partial | No dedicated rollback/fault-injection test; durability under `fsync` settings is untested (inventory gap 2) |
+| Transaction rollback and uniqueness | `packages/store/dialect-transaction.test.ts`, `tests/storage-durability.test.ts` | `store_contract.rs` (both); every `*_contract.rs` writes through the same store; `crash_durability.rs` `*_before_commit` cases kill the Control Plane inside open admission, claim, start, event, finish, and reply transactions (both, and the durable PostgreSQL lane) | Partial | Rollback is proven only for the transactions the crash matrix interrupts; there is no general fault-injection test for other writes |
 | Ordered Task events with stable sequences | `packages/store/task-event-sequence.test.ts` | `store_contract.rs` (`append_event`, `list_events`); `authority_contract.rs` (both); `split_runtime.rs` (events `[1, 2]`, cursor tail) **(read)** | Both DBs | — |
 | Idempotent admission by operation ID; conflicting reuse rejected | `packages/store/inbound-execution.test.ts`, `tests/event-ingestion.test.ts` | `split_runtime.rs` (retry equality, `ALREADY_EXISTS` on different intent) **(read)**; `connector_contract.rs` (`accept_event`, both); baseline `admission-retry` via Rust driver | Both DBs | — |
 | Optimistic concurrency on resources (revision fences) | `packages/store/resource-change.test.ts`, `tests/resource-list-version.test.ts`, `tests/field-management.test.ts` | `policy_contract.rs` (stale revision → conflict, both) **(read)**; `objectives_contract.rs` (stale revision, both) **(read, lines 440–546)**; `cli/tests/resource_manifest_runtime.rs` | Both DBs | — |
@@ -122,7 +122,7 @@ Recorded on November 12, 2026, macOS ARM64, at branch `codex/rust-capability-led
 | Capability | TypeScript tests | Rust tests | Status | Gap |
 | --- | --- | --- | --- | --- |
 | Admission survives Control Plane and Gateway hard stop | `tests/control-plane-durable-lifecycle.test.ts`, `packages/control-plane/durable-execution.test.ts` | `split_runtime.rs` `sqlite_/postgres_separate_processes_preserve_work_and_cancel_execution` **(read)**; baseline `admission-retry` (both) | Both DBs | — |
-| Host journal: no re-execution after restart; cursor replay | `packages/runtime/sdk/durable-worklet.test.ts`, `tests/attempt-journal-ownership.test.ts`, `tests/native-agent-event-replay.test.ts` | `worker-host/src/journal.rs` 3 unit tests; `split_runtime.rs` `killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning`; baseline `durable-event-replay` via Rust driver | SQLite only | Process tests use SQLite for the Control Plane |
+| Host journal: no re-execution after restart; cursor replay | `packages/runtime/sdk/durable-worklet.test.ts`, `tests/attempt-journal-ownership.test.ts`, `tests/native-agent-event-replay.test.ts` | `worker-host/src/journal.rs` 3 unit tests; `split_runtime.rs` `killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning`; `crash_durability.rs` `worker_host_*` cases (claim, start, execute, event, finish journal stages; both); baseline `durable-event-replay` via Rust driver | Both DBs | — |
 | Attempt generation fencing, lease expiry, uncertain Attempts, audited resolution | `tests/uncertain-attempt.test.ts`, `tests/ps-uncertain-attempts.test.ts`, `tests/recover-worklet-host.test.ts`, `tests/outsider-worklet-recovery.test.ts`, `tests/removed-host.test.ts` | `authority_contract.rs` (both); `split_runtime.rs` `gateway_partition_expires_execution_and_requires_audited_retry_before_replay` (ignored by default: 30-second deadline) | Both DBs | — |
 | Cancellation reaps the adapter and its descendants | `tests/worklet-cleanup-recovery.test.ts`, `packages/runtime/sdk/process-supervision.test.ts`, `tests/durable-cleanup-unknown.test.ts` | `split_runtime.rs` (cancel path) **(read)**; `cli/tests/adapter_guardian.rs` 5 tests; `opencode_runtime.rs` `opencode_cancellation_reaps_native_process`; `cursor_runtime.rs` `cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint` | Both DBs | — |
 | Session checkpoints and continuation across hosts | `tests/session-persistence-grpc.test.ts`, `tests/session-persistence-http.test.ts`, `tests/session-state-store.test.ts`, `tests/session-continuity.test.ts` | `checkpoint_contract.rs` (both); `native_codex.rs` `continuation_restores_native_history_in_a_new_home_and_reapplies_current_permissions`; `language_runtime.rs` `python_agents_sdk_restores_session_on_a_fresh_host`, `claude_code_sdk_restores_session_on_a_fresh_host` (ignored without fixtures) | Both DBs | — |
@@ -130,7 +130,16 @@ Recorded on November 12, 2026, macOS ARM64, at branch `codex/rust-capability-led
 | Task execution report recovery | `tests/task-execution-report-recovery.test.ts`, `packages/control-plane/task-execution-report.test.ts` | `reply_recovery_contract.rs` (both); `split_runtime.rs` `local_shutdown_replays_finish_before_next_session_task_without_rerunning_adapter` | Both DBs | — |
 | Observer disconnect does not cancel execution | `tests/durable-control-plane-observation.test.ts` | `operator_runtime.rs` `watch_replays_private_conversations_after_services_restart` | Partial | No test disconnects a watcher mid-execution and checks the Task continues |
 | Python durable Worker | `tests/e2e/python-durable-worker.test.ts`, `sdks/python/tests/test_durable.py` | `language_runtime.rs` `python_agents_sdk_restores_session_on_a_fresh_host` | Changed | Approved: Python keeps adapters, not a full Worker runtime (design §1) |
-| Hard crash at each durable boundary with production durability settings | (inventory gap 2) | None | Open | Rust tests use `SIGKILL` between operations, not at commit boundaries; PostgreSQL lanes use test durability settings |
+| Hard crash at each durable boundary with production durability settings | (inventory gap 2) | `cli/tests/crash_durability.rs`: 44 cases in `sqlite::` and the same 44 in `postgres::`. A test-only crash point (`supertag-protocol` feature `crash-points`, enabled by `test-fixtures`) makes the Control Plane, Gateway, Worker Host, or fixture adapter `SIGKILL` itself before and after admission (operator and Slack), claim, start, event append, finish, reply claim, provider send, and reply settlement. Each case restarts only the killed process and asserts one Task per accepted request (redelivery resolves to it), at most one adapter launch, no lost terminal outcome, and at most one provider post with the reply delivered with its receipt or settled uncertain. Durable lane: `rust/scripts/durable-postgres-crash-lane.sh` and the `crash-durability` job in `.github/workflows/rust-port.yml` run the PostgreSQL cases with `fsync`, `synchronous_commit`, and `full_page_writes` on, and every case refuses a server without them | Both DBs | Process kill only: no power-loss or OS-crash simulation, so `fsync` ordering of the host and delivery journals is not exercised. Recorded outcomes: a Control Plane or Gateway crash during an event append fails the Task, because the adapter's publish fails and the fixture exits; a host killed after it journals `Executing` restarts fail-closed and leaves the Task running for operator recovery; an adapter killed after proposing a result fails the Task, because the host accepts results only from a clean adapter exit |
+
+**Running the crash matrix.** SQLite cases run by default:
+`cargo test -p supertag-cli --features test-fixtures --test crash_durability sqlite::`. The fast
+PostgreSQL run adds `-- --ignored postgres::` with `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` set. For
+the durable lane, run `sh rust/scripts/durable-postgres-crash-lane.sh`. Without a URL file it
+creates a disposable trust-auth cluster with `initdb` and `pg_ctl` on `127.0.0.1:55439` (override
+with `SUPERTAG_DURABLE_POSTGRES_PORT`), turns the three durability settings on, runs the
+PostgreSQL cases, and removes the cluster. With a URL file it uses that server, and each case
+fails unless the server reports all three settings on.
 
 ## 6. gRPC/protobuf interoperability and transport behavior
 
@@ -235,8 +244,13 @@ Priority reflects risk to accepted work and to the cutover, not effort.
      supertag_v2_manifest_relationships already exists".
 
    Fix both fixtures before counting MCP approvals or Volume copies as covered.
-2. **Hard-crash durability** at admission, assignment, receipt, terminal outcome, and delivery
-   boundaries, plus a PostgreSQL lane with production durability settings (area 5).
+2. **Hard-crash durability.** Covered by `crash_durability.rs` and the durable PostgreSQL lane
+   (area 5). The matrix found and fixed one bug: a peer killed mid-call surfaced as gRPC `Unknown`
+   ("transport error"), which the Worker Host and the Gateway's reply delivery treated as permanent.
+   The host exited and left its Task running until the lease expired as uncertain, and the whole
+   Gateway process exited from its Slack delivery loop. Both now treat an interrupted transport as retryable, and the
+   Gateway reports an interrupted Control Plane call as `Unavailable`. Remaining: process kill does
+   not simulate power loss.
 3. **Workspace mounts** (area 9): finish and verify `codex/rust-workspace-volume-mounts`.
 4. **Operator identity and access**: operator token issuance and revocation, general audit log
    (area 1).
