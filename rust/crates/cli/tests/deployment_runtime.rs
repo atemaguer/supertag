@@ -531,12 +531,14 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ))
     .await?;
     assert!(
-        refused.contains("must be an https:// or wss:// origin"),
+        refused
+            .contains("must be an https:// origin without credentials, path, query, or fragment"),
         "{refused}"
     );
     let refused = fail(verify(&format!("{public_url}/path"), &trusted, &[])).await?;
     assert!(
-        refused.contains("must be an https:// or wss:// origin"),
+        refused
+            .contains("must be an https:// origin without credentials, path, query, or fragment"),
         "{refused}"
     );
     let refused = fail(verify(&public_url, &trusted, &[])).await?;
@@ -1063,10 +1065,11 @@ async fn deploys_and_verifies_behind_an_http_only_edge(database: String) -> Resu
         &trusted,
     ))
     .await?;
-    // A tunnel URL with a path is not an origin.
-    let refused = fail(verify(&format!("{public}/tunnel"), &trusted)).await?;
+    // A tunnel may sit under a path; this edge forwards upgrades on any path. A query is refused.
+    succeed(verify(&format!("{public}/tunnel"), &trusted)).await?;
+    let refused = fail(verify(&format!("{public}/?token=secret"), &trusted)).await?;
     assert!(
-        refused.contains("must be an https:// or wss:// origin"),
+        refused.contains("or a wss:// URL without credentials, query, or fragment"),
         "{refused}"
     );
     control.start_kill()?;
