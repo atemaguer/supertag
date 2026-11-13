@@ -13,12 +13,16 @@ pub enum TeamCommand {
     /// Create a Team from existing Tags.
     Create {
         team_id: String,
+        /// Display name. Defaults to the Team ID.
         #[arg(long)]
         name: Option<String>,
+        /// Member Tag ID. Repeat for each member.
         #[arg(long, required = true)]
         member: Vec<String>,
+        /// Most Tasks the Team runs at once. Omit for no Team limit.
         #[arg(long)]
         max_concurrency: Option<u32>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -26,42 +30,55 @@ pub enum TeamCommand {
     Get { team: String },
     /// List Teams, optionally for one member Tag.
     List {
+        /// Only Teams this Tag belongs to.
         #[arg(long, default_value = "")]
         member: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
     /// Replace the selected fields of a Team.
     Update {
         team: String,
+        /// New display name.
         #[arg(long)]
         name: Option<String>,
+        /// Replace the members with these Tag IDs. Repeat for each member.
         #[arg(long)]
         member: Vec<String>,
+        /// Most Tasks the Team runs at once.
         #[arg(long, conflicts_with = "clear_concurrency", value_parser = clap::value_parser!(u32).range(1..=1000))]
         max_concurrency: Option<u32>,
+        /// Remove the Team concurrency limit.
         #[arg(long)]
         clear_concurrency: bool,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
     /// Delete a Team and its Workstream after its Objectives close.
     Delete {
         team: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
     /// Read the newest Workstream posts or continue from a sequence.
     Posts {
         team: String,
+        /// Continue after this post sequence instead of reading the newest posts.
         #[arg(long)]
         after_sequence: Option<u64>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 16)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -195,7 +212,7 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
             json!({ "posts": page.posts.into_iter().map(post_json).collect::<Vec<_>>(), "next_cursor": page.next_cursor })
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

@@ -497,6 +497,7 @@ mod tests {
         let node = install.node(
             "test \"$#\" = 1 && test \"$1\" = --version && test -z \"$NODE_OPTIONS\" && printf 'v22.13.0\\n'",
         );
-        check_node_version(&node, Duration::from_secs(1)).unwrap();
+        // Generous: a parallel test run can delay the fake shell well past a second.
+        check_node_version(&node, Duration::from_secs(10)).unwrap();
     }
 }

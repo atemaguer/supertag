@@ -510,7 +510,9 @@ impl OperatorNotifier {
                 Err(error) => Err(error),
             }
             .unwrap_or_else(|error| {
-                eprintln!("operator notification delivery paused: {error:#}");
+                supertag_protocol::terminal_text::warn(&format!(
+                    "operator notification delivery paused: {error:#}"
+                ));
                 false
             });
             if !delivered {

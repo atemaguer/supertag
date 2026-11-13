@@ -9,8 +9,10 @@ use crate::{Connection, connect_operator, request};
 pub enum HostCommand {
     /// List Worker Hosts and their readiness.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -55,7 +57,7 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
                 .into_inner(),
         ),
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

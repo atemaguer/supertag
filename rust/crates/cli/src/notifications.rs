@@ -43,7 +43,7 @@ pub async fn run(command: TestCommand) -> Result<()> {
         )?)
         .await?
         .into_inner();
-    print!("{}", render(&response));
+    out!("{}", render(&response));
     Ok(())
 }
 

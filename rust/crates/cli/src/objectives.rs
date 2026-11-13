@@ -20,19 +20,25 @@ pub enum ObjectiveCommand {
     /// Record an Objective and queue the owner's first Task.
     Create {
         objective_id: String,
+        /// Tag that owns the Objective until it is met.
         #[arg(long)]
         owner: String,
         /// Optional Team ID or name.
         #[arg(long)]
         team: Option<String>,
+        /// An ongoing responsibility with no finish, instead of an outcome that completes.
         #[arg(long)]
         ongoing: bool,
+        /// RFC 3339 time with a time zone by which the outcome is due.
         #[arg(long, value_parser = deadline)]
         deadline: Option<i64>,
+        /// Spending limit in minor currency units, such as cents. Requires --currency.
         #[arg(long)]
         budget_minor: Option<u64>,
+        /// Three-letter currency of the spending limit.
         #[arg(long)]
         currency: Option<String>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
         /// Narrow runtime actions to this list; repeat for each allowed action.
@@ -43,59 +49,77 @@ pub enum ObjectiveCommand {
         no_runtime_actions: bool,
         outcome: String,
     },
-    Get {
-        objective_id: String,
-    },
+    /// Read one Objective.
+    Get { objective_id: String },
+    /// List Objectives.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue after the last ID the previous page returned.
         #[arg(long, default_value = "")]
         after_id: String,
     },
     /// List commit review requests and recorded verdicts for an Objective.
     ListCommitReviews {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },
     /// Change the deadline or monetary limit.
     SetLimits {
         objective_id: String,
+        /// New RFC 3339 deadline with a time zone.
         #[arg(long, value_parser = deadline)]
         deadline: Option<i64>,
+        /// Remove the deadline.
         #[arg(long, conflicts_with = "deadline")]
         clear_deadline: bool,
+        /// New spending limit in minor currency units, such as cents.
         #[arg(long)]
         budget_minor: Option<u64>,
+        /// Three-letter currency of the spending limit.
         #[arg(long)]
         currency: Option<String>,
+        /// Remove the spending limit.
         #[arg(long, conflicts_with_all = ["budget_minor", "currency"])]
         clear_budget: bool,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
     /// Replace the runtime-action ceiling for future Objective turns.
     SetRuntimeActions {
         objective_id: String,
+        /// Runtime action future turns may use. Repeat for each action.
         #[arg(
             long = "runtime-action",
             conflicts_with = "no_runtime_actions",
             required_unless_present = "no_runtime_actions"
         )]
         runtime_actions: Vec<String>,
+        /// Allow no runtime actions in future turns.
         #[arg(long)]
         no_runtime_actions: bool,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
+    /// Pause the Objective. Resuming it later queues an owner turn that reports what happened.
     Pause(Action),
+    /// Resume a paused Objective.
     Resume(Action),
+    /// Cancel the Objective and its open Tasks.
     Cancel(Action),
     /// Approve the owner's assessment of an Objective ready for review, or
     /// request changes with feedback the owner works from.
@@ -106,6 +130,7 @@ pub enum ObjectiveCommand {
         /// What to change; required to request changes, refused on approval.
         #[arg(long, default_value = "")]
         feedback: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -119,6 +144,7 @@ pub enum ObjectiveCommand {
         /// Refuse when the Objective changed since this revision.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -127,8 +153,10 @@ pub enum ObjectiveCommand {
 #[derive(Args)]
 pub struct Action {
     objective_id: String,
+    /// Why, recorded in the Objective history.
     #[arg(long, default_value = "")]
     reason: String,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
     operation_id: Option<String>,
 }
@@ -182,13 +210,10 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                 )?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({
-                    "reviews": page.reviews.into_iter().map(commit_review_output).collect::<Vec<_>>(),
-                    "next_before_order": page.next_before_order,
-                })
-            );
+            crate::terminal::print_json(&json!({
+                "reviews": page.reviews.into_iter().map(commit_review_output).collect::<Vec<_>>(),
+                "next_before_order": page.next_before_order,
+            }))?;
             return Ok(());
         }
         ObjectiveCommand::Create {
@@ -238,7 +263,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                 .await?
                 .into_inner();
             for objective in page.objectives {
-                println!("{}", output(objective));
+                crate::terminal::print_json(&output(objective))?;
             }
             return Ok(());
         }
@@ -381,13 +406,13 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
         dropped.sort();
         dropped.dedup();
         if !dropped.is_empty() {
-            eprintln!(
+            errln!(
                 "Warning: Objective omitted actions its owner does not allow: {}.",
-                dropped.join(", ")
+                crate::terminal::text(&dropped.join(", "))
             );
         }
     }
-    println!("{}", output(objective));
+    crate::terminal::print_json(&output(objective))?;
     Ok(())
 }
 

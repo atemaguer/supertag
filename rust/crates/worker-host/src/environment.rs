@@ -201,18 +201,18 @@ async fn hold(
             {
                 Ok(child) => child,
                 Err(error) => {
-                    eprintln!(
+                    supertag_protocol::terminal_text::warn(&format!(
                         "Cannot keep the machine awake with {}: {error}. Task Attempts still run, but the machine may sleep during them.",
                         command.label
-                    );
+                    ));
                     return;
                 }
             };
-            eprintln!(
+            supertag_protocol::terminal_text::warn(&format!(
                 "Keeping the machine awake ({}) since {} while Task Attempts run.",
                 command.label,
                 now()
-            );
+            ));
             let idle = tokio::select! {
                 _ = shutdown.cancelled() => None,
                 _ = child.wait() => Some(false),
@@ -223,7 +223,10 @@ async fn hold(
                 unsafe { libc::kill(pid as i32, libc::SIGTERM) };
             }
             let _ = child.wait().await;
-            eprintln!("Stopped keeping the machine awake ({}).", command.label);
+            supertag_protocol::terminal_text::warn(&format!(
+                "Stopped keeping the machine awake ({}).",
+                command.label
+            ));
             match idle {
                 None => return,
                 Some(true) => break,

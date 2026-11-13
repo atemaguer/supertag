@@ -9,10 +9,13 @@ pub enum PublicationCommand {
     Publish {
         publication_id: String,
         artifact_id: String,
+        /// File in the artifact to publish. Repeat for each file.
         #[arg(long, required = true)]
         path: Vec<String>,
+        /// Destination Objective ID that may use the files. Repeat for each Objective.
         #[arg(long, required = true)]
         audience: Vec<String>,
+        /// Earlier publication that this one replaces.
         #[arg(long)]
         supersedes: Option<String>,
     },
@@ -22,36 +25,45 @@ pub enum PublicationCommand {
         publication_id: String,
         objective_id: String,
     },
-    Get {
-        publication_id: String,
-    },
-    Consumption {
-        consumption_id: String,
-    },
+    /// Read one artifact publication.
+    Get { publication_id: String },
+    /// Read one consumption approval.
+    Consumption { consumption_id: String },
+    /// List the artifact publications approved from an Objective.
     List {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },
+    /// List the consumption approvals for a destination Objective.
     Consumptions {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },
+    /// Withdraw a publication at its exact revision, so later Tasks cannot use it.
     Withdraw {
         publication_id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
     },
+    /// Withdraw a consumption approval at its exact revision.
     WithdrawConsumption {
         consumption_id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
     },
+    /// List the recorded events for one publication or consumption approval.
     Audit {
         approval_type: String,
         approval_id: String,
@@ -215,6 +227,6 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
             json!({"events":list.events.iter().map(|e|json!({"approval_type":e.approval_type,"approval_id":e.approval_id,"objective_id":e.objective_id,"revision":e.revision,"action":e.action,"actor":e.actor,"recorded_at_ms":e.recorded_at_ms})).collect::<Vec<_>>()})
         }
     };
-    println!("{value}");
+    crate::terminal::print_json(&value)?;
     Ok(())
 }

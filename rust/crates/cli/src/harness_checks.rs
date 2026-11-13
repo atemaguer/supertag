@@ -221,6 +221,7 @@ pub struct SignInArgs {
     /// Model to check with. OpenCode requires one, as provider/model.
     #[arg(long)]
     model: Option<String>,
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
     /// Service configuration whose env_file supplies credentials; otherwise
@@ -251,16 +252,16 @@ pub async fn sign_in(args: SignInArgs) -> Result<()> {
         &environment,
         supervisor,
     )?;
-    println!(
+    outln!(
         "Checking {} sign-in with the Worker Host credentials...",
         args.harness.name()
     );
     let result = probe_sign_in(args.harness, args.model.as_deref(), &variables).await;
     if let Some(detail) = &result.detail {
-        println!("  {detail}");
+        outln!("  {detail}");
     }
     if result.signed_in {
-        println!("{}: signed in", args.harness.name());
+        outln!("{}: signed in", args.harness.name());
         return Ok(());
     }
     bail!(

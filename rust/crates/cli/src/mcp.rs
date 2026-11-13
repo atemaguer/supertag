@@ -1,6 +1,6 @@
 //! `supertag mcp`: the MCP servers this host's Worker Host catalog declares, and their logins.
 
-use std::{io::Write, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
@@ -37,7 +37,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
     let logins = McpLoginStore::default_location()?;
     match command {
         McpCommand::List { mcp_catalog } => {
-            print!("{}", list(&mcp_catalog, &logins)?);
+            out!("{}", list(&mcp_catalog, &logins)?);
             Ok(())
         }
         McpCommand::Login {
@@ -62,11 +62,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
                     "MCP server {name} does not use \"oauth\": true, so it has no login to store; declare it with \"oauth\": true to log in"
                 );
             };
-            let mut write = |text: &str| {
-                let mut stderr = std::io::stderr().lock();
-                let _ = stderr.write_all(text.as_bytes());
-                let _ = stderr.flush();
-            };
+            let mut write = |text: &str| crate::terminal::write_stderr(text);
             let login = run_mcp_login(
                 &name,
                 url,
@@ -78,7 +74,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
             )
             .await?;
             logins.store(&name, &login)?;
-            println!(
+            outln!(
                 "Logged in to MCP server {name}. The Worker Host refreshes the login on this host."
             );
             Ok(())

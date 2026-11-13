@@ -8,7 +8,8 @@ use supertag_protocol::v2::{
     ObjectiveStatus, ObjectiveTurn, TaskState,
 };
 
-use crate::observe::{money, terminal_text};
+use crate::observe::money;
+use crate::terminal::text as terminal_text;
 
 fn words(name: &str, prefix: &str) -> String {
     name.strip_prefix(prefix)
@@ -128,7 +129,8 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
     );
     let mut lines = vec![
         format!("Objective {id}: {}", status_words(status)),
-        format!("Outcome: {}", block(&objective.outcome, "  ")),
+        // The outcome is one operator-written field: a line break in it must not add a line.
+        format!("Outcome: {}", terminal_text(objective.outcome.trim())),
     ];
     if let Some(summary) = objective
         .completion_summary

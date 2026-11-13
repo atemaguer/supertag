@@ -15,6 +15,7 @@ pub enum MailboxGrantCommand {
     Allow {
         sender_tag_id: String,
         recipient_tag_id: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -22,14 +23,17 @@ pub enum MailboxGrantCommand {
     Revoke {
         sender_tag_id: String,
         recipient_tag_id: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
     /// List the incoming and outgoing direct message grants for a Tag.
     List {
         tag_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -108,6 +112,6 @@ pub async fn run(connection: Connection, command: MailboxGrantCommand) -> Result
             })
         }
     };
-    println!("{}", serde_json::to_string(&output)?);
+    crate::terminal::print_json(&output)?;
     Ok(())
 }

@@ -33,12 +33,16 @@ impl From<Kind> for InboxItemKind {
 pub enum InboxCommand {
     /// List questions and work waiting for an operator.
     List {
+        /// Only items for this Objective.
         #[arg(long, default_value = "")]
         objective: String,
+        /// Only items of this kind.
         #[arg(long)]
         kind: Option<Kind>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -56,14 +60,19 @@ pub enum InboxCommand {
     Approval { approval_id: String },
     /// List approval history.
     Approvals {
+        /// Only items for this Objective.
         #[arg(long, default_value = "")]
         objective: String,
+        /// Only approvals requested by this Task.
         #[arg(long, default_value = "")]
         task: String,
+        /// Only requests that still wait for a decision.
         #[arg(long)]
         pending: bool,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -73,16 +82,20 @@ pub enum InboxCommand {
         /// Allow this Tag's Workstream posts to the same Team for this Objective.
         #[arg(long)]
         objective_scope: bool,
+        /// End of the approval, in milliseconds since the Unix epoch. Omit for no end.
         #[arg(long)]
         valid_until_ms: Option<i64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
     /// Deny a pending approval request.
     Deny {
         approval_id: String,
+        /// Why the request is denied; the Tag sees this reason.
         #[arg(long)]
         reason: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -246,7 +259,7 @@ pub async fn run(connection: Connection, command: InboxCommand) -> Result<()> {
             approval_json(approval)
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

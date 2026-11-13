@@ -126,6 +126,7 @@ Optional environment variables:
         common: Common,
         #[command(flatten)]
         listen: Listen,
+        /// How SuperTag authenticates to GitHub: a personal access token or a GitHub App.
         #[arg(long, value_enum, default_value = "token")]
         auth: GithubAuth,
         /// With token authentication, also enroll a repository webhook secret.
@@ -157,6 +158,7 @@ Optional environment variables:
     Lark {
         #[command(flatten)]
         common: Common,
+        /// The app's platform: Lark, or Feishu in mainland China.
         #[arg(long, value_enum, default_value = "lark")]
         domain: LarkDomain,
     },
@@ -280,8 +282,10 @@ pub struct ActivationArgs {
     kind: SetKind,
     /// Permission Set or Context Set ID or name.
     set: String,
+    /// The Tag whose surface location the set applies to.
     #[arg(long)]
     tag: String,
+    /// The surface the location belongs to.
     #[arg(long, value_enum)]
     provider: Provider,
     /// Location flags; defaults to the account's location in supertag.yaml.
@@ -610,8 +614,7 @@ impl Prompter {
     }
 
     fn line(&self, label: &str, secret: bool) -> Result<Option<String>> {
-        eprint!("{label}: ");
-        std::io::stderr().flush()?;
+        crate::terminal::write_stderr(&format!("{label}: "));
         let echo = if secret && self.terminal {
             hide_input()
         } else {
@@ -621,7 +624,7 @@ impl Prompter {
         let read = std::io::stdin().lock().take(64 * 1024).read_line(&mut line);
         if let Some(saved) = echo {
             restore_input(saved);
-            eprintln!();
+            errln!("");
         }
         Ok((read.context("read standard input")? > 0).then(|| line.trim().to_owned()))
     }
@@ -633,7 +636,7 @@ impl Prompter {
         loop {
             match self.line(label, secret)? {
                 Some(value) if !value.is_empty() => return Ok(value),
-                Some(_) if self.terminal => eprintln!("A value is required"),
+                Some(_) if self.terminal => errln!("A value is required"),
                 _ => bail!("{label} is required: set {variable} or enter it when prompted"),
             }
         }
@@ -859,7 +862,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
                 transport == "http",
                 "--transport must be http: the Gateway receives Slack events over HTTP"
             );
-            println!(
+            outln!(
                 "Slack requires an installed app. Guide: docs/surfaces/slack.md\nSlack app manifest: docs/surfaces/slack-app-manifest.yaml"
             );
             let bot_token = prompter.value("SLACK_BOT_TOKEN", "Slack bot token (xoxb-…)", true)?;
@@ -869,7 +872,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
         }
         Kind::Github { auth, webhook } => match auth {
             GithubAuth::Token => {
-                println!(
+                outln!(
                     "GitHub setup enrolls credentials only. Tag locations and webhooks are configured separately. See docs/surfaces/github.md."
                 );
                 let token = prompter.value(
@@ -914,7 +917,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
             }
         },
         Kind::Linear => {
-            println!(
+            outln!(
                 "Linear setup enrolls credentials only. Tag locations and webhooks are configured separately. See docs/surfaces/linear.md."
             );
             let api_key = prompter.value("LINEAR_API_KEY", "Linear personal API key", true)?;
@@ -926,7 +929,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
             surface_setup::verify_linear(endpoints, &api_key, &secret).await
         }
         Kind::Lark { feishu } => {
-            println!(
+            outln!(
                 "Lark uses an app with bot messaging and im.message.receive_v1 over a long connection. See docs/surfaces/lark.md."
             );
             let app_id = prompter.value("LARK_APP_ID", "Lark App ID", false)?;
@@ -935,7 +938,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
             surface_setup::verify_lark(endpoints, *feishu, &app_id, &secret, &tenant_key).await
         }
         Kind::Teams => {
-            println!(
+            outln!(
                 "Teams requires an installed bot app with the Gateway messaging endpoint. See docs/surfaces/teams.md."
             );
             let app_id =
@@ -1038,20 +1041,20 @@ async fn finish(
         }
         None => None,
     };
-    println!(
+    outln!(
         "Connected {} account {} ({}).",
         provider.name(),
         verified.display_name,
         verified.external_account_id
     );
     match recorded {
-        Some(path) => println!(
+        Some(path) => outln!(
             "Saved Surface Account {} (revision {}) in {} with credentials in {credential}.",
             account.account_id,
             account.revision,
             path.display()
         ),
-        None => println!(
+        None => outln!(
             "Saved Surface Account {} with credentials in Vault at {credential}. No local Control Plane is configured, so configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=vault and SUPERTAG_*_CREDENTIAL_ID={credential}.",
             account.account_id
         ),
@@ -1176,7 +1179,7 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
                 .await?;
         }
         edit.write()?;
-        println!(
+        outln!(
             "Added {} to {} {place} on {display}.",
             args.tag,
             provider.name()
@@ -1217,7 +1220,7 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
                 )?)
                 .await?;
         }
-        println!(
+        outln!(
             "Removed {} from {} {place} on {display}.",
             args.tag,
             provider.name()
@@ -1309,7 +1312,7 @@ pub async fn activation(activate: bool, args: ActivationArgs) -> Result<()> {
             )?)
             .await?;
     }
-    println!(
+    outln!(
         "{} {} for {} {place}.",
         if activate { "Activated" } else { "Deactivated" },
         args.set,

@@ -8,21 +8,25 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 pub enum PublicationCommand {
     /// List verified Workspace results and their separate GitHub publication status.
     List {
+        /// Only results of this Task.
         #[arg(long, default_value = "")]
         task_id: String,
+        /// Most entries to return on one page.
         #[arg(long,default_value_t=50,value_parser=clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long,default_value_t=0,value_parser=clap::value_parser!(i64).range(0..))]
         before_order: i64,
     },
-    Get {
-        publication_id: String,
-    },
+    /// Read one GitHub publication.
+    Get { publication_id: String },
     /// Stop further provider writes. This does not delete a branch or close a PR.
     Cancel {
         publication_id: String,
+        /// Why provider writes stop; recorded with the cancellation.
         #[arg(long)]
         reason: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -83,7 +87,7 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
             value
         }
     };
-    println!("{value}");
+    crate::terminal::print_json(&value)?;
     Ok(())
 }
 fn describe(value: GithubPublication) -> Value {

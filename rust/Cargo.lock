@@ -2677,6 +2677,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-health",
+ "unicode-normalization",
  "url",
  "uuid",
 ]

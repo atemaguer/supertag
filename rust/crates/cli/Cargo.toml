@@ -42,6 +42,7 @@ tokio-util.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
 url = "2"
+unicode-normalization = "0.1"
 uuid.workspace = true
 
 [dev-dependencies]

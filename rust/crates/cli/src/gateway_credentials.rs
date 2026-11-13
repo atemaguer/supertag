@@ -39,6 +39,6 @@ pub async fn run(command: GatewayCredentialCommand) -> Result<()> {
             ("deleted", credential_id)
         }
     };
-    println!("{}", json!({ "credential_id": id, "result": action }));
+    crate::terminal::print_json(&json!({ "credential_id": id, "result": action }))?;
     Ok(())
 }

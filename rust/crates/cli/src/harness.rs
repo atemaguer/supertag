@@ -50,6 +50,7 @@ pub struct AdapterOptions {
     /// Executable that implements the SuperTag harness protocol.
     #[arg(long, conflicts_with = "harness")]
     adapter: Option<PathBuf>,
+    /// Argument passed to the --adapter executable. Repeat for more arguments.
     #[arg(long, requires = "adapter", allow_hyphen_values = true)]
     adapter_arg: Vec<OsString>,
     /// Built-in harness to use for Tasks on this host.
@@ -61,6 +62,7 @@ pub struct AdapterOptions {
     /// Override the JavaScript or Python application entrypoint.
     #[arg(long, requires = "harness")]
     harness_entrypoint: Option<PathBuf>,
+    /// Default model ID for the built-in harness.
     #[arg(long, requires = "harness")]
     harness_model: Option<String>,
     /// Additional model IDs this Worker Host can run.
@@ -90,8 +92,10 @@ pub struct AdapterOptions {
     /// Claude executable used by the Agent SDK.
     #[arg(long, requires = "harness")]
     claude_path: Option<PathBuf>,
+    /// Codex executable. Otherwise resolve codex on PATH.
     #[arg(long, requires = "harness")]
     codex_path: Option<PathBuf>,
+    /// Default Codex model ID.
     #[arg(long, requires = "harness")]
     codex_model: Option<String>,
     /// Existing directory for read-only Tasks. Otherwise each Task gets its own directory.

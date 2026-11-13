@@ -86,7 +86,7 @@ pub async fn run(connection: Connection, command: PlacementCommand) -> Result<()
             })
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 
@@ -133,13 +133,10 @@ pub async fn list_auth_keys(connection: Connection, limit: u32, cursor: String) 
         .list_auth_keys(request(ListAuthKeysRequest { limit, cursor }, &token)?)
         .await?
         .into_inner();
-    println!(
-        "{}",
-        json!({
-            "auth_keys": page.auth_keys.iter().map(auth_key_view).collect::<Vec<_>>(),
-            "next_cursor": page.next_cursor,
-        })
-    );
+    crate::terminal::print_json(&json!({
+        "auth_keys": page.auth_keys.iter().map(auth_key_view).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))?;
     Ok(())
 }
 
@@ -149,7 +146,7 @@ pub async fn get_auth_key(connection: Connection, name: String) -> Result<()> {
         .get_auth_key(request(GetAuthKeyRequest { name }, &token)?)
         .await?
         .into_inner();
-    println!("{}", auth_key_view(&key));
+    crate::terminal::print_json(&auth_key_view(&key))?;
     Ok(())
 }
 
@@ -159,7 +156,7 @@ pub async fn revoke_auth_key(connection: Connection, name: String) -> Result<()>
         .revoke_auth_key(request(RevokeAuthKeyRequest { name }, &token)?)
         .await?
         .into_inner();
-    println!("{}", auth_key_view(&key));
+    crate::terminal::print_json(&auth_key_view(&key))?;
     Ok(())
 }
 
@@ -245,12 +242,9 @@ pub async fn rotate_host_credential(
         file.sync_all()?;
         rotation
     };
-    println!(
-        "{}",
-        json!({
-            "host_id": rotation.host_id,
-            "credential_revision": rotation.credential_revision,
-        })
-    );
+    crate::terminal::print_json(&json!({
+        "host_id": rotation.host_id,
+        "credential_revision": rotation.credential_revision,
+    }))?;
     Ok(())
 }

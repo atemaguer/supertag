@@ -58,18 +58,15 @@ pub async fn fetch(connection: Connection, args: FetchArgs) -> Result<()> {
     let accepted = resolve(&channel, &token, &args.id, args.tag.as_deref()).await?;
     let repository = args.repository;
     let (branch, imported) = import(&channel, &token, &accepted, &repository).await?;
-    println!(
-        "{}",
-        json!({
-            "task_id": accepted.task_id,
-            "tag_id": accepted.tag_id,
-            "session_id": accepted.session_id,
-            "repository": repository,
-            "branch": branch,
-            "head_commit": accepted.delivery.head_commit,
-            "result": imported.as_str(),
-        })
-    );
+    crate::terminal::print_json(&json!({
+        "task_id": accepted.task_id,
+        "tag_id": accepted.tag_id,
+        "session_id": accepted.session_id,
+        "repository": repository,
+        "branch": branch,
+        "head_commit": accepted.delivery.head_commit,
+        "result": imported.as_str(),
+    }))?;
     Ok(())
 }
 

@@ -17,10 +17,15 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
+mod descendants;
+use descendants::Descendants;
+
 pub(crate) const MAX_BOOTSTRAP_BYTES: usize = 4096;
 pub(crate) const ADAPTER_STOP_GRACE: Duration = Duration::from_secs(2);
 pub(crate) const ADAPTER_SCRATCH_PARENT: &str = "SUPERTAG_ADAPTER_SCRATCH_PARENT";
 pub const ADAPTER_STATE_DIRECTORY: &str = "SUPERTAG_ADAPTER_STATE_DIRECTORY";
+/// How often the guardian records the adapter's processes where the OS cannot adopt orphans.
+const DESCENDANT_SCAN_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) fn monotonic_now_ns() -> io::Result<u64> {
     let mut time = MaybeUninit::<libc::timespec>::uninit();
@@ -110,6 +115,8 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
                 .tempdir_in(parent)
         })
         .transpose()?;
+    // Track the adapter's processes before any of them can start.
+    let mut descendants = Descendants::new(group).context("track adapter descendants")?;
     let mut command = Command::new(adapter);
     command
         .args(args)
@@ -158,8 +165,9 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
             .context("send harness adapter bootstrap")
     })();
     if written.is_err() {
-        return stop_group(&mut child, &mut scratch, group);
+        return stop_group(&mut child, &mut scratch, &mut descendants, group);
     }
+    let mut next_scan = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().context("reap harness adapter")? {
             break status;
@@ -167,24 +175,45 @@ pub fn guard_adapter(adapter: &Path, args: &[OsString]) -> Result<()> {
         if disconnected.recv_timeout(Duration::from_millis(10))
             != Err(mpsc::RecvTimeoutError::Timeout)
         {
-            return stop_group(&mut child, &mut scratch, group);
+            return stop_group(&mut child, &mut scratch, &mut descendants, group);
+        }
+        if Instant::now() >= next_scan {
+            // Best effort while running; cleanup scans again and reports a failure.
+            let _ = descendants.observe();
+            next_scan = Instant::now() + DESCENDANT_SCAN_INTERVAL;
         }
     };
+    // Stop what the adapter left behind before removing the state it may still use. Processes
+    // that left the group are stopped quietly; a survivor in the group means the adapter did
+    // not clean up, which fails the Attempt as before.
+    let swept = descendants.sweep();
     if let Some(directory) = scratch {
         directory
             .close()
             .context("remove disposable adapter Attempt state")?;
     }
+    let swept = swept.context("stop adapter descendants")?;
     ensure!(status.success(), "harness adapter exited unsuccessfully");
+    ensure!(
+        !swept.group_survivors,
+        "harness adapter left running descendants"
+    );
     Ok(())
 }
 
 fn stop_group(
     child: &mut Child,
     scratch: &mut Option<tempfile::TempDir>,
+    descendants: &mut Descendants,
     group: i32,
 ) -> Result<()> {
     let reaped = stop_adapter(child);
+    // Stop processes that left the group too, while this guardian can still adopt them.
+    let swept = if reaped.is_ok() {
+        descendants.sweep().map(|_| ())
+    } else {
+        Ok(())
+    };
     if let Some(directory) = scratch.take() {
         let _ = directory.close();
     }
@@ -192,6 +221,7 @@ fn stop_group(
     // the group even if direct-child reaping failed.
     unsafe { libc::kill(-group, libc::SIGKILL) };
     reaped.context("reap harness adapter after Host exit")?;
+    swept.context("stop adapter descendants after Host exit")?;
     anyhow::bail!("could not stop the adapter process group")
 }
 

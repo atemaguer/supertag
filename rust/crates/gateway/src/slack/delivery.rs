@@ -37,7 +37,9 @@ impl Connector {
         match self.advance_progress().await {
             Ok(progressed) => Ok(progressed),
             Err(error) => {
-                eprintln!("Slack reply progress skipped: {error:#}");
+                supertag_protocol::terminal_text::warn(&format!(
+                    "Slack reply progress skipped: {error:#}"
+                ));
                 self.progress_journal.clear()?;
                 Ok(false)
             }

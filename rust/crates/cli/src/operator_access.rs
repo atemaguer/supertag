@@ -24,8 +24,10 @@ pub enum OperatorTokenCommand {
     Create { name: String },
     /// List Operator Tokens without their secrets.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -62,6 +64,7 @@ pub struct AuditArgs {
     /// Continue from the cursor a previous JSON page returned.
     #[arg(long, default_value = "")]
     cursor: String,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value_t = AuditOutput::Text)]
     output: AuditOutput,
 }
@@ -154,7 +157,7 @@ pub async fn run_tokens(connection: Connection, command: OperatorTokenCommand) -
                 .into_inner(),
         ),
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 
@@ -247,14 +250,14 @@ pub async fn run_audit(args: AuditArgs) -> Result<()> {
         .await?
         .into_inner();
     match args.output {
-        AuditOutput::Json => println!(
+        AuditOutput::Json => outln!(
             "{}",
             json!({
                 "entries": page.entries.iter().map(entry_json).collect::<Vec<_>>(),
                 "next_cursor": page.next_cursor,
             })
         ),
-        AuditOutput::Text => print!("{}", format_entries(&page.entries)),
+        AuditOutput::Text => out!("{}", format_entries(&page.entries)),
     }
     Ok(())
 }

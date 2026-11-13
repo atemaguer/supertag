@@ -1,3 +1,5 @@
+#[macro_use]
+mod terminal;
 mod artifact_publications;
 mod artifacts;
 mod delivery_branches;
@@ -115,6 +117,7 @@ struct Connection {
     /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
     #[arg(long, value_name = "URL|NAME", conflicts_with = "state_directory")]
     gateway: Option<String>,
+    /// Use the local services in this state directory instead of a Gateway.
     #[arg(long)]
     state_directory: Option<PathBuf>,
 }
@@ -133,13 +136,14 @@ enum Command {
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Gateway.
     Apply(manifests::ManifestArgs),
-    /// Manage GitHub Workspace sources pinned to one repository and commit.
+    /// Read GitHub publications of verified Workspace results and stop further provider writes.
     GithubPublication {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: github_publications::PublicationCommand,
     },
+    /// Manage GitHub Workspace sources pinned to one repository and commit.
     GithubWorkspace {
         #[command(flatten)]
         connection: Connection,
@@ -218,8 +222,10 @@ enum Command {
         #[command(flatten)]
         connection: Connection,
         tag_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -266,6 +272,7 @@ enum Command {
         /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
         #[arg(long)]
         state_directory: Option<PathBuf>,
         /// Run in this terminal with each service's logs here until interrupted.
@@ -279,6 +286,7 @@ enum Command {
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
+        /// Address the local Gateway listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         gateway_listen: SocketAddr,
     },
@@ -294,8 +302,10 @@ enum Command {
     Version(status::VersionArgs),
     /// Print the resolved supertag.yaml that supertag up runs.
     Config {
+        /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
         #[arg(long)]
         state_directory: Option<PathBuf>,
         /// List the service names only.
@@ -304,15 +314,19 @@ enum Command {
     },
     /// Run the private service that stores work and schedules execution.
     ControlPlane {
+        /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
     },
     /// Run the public gRPC service for operators and Worker Hosts.
     Gateway {
+        /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
+        /// Private Control Plane URL that this Gateway forwards to.
         #[arg(long)]
         control_plane: String,
+        /// Private directory for Session checkpoint archives that Worker Hosts transfer through this Gateway.
         #[arg(long)]
         checkpoint_directory: Option<PathBuf>,
         /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
@@ -324,12 +338,16 @@ enum Command {
             long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Gateway reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
         )]
         artifact_s3_volumes: Option<PathBuf>,
+        /// Address for Slack webhooks. Requires the Slack state directory.
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
+        /// Private directory for Slack connector state and reply receipts.
         #[arg(long, requires = "slack_listen")]
         slack_state_directory: Option<PathBuf>,
+        /// Address for GitHub webhooks. Requires the GitHub state directory.
         #[arg(long, requires = "github_state_directory")]
         github_listen: Option<SocketAddr>,
+        /// Private directory for GitHub connector state and reply receipts.
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
         /// Private scratch for GitHub source bundles, using the configured GitHub account.
@@ -337,15 +355,19 @@ enum Command {
         /// Gateway serves either a GitHub Workspace or a GitHub location, not both.
         #[arg(long, conflicts_with = "github_listen")]
         github_workspace_directory: Option<PathBuf>,
+        /// Address for Linear webhooks. Requires the Linear state directory.
         #[arg(long, requires = "linear_state_directory")]
         linear_listen: Option<SocketAddr>,
+        /// Private directory for Linear connector state and reply receipts.
         #[arg(long, requires = "linear_listen")]
         linear_state_directory: Option<PathBuf>,
         /// Enable the outbound Lark or Feishu connection and store reply receipts here.
         #[arg(long)]
         lark_state_directory: Option<PathBuf>,
+        /// Address for Microsoft Teams webhooks. Requires the Microsoft Teams state directory.
         #[arg(long, requires = "microsoft_teams_state_directory")]
         microsoft_teams_listen: Option<SocketAddr>,
+        /// Private directory for Microsoft Teams connector state and reply receipts.
         #[arg(long, requires = "microsoft_teams_listen")]
         microsoft_teams_state_directory: Option<PathBuf>,
         /// Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME],
@@ -358,19 +380,25 @@ enum Command {
     },
     /// Open the terminal UI for a saved or explicitly configured Gateway.
     Tui {
+        /// Gateway URL or the name of a saved Gateway.
         #[arg(long, conflicts_with = "state_directory")]
         gateway: Option<String>,
+        /// Use the local services in this state directory instead of a Gateway.
         #[arg(long)]
         state_directory: Option<PathBuf>,
+        /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
         #[arg(long)]
         binary: Option<PathBuf>,
+        /// Workspace ID the terminal UI starts in.
         #[arg(long)]
         workspace: Option<String>,
     },
     /// Connect a Worker Host and run accepted Tasks through an adapter.
     WorkerHost {
+        /// Gateway URL this Worker Host connects to.
         #[arg(long)]
         gateway: String,
+        /// Private directory for this Worker Host's enrollment and execution journal.
         #[arg(long)]
         state_directory: PathBuf,
         /// Placement label for this host, such as gpu. Repeat for more labels.
@@ -391,8 +419,10 @@ enum Command {
         /// Dedicated owner-only absolute directory for immutable artifact copies.
         #[arg(long, requires = "artifact_transfer_listen")]
         artifact_source_directory: Option<PathBuf>,
+        /// TLS certificate for the artifact transfer listener.
         #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_key"])]
         artifact_transfer_tls_cert: Option<PathBuf>,
+        /// TLS private key for the artifact transfer listener.
         #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_cert"])]
         artifact_transfer_tls_key: Option<PathBuf>,
         /// Pin a producing Worker Host to an HTTPS origin or literal loopback HTTP.
@@ -440,6 +470,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
         #[arg(long, requires = "shared_execution_endpoint")]
         shared_execution_environment: Option<String>,
+        /// CA certificate for the shared execution provider endpoint.
         #[arg(long, requires = "shared_execution_endpoint")]
         shared_execution_ca_file: Option<PathBuf>,
         /// Enable lease-bound commands on an operator-trusted Linux shared execution provider.
@@ -452,10 +483,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
+        /// Seconds a Task Attempt may run before this host stops it.
         #[arg(long, default_value_t = 120)]
         attempt_timeout_seconds: u64,
+        /// Exit after running one Task Attempt.
         #[arg(long)]
         once: bool,
+        /// Stay connected while an interrupted Attempt waits for an operator decision, instead of exiting.
         #[arg(long)]
         wait_for_recovery: bool,
     },
@@ -484,12 +518,14 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable.
         #[arg(long)]
         expires_in_seconds: Option<u64>,
+        /// Tag whose Tasks hosts enrolled with this key may run. Repeat for more Tags.
         #[arg(
             long,
             conflicts_with = "all_tags",
             required_unless_present = "all_tags"
         )]
         tag: Vec<String>,
+        /// Let hosts enrolled with this key run Tasks for every Tag.
         #[arg(long)]
         all_tags: bool,
     },
@@ -505,10 +541,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Replace a Gateway already saved under this name for the same origin.
         #[arg(long)]
         replace: bool,
+        /// PEM file of the certificate authority that signed the Gateway's TLS certificate.
         #[arg(long)]
         server_ca_file: Option<PathBuf>,
+        /// PEM client certificate for a Gateway that requires mutual TLS.
         #[arg(long, requires = "client_key_file")]
         client_cert_file: Option<PathBuf>,
+        /// PEM private key of the client certificate.
         #[arg(long, requires = "client_cert_file")]
         client_key_file: Option<PathBuf>,
     },
@@ -516,6 +555,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     ListAuthKeys {
         #[command(flatten)]
         connection: Connection,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 100)]
         limit: u32,
         /// The next_cursor of the previous page.
@@ -554,8 +594,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
     /// Enroll this installation with a one-time Auth Key.
     EnrollHost {
+        /// Gateway URL to enroll with.
         #[arg(long)]
         gateway: String,
+        /// Private directory for this Worker Host's enrollment and execution journal.
         #[arg(long)]
         state_directory: PathBuf,
         host_id: String,
@@ -586,8 +628,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Display name. Defaults to the Tag ID for a new Tag.
         #[arg(long = "name")]
         display_name: Option<String>,
+        /// Standing instructions the Tag follows in every Task.
         #[arg(long)]
         instructions: String,
+        /// Action the Tag may take, such as files:read. Repeat for each action.
         #[arg(long)]
         allow: Vec<String>,
         /// Require approval before this Tag posts to a Team Workstream.
@@ -638,10 +682,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     ListTags {
         #[command(flatten)]
         connection: Connection,
+        /// Also list retired Tags.
         #[arg(long)]
         include_retired: bool,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 100)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -658,10 +705,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     Submit {
         #[command(flatten)]
         connection: Connection,
+        /// Tag that does the work.
         #[arg(long)]
         tag: String,
+        /// Session that the turn belongs to; a new name starts a new Session.
         #[arg(long)]
         session: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
         /// Stop the turn when its reported token count reaches this limit.
@@ -726,8 +776,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+        /// Which published result to download.
         #[arg(long, value_enum)]
         kind: artifacts::ArtifactKind,
+        /// Local file to create with the download. It must not already exist.
         #[arg(long)]
         output: PathBuf,
     },
@@ -743,6 +795,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+        /// Only entries after this sequence number.
         #[arg(long, default_value_t = 0)]
         after: u64,
     },
@@ -752,6 +805,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
         attempt_id: String,
+        /// Only entries after this sequence number.
         #[arg(long, default_value_t = 0)]
         after: u64,
     },
@@ -767,12 +821,16 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
         attempt_id: String,
+        /// Mark the Attempt failed, or run the Task again.
         #[arg(long, value_enum)]
         decision: RecoveryDecision,
+        /// What you checked that shows the Attempt stopped and what it did.
         #[arg(long)]
         evidence: String,
+        /// Confirm that no process of this Attempt is still running.
         #[arg(long)]
         confirmed_stopped: bool,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -826,8 +884,59 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
+fn main() -> std::process::ExitCode {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => usage_error(error),
+    };
+    match dispatch(cli) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            // Errors carry text from services, surfaces and files; filter it for the terminal.
+            errln!("Error: {error:?}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Help and version text is the CLI's own. A usage error can repeat what was typed, so it is
+/// reported for the arguments with their controls replaced: a typed line break cannot add a
+/// fake line, and an escape sequence prints as visible text.
+fn usage_error(error: clap::Error) -> ! {
+    use clap::error::ErrorKind;
+    if matches!(
+        error.kind(),
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+    ) {
+        error.exit()
+    }
+    let filtered = std::env::args_os().map(|arg| terminal::text(&arg.to_string_lossy()));
+    let text = usage_error_text(&error, filtered);
+    if error.use_stderr() {
+        terminal::write_stderr(&text);
+    } else {
+        terminal::write_stdout(&text);
+    }
+    std::process::exit(error.exit_code())
+}
+
+/// A usage error repeats what was typed, so it is rendered again from the filtered arguments. If
+/// those parse differently, only the kind of error is printed: the original rendering still holds
+/// the typed text, and a typed line break in it would print as a separate line.
+fn usage_error_text(error: &clap::Error, filtered: impl IntoIterator<Item = String>) -> String {
+    match Cli::try_parse_from(filtered) {
+        Err(filtered) if filtered.kind() == error.kind() => filtered.render().to_string(),
+        _ => format!(
+            "error: {}\n\nFor more information, try '--help'.\n",
+            error
+                .kind()
+                .as_str()
+                .unwrap_or("the arguments could not be read")
+        ),
+    }
+}
+
+fn dispatch(cli: Cli) -> Result<()> {
     let command = match cli.command {
         Some(command) => command,
         None => Command::Tui {
@@ -965,10 +1074,9 @@ async fn run(command: Command) -> Result<()> {
                     })
                 })
                 .collect::<Vec<_>>();
-            println!(
-                "{}",
-                json!({ "messages": messages, "next_cursor": page.next_cursor })
-            );
+            crate::terminal::print_json(
+                &json!({ "messages": messages, "next_cursor": page.next_cursor }),
+            )?;
         }
         Command::GithubPublication {
             connection,
@@ -995,7 +1103,7 @@ async fn run(command: Command) -> Result<()> {
             services,
         } => {
             let state_directory = local_config::state_directory(state_directory)?;
-            print!(
+            out!(
                 "{}",
                 local_config::render(file, &state_directory, services)?
             );
@@ -1306,7 +1414,7 @@ async fn run(command: Command) -> Result<()> {
                 lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
                     incarnation_id,
                     observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
-                        println!("state {}", state.as_str());
+                        outln!("state {}", state.as_str());
                     }),
                 }),
             };
@@ -1316,7 +1424,7 @@ async fn run(command: Command) -> Result<()> {
                 termination_signal().await;
                 shutdown.cancel();
             });
-            let result = supertag_worker_host::run(options, token, || println!("ready")).await;
+            let result = supertag_worker_host::run(options, token, || outln!("ready")).await;
             signal.abort();
             result?;
         }
@@ -1357,7 +1465,7 @@ async fn run(command: Command) -> Result<()> {
                 .into_inner();
             let mut view = placement::auth_key_view(&key);
             view["auth_key"] = secret.into();
-            println!("{view}");
+            crate::terminal::print_json(&view)?;
         }
         Command::ConnectGateway {
             url,
@@ -1425,10 +1533,9 @@ async fn run(command: Command) -> Result<()> {
                 auth_key.as_deref(),
             )
             .await?;
-            println!(
-                "{}",
-                json!({ "host_id": record.host_id, "generation": record.generation })
-            );
+            crate::terminal::print_json(
+                &json!({ "host_id": record.host_id, "generation": record.generation }),
+            )?;
         }
         Command::RevokeHost {
             connection,
@@ -1439,10 +1546,9 @@ async fn run(command: Command) -> Result<()> {
                 .revoke_host(request(RevokeHostRequest { host_id }, &token)?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({ "host_id": record.host_id, "revoked": record.revoked })
-            );
+            crate::terminal::print_json(
+                &json!({ "host_id": record.host_id, "revoked": record.revoked }),
+            )?;
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
@@ -1523,10 +1629,9 @@ async fn run(command: Command) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision })
-            );
+            crate::terminal::print_json(
+                &json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision }),
+            )?;
         }
         Command::GetTag { connection, tag_id } => {
             let (mut operator, token) = operator(connection).await?;
@@ -1534,7 +1639,7 @@ async fn run(command: Command) -> Result<()> {
                 .get_tag(request(GetTagRequest { tag_id }, &token)?)
                 .await?
                 .into_inner();
-            println!("{}", tag_json(&tag));
+            crate::terminal::print_json(&tag_json(&tag))?;
         }
         Command::ListTags {
             connection,
@@ -1554,13 +1659,10 @@ async fn run(command: Command) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({
-                    "tags": page.tags.iter().map(tag_json).collect::<Vec<_>>(),
-                    "next_cursor": page.next_cursor,
-                })
-            );
+            crate::terminal::print_json(&json!({
+                "tags": page.tags.iter().map(tag_json).collect::<Vec<_>>(),
+                "next_cursor": page.next_cursor,
+            }))?;
         }
         Command::RetireTag {
             connection,
@@ -1572,18 +1674,15 @@ async fn run(command: Command) -> Result<()> {
                 .retire_tag(request(RetireTagRequest { tag_id, dry_run }, &token)?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({
-                    "tag": response.tag.as_ref().map(tag_json),
-                    "dry_run": dry_run,
-                    "blockers": response.blockers,
-                    "surface_locations": response.surface_locations,
-                    "host_bindings": response.host_bindings,
-                    "mailbox_grants": response.mailbox_grants,
-                    "role_assignments": response.role_assignments,
-                })
-            );
+            crate::terminal::print_json(&json!({
+                "tag": response.tag.as_ref().map(tag_json),
+                "dry_run": dry_run,
+                "blockers": response.blockers,
+                "surface_locations": response.surface_locations,
+                "host_bindings": response.host_bindings,
+                "mailbox_grants": response.mailbox_grants,
+                "role_assignments": response.role_assignments,
+            }))?;
         }
         Command::Submit {
             connection,
@@ -1632,7 +1731,7 @@ async fn run(command: Command) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            print_task(&task);
+            print_task(&task)?;
         }
         Command::GetTask {
             connection,
@@ -1643,7 +1742,7 @@ async fn run(command: Command) -> Result<()> {
                 .get_task(request(GetTaskRequest { task_id }, &token)?)
                 .await?
                 .into_inner();
-            print_task(&task);
+            print_task(&task)?;
         }
         Command::WorkspaceArtifact {
             connection,
@@ -1690,10 +1789,9 @@ async fn run(command: Command) -> Result<()> {
                 .await?
                 .into_inner();
             for event in events.events {
-                println!(
-                    "{}",
-                    json!({ "sequence": event.sequence, "text": event.text })
-                );
+                crate::terminal::print_json(
+                    &json!({ "sequence": event.sequence, "text": event.text }),
+                )?;
             }
         }
         Command::TaskUsage {
@@ -1717,20 +1815,17 @@ async fn run(command: Command) -> Result<()> {
                 .into_inner();
             for report in response.reports {
                 if let Some(usage) = report.native_usage {
-                    println!(
-                        "{}",
-                        json!({
-                            "sequence": report.sequence,
-                            "input_tokens": usage.input_tokens,
-                            "cached_input_tokens": usage.cached_input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "total_tokens": usage.total_tokens,
-                            "observed_model": usage.observed_model,
-                            "reported_cost": report.amount_minor.zip(report.currency).map(|(amount_minor, currency)| json!({
-                                "amount_minor": amount_minor, "currency": currency, "estimated": report.estimated,
-                            })),
-                        })
-                    );
+                    crate::terminal::print_json(&json!({
+                        "sequence": report.sequence,
+                        "input_tokens": usage.input_tokens,
+                        "cached_input_tokens": usage.cached_input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "total_tokens": usage.total_tokens,
+                        "observed_model": usage.observed_model,
+                        "reported_cost": report.amount_minor.zip(report.currency).map(|(amount_minor, currency)| json!({
+                            "amount_minor": amount_minor, "currency": currency, "estimated": report.estimated,
+                        })),
+                    }))?;
                 }
             }
         }
@@ -1743,7 +1838,7 @@ async fn run(command: Command) -> Result<()> {
                 .cancel_task(request(CancelTaskRequest { task_id }, &token)?)
                 .await?
                 .into_inner();
-            print_task(&task);
+            print_task(&task)?;
         }
         Command::ResolveAttempt {
             connection,
@@ -1773,14 +1868,11 @@ async fn run(command: Command) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({
-                    "task_id": resolution.task_id, "attempt_id": resolution.attempt_id,
-                    "decision": resolution.decision().as_str_name(),
-                    "operator_id": resolution.operator_id, "resolved_at_ms": resolution.resolved_at_ms,
-                })
-            );
+            crate::terminal::print_json(&json!({
+                "task_id": resolution.task_id, "attempt_id": resolution.attempt_id,
+                "decision": resolution.decision().as_str_name(),
+                "operator_id": resolution.operator_id, "resolved_at_ms": resolution.resolved_at_ms,
+            }))?;
         }
         Command::Input {
             connection,
@@ -1873,7 +1965,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         >()
         .await;
     let listener = TcpListener::bind(listen).await?;
-    println!("{}", listener.local_addr()?);
+    outln!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
     let sweep = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -1881,7 +1973,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         loop {
             interval.tick().await;
             if let Err(error) = maintenance.sweep().await {
-                eprintln!("Control Plane maintenance failed: {error}");
+                errln!("Control Plane maintenance failed: {error}");
             }
         }
     });
@@ -2186,18 +2278,18 @@ async fn gateway(
         >()
         .await;
     let listener = TcpListener::bind(listen).await?;
-    println!("{}", listener.local_addr()?);
+    outln!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
-        println!("{}", listener.local_addr()?);
+        outln!("{}", listener.local_addr()?);
     }
     if let Some((_, listener)) = &github {
-        println!("{}", listener.local_addr()?);
+        outln!("{}", listener.local_addr()?);
     }
     if let Some((_, listener)) = &linear {
-        println!("{}", listener.local_addr()?);
+        outln!("{}", listener.local_addr()?);
     }
     if let Some((_, listener)) = &microsoft_teams {
-        println!("{}", listener.local_addr()?);
+        outln!("{}", listener.local_addr()?);
     }
     let shutdown = CancellationToken::new();
     let router = builder
@@ -2960,10 +3052,9 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
         .await
         .context("the Gateway refused the operator token")?;
     let store = profiles::save(&gateway, replace)?;
-    println!(
-        "{}",
-        json!({"name": gateway.name, "saved_in": store.display().to_string(), "active": true})
-    );
+    crate::terminal::print_json(
+        &json!({"name": gateway.name, "saved_in": store.display().to_string(), "active": true}),
+    )?;
     Ok(())
 }
 
@@ -2995,8 +3086,8 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
     })
 }
 
-fn print_task(task: &Task) {
-    println!("{}", task_json(task));
+fn print_task(task: &Task) -> Result<()> {
+    Ok(crate::terminal::print_json(&task_json(task))?)
 }
 
 fn task_json(task: &Task) -> serde_json::Value {
@@ -3038,4 +3129,44 @@ fn task_json(task: &Task) -> serde_json::Value {
             "max_native_agents": limits.max_native_agents,
         })),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, usage_error_text};
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_usage_error_never_falls_back_to_the_typed_text() {
+        let typed = "5\nerror: fake line";
+        let error = Cli::try_parse_from(args(&["supertag", "objective", "list", "--limit", typed]))
+            .err()
+            .expect("an invalid limit is a usage error");
+        assert!(error.render().to_string().contains("\nerror: fake line"));
+        // The filtered arguments parse to a different kind of error, so the original rendering,
+        // which still holds the typed line break, must not be used.
+        let text = usage_error_text(&error, args(&["supertag", "--version"]));
+        assert_eq!(
+            text,
+            "error: invalid value for one of the arguments\n\nFor more information, try '--help'.\n"
+        );
+        // With the same kind, the filtered rendering keeps the value on one line.
+        let filtered = usage_error_text(
+            &error,
+            args(&[
+                "supertag",
+                "objective",
+                "list",
+                "--limit",
+                &crate::terminal::text(typed),
+            ]),
+        );
+        assert!(filtered.contains("'5 error: fake line'"), "{filtered}");
+        assert!(!filtered.contains("\nerror: fake line"), "{filtered}");
+    }
 }

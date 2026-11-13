@@ -10,12 +10,16 @@ pub enum GithubWorkspaceCommand {
     /// Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway.
     Put {
         workspace_id: String,
+        /// Configured GitHub account that reads the repository.
         #[arg(long)]
         account: String,
+        /// Numeric GitHub repository ID, which survives renames.
         #[arg(long)]
         repository_id: u64,
+        /// Repository as OWNER/NAME; must match the repository ID.
         #[arg(long)]
         repository: String,
+        /// Pin this full commit SHA.
         #[arg(long, conflicts_with = "reference")]
         commit: Option<String>,
         /// Select a branch or tag. Omit commit and ref to use the default branch.
@@ -24,24 +28,31 @@ pub enum GithubWorkspaceCommand {
         /// Publish verified results as a draft pull request into this branch.
         #[arg(long)]
         pull_request_base: Option<String>,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
-    Get {
-        workspace_id: String,
-    },
+    /// Read one GitHub Workspace source.
+    Get { workspace_id: String },
+    /// List GitHub Workspace sources.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue after the last ID the previous page returned.
         #[arg(long, default_value = "")]
         after_id: String,
     },
+    /// Delete a GitHub Workspace source at its exact revision.
     Delete {
         workspace_id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -128,7 +139,7 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
             json!({"workspace_id":workspace_id,"deleted":true,"operation_id":operation_id})
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

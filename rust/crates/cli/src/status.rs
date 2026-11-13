@@ -31,6 +31,7 @@ pub struct StatusArgs {
     /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value_t)]
     output: Output,
 }
@@ -82,6 +83,11 @@ fn connection(gateway: Option<String>, state_directory: Option<PathBuf>) -> Resu
     Ok(match gateway {
         Some(gateway) => Connection {
             gateway: Some(gateway),
+            state_directory: None,
+        },
+        // `supertag --gateway URL status` selects the Gateway before the command name.
+        None if state_directory.is_none() && crate::ROOT_GATEWAY.get().is_some() => Connection {
+            gateway: None,
             state_directory: None,
         },
         None => Connection {
@@ -251,8 +257,8 @@ pub async fn status(args: StatusArgs) -> Result<()> {
         },
     };
     match args.output {
-        Output::Json => println!("{}", serde_json::to_string_pretty(&view)?),
-        Output::Text => print!("{}", format_status(&view, now_ms())),
+        Output::Json => crate::terminal::print_json_pretty(&view)?,
+        Output::Text => out!("{}", format_status(&view, now_ms())),
     }
     Ok(())
 }
@@ -374,14 +380,7 @@ fn format_status(view: &StatusView, now_ms: i64) -> String {
     });
     lines
         .into_iter()
-        .map(|line| format!("{}\n", terminal_text(&line)))
-        .collect()
-}
-
-/// Replace control characters, so names from the Control Plane cannot drive the terminal.
-pub fn terminal_text(text: &str) -> String {
-    text.chars()
-        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .map(|line| format!("{}\n", crate::terminal::text(&line)))
         .collect()
 }
 
@@ -398,8 +397,10 @@ fn span(minutes: i64) -> String {
 
 #[derive(Args)]
 pub struct VersionArgs {
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value_t)]
     output: Output,
 }
@@ -444,19 +445,19 @@ pub fn version(args: VersionArgs) -> Result<()> {
         local_services,
     };
     match args.output {
-        Output::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        Output::Json => crate::terminal::print_json_pretty(&report)?,
         Output::Text => {
-            println!("supertag {}", report.cli);
+            outln!("supertag {}", report.cli);
             match (&report.local_services.version, report.local_services.pid) {
                 (Some(version), Some(pid)) => {
-                    println!("Local services: {version} (process {pid})");
+                    outln!("Local services: {version} (process {pid})");
                     if report.local_services.matches_cli == Some(false) {
-                        println!(
+                        outln!(
                             "The local services run a different version; restart them with supertag down and supertag up."
                         );
                     }
                 }
-                _ => println!("Local services: not running"),
+                _ => outln!("Local services: not running"),
             }
         }
     }

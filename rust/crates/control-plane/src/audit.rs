@@ -927,10 +927,10 @@ where
                 store.fail_audit_call(&call.id, &record, rule.kind).await
             };
             if let Err(error) = result {
-                eprintln!(
+                supertag_protocol::terminal_text::warn(&format!(
                     "Could not record the audit entry for {} {}: {error}",
                     rule.action, rule.kind
-                );
+                ));
             }
             Ok(response)
         })
