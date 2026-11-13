@@ -68,6 +68,35 @@ fn target() -> Claim {
 }
 
 #[tokio::test]
+async fn a_connection_lost_mid_response_is_retried_not_rejected() -> Result<()> {
+    // How tonic reports a connection that broke while a response body was being read,
+    // for example a dropped WebSocket tunnel: `Unknown` with only the local I/O cause.
+    let broken = || {
+        tonic::Status::from_error(Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset",
+        )))
+    };
+    assert_eq!(broken().code(), tonic::Code::Unknown);
+    assert!(
+        private_call(async { Err::<(), _>(broken()) }, "accept event")
+            .await?
+            .is_none()
+    );
+    assert!(!settle_call(async { Err(broken()) }, "settle reply").await?);
+    // A status the Control Plane itself sent is still definitive.
+    assert!(
+        private_call(
+            async { Err::<(), _>(tonic::Status::unknown("rejected")) },
+            "accept event"
+        )
+        .await
+        .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn transient_renewals_do_not_pause_or_abandon_held_provider_io() -> Result<()> {
     let fixture = Fixture::new(Mode::Transient);
     let (client, _lease_server) = fixture.client().await?;

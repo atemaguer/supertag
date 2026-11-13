@@ -168,11 +168,19 @@ Security does not depend on the platform's proxy:
   service refuses the client certificate, the connection fails.
 - `ws://` is cleartext and, like `http://`, allowed only for a loopback IP address. A service
   without TLS accepts tunnels only on a loopback address.
+- The listener refuses any upgrade that carries an `Origin` header, so a web page open in a
+  browser cannot reach a service through the tunnel. SuperTag's clients never send one.
+
+A platform-owned hostname such as `*.onrender.com` or `*.modal.run` cannot get a publicly
+trusted certificate for SuperTag's inner TLS, so issue the service certificate from your own CA
+for that hostname and give every client that CA in `SUPERTAG_SERVER_CA_FILE`.
 
 Both ends send a WebSocket ping every 20 seconds, which keeps an idle tunnel open through proxies
-that close idle connections (about 100 seconds on Cloudflare), and both treat a peer that sends
-nothing for 60 seconds as gone. A dropped tunnel fails calls in flight the same way a dropped TCP
-connection does, and Worker Hosts and the Gateway reconnect and retry as they do with native gRPC.
+that close idle connections (about 100 seconds on Cloudflare), and both treat a peer that has sent
+nothing for 60 seconds as gone, noticing within the next 20. A dropped tunnel fails calls in
+flight the same way a dropped TCP connection does, and Worker Hosts and the Gateway reconnect and
+retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, rather than the
+5 allowed for native gRPC, so a platform can start a service that scaled to zero.
 
 ## Platforms behind an HTTP proxy
 

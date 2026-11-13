@@ -1,6 +1,7 @@
 //! A WebSocket as an ordinary byte stream, and the listener that accepts upgrades.
 
 use std::{
+    collections::VecDeque,
     io,
     pin::Pin,
     task::{Context, Poll, ready},
@@ -13,12 +14,17 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpListener, TcpStream},
     sync::mpsc,
-    task::JoinSet,
+    task::{AbortHandle, JoinSet},
     time::{Instant, Interval, MissedTickBehavior, interval_at},
 };
 use tokio_tungstenite::{
     WebSocketStream,
-    tungstenite::{self, Message, error::ProtocolError, protocol::WebSocketConfig},
+    tungstenite::{
+        self, Message,
+        error::ProtocolError,
+        handshake::server::{Callback, ErrorResponse, Request, Response},
+        protocol::WebSocketConfig,
+    },
 };
 use tonic::transport::server::TcpConnectInfo;
 
@@ -29,7 +35,9 @@ use crate::Connection;
 const MAX_MESSAGE: usize = 256 * 1024;
 /// How long a client has to finish the WebSocket upgrade after connecting.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Upgrades in progress at once; further connections are closed until one finishes.
+/// Upgrades in progress at once. A new connection beyond this evicts the oldest
+/// unfinished upgrade rather than being refused, so clients that stall the upgrade
+/// cannot lock out a client that completes it promptly.
 const MAX_HANDSHAKES: usize = 256;
 
 pub(crate) fn config() -> WebSocketConfig {
@@ -199,7 +207,7 @@ impl Upgrades {
         let (sender, receiver) = mpsc::channel(16);
         Self {
             receiver,
-            task: tokio::spawn(accept(listener, sender, ping)),
+            task: tokio::spawn(accept(listener, sender, ping, MAX_HANDSHAKES)),
         }
     }
 
@@ -214,15 +222,27 @@ impl Drop for Upgrades {
     }
 }
 
-async fn accept(listener: TcpListener, sender: mpsc::Sender<Connection>, ping: Duration) {
+async fn accept(
+    listener: TcpListener,
+    sender: mpsc::Sender<Connection>,
+    ping: Duration,
+    limit: usize,
+) {
     let mut upgrades = JoinSet::new();
+    // Upgrades in progress, oldest first.
+    let mut in_progress: VecDeque<AbortHandle> = VecDeque::new();
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {
-                Ok((stream, _)) if upgrades.len() < MAX_HANDSHAKES => {
-                    upgrades.spawn(upgrade(stream, ping));
+                Ok((stream, _)) => {
+                    in_progress.retain(|upgrade| !upgrade.is_finished());
+                    if in_progress.len() >= limit
+                        && let Some(oldest) = in_progress.pop_front()
+                    {
+                        oldest.abort();
+                    }
+                    in_progress.push_back(upgrades.spawn(upgrade(stream, ping)));
                 }
-                Ok(_) => {}
                 // Accept failures such as running out of file descriptors are transient.
                 Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
             },
@@ -237,6 +257,23 @@ async fn accept(listener: TcpListener, sender: mpsc::Sender<Connection>, ping: D
     }
 }
 
+/// Refuses an upgrade that carries an `Origin` header. Browsers always send one and
+/// SuperTag's clients never do, so this keeps any web page the operator has open from
+/// speaking gRPC to a listener through the tunnel.
+struct RefuseBrowsers;
+
+impl Callback for RefuseBrowsers {
+    fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
+        if request.headers().contains_key(http::header::ORIGIN) {
+            let mut refusal =
+                ErrorResponse::new(Some("browsers may not open a SuperTag tunnel".to_owned()));
+            *refusal.status_mut() = http::StatusCode::FORBIDDEN;
+            return Err(refusal);
+        }
+        Ok(response)
+    }
+}
+
 async fn upgrade(stream: TcpStream, ping: Duration) -> Option<Connection> {
     let info = TcpConnectInfo {
         local_addr: stream.local_addr().ok(),
@@ -245,7 +282,7 @@ async fn upgrade(stream: TcpStream, ping: Duration) -> Option<Connection> {
     stream.set_nodelay(true).ok()?;
     let socket = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        tokio_tungstenite::accept_async_with_config(stream, Some(config())),
+        tokio_tungstenite::accept_hdr_async_with_config(stream, RefuseBrowsers, Some(config())),
     )
     .await
     .ok()?
@@ -260,7 +297,7 @@ async fn upgrade(stream: TcpStream, ping: Duration) -> Option<Connection> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
-    use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, protocol::Role};
 
     async fn pair(
         ping: Duration,
@@ -360,5 +397,78 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    fn listen(limit: usize) -> (std::net::SocketAddr, Upgrades) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let listener = TcpListener::from_std(listener).unwrap();
+        let (sender, receiver) = mpsc::channel(16);
+        let task = tokio::spawn(accept(listener, sender, Duration::from_secs(60), limit));
+        (address, Upgrades { receiver, task })
+    }
+
+    async fn next_upgrade(upgrades: &mut Upgrades) -> Connection {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| upgrades.poll_next(cx)),
+        )
+        .await
+        .expect("the upgrade completes")
+        .expect("the listener is running")
+    }
+
+    #[tokio::test]
+    async fn stalled_upgrades_cannot_lock_out_a_prompt_client() {
+        let limit = 4;
+        let (address, mut upgrades) = listen(limit);
+        let mut stalled = Vec::new();
+        for _ in 0..limit * 3 {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(b"GET / HTTP/1.1\r\n").await.unwrap();
+            stalled.push(stream);
+        }
+        let stream = TcpStream::connect(address).await.unwrap();
+        let client = tokio::spawn(tokio_tungstenite::client_async_with_config(
+            format!("ws://{address}/tunnel"),
+            stream,
+            Some(config()),
+        ));
+        next_upgrade(&mut upgrades).await;
+        client.await.unwrap().unwrap();
+        drop(stalled);
+    }
+
+    #[tokio::test]
+    async fn refuses_an_upgrade_from_a_browser() {
+        let (address, mut upgrades) = listen(MAX_HANDSHAKES);
+        let mut request = format!("ws://{address}/tunnel")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            http::header::ORIGIN,
+            http::HeaderValue::from_static("https://evil.example"),
+        );
+        let stream = TcpStream::connect(address).await.unwrap();
+        let error = tokio_tungstenite::client_async_with_config(request, stream, Some(config()))
+            .await
+            .unwrap_err();
+        match error {
+            tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // The same client without an Origin header is accepted.
+        let stream = TcpStream::connect(address).await.unwrap();
+        tokio_tungstenite::client_async_with_config(
+            format!("ws://{address}/tunnel"),
+            stream,
+            Some(config()),
+        )
+        .await
+        .unwrap();
+        next_upgrade(&mut upgrades).await;
     }
 }

@@ -14,7 +14,7 @@ use std::{
     future::Future,
     io,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
     time::Duration,
 };
@@ -157,12 +157,22 @@ pub fn tunneled_uri(url: &str) -> Result<Option<String>, Error> {
     Ok(Some(format!("{scheme}://{host}:{port}")))
 }
 
+/// The system roots, loaded once per process: loading them can block for a while
+/// (the macOS keychain), and clients build a new target on every reconnect.
+fn system_roots() -> &'static RootCertStore {
+    static ROOTS: OnceLock<RootCertStore> = OnceLock::new();
+    ROOTS.get_or_init(|| {
+        let mut roots = RootCertStore::empty();
+        for certificate in rustls_native_certs::load_native_certs().certs {
+            // Unparseable system roots are skipped, as every rustls client does.
+            let _ = roots.add(certificate);
+        }
+        roots
+    })
+}
+
 fn outer_tls(extra_roots: Option<&[u8]>) -> Result<ClientConfig, Error> {
-    let mut roots = RootCertStore::empty();
-    for certificate in rustls_native_certs::load_native_certs().certs {
-        // Unparseable system roots are skipped, as every rustls client does.
-        let _ = roots.add(certificate);
-    }
+    let mut roots = system_roots().clone();
     if let Some(pem) = extra_roots {
         for certificate in CertificateDer::pem_slice_iter(pem) {
             roots.add(certificate?)?;

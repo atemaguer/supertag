@@ -66,16 +66,6 @@ pub fn matches_bearer<T>(request: &Request<T>, token: &str) -> bool {
     })
 }
 
-/// Whether a client-side call failed because its connection broke after the
-/// request may have been sent, for example when the peer process was killed
-/// mid-call. tonic reports this as `Unknown` with a transport error source. Like
-/// `Unavailable`, the outcome is unknown, so callers retry only idempotent work.
-pub fn interrupted_transport(status: &Status) -> bool {
-    status.code() == tonic::Code::Unknown
-        && std::iter::successors(std::error::Error::source(status), |error| error.source())
-            .any(|error| error.is::<tonic::transport::Error>())
-}
-
 /// Report an interrupted upstream connection as `Unavailable`, so a downstream
 /// client applies its existing retry rules instead of failing permanently. The
 /// local cause does not cross the wire, so a forwarded `Unknown` would otherwise

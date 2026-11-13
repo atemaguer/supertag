@@ -91,8 +91,11 @@ async fn configured_endpoint(
 ) -> Result<Target> {
     let tunnel = tunneled_uri(&uri).map_err(|error| anyhow!("invalid endpoint URL: {error}"))?;
     let native = tunnel.clone().unwrap_or_else(|| uri.clone());
+    // A tunnel dial also covers the outer TLS and the WebSocket upgrade, and a platform
+    // proxy may hold the upgrade while it starts a container that scaled to zero.
+    let connect_timeout = Duration::from_secs(if tunnel.is_some() { 30 } else { 5 });
     let mut endpoint = Endpoint::from_shared(native)?
-        .connect_timeout(Duration::from_secs(5))
+        .connect_timeout(connect_timeout)
         .timeout(timeout);
     let mut server_ca = None;
     match endpoint.uri().scheme_str() {

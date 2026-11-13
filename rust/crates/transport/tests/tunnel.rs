@@ -644,8 +644,7 @@ fn retryable(status: &Status) -> bool {
     matches!(
         status.code(),
         tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-    ) || supertag_protocol::interrupted_transport(status)
-        || supertag_protocol::local_transport_failure(status)
+    ) || supertag_protocol::local_transport_failure(status)
 }
 
 /// A tunnel that drops mid-call fails the call with a retryable transport status, the

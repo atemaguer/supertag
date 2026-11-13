@@ -218,7 +218,7 @@ pub(crate) async fn private_call<T>(
             if matches!(
                 error.code(),
                 tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-            ) || supertag_protocol::interrupted_transport(&error) =>
+            ) || supertag_protocol::local_transport_failure(&error) =>
         {
             Ok(None)
         }
@@ -240,7 +240,7 @@ pub(crate) async fn settle_call(
             if matches!(
                 error.code(),
                 tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-            ) || supertag_protocol::interrupted_transport(&error) =>
+            ) || supertag_protocol::local_transport_failure(&error) =>
         {
             Ok(false)
         }
@@ -285,7 +285,7 @@ async fn renew_claim(
             if matches!(
                 error.code(),
                 tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-            ) || supertag_protocol::interrupted_transport(&error) =>
+            ) || supertag_protocol::local_transport_failure(&error) =>
         {
             Ok(Renewal::Transient)
         }
