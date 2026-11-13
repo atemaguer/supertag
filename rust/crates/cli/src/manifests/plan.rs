@@ -1027,6 +1027,7 @@ impl<'a> Catalog<'a> {
             budget_currency: spec.budget_currency,
             team_id: team,
             runtime_actions: actions,
+            notification_task_id: None,
         };
         validate_manifest_objective(&value)?;
         if let Some(prior) = prior {

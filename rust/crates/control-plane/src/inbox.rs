@@ -233,6 +233,16 @@ impl Store {
         principal: &str,
         input: &ListInboxItemsRequest,
     ) -> Result<ListInboxItemsResponse> {
+        self.inbox_page(principal, input, true).await
+    }
+
+    /// A page of the Inbox; `statuses` adds each item's notification status.
+    pub(crate) async fn inbox_page(
+        &self,
+        principal: &str,
+        input: &ListInboxItemsRequest,
+        statuses: bool,
+    ) -> Result<ListInboxItemsResponse> {
         operator(principal)?;
         if !input.objective_id.is_empty() {
             name("Objective ID", &input.objective_id)?;
@@ -302,6 +312,7 @@ impl Store {
                         asked_at_ms: question.asked_at_ms,
                     }),
                     approval: None,
+                    notification: None,
                 });
             }
         }
@@ -362,6 +373,7 @@ impl Store {
                         reason,
                         question: None,
                         approval: None,
+                        notification: None,
                     });
                 }
             }
@@ -378,7 +390,7 @@ impl Store {
                 let task_id: String = row.try_get("task_id")?;
                 let attempt_id: Option<String> = row.try_get("attempt_id")?;
                 let key = format!("task_attention:{task_id}");
-                items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None });
+                items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None, notification: None });
             }
         }
         if wants(&cursor, InboxItemKind::Approval) {
@@ -414,6 +426,11 @@ impl Store {
         } as usize;
         let more = items.len() > limit;
         items.truncate(limit);
+        for item in items.iter_mut().filter(|_| statuses) {
+            item.notification = Some(
+                crate::operator_notifications::item_status_in(&mut tx, principal, item).await?,
+            );
+        }
         let next_cursor = if more {
             let last = items.last().expect("nonempty bounded page");
             serde_json::to_string(&Cursor {
@@ -537,6 +554,7 @@ async fn mcp_logins_in(
                 ),
                 question: None,
                 approval: None,
+                notification: None,
             });
         }
     }

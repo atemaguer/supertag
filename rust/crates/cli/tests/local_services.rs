@@ -2019,6 +2019,16 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
     assert!(
         fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
     );
+    // The Inbox shows that the question reached the operator, and through what.
+    let inbox: Value =
+        serde_json::from_str(&cli(&["get", "inbox-items", "--objective", "release"])?)?;
+    let notification = &inbox["items"][0]["notification"];
+    assert_eq!(notification["status"], "delivered", "{inbox}");
+    let via = notification["reason"].as_str().context("delivery reason")?;
+    assert!(
+        via == "via desktop,webhook" || via == "via webhook,desktop",
+        "{via}"
+    );
     supervisor.stop().await
 }
 

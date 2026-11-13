@@ -83,6 +83,12 @@ impl ControlPlane {
         })
     }
 
+    /// Records the deployment's default thread for Objective notices, or clears it.
+    pub async fn set_default_notification_task(&self, task_id: Option<&str>) -> anyhow::Result<()> {
+        self.store.set_default_notification_task(task_id).await?;
+        Ok(())
+    }
+
     pub async fn seed_host(&self, host_id: &str, token_digest: &[u8]) -> anyhow::Result<()> {
         self.store.seed_host(host_id, token_digest).await?;
         Ok(())

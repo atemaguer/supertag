@@ -48,6 +48,10 @@ pub enum ObjectiveCommand {
         /// Create the Objective with no runtime actions.
         #[arg(long)]
         no_runtime_actions: bool,
+        /// Post the Objective's limit notices and completion report in the thread of this
+        /// surface Task, in place of its start thread or the deployment default.
+        #[arg(long)]
+        notification_task: Option<String>,
         outcome: String,
     },
     /// List commit review requests and recorded verdicts for an Objective.
@@ -261,6 +265,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
             operation_id: id,
             runtime_actions,
             no_runtime_actions,
+            notification_task,
         } => {
             if no_runtime_actions || !runtime_actions.is_empty() {
                 requested_actions = Some(runtime_actions);
@@ -280,6 +285,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                         runtime_actions: requested_actions
                             .clone()
                             .map(|actions| RuntimeActions { actions }),
+                        notification_task_id: notification_task,
                     },
                     &token,
                 )?)

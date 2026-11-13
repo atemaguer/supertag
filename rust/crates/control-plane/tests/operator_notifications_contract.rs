@@ -130,6 +130,28 @@ impl Fixture {
             .unwrap()
     }
 
+    /// The notification status the Inbox shows for an Objective's item of `kind`.
+    async fn status(
+        &self,
+        objective: &str,
+        kind: InboxItemKind,
+    ) -> (InboxNotificationStatus, String) {
+        let page = self
+            .store
+            .list_inbox_items(
+                OPERATOR,
+                &ListInboxItemsRequest {
+                    objective_id: objective.into(),
+                    kind: kind as i32,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let notification = page.items[0].notification.clone().expect("a status");
+        (notification.status(), notification.reason)
+    }
+
     async fn running(&self, task_id: &str) -> InspectAttemptRequest {
         // Clock jumps outlive the host's presence; register it again before each claim.
         self.store
@@ -274,6 +296,11 @@ async fn contract(url: &str) {
     let attempt = f.running(&first.starting_task_id).await;
     f.expire().await;
     assert!(f.claim(&[]).await.is_none());
+    // TS `listOperatorNotificationsForItems` through the Inbox enricher: per-item status.
+    assert_eq!(
+        f.status("first", InboxItemKind::TaskAttention).await,
+        (InboxNotificationStatus::NotConfigured, String::new())
+    );
     assert!(matches!(
         f.store
             .claim_operator_notification(
@@ -324,6 +351,10 @@ async fn contract(url: &str) {
         delivered.external_message_id.as_deref(),
         Some("1794470009.000001")
     );
+    assert_eq!(
+        f.status("first", InboxItemKind::TaskAttention).await,
+        (InboxNotificationStatus::Delivered, "via slack".into())
+    );
     // A settled lease cannot be settled again, and nothing repeats.
     assert!(matches!(
         f.settle(&message, &lease, Err("late")).await,
@@ -364,6 +395,11 @@ async fn contract(url: &str) {
     assert_eq!(
         failed.last_error.as_deref(),
         Some("failed at <redacted URL>")
+    );
+    // The second occurrence waits for its next attempt.
+    assert_eq!(
+        f.status("first", InboxItemKind::TaskAttention).await,
+        (InboxNotificationStatus::Pending, "retry 2/5".into())
     );
     assert!(f.claim(&[slack()]).await.is_none());
     f.advance(RETRY_BASE_MS);
@@ -535,6 +571,10 @@ async fn contract(url: &str) {
     assert_eq!(
         failed.last_error.as_deref(),
         Some("Desktop notification unavailable")
+    );
+    assert_eq!(
+        f.status("desktop-only", InboxItemKind::TaskAttention).await,
+        (InboxNotificationStatus::Unavailable, String::new())
     );
 
     // A message whose lease lapses on its last attempt fails instead of being sent again.

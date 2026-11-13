@@ -10,7 +10,8 @@
 //! accepts the message.
 use sqlx::{Acquire, Any, Row, Transaction};
 use supertag_protocol::v2::{
-    ObjectiveActionRequest, ObjectiveStatus, ReplyState, ReviewObjectiveRequest, Task, TaskState,
+    ObjectiveActionRequest, ObjectiveStatus, ReplyDeliveryAudit, ReplyState,
+    ReviewObjectiveRequest, SurfaceAccount, Task, TaskState,
 };
 use uuid::Uuid;
 
@@ -388,23 +389,120 @@ async fn status_in(
     task_in(tx, &task.task_id).await
 }
 
-/// Posts a Control Plane report once to an Objective's home thread, keyed by
-/// `key` within the Objective. An Objective without a home thread posts nothing.
-/// A report the home Tag can no longer accept is skipped: the change it
-/// reports has already happened and must not be undone by its notice.
+/// Where an Objective's notices post: a surface thread that still verifies.
+pub(crate) struct NoticeHome {
+    /// `task:ID` for a chosen or default surface Task, `thread` for the start thread.
+    pub(crate) id: String,
+    account_id: String,
+    conversation_id: String,
+    thread_id: Option<String>,
+}
+
+/// TS `objectiveHome`: the surface Task an operator chose for the Objective, then the thread
+/// that started it, then the deployment default (`SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`); the
+/// first whose Tag is active and whose Surface Account is still enabled.
+pub(crate) async fn notice_home_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+) -> Result<Option<NoticeHome>> {
+    let chosen: Option<String> = sqlx::query_scalar(
+        "SELECT notification_task_id FROM supertag_v2_objectives WHERE objective_id=$1",
+    )
+    .bind(objective_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .flatten();
+    if let Some(task) = chosen
+        && let Some(home) = task_home_in(tx, &task).await?
+    {
+        return Ok(Some(home));
+    }
+    if let Some(row) = sqlx::query("SELECT account_id, conversation_id, thread_id, tag_id FROM supertag_v2_surface_objectives WHERE objective_id=$1")
+        .bind(objective_id).fetch_optional(&mut **tx).await?
+    {
+        let account_id: String = row.try_get("account_id")?;
+        if route_verified_in(tx, &account_id, &row.try_get::<String, _>("tag_id")?).await? {
+            return Ok(Some(NoticeHome {
+                id: "thread".into(),
+                account_id,
+                conversation_id: row.try_get("conversation_id")?,
+                thread_id: row.try_get("thread_id")?,
+            }));
+        }
+    }
+    let default: Option<String> = sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_notification_defaults WHERE singleton=1",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    match default {
+        Some(task) => task_home_in(tx, &task).await,
+        None => Ok(None),
+    }
+}
+
+/// The thread of a surface Task, while it verifies (TS `getVerifiedSurfaceTask`).
+pub(crate) async fn task_home_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Option<NoticeHome>> {
+    let Some(row) = sqlx::query("SELECT e.account_id, e.conversation_id, e.thread_id, t.tag_id FROM supertag_v2_inbound_events e JOIN supertag_v2_tasks t ON t.task_id=e.task_id WHERE e.task_id=$1")
+        .bind(task_id).fetch_optional(&mut **tx).await? else {
+        return Ok(None);
+    };
+    let account_id: String = row.try_get("account_id")?;
+    if !route_verified_in(tx, &account_id, &row.try_get::<String, _>("tag_id")?).await? {
+        return Ok(None);
+    }
+    Ok(Some(NoticeHome {
+        id: format!("task:{task_id}"),
+        account_id,
+        conversation_id: row.try_get("conversation_id")?,
+        thread_id: row.try_get("thread_id")?,
+    }))
+}
+
+/// A route verifies while its Tag is active and, for a connector of a managed Surface Account,
+/// while that account is enabled.
+async fn route_verified_in(
+    tx: &mut Transaction<'_, Any>,
+    connector_account_id: &str,
+    tag_id: &str,
+) -> Result<bool> {
+    let retired: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT retired_at_ms FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if !matches!(retired, Some(None)) {
+        return Ok(false);
+    }
+    let account: Option<Vec<u8>> = sqlx::query_scalar("SELECT account.payload FROM supertag_v2_managed_connector_aliases alias JOIN supertag_v2_surface_accounts account ON account.account_id=alias.account_id WHERE alias.connector_account_id=$1")
+        .bind(connector_account_id).fetch_optional(&mut **tx).await?;
+    Ok(match account {
+        Some(bytes) => crate::policy::decode::<SurfaceAccount>(&bytes)?.enabled,
+        None => true,
+    })
+}
+
+/// Posts a Control Plane report once to an Objective's notice home, keyed by `key` within the
+/// Objective and the home, so a changed home gets the report once more. An Objective without a
+/// home posts nothing. A report the home Tag can no longer accept is skipped: the change it
+/// reports has already happened and must not be undone by its notice. `limit_key` names the
+/// limit event a limit notice reports, which must still hold when it is delivered.
 pub(crate) async fn home_report_in(
     tx: &mut Transaction<'_, Any>,
     objective_id: &str,
     tag_id: &str,
     key: &str,
+    limit_key: Option<&str>,
     text: &str,
     now_ms: i64,
 ) -> Result<()> {
-    let Some(home) = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_surface_objectives WHERE objective_id=$1")
-        .bind(objective_id).fetch_optional(&mut **tx).await? else {
+    let Some(home) = notice_home_in(tx, objective_id).await? else {
         return Ok(());
     };
-    let notice_key = format!("report:{key}");
+    let notice_key = format!("report:{key}@{}", home.id);
     let prior: Option<String> = sqlx::query_scalar(
         "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id=$1 AND notice_key=$2",
     )
@@ -439,15 +537,95 @@ pub(crate) async fn home_report_in(
         }
         Err(error) => return Err(error),
     };
-    sqlx::query("INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id) VALUES ($1,$2,$3)")
-        .bind(objective_id).bind(&notice_key).bind(&task.task_id).execute(&mut *savepoint).await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id,home,limit_key) VALUES ($1,$2,$3,$4,$5)")
+        .bind(objective_id).bind(&notice_key).bind(&task.task_id).bind(&home.id).bind(limit_key).execute(&mut *savepoint).await?;
     sqlx::query("INSERT INTO supertag_v2_replies (reply_id, task_id, account_id, conversation_id, thread_id, text, state, ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
         .bind(Uuid::new_v4().to_string()).bind(&task.task_id)
-        .bind(home.try_get::<String, _>("account_id")?).bind(home.try_get::<String, _>("conversation_id")?)
-        .bind(home.try_get::<Option<String>, _>("thread_id")?).bind(text)
+        .bind(&home.account_id).bind(&home.conversation_id)
+        .bind(&home.thread_id).bind(text)
         .bind(ReplyState::Pending as i64).bind(order).execute(&mut *savepoint).await?;
     savepoint.commit().await?;
     Ok(())
+}
+
+impl crate::Store {
+    /// Records the deployment's default notice thread (TypeScript
+    /// `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`), or clears it. An Objective with no chosen
+    /// thread and no start thread posts its notices there while the Task verifies. Every
+    /// Control Plane replica of one deployment must be started with the same value.
+    pub async fn set_default_notification_task(&self, task_id: Option<&str>) -> Result<()> {
+        let (mut tx, _) = self.write().await?;
+        sqlx::query("DELETE FROM supertag_v2_notification_defaults")
+            .execute(&mut *tx)
+            .await?;
+        if let Some(task_id) = task_id {
+            crate::store::name("notification Task ID", task_id)?;
+            // It must name a surface Task; whether its thread still verifies is checked at
+            // each use, so a later retired Tag never stops the Control Plane from starting.
+            let surface: Option<String> = sqlx::query_scalar(
+                "SELECT task_id FROM supertag_v2_inbound_events WHERE task_id=$1",
+            )
+            .bind(task_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if surface.is_none() {
+                return Err(StoreError::InvalidArgument(
+                    "the default notification Task must be a Task a surface message started".into(),
+                ));
+            }
+            sqlx::query(
+                "INSERT INTO supertag_v2_notification_defaults (singleton, task_id) VALUES (1, $1)",
+            )
+            .bind(task_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+/// TS `BudgetNotifications.mayDeliver`: just before a limit notice is delivered, it must still
+/// apply. A notice whose Objective closed, whose limit event no longer holds (a raised budget or
+/// moved deadline), or whose home changed or no longer verifies (a retired Tag, a disabled
+/// Surface Account) is withdrawn: failed with the reason recorded, never posted. Returns whether
+/// the reply was withdrawn.
+pub(crate) async fn withdraw_stale_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    reply_id: &str,
+    now_ms: i64,
+) -> Result<bool> {
+    let Some(notice) = sqlx::query("SELECT n.objective_id, n.home, n.limit_key FROM supertag_v2_replies r JOIN supertag_v2_objective_notices n ON n.task_id=r.task_id WHERE r.reply_id=$1 AND n.limit_key IS NOT NULL")
+        .bind(reply_id).fetch_optional(&mut **tx).await? else {
+        return Ok(false);
+    };
+    let objective_id: String = notice.try_get("objective_id")?;
+    let limit_key: String = notice.try_get("limit_key")?;
+    let home: Option<String> = notice.try_get("home")?;
+    if objectives::limit_notice_applies_in(tx, &objective_id, &limit_key).await?
+        && notice_home_in(tx, &objective_id).await?.map(|home| home.id) == home
+    {
+        return Ok(false);
+    }
+    sqlx::query("UPDATE supertag_v2_replies SET state=$1 WHERE reply_id=$2")
+        .bind(ReplyState::Failed as i64)
+        .bind(reply_id)
+        .execute(&mut **tx)
+        .await?;
+    crate::replies::audit_in(
+        tx,
+        reply_id,
+        ReplyDeliveryAudit {
+            kind: "withdrawn".into(),
+            principal: "system".into(),
+            evidence: "Operator notification was superseded, resolved, or its destination is no longer verified".into(),
+            recorded_at_ms: now_ms,
+            state: ReplyState::Failed.into(),
+            provider_receipt: None,
+        },
+    )
+    .await?;
+    Ok(true)
 }
 
 /// Queue the status answer once the thread route of its Task is recorded.

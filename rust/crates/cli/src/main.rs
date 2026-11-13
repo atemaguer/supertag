@@ -1303,6 +1303,12 @@ async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Res
         required_env("SUPERTAG_GATEWAY_TOKEN")?,
     )
     .await?;
+    // The deployment's default thread for Objective notices (TypeScript parity).
+    plane
+        .set_default_notification_task(
+            nonempty_env("SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID").as_deref(),
+        )
+        .await?;
     if let Ok(token) = std::env::var("SUPERTAG_BOOTSTRAP_HOST_TOKEN") {
         ensure!(
             token.len() >= 32,

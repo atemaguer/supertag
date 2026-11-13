@@ -46,7 +46,16 @@ impl Store {
         }
         crate::reply_progress::sweep_in(&mut tx, now).await?;
         crate::reply_progress::enqueue_unsuccessful_in(&mut tx, account).await?;
-        let id: Option<String> = sqlx::query_scalar(&format!("SELECT reply_id FROM supertag_v2_replies WHERE account_id=$1 AND state=$2 AND {} ORDER BY ready_order LIMIT 1", crate::reply_progress::FINAL_READY)).bind(account).bind(ReplyState::Pending as i64).bind(now).fetch_optional(&mut *tx).await?;
+        // A limit notice that no longer applies is withdrawn instead of claimed.
+        let id = loop {
+            let id: Option<String> = sqlx::query_scalar(&format!("SELECT reply_id FROM supertag_v2_replies WHERE account_id=$1 AND state=$2 AND {} ORDER BY ready_order LIMIT 1", crate::reply_progress::FINAL_READY)).bind(account).bind(ReplyState::Pending as i64).bind(now).fetch_optional(&mut *tx).await?;
+            match id {
+                Some(id)
+                    if crate::surface_objectives::withdraw_stale_notice_in(&mut tx, &id, now)
+                        .await? => {}
+                id => break id,
+            }
+        };
         let Some(id) = id else {
             tx.commit().await?;
             return Ok(ClaimReplyResponse::default());
@@ -313,7 +322,7 @@ async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<()> {
     Ok(())
 }
 
-async fn audit_in(
+pub(crate) async fn audit_in(
     tx: &mut Transaction<'_, Any>,
     id: &str,
     audit: ReplyDeliveryAudit,

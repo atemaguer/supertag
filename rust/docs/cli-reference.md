@@ -4113,6 +4113,8 @@ Options:
           Narrow runtime actions to this list; repeat for each allowed action
       --no-runtime-actions
           Create the Objective with no runtime actions
+      --notification-task <NOTIFICATION_TASK>
+          Post the Objective's limit notices and completion report in the thread of this surface Task, in place of its start thread or the deployment default
   -h, --help
           Print help
 ```
