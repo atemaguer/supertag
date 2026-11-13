@@ -99,17 +99,35 @@ impl Bridge {
         F: FnMut(RegisteredHost, Request<M>) -> Fut,
         Fut: std::future::Future<Output = Result<Response<R>, Status>>,
     {
+        self.retry(message, |request| call(self.host.clone(), request))
+            .await
+            .map(Response::into_inner)
+    }
+
+    /// Repeats one upstream call while execution authority lasts. Use it only
+    /// for calls the Control Plane deduplicates (an operation ID, a usage
+    /// sequence, an exact receipt) or that only read, so a call whose answer
+    /// the transport lost is safely sent again. Each try is bounded to five
+    /// seconds; a refusal from the Control Plane is returned at once.
+    async fn retry<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<Response<R>, Status>
+    where
+        M: Clone,
+        F: FnMut(Request<M>) -> Fut,
+        Fut: std::future::Future<Output = Result<Response<R>, Status>>,
+    {
         loop {
             let deadline = self.inputs.active_deadline()?;
             let sent = Instant::now();
+            let attempt_deadline = deadline.min(sent + Duration::from_secs(5));
             let mut upstream = authenticated_request(message.clone(), &self.host_token, None)?;
-            upstream.set_timeout(
-                deadline
-                    .saturating_duration_since(sent)
-                    .min(Duration::from_secs(5)),
-            );
-            match call(self.host.clone(), upstream).await {
-                Ok(response) => return Ok(response.into_inner()),
+            upstream.set_timeout(attempt_deadline.saturating_duration_since(sent));
+            // The channel would otherwise hold a call across a broken connection
+            // for its whole endpoint timeout; bound each try here instead.
+            let outcome = time::timeout_at(attempt_deadline, call(upstream))
+                .await
+                .unwrap_or_else(|_| Err(Status::deadline_exceeded("upstream call timed out")));
+            match outcome {
+                Ok(response) => return Ok(response),
                 Err(error) if crate::retryable(&error) => {
                     time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(250)))
                         .await;
@@ -285,20 +303,22 @@ impl Harness for Bridge {
                     amount_minor,
                 })
         };
-        let mut upstream = authenticated_request(
-            ReportAttemptUsageRequest {
-                attempt: Some(self.attempt()),
-                sequence: usage.sequence,
-                amount_minor: usage.amount_minor,
-                currency: usage.currency,
-                estimated: usage.estimated,
-                native_usage: usage.native_usage,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
-        let response = self.host.clone().report_attempt_usage(upstream).await?;
+        // The Control Plane accepts an exact repeat of a usage sequence, so a
+        // report whose answer the transport lost is safely sent again.
+        let report = ReportAttemptUsageRequest {
+            attempt: Some(self.attempt()),
+            sequence: usage.sequence,
+            amount_minor: usage.amount_minor,
+            currency: usage.currency,
+            estimated: usage.estimated,
+            native_usage: usage.native_usage,
+        };
+        let response = self
+            .retry(report, |request| {
+                let mut host = self.host.clone();
+                async move { host.report_attempt_usage(request).await }
+            })
+            .await?;
         if let Some((sequence, tokens)) = native_receipt
             && sequence >= state.native_usage_sequence
         {

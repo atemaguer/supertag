@@ -1,5 +1,5 @@
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_MESSAGE_BYTES,
     v2::{
         AskQuestionRequest, HarnessAskQuestionRequest, ObjectiveQuestion,
         harness_questions_server::{HarnessQuestions, HarnessQuestionsServer},
@@ -32,17 +32,18 @@ impl HarnessQuestions for Bridge {
             ));
         }
         let input = request.into_inner();
-        let mut upstream = authenticated_request(
-            AskQuestionRequest {
-                attempt: Some(self.attempt()),
-                operation_id: input.operation_id,
-                text: input.text,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(std::time::Duration::from_secs(5));
-        let question = self.host.clone().ask_question(upstream).await?;
+        // An exact repeat of this Attempt's question returns its durable receipt.
+        let ask = AskQuestionRequest {
+            attempt: Some(self.attempt()),
+            operation_id: input.operation_id,
+            text: input.text,
+        };
+        let question = self
+            .retry(ask, |request| {
+                let mut host = self.host.clone();
+                async move { host.ask_question(request).await }
+            })
+            .await?;
         drop(state);
         Ok(question)
     }

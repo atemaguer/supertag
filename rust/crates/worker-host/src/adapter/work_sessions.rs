@@ -1,7 +1,5 @@
-use std::time::Duration;
-
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_MESSAGE_BYTES,
     v2::{
         AskWorkSessionQuestionRequest, ContinueWorkSessionRequest,
         HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
@@ -22,6 +20,8 @@ impl Bridge {
 }
 
 #[tonic::async_trait]
+// Each Work Session call carries an operation ID that the Control Plane replays,
+// so a call whose answer a Gateway partition lost is retried within authority.
 impl HarnessWorkSessions for Bridge {
     async fn r#continue(
         &self,
@@ -34,22 +34,17 @@ impl HarnessWorkSessions for Bridge {
             return Err(Status::failed_precondition("execution is complete"));
         }
         let input = request.into_inner();
-        let mut upstream = authenticated_request(
-            ContinueWorkSessionRequest {
-                attempt: Some(self.attempt()),
-                operation_id: input.operation_id,
-                work_session_id: input.work_session_id,
-                message: input.message,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
+        let upstream = ContinueWorkSessionRequest {
+            attempt: Some(self.attempt()),
+            operation_id: input.operation_id,
+            work_session_id: input.work_session_id,
+            message: input.message,
+        };
         let response = self
-            .coordination
-            .work_sessions
-            .clone()
-            .r#continue(upstream)
+            .retry(upstream, |request| {
+                let mut client = self.coordination.work_sessions.clone();
+                async move { client.r#continue(request).await }
+            })
             .await;
         drop(state);
         response
@@ -66,17 +61,17 @@ impl HarnessWorkSessions for Bridge {
             return Err(Status::failed_precondition("execution is complete"));
         }
         let input = request.into_inner();
-        let mut upstream = authenticated_request(
-            AskWorkSessionQuestionRequest {
-                attempt: Some(self.attempt()),
-                operation_id: input.operation_id,
-                text: input.text,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
-        let response = self.coordination.work_sessions.clone().ask(upstream).await;
+        let upstream = AskWorkSessionQuestionRequest {
+            attempt: Some(self.attempt()),
+            operation_id: input.operation_id,
+            text: input.text,
+        };
+        let response = self
+            .retry(upstream, |request| {
+                let mut client = self.coordination.work_sessions.clone();
+                async move { client.ask(request).await }
+            })
+            .await;
         drop(state);
         response
     }
@@ -94,24 +89,19 @@ impl HarnessWorkSessions for Bridge {
             return Err(Status::failed_precondition("execution is complete"));
         }
         let input = request.into_inner();
-        let mut upstream = authenticated_request(
-            StartWorkSessionRequest {
-                attempt: Some(self.attempt()),
-                operation_id: input.operation_id,
-                title: input.title,
-                instruction: input.instruction,
-                workspace_id: input.workspace_id,
-                target_tag_id: input.target_tag_id,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
+        let upstream = StartWorkSessionRequest {
+            attempt: Some(self.attempt()),
+            operation_id: input.operation_id,
+            title: input.title,
+            instruction: input.instruction,
+            workspace_id: input.workspace_id,
+            target_tag_id: input.target_tag_id,
+        };
         let response = self
-            .coordination
-            .work_sessions
-            .clone()
-            .start(upstream)
+            .retry(upstream, |request| {
+                let mut client = self.coordination.work_sessions.clone();
+                async move { client.start(request).await }
+            })
             .await;
         drop(state);
         response

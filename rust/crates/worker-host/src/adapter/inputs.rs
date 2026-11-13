@@ -107,22 +107,33 @@ impl InputLane {
         request: HarnessSettleLiveInputRequest,
         token: &str,
     ) -> Result<Response<LiveInput>, Status> {
-        let sent = Instant::now();
-        let deadline = self.active_deadline()?.min(sent + CALL_TIMEOUT);
-        let mut upstream = authenticated_request(
-            SettleInputRequest {
-                attempt: Some(attempt.clone()),
-                input_id: request.input_id.clone(),
-                receipt: request.receipt,
-            },
-            token,
-            None,
-        )?;
-        upstream.set_timeout(deadline.saturating_duration_since(sent));
-        let mut client = self.client.clone();
-        let response = self
-            .forward(deadline, client.settle_input(upstream))
-            .await?;
+        // A receipt is idempotent: the Control Plane accepts the same receipt
+        // again, so a settlement whose answer a partition lost is repeated
+        // while execution authority lasts. Take is never repeated (above).
+        let response = loop {
+            let sent = Instant::now();
+            let deadline = self.active_deadline()?.min(sent + CALL_TIMEOUT);
+            let mut upstream = authenticated_request(
+                SettleInputRequest {
+                    attempt: Some(attempt.clone()),
+                    input_id: request.input_id.clone(),
+                    receipt: request.receipt,
+                },
+                token,
+                None,
+            )?;
+            upstream.set_timeout(deadline.saturating_duration_since(sent));
+            let mut client = self.client.clone();
+            match self.forward(deadline, client.settle_input(upstream)).await {
+                Ok(response) => break response,
+                Err(error) if crate::retryable(&error) => {
+                    let authority = self.active_deadline()?;
+                    time::sleep_until(authority.min(Instant::now() + Duration::from_millis(250)))
+                        .await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         let input = response.get_ref();
         if input.task_id != attempt.task_id
             || input.attempt_id != attempt.attempt_id

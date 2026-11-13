@@ -94,6 +94,21 @@ struct Observed {
     may_acquire_artifacts: bool,
     artifact_reads: Vec<HarnessReadArtifactRequest>,
     captures: Vec<HarnessCaptureArtifactRequest>,
+    /// Simulates a Worker Host riding out a Gateway partition: these calls
+    /// answer only after this delay, and takes fail as unavailable.
+    partition: Option<Duration>,
+    unavailable_takes: usize,
+}
+
+impl HarnessFixture {
+    /// Holds a call for the configured partition without holding the
+    /// observation lock, as the Worker Host does while it retries upstream.
+    async fn ride_out_partition(&self) {
+        let partition = self.observed.lock().await.partition;
+        if let Some(partition) = partition {
+            tokio::time::sleep(partition).await;
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -230,6 +245,10 @@ impl Harness for HarnessFixture {
     ) -> Result<Response<TakeInputResponse>, Status> {
         self.authenticate(&request)?;
         let mut observed = self.observed.lock().await;
+        if observed.unavailable_takes > 0 {
+            observed.unavailable_takes -= 1;
+            return Err(Status::unavailable("synthetic Gateway partition"));
+        }
         let input = observed.input.take();
         if let Some(input) = &input {
             observed.dispatched = Some(input.clone());
@@ -248,6 +267,7 @@ impl Harness for HarnessFixture {
         request: Request<HarnessSettleLiveInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
         self.authenticate(&request)?;
+        self.ride_out_partition().await;
         let mut observed = self.observed.lock().await;
         let request = request.into_inner();
         if let Some(previous) = observed.receipts.first() {
@@ -278,6 +298,7 @@ impl Harness for HarnessFixture {
         request: Request<HarnessPublishRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
         self.authenticate(&request)?;
+        self.ride_out_partition().await;
         let event = request.into_inner();
         let mut observed = self.observed.lock().await;
         assert_eq!(event.sequence, observed.events.len() as u64 + 1);
@@ -305,6 +326,7 @@ impl Harness for HarnessFixture {
         request: Request<HarnessUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
         self.authenticate(&request)?;
+        self.ride_out_partition().await;
         let mut observed = self.observed.lock().await;
         assert!(
             observed.outcome.is_none(),
@@ -335,6 +357,7 @@ impl HarnessQuestions for HarnessFixture {
         request: Request<HarnessAskQuestionRequest>,
     ) -> Result<Response<ObjectiveQuestion>, Status> {
         self.authenticate(&request)?;
+        self.ride_out_partition().await;
         let mut observed = self.observed.lock().await;
         let request = request.into_inner();
         if let Some(prior) = observed.questions.first() {
@@ -1361,6 +1384,58 @@ async fn live_input_targets_exact_active_turn_once_and_retries_only_the_receipt(
         steering[0]["params"]["input"][0]["text"],
         "Use the revised requirement"
     );
+    Ok(())
+}
+
+/// A Worker Host repeats idempotent upstream calls across a Gateway partition
+/// until its execution authority ends, so its answers can take longer than
+/// the five seconds a native app-server exchange is allowed. The adapter
+/// waits for them, and a take that the partition interrupted only delays the
+/// next poll; neither fails the native turn.
+#[tokio::test]
+async fn host_calls_held_by_a_gateway_partition_do_not_fail_the_native_turn() -> Result<()> {
+    let partition = Duration::from_secs(6);
+    let (fixture, server) = steering_fixture("accept", 30_000, false).await?;
+    {
+        let mut observed = server.observed.lock().await;
+        observed.partition = Some(partition);
+        observed.unavailable_takes = 3;
+    }
+    let mut options = fixture.options();
+    options.timeout = Duration::from_secs(60);
+    let started = std::time::Instant::now();
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert!(
+        started.elapsed() > partition * 2,
+        "the partition was not held"
+    );
+    assert_eq!(observed.unavailable_takes, 0);
+    assert_eq!(observed.receipts.len(), 1);
+    assert_eq!(observed.receipts[0].receipt(), LiveInputReceipt::Accepted);
+    assert_eq!(observed.usage.len(), 1);
+    assert!(!observed.events.is_empty());
+    let steering = fixture
+        .read("requests.jsonl")?
+        .lines()
+        .filter(|line| line.contains("\"turn/steer\""))
+        .count();
+    assert_eq!(steering, 1);
+    drop(observed);
+
+    let fixture = NativeFixture::new(&successful("Question handled"), "exit 0")?;
+    std::fs::write(fixture.directory.path().join("question-mode"), "valid")?;
+    let server = HarnessProcess::configured(&["files:read"], None, "Ask", true).await?;
+    server.observed.lock().await.partition = Some(partition);
+    let mut options = fixture.options();
+    options.timeout = Duration::from_secs(60);
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(observed.questions.len(), 1);
     Ok(())
 }
 

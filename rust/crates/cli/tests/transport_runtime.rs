@@ -27,8 +27,9 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
-        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, PutTagRequest, ServiceRole,
-        SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind, WatchRequest,
+        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListNativeUsageRequest,
+        PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent,
+        WatchKind, WatchRequest,
         operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient,
         operator_events_server::{OperatorEvents, OperatorEventsServer},
@@ -483,6 +484,7 @@ async fn start_host(
     directory: &Path,
     index: usize,
     tag: &str,
+    adapter_args: &[&str],
 ) -> Result<Host> {
     let id = format!("scale-host-{index:02}");
     let proxy = Proxy::start(gateway).await?;
@@ -525,6 +527,9 @@ async fn start_host(
             "--adapter-arg=--wait-for-file={}",
             release.display()
         ));
+    for argument in adapter_args {
+        command.arg(format!("--adapter-arg={argument}"));
+    }
     let process = Service::spawn(command, directory, &id)?;
     Ok(Host {
         id,
@@ -771,6 +776,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
                 root,
                 index,
                 &tag,
+                &[],
             )
             .await?,
         );
@@ -1084,6 +1090,139 @@ async fn postgres_sixteen_host_partition_storm_preserves_invariants() -> Result<
         Ok(())
     })
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Adapter calls relayed through a partition
+
+/// The adapter reports usage and reads its Mailbox while its Worker Host cannot
+/// reach the Gateway for 18 seconds: longer than a host channel holds one call
+/// (15 seconds) and shorter than the 30-second execution lease. The host
+/// repeats each idempotent call within execution authority, so the Attempt
+/// succeeds once the partition heals, the usage is recorded once, and the
+/// adapter runs once.
+async fn exercise_adapter_calls_through_partition(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let mut operator = OperatorClient::new(services.channel().await?);
+    let tag = "partition-calls";
+    operator
+        .put_tag(tokens.request(PutTagRequest {
+            tag_id: tag.into(),
+            instructions: "Relay calls".into(),
+            allowed_actions: vec![],
+            workspace: None,
+            harness_kind: 0,
+            approval_rules: vec![],
+            execution: None,
+            name: None,
+            expected_revision: None,
+        })?)
+        .await?;
+    let host = start_host(
+        &mut operator,
+        &tokens,
+        services.gateway_address,
+        root,
+        0,
+        tag,
+        &["--calls-after-release"],
+    )
+    .await?;
+    let task = operator
+        .submit_task(tokens.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: tag.into(),
+            session_id: "partition-calls".into(),
+            operation_id: "partition-calls".into(),
+            prompt: "relay through the partition".into(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut waiting = host.release.clone().into_os_string();
+    waiting.push(".waiting");
+    while !Path::new(&waiting).exists() {
+        ensure!(Instant::now() < deadline, "the adapter never attached");
+        sleep(Duration::from_millis(20)).await;
+    }
+    host.proxy.partition();
+    std::fs::write(&host.release, "")?;
+    sleep(Duration::from_secs(18)).await;
+    ensure!(
+        task_state(&mut operator, &tokens, &task.task_id)
+            .await?
+            .state()
+            == TaskState::Running,
+        "the Attempt did not ride out the partition"
+    );
+    host.proxy.restore();
+    let finished = loop {
+        let current = task_state(&mut operator, &tokens, &task.task_id).await?;
+        if !matches!(current.state(), TaskState::Queued | TaskState::Running) {
+            break current;
+        }
+        ensure!(
+            Instant::now() < deadline + Duration::from_secs(30),
+            "Task never finished"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
+    ensure!(
+        finished.state() == TaskState::Succeeded,
+        "Task ended {:?}: {:?}\n{}",
+        finished.state(),
+        finished.result,
+        host.process.logs()
+    );
+    ensure!(
+        finished
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("Relayed through partition: usage, Mailbox")),
+        "unexpected result {:?}",
+        finished.result
+    );
+    let usage = operator
+        .list_native_usage(tokens.request(ListNativeUsageRequest {
+            task_id: task.task_id.clone(),
+            attempt_id: finished.attempt_id.clone().unwrap_or_default(),
+            after_sequence: 0,
+            limit: 10,
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        usage.reports.len() == 1
+            && usage.reports[0]
+                .native_usage
+                .as_ref()
+                .is_some_and(|native| native.total_tokens == Some(5)),
+        "usage was not recorded exactly once: {:?}",
+        usage.reports
+    );
+    ensure!(host.launches()? == 1, "the adapter ran more than once");
+    ensure!(
+        host.proxy.refused() > 0,
+        "the partition refused no reconnect"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_adapter_calls_through_partition(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+    with_postgres("partition_calls", exercise_adapter_calls_through_partition).await
 }
 
 // ---------------------------------------------------------------------------
