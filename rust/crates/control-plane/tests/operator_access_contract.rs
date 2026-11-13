@@ -255,6 +255,56 @@ async fn operator_access_contract(url: &str) {
         OperatorAuthentication::Authenticated("token:laptop-2".into())
     );
     assert!(!rotated_secret.is_empty());
+    // A late retry of a superseded rotation never restores its secret.
+    clock.store(NOW + 121_000, Ordering::SeqCst);
+    let (_, later_digest) = secret("laptop-later");
+    let later = store
+        .rotate_operator_token(&RotateOperatorTokenRequest {
+            name: "laptop-2".into(),
+            operation_id: "rotate-laptop-later".into(),
+            secret_digest: later_digest.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(later.secret_revision, 3);
+    assert!(matches!(
+        store.rotate_operator_token(&rotate).await,
+        Err(StoreError::Conflict(_))
+    ));
+    assert_eq!(store.get_operator_token("laptop-2").await.unwrap(), later);
+    assert_eq!(
+        store
+            .authenticate_operator_token(&rotated_digest)
+            .await
+            .unwrap(),
+        OperatorAuthentication::Invalid
+    );
+    // A secret a token held before is never accepted again, by any rotation or creation.
+    for reused in [&laptop_digest, &rotated_digest] {
+        assert!(matches!(
+            store
+                .rotate_operator_token(&RotateOperatorTokenRequest {
+                    name: "laptop-2".into(),
+                    operation_id: format!("reuse-{}", hex(reused)),
+                    secret_digest: reused.clone(),
+                })
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+        assert!(matches!(
+            store
+                .create_operator_token("local", &create("fresh", "fresh", reused))
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+    }
+    assert_eq!(
+        store
+            .authenticate_operator_token(&later_digest)
+            .await
+            .unwrap(),
+        OperatorAuthentication::Authenticated("token:laptop-2".into())
+    );
 
     // Expiry: the token is refused at its expiry time, and rotation renews it.
     clock.store(NOW + OPERATOR_TOKEN_LIFETIME_MS, Ordering::SeqCst);
@@ -323,6 +373,24 @@ async fn operator_access_contract(url: &str) {
     clock.store(NOW + 20, Ordering::SeqCst);
     store
         .record_audit_entry(&record("token:laptop-2", "tag.retire", "Tag", false))
+        .await
+        .unwrap();
+    // A target names a kind and up to two 256-byte IDs, so it may exceed one ID's limit.
+    let long = format!("MailboxGrant/{}->{}", "s".repeat(256), "r".repeat(256));
+    let stored = store
+        .record_audit_entry(&record("local", "mailbox-grant.change", &long, true))
+        .await
+        .unwrap();
+    assert_eq!(stored.target, long);
+    assert!(matches!(
+        store
+            .record_audit_entry(&record("local", "tag.put", &"t".repeat(1025), true))
+            .await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    sqlx::query("DELETE FROM supertag_v2_audit_entries WHERE entry_id=$1")
+        .bind(&stored.id)
+        .execute(&raw_pool(url).await)
         .await
         .unwrap();
     let all = store

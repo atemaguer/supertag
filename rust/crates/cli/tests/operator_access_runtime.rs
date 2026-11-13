@@ -1,7 +1,8 @@
 //! Operator Tokens and the audit log through separate Control Plane and Gateway processes.
 //!
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
-//! Gateway refuses the revoked token on new calls and ends a Watch stream it already opened.
+//! Gateway refuses the revoked token on new calls and ends a Watch stream and an artifact download
+//! it already opened. The audit log names every resource a call changed.
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -14,8 +15,11 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
-use supertag_protocol::{authenticated_request, v2::*};
+use supertag_protocol::{
+    CHECKPOINT_CHUNK_BYTES, HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request, v2::*,
+};
 use tokio::time::sleep;
 use tonic::{Code, Request, transport::Endpoint};
 use uuid::Uuid;
@@ -26,6 +30,7 @@ const WAIT: Duration = Duration::from_secs(15);
 struct Credentials {
     gateway: String,
     admin: String,
+    host: String,
 }
 
 impl Credentials {
@@ -33,7 +38,17 @@ impl Credentials {
         Self {
             gateway: Uuid::new_v4().to_string(),
             admin: Uuid::new_v4().to_string(),
+            host: Uuid::new_v4().to_string(),
         }
+    }
+
+    /// A Worker Host call for `generation`.
+    fn host<T>(&self, value: T, generation: u64) -> Result<Request<T>> {
+        let mut request = request(value, &self.host)?;
+        request
+            .metadata_mut()
+            .insert(HOST_GENERATION_HEADER, generation.to_string().parse()?);
+        Ok(request)
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -43,7 +58,9 @@ impl Credentials {
             .env_clear()
             .stdin(Stdio::null())
             .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &self.admin);
+            .env("SUPERTAG_OPERATOR_TOKEN", &self.admin)
+            .env("SUPERTAG_HOST_TOKEN", &self.host)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
         command
     }
 }
@@ -440,19 +457,445 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("control.db").display()
-    );
-    revoked_token_is_refused_by_a_running_gateway(&database).await
+/// A Control Plane and a Gateway with a blob directory, as separate processes.
+struct Services {
+    _directory: tempfile::TempDir,
+    _control: Process,
+    _gateway: Process,
+    private: String,
+    public: String,
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
+async fn services(credentials: &Credentials, database: &str) -> Result<Services> {
+    let directory = tempfile::tempdir()?;
+    let mut command = credentials.command(&["control-plane"]);
+    command.env("SUPERTAG_DATABASE_URL", database);
+    let mut control = Process::spawn(command, directory.path())?;
+    let private = control.address().await?;
+    let mut command = credentials.command(&["gateway", "--control-plane", &private]);
+    command
+        .arg("--checkpoint-directory")
+        .arg(directory.path().join("cas"));
+    let mut gateway = Process::spawn(command, directory.path())?;
+    let public = gateway.address().await?;
+    Ok(Services {
+        _directory: directory,
+        _control: control,
+        _gateway: gateway,
+        private,
+        public,
+    })
+}
+
+fn create_token(credentials: &Credentials, public: &str, name: &str) -> Result<String> {
+    let created = json(&cli(
+        credentials,
+        &credentials.admin,
+        public,
+        &["operator-token", "create", name],
+    )?)?;
+    Ok(created["secret"].as_str().context("secret")?.to_owned())
+}
+
+/// `(actor, action, target, outcome, code)` of every entry, oldest first.
+fn audit_entries(credentials: &Credentials, public: &str) -> Result<Vec<[String; 5]>> {
+    let audit = json(&cli(
+        credentials,
+        &credentials.admin,
+        public,
+        &["audit", "--output", "json", "--limit", "500"],
+    )?)?;
+    let mut entries: Vec<[String; 5]> = audit["entries"]
+        .as_array()
+        .context("entries")?
+        .iter()
+        .map(|entry| {
+            ["actor", "action", "target", "outcome", "code"]
+                .map(|field| entry[field].as_str().unwrap_or_default().to_owned())
+        })
+        .collect();
+    entries.reverse();
+    Ok(entries)
+}
+
+fn entry(actor: &str, action: &str, target: &str, outcome: &str, code: &str) -> [String; 5] {
+    [actor, action, target, outcome, code].map(str::to_owned)
+}
+
+async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
+    let credentials = Credentials::new();
+    let services = services(&credentials, database).await?;
+    let channel = Endpoint::from_shared(services.public.clone())?.connect_lazy();
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut mailbox = mailbox_client::MailboxClient::new(channel.clone());
+    let mut manifests =
+        manifest_relationships_client::ManifestRelationshipsClient::new(channel.clone());
+    let mut teams = teams_client::TeamsClient::new(channel.clone());
+    let secret = create_token(&credentials, &services.public, "auditor")?;
+    let actor = "token:auditor";
+
+    // IDs at the 256-byte limit still name their resource: the target is longer than any one ID.
+    let long_tag = "t".repeat(253);
+    let sender = "s".repeat(128);
+    let recipient = "r".repeat(128);
+    for tag in [&long_tag, &sender, &recipient] {
+        operator.put_tag(request(put_tag(tag), &secret)?).await?;
+    }
+    let grant = format!("MailboxGrant/{sender}->{recipient}");
+    assert!(grant.len() > 256);
+    mailbox
+        .change_grant(request(
+            ChangeMailboxGrantRequest {
+                operation_id: "grant".into(),
+                sender_tag_id: sender.clone(),
+                recipient_tag_id: recipient.clone(),
+                granted: true,
+            },
+            &secret,
+        )?)
+        .await?;
+    teams
+        .create_team(request(
+            CreateTeamRequest {
+                operation_id: "team".into(),
+                team_id: "core".into(),
+                name: "Core".into(),
+                member_tag_ids: vec![sender.clone()],
+                max_concurrency: Some(1),
+            },
+            &secret,
+        )?)
+        .await?;
+
+    // A call that provisions several Tags names each of them.
+    let provision = |tag: &str| ProvisionTag {
+        tag: Some(put_tag(tag)),
+        ..Default::default()
+    };
+    manifests
+        .provision_tags(request(
+            ProvisionTagsRequest {
+                tags: vec![provision("planner"), provision("builder")],
+            },
+            &secret,
+        )?)
+        .await?;
+
+    // Pruning an apply set records each member it removed, not only the set.
+    let mut declared = Vec::new();
+    for tag in ["prune-kept", "prune-removed"] {
+        let put = operator
+            .put_tag(request(put_tag(tag), &secret)?)
+            .await?
+            .into_inner();
+        declared.push(ApplySetDeclaration {
+            kind: "Tag".into(),
+            name: tag.into(),
+            revision: put.revision,
+            created: true,
+        });
+    }
+    manifests
+        .reconcile_apply_set(request(
+            ReconcileApplySetRequest {
+                apply_set: "web".into(),
+                declared: declared.clone(),
+                prune: false,
+                preview: false,
+            },
+            &secret,
+        )?)
+        .await?;
+    let pruned = manifests
+        .reconcile_apply_set(request(
+            ReconcileApplySetRequest {
+                apply_set: "web".into(),
+                declared: declared[..1].to_vec(),
+                prune: true,
+                preview: false,
+            },
+            &secret,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(pruned.pruned.len(), 1);
+    assert_eq!(pruned.pruned[0].action(), ApplySetPruneAction::Delete);
+
+    // A message larger than the Control Plane accepts is refused by tonic itself, and recorded with
+    // that refusal rather than as an empty request.
+    let private = Endpoint::from_shared(services.private.clone())?.connect_lazy();
+    let mut oversized = request(
+        PutTagRequest {
+            instructions: "x".repeat(MAX_MESSAGE_BYTES + 1024),
+            ..put_tag("oversized")
+        },
+        &credentials.gateway,
+    )?;
+    oversized
+        .metadata_mut()
+        .insert("x-supertag-principal", "operator:local".parse()?);
+    let refused = operator_client::OperatorClient::new(private)
+        .put_tag(oversized)
+        .await
+        .unwrap_err();
+    assert_ne!(refused.code(), Code::InvalidArgument, "{refused:?}");
+    let refused_code = format!("{:?}", refused.code());
+
+    let entries = audit_entries(&credentials, &services.public)?;
+    let mut expected = vec![entry(
+        "local",
+        "operator-token.create",
+        "OperatorToken/auditor",
+        "succeeded",
+        "OK",
+    )];
+    for tag in [&long_tag, &sender, &recipient] {
+        expected.push(entry(
+            actor,
+            "tag.put",
+            &format!("Tag/{tag}"),
+            "succeeded",
+            "OK",
+        ));
+    }
+    expected.extend([
+        entry(actor, "mailbox-grant.change", &grant, "succeeded", "OK"),
+        entry(actor, "team.create", "Team/core", "succeeded", "OK"),
+        entry(actor, "tag.provision", "Tag/planner", "succeeded", "OK"),
+        entry(actor, "tag.provision", "Tag/builder", "succeeded", "OK"),
+        entry(actor, "tag.put", "Tag/prune-kept", "succeeded", "OK"),
+        entry(actor, "tag.put", "Tag/prune-removed", "succeeded", "OK"),
+        entry(
+            actor,
+            "apply-set.reconcile",
+            "ApplySet/web",
+            "succeeded",
+            "OK",
+        ),
+        entry(
+            actor,
+            "resource.prune",
+            "Tag/prune-removed",
+            "succeeded",
+            "OK",
+        ),
+    ]);
+    assert_eq!(entries[..expected.len()], expected[..]);
+    let last = entries.last().context("oversized entry")?;
+    assert_eq!(
+        last[..4],
+        entry("local", "tag.put", "Tag", "failed", "")[..4]
+    );
+    assert_eq!(
+        last[4].replace('_', "").to_lowercase(),
+        refused_code.to_lowercase(),
+        "{last:?}"
+    );
+    assert_eq!(entries.len(), expected.len() + 1);
+    Ok(())
+}
+
+/// Captures one artifact file of `bytes` from a Task the Operator Token submitted.
+async fn capture_artifact(
+    credentials: &Credentials,
+    channel: tonic::transport::Channel,
+    secret: &str,
+    bytes: &[u8],
+) -> Result<String> {
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    operator
+        .put_tag(request(
+            PutTagRequest {
+                allowed_actions: vec!["files:read".into()],
+                ..put_tag("writer")
+            },
+            secret,
+        )?)
+        .await?;
+    let task = operator
+        .submit_task(request(
+            SubmitTaskRequest {
+                tag_id: "writer".into(),
+                session_id: "source".into(),
+                operation_id: "submit".into(),
+                prompt: "Evidence".into(),
+                ..Default::default()
+            },
+            secret,
+        )?)
+        .await?
+        .into_inner();
+    let registered = host
+        .register_host(request(
+            RegisterHostRequest {
+                incarnation_id: "download-fixture".into(),
+            },
+            &credentials.host,
+        )?)
+        .await?
+        .into_inner();
+    let generation = registered.generation;
+    let assignment = host
+        .claim_task(credentials.host(
+            ClaimTaskRequest {
+                operation_id: "claim".into(),
+                ..Default::default()
+            },
+            generation,
+        )?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("no assignment")?;
+    ensure!(assignment.task.as_ref().context("task")?.task_id == task.task_id);
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id.clone(),
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    host.start_task(credentials.host(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        generation,
+    )?)
+    .await?;
+    let blob = BlobReference {
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+        byte_length: bytes.len() as u64,
+    };
+    let mut parts = vec![ArtifactUpload {
+        part: Some(artifact_upload::Part::Begin(CommitArtifactCaptureRequest {
+            attempt: Some(attempt.clone()),
+            operation_id: "capture".into(),
+            description: Some(ArtifactDescription {
+                title: "Evidence".into(),
+                kind: "report".into(),
+                summary: None,
+            }),
+            files: vec![ArtifactFile {
+                path: "report.bin".into(),
+                blob: Some(blob),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })),
+    }];
+    for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
+        parts.push(ArtifactUpload {
+            part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
+                file_index: 0,
+                data: chunk.to_vec(),
+            })),
+        });
+    }
+    let mut upload = credentials.host(tokio_stream::iter(parts), generation)?;
+    upload.set_timeout(Duration::from_secs(30));
+    let artifact = artifact_transfers_client::ArtifactTransfersClient::new(channel)
+        .upload_capture(upload)
+        .await?
+        .into_inner();
+    host.finish_task(credentials.host(
+        FinishTaskRequest {
+            task_id: attempt.task_id,
+            attempt_id: attempt.attempt_id,
+            lease_token: attempt.lease_token,
+            succeeded: true,
+            result: "Captured".into(),
+            ..Default::default()
+        },
+        generation,
+    )?)
+    .await?;
+    Ok(artifact.summary.context("summary")?.artifact_id)
+}
+
+async fn revoked_token_ends_an_in_flight_download(database: &str) -> Result<()> {
+    let credentials = Credentials::new();
+    let services = services(&credentials, database).await?;
+    let channel = Endpoint::from_shared(services.public.clone())?.connect_lazy();
+    let secret = create_token(&credentials, &services.public, "reader")?;
+    // Far more than the HTTP/2 windows and stream buffers hold, so the download is still in
+    // flight when the token is revoked.
+    let bytes: Vec<u8> = (0..24 * 1024 * 1024)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let artifact_id = capture_artifact(&credentials, channel.clone(), &secret, &bytes).await?;
+    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
+    let download = |token: &str| {
+        let mut download = authenticated_request(
+            DownloadArtifactFileRequest {
+                artifact_id: artifact_id.clone(),
+                path: "report.bin".into(),
+            },
+            token,
+            None,
+        )?;
+        download.set_timeout(Duration::from_secs(60));
+        anyhow::Ok(download)
+    };
+    // The token reads the whole file while it is valid.
+    let mut whole = transfers
+        .download_file(download(&secret)?)
+        .await?
+        .into_inner();
+    let mut length = 0;
+    while let Some(message) = whole.message().await? {
+        if let Some(artifact_download::Part::Chunk(chunk)) = message.part {
+            length += chunk.len();
+        }
+    }
+    assert_eq!(length, bytes.len());
+
+    let mut stream = transfers
+        .download_file(download(&secret)?)
+        .await?
+        .into_inner();
+    let header = stream.message().await?.context("download header")?;
+    assert!(matches!(
+        header.part,
+        Some(artifact_download::Part::File(_))
+    ));
+    cli(
+        &credentials,
+        &credentials.admin,
+        &services.public,
+        &["operator-token", "revoke", "reader"],
+    )?;
+    let revoked_at = Instant::now();
+    // The download is blocked on this reader. Its next periodic recheck, once it resumes, is the
+    // first since the revocation, so it ends before the remaining bytes are sent.
+    sleep(Duration::from_millis(1500)).await;
+    let mut received = 0;
+    let ended = loop {
+        match tokio::time::timeout(Duration::from_secs(10), stream.message())
+            .await
+            .context("revoked download stayed open")?
+        {
+            Ok(Some(message)) => {
+                if let Some(artifact_download::Part::Chunk(chunk)) = message.part {
+                    received += chunk.len();
+                }
+            }
+            Ok(None) => anyhow::bail!("revoked download finished after {received} bytes"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(ended.code(), Code::Unauthenticated, "{ended:?}");
+    assert!(ended.message().contains("revoked"), "{ended:?}");
+    assert!(received < bytes.len());
+    assert!(revoked_at.elapsed() < Duration::from_secs(5));
+    Ok(())
+}
+
+async fn postgres_database<F, Fut>(run: F) -> Result<()>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .context("PostgreSQL test URL file required")?;
     let admin_url = std::fs::read_to_string(path)?;
@@ -463,10 +906,57 @@ async fn postgres_revoked_operator_token_is_refused_by_a_running_gateway() -> Re
         .await?;
     let mut url = url::Url::parse(admin_url.trim())?;
     url.set_path(&name);
-    let outcome = revoked_token_is_refused_by_a_running_gateway(url.as_str()).await;
+    let outcome = run(url.to_string()).await;
     admin
         .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
         .await?;
     admin.close().await?;
     outcome
+}
+
+fn sqlite_database(directory: &tempfile::TempDir) -> String {
+    format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("control.db").display()
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_audit_names_every_changed_resource() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    audit_names_every_changed_resource(&sqlite_database(&directory)).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_audit_names_every_changed_resource() -> Result<()> {
+    postgres_database(|url| async move { audit_names_every_changed_resource(&url).await }).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_revoked_token_ends_an_in_flight_download() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    revoked_token_ends_an_in_flight_download(&sqlite_database(&directory)).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_revoked_token_ends_an_in_flight_download() -> Result<()> {
+    postgres_database(|url| async move { revoked_token_ends_an_in_flight_download(&url).await })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    revoked_token_is_refused_by_a_running_gateway(&sqlite_database(&directory)).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
+    postgres_database(
+        |url| async move { revoked_token_is_refused_by_a_running_gateway(&url).await },
+    )
+    .await
 }

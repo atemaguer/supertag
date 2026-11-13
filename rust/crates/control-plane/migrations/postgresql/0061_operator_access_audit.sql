@@ -12,6 +12,16 @@ CREATE TABLE supertag_v2_operator_tokens (
     revoked_at_ms BIGINT
 );
 
+-- Every secret digest a token has held and the operation that set it. A digest is never accepted
+-- again, so a late retry of a superseded rotation cannot restore its secret.
+CREATE TABLE supertag_v2_operator_token_secrets (
+    secret_digest TEXT PRIMARY KEY,
+    name TEXT NOT NULL REFERENCES supertag_v2_operator_tokens(name),
+    operation_id TEXT NOT NULL,
+    secret_revision BIGINT NOT NULL,
+    UNIQUE (name, operation_id)
+);
+
 -- Administrative and authority-changing operator calls, in the Control Plane write order.
 CREATE TABLE supertag_v2_audit_entries (
     sequence BIGINT PRIMARY KEY,

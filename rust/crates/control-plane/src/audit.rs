@@ -4,16 +4,18 @@
 //! Gateway-authenticated operator, it records who called, what the call did, its target, and the
 //! gRPC outcome, after the handler answers and before the response leaves the Control Plane. A
 //! later call therefore lists it. Calls refused as unauthenticated and previews are not recorded.
-//! Recording never fails the call it describes; a failure is reported on standard error.
+//! A call that changes several resources records one entry per resource. Recording never fails the
+//! call it describes: a target the log refuses is recorded by kind, and a storage failure is
+//! reported on standard error.
 
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
-use bytes::Bytes;
-use http_body_util::{BodyExt, Full, Limited};
+use bytes::{Bytes, BytesMut};
+use http_body::{Frame, SizeHint};
 use prost::Message;
 use subtle::ConstantTimeEq;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -21,16 +23,32 @@ use tonic::{Code, body::Body};
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{ControlPlane, Store, operator_access::AuditRecord};
+use crate::{ControlPlane, Store, StoreError, operator_access::AuditRecord};
 
 const PRINCIPAL: &str = "x-supertag-principal";
 
-/// What an audited call targets: `Kind/ID`, the kind alone, or nothing for a preview.
+/// What an audited call targets: `Kind/ID`, several of them, the kind alone, or nothing for a
+/// preview.
 enum Target {
     Named(String),
+    /// One entry per resource, such as each Tag a single call provisions.
+    Many(Vec<String>),
     Kind,
     Skip,
 }
+
+/// One change a successful audited call made, when one call makes several.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuditChange {
+    pub action: String,
+    /// `Kind/ID`.
+    pub target: String,
+}
+
+/// Set as a response extension by a handler whose call changed several resources, such as an
+/// apply-set prune. The layer then records one entry per change instead of one for the call.
+#[derive(Clone, Debug, Default)]
+pub struct AuditChanges(pub Vec<AuditChange>);
 
 type Decode = fn(&[u8]) -> Option<Target>;
 
@@ -317,18 +335,22 @@ fn rule(path: &str) -> Option<Rule> {
                 named("Tag", &value.tag_id)
             }
         ),
-        ("ManifestRelationships", "ProvisionTags") => rule!(
-            "tag.provision",
-            "Tag",
-            ProvisionTagsRequest,
-            |value| match value.tags.as_slice() {
-                [single] => named(
-                    "Tag",
-                    single.tag.as_ref().map_or("", |tag| tag.tag_id.as_str())
-                ),
-                _ => Some(Target::Kind),
-            }
-        ),
+        ("ManifestRelationships", "ProvisionTags") => {
+            rule!("tag.provision", "Tag", ProvisionTagsRequest, |value| {
+                let tags = value
+                    .tags
+                    .iter()
+                    .filter_map(|tag| tag.tag.as_ref())
+                    .filter(|tag| !tag.tag_id.is_empty())
+                    .map(|tag| format!("Tag/{}", tag.tag_id))
+                    .collect::<Vec<_>>();
+                Some(if tags.is_empty() {
+                    Target::Kind
+                } else {
+                    Target::Many(tags)
+                })
+            })
+        }
         ("ManifestRelationships", "ReconcileApplySet") => rule!(
             "apply-set.reconcile",
             "ApplySet",
@@ -379,6 +401,18 @@ fn rule(path: &str) -> Option<Rule> {
             "ArtifactVolume",
             PutArtifactVolumeRequest,
             |value| named("ArtifactVolume", &value.volume_id)
+        ),
+        ("ArtifactVolumeDirectory", "ReserveCopy") => rule!(
+            "artifact-volume.copy-reserve",
+            "ArtifactVolume",
+            CopyArtifactToVolumeRequest,
+            |value| named("ArtifactVolume", &value.volume_id)
+        ),
+        ("ArtifactVolumeDirectory", "CommitCopy") => rule!(
+            "artifact-volume.copy",
+            "ArtifactVolumeCopy",
+            CommitArtifactVolumeCopyRequest,
+            |value| named("ArtifactVolumeCopy", &value.copy_id)
         ),
         ("ArtifactVolumeDirectory", "Delete") => rule!(
             "artifact-volume.delete",
@@ -463,6 +497,65 @@ fn gateway_bearer(headers: &http::HeaderMap, token: &str) -> bool {
         })
 }
 
+/// Stores one entry. An entry whose target the log refuses is kept with the kind alone, so a
+/// change the handler accepted is never left out of the log.
+async fn record_entry(store: &Store, mut record: AuditRecord, kind: &str) {
+    let mut result = store.record_audit_entry(&record).await;
+    if matches!(result, Err(StoreError::InvalidArgument(_))) && record.target != kind {
+        record.target = kind.into();
+        result = store.record_audit_entry(&record).await;
+    }
+    if let Err(error) = result {
+        eprintln!(
+            "Could not record the audit entry for {} {}: {error}",
+            record.action, record.target
+        );
+    }
+}
+
+/// Passes a request body through unchanged and copies up to one maximum-size unary message.
+struct Recording {
+    inner: Body,
+    /// `None` once the body is longer than any message the router accepts.
+    copy: Arc<Mutex<Option<BytesMut>>>,
+}
+
+impl http_body::Body for Recording {
+    type Data = Bytes;
+    type Error = tonic::Status;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
+        let frame = std::task::ready!(Pin::new(&mut self.inner).poll_frame(context));
+        if let Some(data) = frame
+            .as_ref()
+            .and_then(|frame| frame.as_ref().ok())
+            .and_then(Frame::data_ref)
+            && let Ok(mut copy) = self.copy.lock()
+        {
+            let over = copy
+                .as_ref()
+                .is_some_and(|copy| copy.len() + data.len() > MAX_MESSAGE_BYTES + 5);
+            if over {
+                *copy = None;
+            } else if let Some(copy) = copy.as_mut() {
+                copy.extend_from_slice(data);
+            }
+        }
+        Poll::Ready(frame)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
 /// Wraps the private router so audited calls are recorded.
 #[derive(Clone)]
 pub struct AuditLayer {
@@ -535,19 +628,24 @@ where
         let store = self.layer.store.clone();
         Box::pin(async move {
             let method = request.uri().path().to_owned();
+            // The handler reads the body exactly as sent, including tonic's own refusal of an
+            // oversized message; the layer keeps a copy to name the target afterwards.
+            let copy = Arc::new(Mutex::new(Some(BytesMut::new())));
             let (parts, body) = request.into_parts();
-            // The router refuses a larger message, so a body over the limit is passed on
-            // unaudited-as-named and the handler's refusal is recorded by kind.
-            let bytes = Limited::new(body, MAX_MESSAGE_BYTES + 5)
-                .collect()
-                .await
-                .map(|collected| collected.to_bytes())
+            let body = Body::new(Recording {
+                inner: body,
+                copy: copy.clone(),
+            });
+            let response = inner.call(http::Request::from_parts(parts, body)).await?;
+            let bytes = copy
+                .lock()
+                .ok()
+                .and_then(|mut copy| copy.take())
+                .map(BytesMut::freeze)
                 .unwrap_or_default();
             let target = unary_message(&bytes)
                 .and_then(rule.decode)
                 .unwrap_or(Target::Kind);
-            let request = http::Request::from_parts(parts, Body::new(Full::<Bytes>::new(bytes)));
-            let response = inner.call(request).await?;
             if matches!(target, Target::Skip) {
                 return Ok(response);
             }
@@ -561,22 +659,36 @@ where
                 return Ok(response);
             }
             let succeeded = code == Code::Ok;
-            let record = AuditRecord {
-                actor,
-                action: rule.action.into(),
-                target: match target {
-                    Target::Named(target) if succeeded => target,
-                    _ => rule.kind.into(),
-                },
-                succeeded,
-                code: code_name(code).into(),
-                method,
+            let changes = response
+                .extensions()
+                .get::<AuditChanges>()
+                .filter(|changes| succeeded && !changes.0.is_empty())
+                .map(|changes| {
+                    changes
+                        .0
+                        .iter()
+                        .map(|change| (change.action.clone(), change.target.clone()))
+                        .collect::<Vec<_>>()
+                });
+            let entries = match (changes, target) {
+                (Some(changes), _) => changes,
+                (None, Target::Named(target)) if succeeded => vec![(rule.action.into(), target)],
+                (None, Target::Many(targets)) if succeeded => targets
+                    .into_iter()
+                    .map(|target| (rule.action.to_owned(), target))
+                    .collect(),
+                _ => vec![(rule.action.into(), rule.kind.into())],
             };
-            if let Err(error) = store.record_audit_entry(&record).await {
-                eprintln!(
-                    "Could not record the audit entry for {} {}: {error}",
-                    record.action, record.target
-                );
+            for (action, target) in entries {
+                let record = AuditRecord {
+                    actor: actor.clone(),
+                    action,
+                    target,
+                    succeeded,
+                    code: code_name(code).into(),
+                    method: method.clone(),
+                };
+                record_entry(&store, record, rule.kind).await;
             }
             Ok(response)
         })

@@ -78,6 +78,21 @@ fn token_name(value: &str) -> Result<&str> {
     Ok(value)
 }
 
+/// The longest audit target: a kind and up to two 256-byte IDs, such as a Mailbox grant.
+pub const MAX_AUDIT_TARGET_BYTES: usize = 1024;
+
+fn audit_target(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > MAX_AUDIT_TARGET_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(invalid(&format!(
+            "audit target must contain 1–{MAX_AUDIT_TARGET_BYTES} bytes without control characters"
+        )));
+    }
+    Ok(())
+}
+
 fn hex_digest(bytes: &[u8]) -> Result<String> {
     if bytes.len() != 32 {
         return Err(invalid("secret digest must be 32 bytes"));
@@ -162,6 +177,7 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_operator_tokens (name, secret_digest, operation_id, secret_revision, created_by, created_at_ms, expires_at_ms) VALUES ($1,$2,$3,1,$4,$5,$6)")
             .bind(token).bind(&digest).bind(&input.operation_id).bind(created_by).bind(now).bind(expires_at_ms)
             .execute(&mut *tx).await?;
+        remember_secret(&mut tx, token, &digest, &input.operation_id, 1).await?;
         let row = token_in(&mut tx, token).await?;
         tx.commit().await?;
         token_row(&row, now)
@@ -226,14 +242,27 @@ impl Store {
         let (mut tx, _) = self.write().await?;
         let now = self.execution_now_ms();
         let prior = token_in(&mut tx, token).await?;
-        if prior.try_get::<String, _>("operation_id")? == input.operation_id {
-            // A retry of the rotation that produced the current secret returns it unchanged.
+        let used: Option<String> = sqlx::query_scalar(
+            "SELECT secret_digest FROM supertag_v2_operator_token_secrets WHERE name=$1 AND operation_id=$2",
+        )
+        .bind(token)
+        .bind(&input.operation_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(used) = used {
+            if used != digest {
+                return Err(StoreError::Conflict(
+                    "operation ID was used with a different secret".into(),
+                ));
+            }
+            // A retry of the rotation that produced the current secret returns it unchanged. A
+            // late retry of a superseded one never restores its secret.
             if prior.try_get::<String, _>("secret_digest")? == digest {
                 tx.rollback().await?;
                 return token_row(&prior, now);
             }
             return Err(StoreError::Conflict(
-                "operation ID was used with a different secret".into(),
+                "this rotation was superseded by a later one".into(),
             ));
         }
         if prior.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some() {
@@ -248,6 +277,8 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_operator_tokens SET secret_digest=$1, operation_id=$2, secret_revision=secret_revision+1, rotated_at_ms=$3, expires_at_ms=$4 WHERE name=$5")
             .bind(&digest).bind(&input.operation_id).bind(now).bind(expires_at_ms).bind(token)
             .execute(&mut *tx).await?;
+        let revision = prior.try_get::<i64, _>("secret_revision")? + 1;
+        remember_secret(&mut tx, token, &digest, &input.operation_id, revision).await?;
         let row = token_in(&mut tx, token).await?;
         tx.commit().await?;
         token_row(&row, now)
@@ -306,7 +337,7 @@ impl Store {
     pub async fn record_audit_entry(&self, record: &AuditRecord) -> Result<AuditEntry> {
         name("audit actor", &record.actor)?;
         name("audit action", &record.action)?;
-        name("audit target", &record.target)?;
+        audit_target(&record.target)?;
         name("audit code", &record.code)?;
         name("audit method", &record.method)?;
         let (mut tx, order) = self.write().await?;
@@ -403,15 +434,30 @@ async fn token_in(tx: &mut sqlx::Transaction<'_, sqlx::Any>, name: &str) -> Resu
     .ok_or_else(|| StoreError::NotFound("Operator Token was not found".into()))
 }
 
+/// Refuses a digest any token holds or has ever held.
 async fn digest_unused(tx: &mut sqlx::Transaction<'_, sqlx::Any>, digest: &str) -> Result<()> {
-    let used: Option<String> =
-        sqlx::query_scalar("SELECT name FROM supertag_v2_operator_tokens WHERE secret_digest=$1")
-            .bind(digest)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let used: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM supertag_v2_operator_token_secrets WHERE secret_digest=$1",
+    )
+    .bind(digest)
+    .fetch_optional(&mut **tx)
+    .await?;
     if used.is_some() {
         return Err(StoreError::Conflict("secret is already in use".into()));
     }
+    Ok(())
+}
+
+async fn remember_secret(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    name: &str,
+    digest: &str,
+    operation_id: &str,
+    revision: i64,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_operator_token_secrets (secret_digest, name, operation_id, secret_revision) VALUES ($1,$2,$3,$4)")
+        .bind(digest).bind(name).bind(operation_id).bind(revision)
+        .execute(&mut **tx).await?;
     Ok(())
 }
 
