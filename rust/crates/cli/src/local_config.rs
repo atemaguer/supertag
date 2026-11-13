@@ -7,7 +7,8 @@ use clap::Parser;
 pub use environment::Environment;
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs::OpenOptions,
     io::Read,
@@ -126,6 +127,8 @@ pub struct Config {
     pub hosts: Vec<Host>,
     /// `env_file` values behind the process environment, read only by the supervisor.
     pub environment: Environment,
+    /// `${VAR}` references this shell's environment resolved.
+    pub shell_variables: BTreeSet<String>,
 }
 pub struct Plane {
     pub listen: SocketAddr,
@@ -183,7 +186,15 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
         .parent()
         .context("configuration directory missing")?
         .to_owned();
-    let mut config = parse(&bytes, &base, |name| std::env::var(name).ok())?;
+    let shell = RefCell::new(BTreeSet::new());
+    let mut config = parse(&bytes, &base, |name| {
+        let value = std::env::var(name).ok();
+        if value.is_some() {
+            shell.borrow_mut().insert(name.to_owned());
+        }
+        value
+    })?;
+    config.shell_variables = shell.into_inner();
     config.path = path.canonicalize()?;
     config.digest = crate::lifecycle::hex(&<sha2::Sha256 as sha2::Digest>::digest(&bytes));
     if config
@@ -344,6 +355,16 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             continue;
         };
         ensure!(hosts.len() < 32, "configure at most 32 named Worker Hosts");
+        // These name the supervisor's own logs and `ps` rows.
+        ensure!(
+            ![
+                crate::lifecycle::SUPERVISOR,
+                crate::lifecycle::CONTROL_PLANE,
+                crate::lifecycle::GATEWAY,
+            ]
+            .contains(&name.as_str()),
+            "a host cannot be named {name}; that name belongs to a fixed local service"
+        );
         ensure!(
             concurrency.is_none_or(|n| n == 1),
             "each native Worker Host currently runs one Attempt; use independent named hosts for more capacity"
@@ -469,7 +490,80 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         plane,
         hosts,
         environment,
+        shell_variables: BTreeSet::new(),
     })
+}
+
+/// Check that a per-user service unit, which sees only `unit` and `env_file`, can run this
+/// configuration. Fails when the unit could not load the file at all, which would otherwise
+/// restart it in a loop; returns a warning naming variables the unit resolves differently or
+/// cannot see, as the TypeScript CLI's `unitWarnings` did.
+pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<String>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&config.path)
+        .context("read local services file")?;
+    let mut bytes = Vec::new();
+    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes)?;
+    ensure!(
+        crate::lifecycle::hex(&<sha2::Sha256 as sha2::Digest>::digest(&bytes)) == config.digest,
+        "{} changed while supertag up read it; run supertag up again",
+        config.path.display()
+    );
+    let base = config
+        .path
+        .parent()
+        .context("configuration directory missing")?;
+    let in_unit = |name: &str| {
+        unit.iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    };
+    if let Err(error) = parse(&bytes, base, in_unit) {
+        bail!(
+            "the service unit for {} cannot load it: {error:#}. A service unit does not inherit this shell's environment; put the variables it needs in env_file or a secret file",
+            config.path.display()
+        );
+    }
+    let shell = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let unit_has = |name: &str| in_unit(name).is_some_and(|value| !value.trim().is_empty());
+    let mut unseen = BTreeSet::new();
+    // An interpolation the unit resolves from env_file to another value, or from a default.
+    for name in &config.shell_variables {
+        if !unit_has(name) && config.environment.file_value(name).map(str::to_owned) != shell(name)
+        {
+            unseen.insert(name.clone());
+        }
+    }
+    // What hosts read when they start: an environment Auth Key and their harness credentials.
+    for host in &config.hosts {
+        let mut names: Vec<&str> = host.adapter.provider_environment()?.to_vec();
+        if let Some(Secret::Environment(secret)) = &host.key {
+            names.push(&secret.environment);
+        }
+        for name in names {
+            if shell(name).is_some()
+                && !unit_has(name)
+                && config.environment.file_value(name).is_none()
+            {
+                unseen.insert(name.to_owned());
+            }
+        }
+    }
+    if unseen.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![format!(
+        "Warning: the service unit for {} does not inherit this shell's environment, so it cannot see {}. Put them in env_file or a secret file, or unset them in this shell. supertag up does not restart the service for them.",
+        config.path.display(),
+        unseen.into_iter().collect::<Vec<_>>().join(", ")
+    )])
 }
 /// `supertag config`: the file `up` would run, validated, with `env_file` values and `${VAR}`
 /// references resolved and defaults filled in. Secrets stay references; `env_file` values that

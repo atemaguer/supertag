@@ -105,20 +105,19 @@ impl ServiceManager {
         let Ok(text) = fs::read_to_string(self.path(&definition.name)) else {
             return Ok(None);
         };
-        let marker = state_marker(&definition.state);
-        Ok(
-            (!text.contains(&marker) && !text.contains(&xml(&marker))).then(|| {
-                text.lines()
-                    .find_map(|line| line.trim().strip_prefix("# supertag-state: "))
-                    .or_else(|| {
-                        text.lines()
-                            .find_map(|line| line.trim().strip_prefix("<!-- supertag-state: "))
-                            .and_then(|rest| rest.strip_suffix(" -->"))
-                    })
-                    .unwrap_or("another state directory")
-                    .to_owned()
-            }),
-        )
+        Ok(match marked_state(&text) {
+            Some(marked) if marked == encode_state(&definition.state) => None,
+            Some(marked) => Some(marked),
+            None => Some("another state directory".into()),
+        })
+    }
+
+    /// Whether the installed unit of this name serves exactly this state directory.
+    pub fn serves(&self, name: &UnitName, state: &str) -> bool {
+        fs::read_to_string(self.path(name))
+            .ok()
+            .and_then(|text| marked_state(&text))
+            .is_some_and(|marked| marked == encode_state(state))
     }
 
     pub fn loaded(&self, name: &UnitName) -> bool {
@@ -236,8 +235,35 @@ fn run(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+const MARKER: &str = "supertag-state: ";
+
+/// A state path as its marker carries it: `--` cannot appear inside an XML comment.
+fn encode_state(state: &str) -> String {
+    state.replace("--", "-\u{2010}")
+}
+
 fn state_marker(state: &str) -> String {
-    format!("supertag-state: {}", state.replace("--", "-\u{2010}"))
+    format!("{MARKER}{}", encode_state(state))
+}
+
+/// The whole state path in a unit's marker line, so `/a/.supertag` never matches a unit for
+/// `/a/.supertag-dev`.
+fn marked_state(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("# ") {
+            return rest.strip_prefix(MARKER).map(str::to_owned);
+        }
+        line.strip_prefix("<!-- ")
+            .and_then(|rest| rest.strip_suffix(" -->"))
+            .and_then(|rest| rest.strip_prefix(MARKER))
+            .map(|value| {
+                value
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+            })
+    })
 }
 
 fn xml(value: &str) -> String {
@@ -422,5 +448,40 @@ mod tests {
         fs::write(&path, systemd_unit(&mine)).unwrap();
         assert_eq!(manager.other_state(&mine).unwrap(), None);
         assert!(manager.current(&mine).unwrap());
+        assert!(manager.serves(&mine.name, &mine.state));
+        assert!(!manager.serves(&mine.name, "/home/me/other"));
+    }
+
+    #[test]
+    fn a_state_directory_never_claims_a_unit_for_a_longer_path() {
+        let temp = tempfile::tempdir().unwrap();
+        for manager in [
+            ServiceManager::Systemd {
+                config: temp.path().join("systemd"),
+            },
+            ServiceManager::Launchd {
+                home: temp.path().join("launchd"),
+                uid: 0,
+            },
+        ] {
+            let mut dev = definition();
+            dev.state = "/home/me/.supertag-dev".into();
+            let mine = definition();
+            let path = manager.path(&mine.name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, manager.render(&dev)).unwrap();
+            assert_eq!(
+                manager.other_state(&mine).unwrap().as_deref(),
+                Some("/home/me/.supertag-dev")
+            );
+            assert!(!manager.serves(&mine.name, &mine.state));
+            assert!(manager.serves(&dev.name, &dev.state));
+            // A path with `--` and XML characters round-trips through the marker.
+            let mut odd = definition();
+            odd.state = "/home/me/a--b&<c>".into();
+            fs::write(&path, manager.render(&odd)).unwrap();
+            assert!(manager.serves(&odd.name, &odd.state));
+            assert_eq!(manager.other_state(&odd).unwrap(), None);
+        }
     }
 }

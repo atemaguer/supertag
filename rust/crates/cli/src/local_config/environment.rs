@@ -46,6 +46,14 @@ impl Environment {
             })
     }
 
+    /// The trimmed, non-blank `env_file` value of a variable.
+    pub fn file_value(&self, name: &str) -> Option<&str> {
+        self.file
+            .get(name)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    }
+
     /// The named variables that are available, for a child process allowlist.
     pub fn selected<'a>(
         &'a self,

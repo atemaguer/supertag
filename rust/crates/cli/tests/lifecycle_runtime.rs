@@ -375,6 +375,29 @@ fn configured_services_restart_on_change_render_config_and_refuse_unknown_names(
     assert!(machine.state.join("logs/hosts/reviewer.log").exists());
     machine.ok(&["logs", "reviewer"])?;
 
+    // --force restarts a changed file without waiting, and the new supervisor starts.
+    let second = pids(&ps);
+    config["services"]["checker"] = json!({"type": "host", "adapter": ADAPTER});
+    write_yaml(&file, &config)?;
+    let forced = machine.ok(&["up", "--force"])?;
+    assert!(forced.contains("settings changed"), "{forced}");
+    assert!(forced.contains("Started SuperTag"), "{forced}");
+    wait_gone(&second)?;
+    let ps = machine.ps()?;
+    assert_eq!(service(&ps, "checker")?["state"], "running", "{ps}");
+    assert!(machine.ok(&["up", "--force"])?.contains("left alone"));
+
+    // Host names never collide with the fixed services' logs.
+    let mut reserved = config.clone();
+    reserved["services"]["gateway"] = json!({"type": "host", "adapter": ADAPTER});
+    let reserved_file = machine.home.join("reserved.yaml");
+    write_yaml(&reserved_file, &reserved)?;
+    assert!(
+        machine
+            .fails(&["config", "--file", reserved_file.to_str().unwrap()])?
+            .contains("a host cannot be named gateway")
+    );
+
     let second = pids(&ps);
     machine.ok(&["down"])?;
     wait_gone(&second)?;
@@ -436,10 +459,9 @@ case "$1" in
 esac
 "#;
 
+/// Put the recording launchctl on this machine's PATH; returns where it records calls.
 #[cfg(target_os = "macos")]
-#[test]
-fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() -> Result<()> {
-    let mut machine = Machine::new()?;
+fn fake_launchd(machine: &mut Machine) -> Result<PathBuf> {
     let launchd = machine.home.join("fake-launchd");
     fs::create_dir_all(&launchd)?;
     let fake = machine.bin.join("launchctl");
@@ -448,6 +470,23 @@ fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() 
     machine
         .extra
         .push(("FAKE_LAUNCHD_DIR".into(), launchd.to_str().unwrap().into()));
+    Ok(launchd)
+}
+
+/// A private state directory holding a supertag.yaml.
+fn state_with(directory: &Path, config: &Value) -> Result<PathBuf> {
+    fs::create_dir_all(directory)?;
+    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+    let file = directory.join("supertag.yaml");
+    write_yaml(&file, config)?;
+    Ok(file)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() -> Result<()> {
+    let mut machine = Machine::new()?;
+    let launchd = fake_launchd(&mut machine)?;
     fs::create_dir_all(&machine.state)?;
     fs::set_permissions(&machine.state, fs::Permissions::from_mode(0o700))?;
     let file = machine.state.join("supertag.yaml");
@@ -855,11 +894,156 @@ fn down_drains_running_work_and_leaves_services_running_until_forced() -> Result
     assert_eq!(pids(&ps), running);
     assert_eq!(service(&ps, "local")?["draining"], true, "{ps}");
 
-    machine.ok(&["down", "--force"])?;
+    // Ctrl-C while down waits stops waiting, not the command: everything stops.
+    let mut down = machine
+        .command(&["down"])
+        .env("SUPERTAG_TEST_DOWN_DRAIN_SECONDS", "120")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = down.stdout.take().context("stdout")?;
+    let (send, lines) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = send.send(line);
+        }
+    });
+    let waiting = lines.recv_timeout(WAIT)?;
+    assert!(
+        waiting.contains("Waiting for running Task Attempts") && waiting.contains("Ctrl-C"),
+        "{waiting}"
+    );
+    unsafe {
+        libc::kill(down.id() as i32, libc::SIGINT);
+    }
+    let output = down.wait_with_output()?;
+    let text = lines.iter().collect::<Vec<_>>().join("\n");
+    ensure!(
+        output.status.success(),
+        "interrupted down failed: {text}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(text.contains("Stopped waiting for local"), "{text}");
+    assert!(text.contains("Stopped SuperTag"), "{text}");
     wait_gone(&running)?;
-    // The next up returns the drained host to service.
-    machine.ok(&["up", "--adapter", ADAPTER])?;
+    // The next up returns the drained host to service, with --force passed through cleanly.
+    machine.ok(&["up", "--adapter", ADAPTER, "--force"])?;
     assert_eq!(service(&machine.ps()?, "local")?["draining"], false);
     machine.ok(&["down", "--force"])?;
+    Ok(())
+}
+
+/// A unit name shared by two state directories, one a prefix of the other, belongs to one.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_service_unit_belongs_to_exactly_one_state_directory() -> Result<()> {
+    let mut machine = Machine::new()?;
+    let launchd = fake_launchd(&mut machine)?;
+    let config = json!({
+        "services": {
+            "control-plane": {"type": "control-plane", "ports": ["127.0.0.1:0"], "restart": "unless-stopped"},
+            "builder": {"type": "host", "adapter": ADAPTER, "restart": "unless-stopped"},
+        },
+    });
+    // Both use the default name, so both want the unit ai.supertag.
+    let dev = machine.home.join(".supertag-dev");
+    let dev_arg = dev.to_str().unwrap().to_owned();
+    state_with(&dev, &config)?;
+    state_with(&machine.state, &config)?;
+    let plist = machine.home.join("Library/LaunchAgents/ai.supertag.plist");
+    machine.ok(&["up", "--state-directory", &dev_arg])?;
+    let dev_ps: Value = serde_json::from_str(&machine.ok(&[
+        "ps",
+        "--state-directory",
+        &dev_arg,
+        "--output",
+        "json",
+    ])?)?;
+    assert_eq!(dev_ps["supervisor"]["mode"], "service", "{dev_ps}");
+    let running = pids(&dev_ps);
+
+    // ~/.supertag is a prefix of ~/.supertag-dev, and still never claims its unit.
+    let refused = machine.fails(&["up"])?;
+    assert!(
+        refused.contains("already runs SuperTag for") && refused.contains(".supertag-dev"),
+        "{refused}"
+    );
+    // down for another state directory never stops or removes that unit.
+    for args in [&["down"][..], &["down", "--remove-services"][..]] {
+        let down = machine.ok(args)?;
+        assert!(down.contains("left alone"), "{down}");
+        assert!(down.contains("SuperTag is not running"), "{down}");
+    }
+    let empty = machine.home.join("empty");
+    fs::create_dir_all(&empty)?;
+    machine.ok(&["down", "--state-directory", empty.to_str().unwrap()])?;
+    let calls = fs::read_to_string(launchd.join("calls"))?;
+    assert!(!calls.contains("bootout"), "{calls}");
+    assert!(plist.exists());
+    assert!(running.iter().all(|pid| alive(*pid)));
+
+    let down = machine.ok(&["down", "--remove-services", "--state-directory", &dev_arg])?;
+    assert!(down.contains("Removed service unit"), "{down}");
+    wait_gone(&running)?;
+    assert!(!plist.exists());
+    Ok(())
+}
+
+/// A service unit sees only its own environment and env_file, not this shell's.
+#[cfg(target_os = "macos")]
+#[test]
+fn up_refuses_a_unit_that_cannot_load_the_file_and_warns_about_shell_variables() -> Result<()> {
+    let mut machine = Machine::new()?;
+    fake_launchd(&mut machine)?;
+    machine
+        .extra
+        .push(("LIFECYCLE_ADAPTER".into(), ADAPTER.into()));
+    state_with(
+        &machine.state,
+        &json!({
+            "services": {
+                "control-plane": {"type": "control-plane", "ports": ["127.0.0.1:0"]},
+                "builder": {"type": "host", "adapter": "${LIFECYCLE_ADAPTER}", "restart": "unless-stopped"},
+            },
+        }),
+    )?;
+    let plist = machine.home.join("Library/LaunchAgents/ai.supertag.plist");
+    let refused = machine.fails(&["up"])?;
+    assert!(
+        refused.contains("${LIFECYCLE_ADAPTER} is not set") && refused.contains("env_file"),
+        "{refused}"
+    );
+    assert!(
+        !plist.exists(),
+        "a unit that cannot load its file is never installed"
+    );
+
+    // From env_file the unit sees the same value as this shell: no warning.
+    let env = machine.state.join(".env");
+    fs::write(&env, format!("LIFECYCLE_ADAPTER={ADAPTER}\n"))?;
+    fs::set_permissions(&env, fs::Permissions::from_mode(0o600))?;
+    let up = machine.ok(&["up"])?;
+    assert!(!up.contains("Warning"), "{up}");
+    assert!(up.contains("under its service unit"), "{up}");
+
+    // A different shell value is one the unit cannot see.
+    let link = machine.bin.join("adapter-link");
+    std::os::unix::fs::symlink(ADAPTER, &link)?;
+    machine
+        .extra
+        .retain(|(name, _)| name != "LIFECYCLE_ADAPTER");
+    machine
+        .extra
+        .push(("LIFECYCLE_ADAPTER".into(), link.to_str().unwrap().into()));
+    let again = machine.ok(&["up"])?;
+    assert!(
+        again.contains("Warning: the service unit")
+            && again.contains("cannot see LIFECYCLE_ADAPTER"),
+        "{again}"
+    );
+    assert!(again.contains("left alone"), "{again}");
+    let running = pids(&machine.ps()?);
+    machine.ok(&["down", "--remove-services"])?;
+    wait_gone(&running)?;
     Ok(())
 }

@@ -262,11 +262,27 @@ fn alive(pid: u32) -> bool {
     pid > 0 && unsafe { libc::kill(pid, 0) } == 0
 }
 
-/// Identify flag-selected settings: everything after `up` except `--foreground`.
+/// The `up` arguments that select settings: without `--foreground` and `--force`, which say how
+/// to start rather than what runs. A value of `--adapter-arg` is kept even when it looks like one.
+pub fn setting_args(args: &[OsString]) -> Vec<OsString> {
+    let mut kept: Vec<OsString> = Vec::with_capacity(args.len());
+    for arg in args {
+        let value = kept
+            .last()
+            .is_some_and(|previous| previous == "--adapter-arg");
+        if !value && (arg == "--foreground" || arg == "--force") {
+            continue;
+        }
+        kept.push(arg.clone());
+    }
+    kept
+}
+
+/// Identify flag-selected settings: everything after `up` except how to start it.
 pub fn flags_fingerprint(args: &[OsString]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"flags\0");
-    for arg in args.iter().filter(|arg| *arg != "--foreground") {
+    for arg in setting_args(args) {
         digest.update(arg.as_encoded_bytes());
         digest.update(b"\0");
     }
@@ -295,7 +311,13 @@ pub async fn up(options: Background) -> Result<()> {
         None => flags_fingerprint(&options.args),
     };
     let unit = match &options.config {
-        Some(config) if config.service_unit => Some(unit_definition(&options, config)?),
+        Some(config) if config.service_unit => {
+            let definition = unit_definition(&options, config)?;
+            for warning in local_config::unit_check(config, &definition.environment)? {
+                println!("{warning}");
+            }
+            Some(definition)
+        }
         _ => None,
     };
     let manager = ServiceManager::for_platform();
@@ -353,8 +375,9 @@ pub async fn up(options: Background) -> Result<()> {
             .custom_flags(libc::O_NOFOLLOW)
             .open(log_path(&state, SUPERVISOR))?;
         let mut command = Command::new(std::env::current_exe()?);
+        // `--force` only governs this command's restart; the supervisor runs in its foreground.
         command
-            .args(&options.args)
+            .args(setting_args(&options.args))
             .arg("--foreground")
             .env(MODE_VARIABLE, "background")
             .stdin(Stdio::null())
@@ -399,14 +422,20 @@ fn summary(state: &Path, status: &SupervisorStatus) {
     println!("State: {}", state.display());
 }
 
+/// The state directory as a service unit records it.
+fn unit_state(state: &Path) -> String {
+    state
+        .canonicalize()
+        .unwrap_or_else(|_| state.to_owned())
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn unit_definition(
     options: &Background,
     config: &local_config::Config,
 ) -> Result<ServiceDefinition> {
-    let state = options
-        .state
-        .canonicalize()
-        .unwrap_or_else(|_| options.state.clone());
+    let state = PathBuf::from(unit_state(&options.state));
     let executable = std::env::current_exe()?;
     let command = vec![
         executable.into_os_string(),
@@ -492,7 +521,11 @@ async fn stop(state: &Path, status: Option<&SupervisorStatus>, force: bool) -> R
         .filter(|status| status.mode == "service")
         .map(|status| UnitName::new(&status.instance));
     match (&manager, &unit) {
-        (Some(manager), Some(unit)) if manager.installed(unit) => manager.stop(unit)?,
+        (Some(manager), Some(unit))
+            if manager.installed(unit) && manager.serves(unit, &unit_state(state)) =>
+        {
+            manager.stop(unit)?
+        }
         _ => {
             if let Some(status) = status {
                 let pid = i32::try_from(status.pid)?;
@@ -561,7 +594,10 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
         return Ok(());
     }
     let started = Instant::now();
-    let mut reported = Instant::now();
+    let mut reported: Option<Instant> = None;
+    // Ctrl-C while waiting stops waiting, not the command, as the TypeScript CLI did. The
+    // handler exists before the first message, so an interrupt after it is never lost.
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     loop {
         let mut running = Vec::new();
         for host_id in &hosts {
@@ -593,14 +629,23 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
                 running.join(", ")
             );
         }
-        if reported.elapsed() >= DRAIN_PROGRESS || started.elapsed() < Duration::from_millis(1) {
+        if reported.is_none_or(|at| at.elapsed() >= DRAIN_PROGRESS) {
             println!(
-                "Waiting for running Task Attempts before stopping: {}",
+                "Waiting for running Task Attempts before stopping: {}. Press Ctrl-C or pass --force to stop waiting.",
                 running.join(", ")
             );
-            reported = Instant::now();
+            reported = Some(Instant::now());
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::select! {
+            _ = interrupt.recv() => {
+                println!(
+                    "Stopped waiting for {}; running Task Attempts follow the recovery rules.",
+                    running.join(", ")
+                );
+                return Ok(());
+            }
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
     }
 }
 
@@ -644,9 +689,23 @@ pub async fn down(args: DownArgs) -> Result<()> {
     };
     let manager = ServiceManager::for_platform().ok();
     let unit = UnitName::new(&instance);
-    let installed = manager
+    let present = manager
         .as_ref()
         .is_some_and(|manager| manager.installed(&unit));
+    // A unit of this name may serve another state directory; it is never ours to stop.
+    let installed = present
+        && manager
+            .as_ref()
+            .is_some_and(|manager| manager.serves(&unit, &unit_state(&state)));
+    if present
+        && !installed
+        && let Some(manager) = &manager
+    {
+        println!(
+            "Service unit {} runs SuperTag for another state directory, so it was left alone.",
+            manager.path(&unit).display()
+        );
+    }
     let stopped = match &status {
         Supervisor::Running(status) => {
             stop(&state, Some(status), args.force).await?;
@@ -1115,10 +1174,11 @@ mod tests {
     }
 
     #[test]
-    fn flags_fingerprint_ignores_only_foreground() {
+    fn flags_fingerprint_ignores_only_how_up_starts() {
         let a = flags_fingerprint(&["up".into(), "--adapter".into(), "x".into()]);
         let b = flags_fingerprint(&[
             "up".into(),
+            "--force".into(),
             "--adapter".into(),
             "x".into(),
             "--foreground".into(),
@@ -1126,6 +1186,25 @@ mod tests {
         let c = flags_fingerprint(&["up".into(), "--adapter".into(), "y".into()]);
         assert_eq!(a, b);
         assert_ne!(a, c);
+        // An adapter argument that looks like a start flag is a setting.
+        let args: Vec<OsString> = [
+            "up",
+            "--adapter",
+            "x",
+            "--adapter-arg",
+            "--force",
+            "--force",
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+        assert_eq!(
+            setting_args(&args),
+            ["up", "--adapter", "x", "--adapter-arg", "--force"]
+                .map(OsString::from)
+                .to_vec()
+        );
+        assert_ne!(flags_fingerprint(&args), a);
     }
 
     #[test]

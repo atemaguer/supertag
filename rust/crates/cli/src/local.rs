@@ -109,6 +109,8 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     let lock = open_private_file(&directory.join(STATE_LOCK), true)?;
     lock.try_lock().context("local state is already in use")?;
     remove_endpoint(&directory)?;
+    // A crashed supervisor leaves its status behind; it must not describe a reused PID.
+    lifecycle::forget(&directory)?;
     let credentials = Credentials::load_or_create(&directory)?;
     let executable = std::env::current_exe()?;
 
@@ -769,6 +771,8 @@ pub async fn configured(
     let lock = open_private_file(&directory.join(STATE_LOCK), true)?;
     lock.try_lock().context("local state is already in use")?;
     remove_endpoint(&directory)?;
+    // A crashed supervisor leaves its status behind; it must not describe a reused PID.
+    lifecycle::forget(&directory)?;
     let executable = std::env::current_exe()?;
     let environment = Arc::new(config.environment);
     let mut base = Children::new(&directory)?;

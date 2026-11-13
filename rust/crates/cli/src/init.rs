@@ -382,14 +382,29 @@ fn answers(
         _ => None,
     };
     let unsandboxed = match (harness, ask.as_deref_mut()) {
-        (Found::Opencode | Found::Cursor, Some(prompter)) => prompter.confirm(
-            &format!(
-                "May {} run commands without an operating-system sandbox?",
+        (Found::Opencode | Found::Cursor, Some(prompter)) => {
+            let name = harness.harness();
+            println!(
+                "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
+            );
+            let allowed = prompter.confirm(
+                &format!("Allow {name} to run commands without a sandbox?"),
+                true,
+            )?;
+            if !allowed {
+                println!(
+                    "  Tasks that run commands will not run on {name}. To allow it later, add allow-unsandboxed-commands to its host in supertag.yaml."
+                );
+            }
+            allowed
+        }
+        (Found::Opencode | Found::Cursor, None) => {
+            println!(
+                "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
                 harness.harness()
-            ),
-            true,
-        )?,
-        (Found::Opencode | Found::Cursor, None) => true,
+            );
+            true
+        }
         _ => false,
     };
     let workspace = match ask.as_deref_mut() {
