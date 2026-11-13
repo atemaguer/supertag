@@ -1146,12 +1146,17 @@ async fn drain_hands_connector_to_second_gateway(database: String) -> Result<()>
     )
     .await?;
     // The owner acknowledges the mention first; let that through and hold the final reply.
+    // Release exactly one permit: one per poll would also let the final reply through.
     let deadline = Instant::now() + WAIT;
+    let mut released = false;
     loop {
         let requests = held.requests.lock().await;
         match requests.last() {
             Some((_, body)) if body["text"] != ACKNOWLEDGEMENT => break,
-            Some(_) if requests.len() == 1 => held.gate.add_permits(1),
+            Some(_) if requests.len() == 1 && !released => {
+                held.gate.add_permits(1);
+                released = true;
+            }
             _ => {}
         }
         drop(requests);
