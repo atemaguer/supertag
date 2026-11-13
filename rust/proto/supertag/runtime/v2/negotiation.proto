@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// Each service connection begins with this exchange. A peer that shares no
+// protocol version, or that connects in the wrong role, is refused before it
+// can register, claim, or forward work. The exchange carries no credentials.
+service ProtocolNegotiation {
+  rpc Negotiate(NegotiateProtocolRequest) returns (NegotiateProtocolResponse);
+}
+
+enum ServiceRole {
+  SERVICE_ROLE_UNSPECIFIED = 0;
+  SERVICE_ROLE_CONTROL_PLANE = 1;
+  SERVICE_ROLE_GATEWAY = 2;
+  SERVICE_ROLE_WORKER_HOST = 3;
+}
+
+message NegotiateProtocolRequest {
+  // The connecting service's role.
+  ServiceRole role = 1;
+  // Every protocol version the connecting service can speak.
+  repeated uint32 protocol_versions = 2;
+  // The connecting service's release, for diagnostics only.
+  string build_version = 3;
+}
+
+message NegotiateProtocolResponse {
+  // The answering service's role.
+  ServiceRole role = 1;
+  // The highest protocol version both services speak.
+  uint32 protocol_version = 2;
+  // Every protocol version the answering service can speak.
+  repeated uint32 protocol_versions = 3;
+  string build_version = 4;
+}

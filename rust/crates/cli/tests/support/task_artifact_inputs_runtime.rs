@@ -49,6 +49,7 @@ async fn interrupt_input_receipt(
     };
     let routes: Routes = Routes::new(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
+        .add_service(gateway.negotiation_service())
         .add_service(transfers.attempt_artifacts_service())
         .add_service(transfers.artifact_transfer_service())
         .add_service(transfers.service())

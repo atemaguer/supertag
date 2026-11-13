@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    v2::{EnrollHostRequest, HostRecord, host_enrollment_client::HostEnrollmentClient},
+    v2::{
+        EnrollHostRequest, HostRecord, ServiceRole, host_enrollment_client::HostEnrollmentClient,
+    },
 };
 use tonic::transport::Endpoint;
 use uuid::Uuid;
@@ -66,7 +68,14 @@ pub async fn enroll(
     // Preserve the operation and candidate credential before contacting the Gateway,
     // so that a consumed key can replay the enrollment after a lost response.
     save(&journal, &state)?;
-    let mut enrollment = HostEnrollmentClient::new(gateway.connect_lazy())
+    let channel = gateway.connect_lazy();
+    supertag_protocol::negotiation::negotiate(
+        channel.clone(),
+        ServiceRole::WorkerHost,
+        ServiceRole::Gateway,
+    )
+    .await?;
+    let mut enrollment = HostEnrollmentClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let record = enrollment
