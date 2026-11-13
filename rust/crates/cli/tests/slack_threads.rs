@@ -2,6 +2,8 @@
 //! Every provider interaction terminates at this test's loopback HTTP server.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -15,6 +17,7 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use hmac::{Hmac, Mac};
@@ -378,7 +381,7 @@ async fn signed(endpoint: &str, payload: &Value) -> Result<reqwest::StatusCode> 
 }
 
 async fn receipt(
-    client: &mut ConnectorClient<Channel>,
+    client: &mut ConnectorClient<ProtocolChannel>,
     credentials: &Credentials,
     payload: &Value,
 ) -> Result<Task> {
@@ -428,7 +431,7 @@ async fn execute(
     ]);
     command.arg(directory.join(name));
     Process::spawn(command, directory, name)?.success().await?;
-    let mut operator = OperatorClient::connect(gateway.to_owned()).await?;
+    let mut operator = OperatorClient::new(protocol::dial(gateway.to_owned()).await?);
     let completed = operator
         .get_task(credentials.operator(GetTaskRequest {
             task_id: task.task_id.clone(),
@@ -489,7 +492,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &mock,
     )
     .await?;
-    let mut operator = OperatorClient::connect(public.clone()).await?;
+    let mut operator = OperatorClient::new(protocol::dial(public.clone()).await?);
     for (tag, instructions) in [("builder", "Original Tag"), ("another", "Wrong Tag")] {
         operator
             .put_tag(credentials.operator(PutTagRequest {
@@ -520,7 +523,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     );
     let mention = payload("EvMENTION1", THREAD, true, "Inspect the fixture");
     assert_eq!(signed(&http, &mention).await?, reqwest::StatusCode::OK);
-    let mut connector = ConnectorClient::connect(private.clone()).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
     let initial = receipt(&mut connector, &credentials, &mention).await?;
     execute(
         &credentials,
@@ -701,7 +704,8 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     let mut gateway = Process::spawn(command, directory.path(), "context-gateway")?;
     let endpoints = gateway.endpoints(2).await?;
     let (public, http) = (&endpoints[0], &endpoints[1]);
-    let channel = Channel::from_shared(public.clone())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut operator = OperatorClient::new(channel.clone());
     operator
         .put_tag(credentials.operator(PutTagRequest {
@@ -755,7 +759,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         .await?;
     let first = payload("EvCONTEXT1", THREAD, true, "Capture shared evidence");
     assert_eq!(signed(http, &first).await?, reqwest::StatusCode::OK);
-    let mut connector = ConnectorClient::connect(private).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private).await?);
     let source = receipt(&mut connector, &credentials, &first).await?;
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     let registered = host
@@ -1033,8 +1037,7 @@ fn owner_id(directory: &Path, state: &str) -> Result<String> {
 }
 
 async fn put_builder(credentials: &Credentials, public: &str) -> Result<()> {
-    OperatorClient::connect(public.to_owned())
-        .await?
+    OperatorClient::new(protocol::dial(public.to_owned()).await?)
         .put_tag(credentials.operator(PutTagRequest {
             tag_id: "builder".into(),
             instructions: "Original Tag".into(),
@@ -1065,8 +1068,7 @@ async fn run_host(
         ]);
         command.arg(directory.join(name));
         Process::spawn(command, directory, name)?.success().await?;
-        let completed = OperatorClient::connect(gateway.to_owned())
-            .await?
+        let completed = OperatorClient::new(protocol::dial(gateway.to_owned()).await?)
             .get_task(credentials.operator(GetTaskRequest {
                 task_id: task.task_id.clone(),
             })?)
@@ -1133,7 +1135,7 @@ async fn drain_hands_connector_to_second_gateway(database: String) -> Result<()>
         signed(&second_http, &mention).await?,
         reqwest::StatusCode::OK
     );
-    let mut connector = ConnectorClient::connect(private.clone()).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
     let first_task = receipt(&mut connector, &credentials, &mention).await?;
     run_host(
         &credentials,
@@ -1273,7 +1275,7 @@ async fn slack_thread_starts_and_steers_an_objective(database: String) -> Result
     )
     .await?;
     put_builder(&credentials, &public).await?;
-    let mut connector = ConnectorClient::connect(private.clone()).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
 
     let start = payload(
         "EvOBJECTIVE",
@@ -1283,8 +1285,7 @@ async fn slack_thread_starts_and_steers_an_objective(database: String) -> Result
     );
     assert_eq!(signed(&http, &start).await?, reqwest::StatusCode::OK);
     let starting = receipt(&mut connector, &credentials, &start).await?;
-    let objectives = ObjectivesClient::connect(public.clone())
-        .await?
+    let objectives = ObjectivesClient::new(protocol::dial(public.clone()).await?)
         .list_objectives(credentials.operator(ListObjectivesRequest::default())?)
         .await?
         .into_inner()

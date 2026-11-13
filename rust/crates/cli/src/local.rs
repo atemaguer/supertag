@@ -1227,10 +1227,10 @@ pub async fn configured(
                     .as_bytes(),
             )?;
             if !plane.provision.is_empty() {
-                let channel = crate::network::endpoint(endpoint.clone(), false)
-                    .await?
-                    .connect()
-                    .await?;
+                let channel = crate::network::operator_channel(
+                    &crate::network::endpoint(endpoint.clone(), false).await?,
+                )
+                .await?;
                 crate::manifests::provision(
                     channel,
                     &credentials.as_ref().expect("local credentials").operator,
@@ -1423,7 +1423,7 @@ async fn enroll_configured(
         use sha2::{Digest, Sha256};
         use supertag_protocol::v2::{CreateAuthKeyRequest, operator_client::OperatorClient};
         let key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        OperatorClient::new(gateway.connect_lazy())
+        OperatorClient::new(crate::network::operator_channel(&gateway).await?)
             .create_auth_key(crate::request(
                 CreateAuthKeyRequest {
                     host_id: definition.name.clone(),
@@ -1521,10 +1521,9 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
         return Ok(());
     }
     use supertag_protocol::v2::{SetHostDrainingRequest, operator_client::OperatorClient};
-    let channel = crate::network::endpoint(endpoint.into(), false)
-        .await?
-        .connect()
-        .await?;
+    let channel =
+        crate::network::operator_channel(&crate::network::endpoint(endpoint.into(), false).await?)
+            .await?;
     let mut client = OperatorClient::new(channel);
     for host_id in hosts {
         match client

@@ -2,11 +2,14 @@
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
 
 use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{authenticated_request, v2::*};
@@ -51,11 +54,14 @@ fn gateway(private: &str, service_token: &str, token: &str, principal: &str) -> 
     command
 }
 
-async fn channel(address: &str) -> Result<Channel> {
-    Ok(Channel::from_shared(address.to_owned())?
-        .timeout(WAIT)
-        .connect()
-        .await?)
+async fn channel(address: &str) -> Result<ProtocolChannel> {
+    protocol::negotiated(
+        Channel::from_shared(address.to_owned())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await
 }
 
 async fn cli(args: &[&str], token: &str) -> Result<serde_json::Value> {
@@ -100,7 +106,7 @@ async fn run_host(public: &str, token: &str, state: &Path, mode: &str) -> Result
 }
 
 async fn wait_for_work(
-    client: &mut work_sessions_client::WorkSessionsClient<Channel>,
+    client: &mut work_sessions_client::WorkSessionsClient<ProtocolChannel>,
     token: &str,
     id: &str,
     predicate: impl Fn(&WorkSession) -> bool,

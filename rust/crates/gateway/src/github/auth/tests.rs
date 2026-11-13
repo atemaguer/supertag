@@ -293,7 +293,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
     let (base, task) = serve(api.clone()).await?;
     let connector = Github::new(
         configuration,
-        lease_channel.clone(),
+        supertag_protocol::negotiation::bind_current(lease_channel.clone()),
         "private-gateway-token".into(),
     )?
     .with_test_api_url(base.as_str())?;
@@ -333,7 +333,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
     api.reject.store(false, Ordering::SeqCst);
     let connector = Github::new(
         config(temporary.path()),
-        lease_channel.clone(),
+        supertag_protocol::negotiation::bind_current(lease_channel.clone()),
         "private-gateway-token".into(),
     )?
     .with_test_api_url(base.as_str())?;

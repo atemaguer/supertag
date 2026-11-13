@@ -16,6 +16,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
     v2::{
@@ -28,7 +29,7 @@ use supertag_protocol::{
 };
 use supertag_workspaces::session_branch::{self, Imported, SessionDelivery};
 use tokio_util::sync::CancellationToken;
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 
 use crate::{Connection, connect_operator, request};
 
@@ -73,7 +74,12 @@ pub async fn fetch(connection: Connection, args: FetchArgs) -> Result<()> {
 }
 
 /// A Task's accepted delivery, else the named Session's latest one.
-async fn resolve(channel: &Channel, token: &str, id: &str, tag: Option<&str>) -> Result<Accepted> {
+async fn resolve(
+    channel: &ProtocolChannel,
+    token: &str,
+    id: &str,
+    tag: Option<&str>,
+) -> Result<Accepted> {
     let mut operator = OperatorClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
@@ -132,7 +138,7 @@ async fn resolve(channel: &Channel, token: &str, id: &str, tag: Option<&str>) ->
 
 /// Download the accepted bundle, verify it against the accepted receipt, and import it.
 async fn import(
-    channel: &Channel,
+    channel: &ProtocolChannel,
     token: &str,
     accepted: &Accepted,
     repository: &Path,
@@ -235,13 +241,14 @@ pub async fn follow(
     loop {
         let result: Result<()> = async {
             // The stream is long lived; each call on the channel sets its own deadline.
-            let channel = crate::network::endpoint_with_timeout(
-                endpoint.clone(),
-                false,
-                Duration::from_secs(u32::MAX as u64),
+            let channel = crate::network::operator_channel(
+                &crate::network::endpoint_with_timeout(
+                    endpoint.clone(),
+                    false,
+                    Duration::from_secs(u32::MAX as u64),
+                )
+                .await?,
             )
-            .await?
-            .connect()
             .await?;
             let mut stream = OperatorEventsClient::new(channel.clone())
                 .watch(supertag_protocol::authenticated_request(
@@ -303,7 +310,7 @@ pub async fn follow(
 }
 
 async fn import_task(
-    channel: &Channel,
+    channel: &ProtocolChannel,
     token: &str,
     task_id: &str,
     repositories: &Repositories,

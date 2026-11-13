@@ -129,7 +129,7 @@ mod tests {
 
     fn bridge() -> Bridge {
         let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
-        let headers = crate::HostHeaders("1".parse().unwrap());
+        let headers = crate::HostHeaders::new(1, 2);
         Bridge {
             token: "execution-token".into(),
             host_token: "host-token".into(),

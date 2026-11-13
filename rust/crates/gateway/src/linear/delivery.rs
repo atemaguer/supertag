@@ -64,6 +64,7 @@ impl Connector {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
                 };
+                supertag_protocol::crash_point("gateway.linear-reply", "claimed");
                 let result = with_claim_lease(
                     self.control_plane.clone(),
                     &self.gateway_token,
@@ -75,11 +76,14 @@ impl Connector {
                         self.journal.save(&Entry::Sending {
                             target: target.clone(),
                         })?;
+                        supertag_protocol::crash_point("gateway.linear-reply", "sending-journaled");
                         let outcome = self.post(&reply).await;
+                        supertag_protocol::crash_point("gateway.linear-reply", "provider-answered");
                         self.journal.save(&Entry::Settle {
                             target: target.clone(),
                             outcome,
                         })?;
+                        supertag_protocol::crash_point("gateway.linear-reply", "settle-journaled");
                         Ok(true)
                     },
                 )
@@ -123,6 +127,7 @@ impl Connector {
                 {
                     return Ok(false);
                 }
+                supertag_protocol::crash_point("gateway.linear-reply", "settled");
                 self.journal.clear()?;
                 // Leave time before claiming another provider write.
                 return Ok(false);

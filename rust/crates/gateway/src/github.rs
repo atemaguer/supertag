@@ -22,6 +22,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use std::{path::PathBuf, sync::Arc, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
@@ -31,7 +32,7 @@ use supertag_protocol::{
 };
 use tokio::{net::TcpListener, time};
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -54,7 +55,7 @@ pub struct Github(Arc<Connector>);
 
 struct Connector {
     config: GithubConfig,
-    control_plane: ConnectorClient<Channel>,
+    control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
     principal: String,
     http: reqwest::Client,
@@ -66,7 +67,7 @@ struct Connector {
 impl Github {
     pub fn new(
         mut config: GithubConfig,
-        private_channel: Channel,
+        private_channel: ProtocolChannel,
         gateway_token: String,
     ) -> Result<Self> {
         ensure!(

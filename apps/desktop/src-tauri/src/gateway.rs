@@ -3,13 +3,17 @@ use std::{net::IpAddr, sync::Arc, time::Duration};
 use serde::Serialize;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    v2::{self, conversations_client::ConversationsClient, operator_client::OperatorClient},
+    negotiation::{NegotiationError, ProtocolChannel, connect},
+    v2::{
+        self, ServiceRole, conversations_client::ConversationsClient,
+        operator_client::OperatorClient,
+    },
 };
 use tokio::sync::{Mutex, RwLock};
 use tonic::{
     Code, Request, Status,
     metadata::{Ascii, MetadataValue},
-    transport::{Channel, ClientTlsConfig, Endpoint},
+    transport::{ClientTlsConfig, Endpoint},
 };
 
 mod artifacts;
@@ -48,7 +52,7 @@ impl Connection {
 // This type deliberately has no Debug/Serialize implementation. The credential
 // lives only here and in sensitive request headers, never in settings or logs.
 struct Session {
-    channel: Channel,
+    channel: ProtocolChannel,
     authorization: MetadataValue<Ascii>,
 }
 
@@ -58,6 +62,19 @@ impl Session {
         let channel = endpoint.connect().await.map_err(|_| {
             "Could not connect to the Gateway. Check its address and TLS certificate.".to_owned()
         })?;
+        // The Gateway refuses every call that does not name a negotiated version.
+        let channel = connect(channel, ServiceRole::Operator, ServiceRole::Gateway)
+            .await
+            .map_err(|error| match error {
+                NegotiationError::Unavailable(_) => {
+                    "Could not connect to the Gateway. Check its address and TLS certificate."
+                        .to_owned()
+                }
+                NegotiationError::Incompatible(_) => {
+                    "This Gateway runs an incompatible SuperTag release. Use the same release for the Gateway and this app."
+                        .to_owned()
+                }
+            })?;
         Ok(Self {
             channel,
             authorization,
@@ -78,13 +95,13 @@ impl Session {
         request
     }
 
-    fn operator(&self) -> OperatorClient<Channel> {
+    fn operator(&self) -> OperatorClient<ProtocolChannel> {
         OperatorClient::new(self.channel.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    fn conversations(&self) -> ConversationsClient<Channel> {
+    fn conversations(&self) -> ConversationsClient<ProtocolChannel> {
         ConversationsClient::new(self.channel.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)

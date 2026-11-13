@@ -421,8 +421,8 @@ impl GatewayTransfers {
     }
 }
 fn client(
-    channel: Channel,
-) -> artifact_volume_directory_client::ArtifactVolumeDirectoryClient<Channel> {
+    channel: ProtocolChannel,
+) -> artifact_volume_directory_client::ArtifactVolumeDirectoryClient<ProtocolChannel> {
     artifact_volume_directory_client::ArtifactVolumeDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

@@ -1,5 +1,7 @@
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -188,8 +190,7 @@ spec: {source: "file:///var/lib/supertag/archive"}
     let task_id = objective["starting_task_id"]
         .as_str()
         .context("missing starting Task")?;
-    let task = OperatorClient::connect(gateway.clone())
-        .await?
+    let task = OperatorClient::new(protocol::dial(gateway.clone()).await?)
         .get_task(authenticated_request(
             GetTaskRequest {
                 task_id: task_id.into(),
@@ -232,7 +233,7 @@ spec: {source: "file:///var/lib/supertag/archive"}
         "No changes."
     );
 
-    let mut operator = OperatorClient::connect(gateway.clone()).await?;
+    let mut operator = OperatorClient::new(protocol::dial(gateway.clone()).await?);
     let before = operator
         .get_tag(authenticated_request(
             GetTagRequest {
@@ -378,7 +379,8 @@ spec: {purpose: Observe releases.}
         "No changes."
     );
 
-    let mut relationship_client = ManifestRelationshipsClient::connect(gateway.clone()).await?;
+    let mut relationship_client =
+        ManifestRelationshipsClient::new(protocol::dial(gateway.clone()).await?);
     let tags = |sender: &str| {
         vec![
             ProvisionTag {
@@ -497,7 +499,7 @@ spec: {{members: [resume-worker]}}
 
     // A previous run was interrupted after creating a Volume and before it
     // recorded membership: it had claimed the Volume first.
-    let mut client = ManifestRelationshipsClient::connect(gateway.to_owned()).await?;
+    let mut client = ManifestRelationshipsClient::new(protocol::dial(gateway.to_owned()).await?);
     client
         .reconcile_apply_set(authenticated_request(
             ReconcileApplySetRequest {

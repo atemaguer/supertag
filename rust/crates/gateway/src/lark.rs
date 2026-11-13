@@ -15,13 +15,14 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{AcceptLarkEventRequest, LarkDomain, connector_client::ConnectorClient},
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct LarkConfig {
@@ -40,7 +41,7 @@ pub struct LarkConfig {
 pub struct Lark(Arc<Connector>);
 struct Connector {
     config: LarkConfig,
-    control_plane: ConnectorClient<Channel>,
+    control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
     principal: String,
     http: reqwest::Client,
@@ -54,7 +55,11 @@ struct AccessToken {
     expires: Instant,
 }
 impl Lark {
-    pub fn new(mut config: LarkConfig, channel: Channel, gateway_token: String) -> Result<Self> {
+    pub fn new(
+        mut config: LarkConfig,
+        channel: ProtocolChannel,
+        gateway_token: String,
+    ) -> Result<Self> {
         ensure!(
             valid_id(&config.account_id, "")
                 && valid_app(&config.app_id)

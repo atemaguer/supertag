@@ -25,6 +25,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::Sha256;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
@@ -34,7 +35,7 @@ use supertag_protocol::{
 };
 use tokio::{net::TcpListener, time};
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
 const WEBHOOK_TIMEOUT: Duration = Duration::from_millis(2500);
@@ -58,20 +59,20 @@ pub struct Slack(Arc<Connector>);
 
 struct Connector {
     config: SlackConfig,
-    control_plane: ConnectorClient<Channel>,
+    control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
     principal: String,
     http: reqwest::Client,
     post_message: reqwest::Url,
     journal: Journal,
-    progress: ReplyProgressClient<Channel>,
+    progress: ReplyProgressClient<ProtocolChannel>,
     progress_journal: Journal,
 }
 
 impl Slack {
     pub fn new(
         config: SlackConfig,
-        private_channel: Channel,
+        private_channel: ProtocolChannel,
         gateway_token: String,
     ) -> Result<Self> {
         ensure!(

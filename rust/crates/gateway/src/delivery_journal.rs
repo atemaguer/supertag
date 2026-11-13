@@ -9,13 +9,13 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     authenticated_request,
     v2::{RenewReplyRequest, connector_client::ConnectorClient},
 };
 use tempfile::NamedTempFile;
 use tokio::time;
-use tonic::transport::Channel;
 const REPLY_FILE: &str = "reply.json";
 const OWNER_FILE: &str = "connector-owner";
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -256,7 +256,7 @@ enum Renewal {
 }
 
 async fn renew_claim(
-    client: &mut ConnectorClient<Channel>,
+    client: &mut ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
     principal: &str,
     target: &Claim,
@@ -299,7 +299,7 @@ async fn renew_claim(
 /// This future stays pending while ownership is valid. Its deadline also bounds
 /// an in-flight renewal, and only a successful renewal can extend that deadline.
 async fn maintain_claim_lease(
-    client: &mut ConnectorClient<Channel>,
+    client: &mut ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
     principal: &str,
     target: &Claim,
@@ -328,7 +328,7 @@ async fn maintain_claim_lease(
 /// maintenance alongside that work. Transient renewal failures retain the last
 /// proven deadline; expiry or explicit revocation drops the possibly sent request.
 pub(crate) async fn with_claim_lease<T>(
-    mut client: ConnectorClient<Channel>,
+    mut client: ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
     principal: &str,
     target: &Claim,

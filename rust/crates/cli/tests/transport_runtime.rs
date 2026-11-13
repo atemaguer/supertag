@@ -5,6 +5,8 @@
 //!
 //! Ports `tests/worklet-transport-adoption-gates.test.ts` (16 hosts, partition,
 //! reconnect, no repeated accepted work) to the Rust services.
+#[path = "support/protocol.rs"]
+mod protocol;
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
@@ -18,6 +20,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
@@ -27,8 +30,9 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
-        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, PutTagRequest, ServiceRole,
-        SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind, WatchRequest,
+        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListNativeUsageRequest,
+        PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent,
+        WatchKind, WatchRequest,
         operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient,
         operator_events_server::{OperatorEvents, OperatorEventsServer},
@@ -213,11 +217,17 @@ impl Services {
         })
     }
 
-    async fn channel(&self) -> Result<Channel> {
+    async fn channel(&self) -> Result<ProtocolChannel> {
+        protocol::negotiated(connect(self.gateway_address).await?).await
+    }
+
+    /// A Gateway channel that has not negotiated.
+    async fn raw_channel(&self) -> Result<Channel> {
         connect(self.gateway_address).await
     }
 
-    async fn control_plane_channel(&self) -> Result<Channel> {
+    /// A Control Plane channel that has not negotiated.
+    async fn raw_control_plane_channel(&self) -> Result<Channel> {
         connect(self.control_plane_address).await
     }
 }
@@ -477,12 +487,13 @@ fn recording_adapter(directory: &Path, host: &str) -> Result<(PathBuf, PathBuf)>
 }
 
 async fn start_host(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     gateway: SocketAddr,
     directory: &Path,
     index: usize,
     tag: &str,
+    adapter_args: &[&str],
 ) -> Result<Host> {
     let id = format!("scale-host-{index:02}");
     let proxy = Proxy::start(gateway).await?;
@@ -525,6 +536,9 @@ async fn start_host(
             "--adapter-arg=--wait-for-file={}",
             release.display()
         ));
+    for argument in adapter_args {
+        command.arg(format!("--adapter-arg={argument}"));
+    }
     let process = Service::spawn(command, directory, &id)?;
     Ok(Host {
         id,
@@ -536,7 +550,7 @@ async fn start_host(
 }
 
 async fn task_state(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     id: &str,
 ) -> Result<supertag_protocol::v2::Task> {
@@ -556,7 +570,7 @@ static SLOWEST_READ_MS: AtomicU64 = AtomicU64::new(0);
 /// Polls until every Task reaches `expected`, recording each Task's queue latency
 /// when it first leaves the queue.
 async fn wait_for_all(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     tasks: &mut [Submitted],
     expected: TaskState,
@@ -691,7 +705,7 @@ async fn partition_round(
 }
 
 async fn submit_wave(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     workload: &Workload,
     wave: usize,
@@ -771,6 +785,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
                 root,
                 index,
                 &tag,
+                &[],
             )
             .await?,
         );
@@ -995,11 +1010,14 @@ async fn stalled_watch_client(
     gateway: SocketAddr,
     tokens: &Tokens,
 ) -> Result<tonic::Streaming<WatchEvent>> {
-    let channel = Endpoint::from_shared(format!("http://{gateway}"))?
-        .initial_stream_window_size(16 * 1024)
-        .initial_connection_window_size(16 * 1024)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Endpoint::from_shared(format!("http://{gateway}"))?
+            .initial_stream_window_size(16 * 1024)
+            .initial_connection_window_size(16 * 1024)
+            .connect()
+            .await?,
+    )
+    .await?;
     let request = authenticated_request(
         WatchRequest {
             resume_token: String::new(),
@@ -1084,6 +1102,326 @@ async fn postgres_sixteen_host_partition_storm_preserves_invariants() -> Result<
         Ok(())
     })
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Adapter calls relayed through a partition
+
+/// The steps `--partition-steps` makes, in order (see the fixture's
+/// `partition_calls` module). `take` runs connected: a take is never repeated.
+const PARTITION_STEPS: [&str; 9] = [
+    "usage",
+    "mailbox-read",
+    "mailbox-send",
+    "workstream-read",
+    "workstream-post",
+    "question",
+    "work-session-start",
+    "take",
+    "settle",
+];
+
+fn step_marker(base: &Path, step: &str, suffix: &str) -> PathBuf {
+    let mut path = base.as_os_str().to_owned();
+    path.push(format!(".{step}.{suffix}"));
+    PathBuf::from(path)
+}
+
+async fn wait_for_marker(path: &Path, host: &Host) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !path.exists() {
+        ensure!(
+            Instant::now() < deadline,
+            "{} never appeared\n{}\nadapter: {}",
+            path.display(),
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    Ok(())
+}
+
+async fn operator_cli(services: &Services, tokens: &Tokens, args: &[&str]) -> Result<Value> {
+    let gateway = format!("http://{}", services.gateway_address);
+    let mut full = vec![args[0], "--gateway", gateway.as_str()];
+    full.extend_from_slice(&args[1..]);
+    let mut command = binary(&full);
+    command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    run_json(command).await
+}
+
+/// Every adapter-facing call the Worker Host may repeat starts while its host
+/// cannot reach the Gateway: usage, Mailbox read and send, Workstream read and
+/// post, an Objective question, a Work Session start, and a live-input
+/// settlement. The first partition lasts 18 seconds: longer than a host
+/// channel holds one call (15 seconds) and shorter than the 30-second
+/// execution lease; the rest last 4 seconds, inside the live input's
+/// 10-second acknowledgement window, and the host reconnects and renews its
+/// lease between partitions. Each call is still outstanding when its
+/// partition heals, the Attempt succeeds, the adapter runs once, and every
+/// effect the Control Plane deduplicates is recorded exactly once.
+async fn exercise_adapter_calls_through_partition(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let mut operator = OperatorClient::new(services.channel().await?);
+    let tag = "partition-calls";
+    let peer = "partition-peer";
+    for id in [tag, peer] {
+        operator_cli(
+            &services,
+            &tokens,
+            &["put-tag", id, "--instructions", "Relay calls"],
+        )
+        .await?;
+    }
+    operator_cli(
+        &services,
+        &tokens,
+        &[
+            "mailbox-grants",
+            "allow",
+            tag,
+            peer,
+            "--operation-id",
+            "allow-peer",
+        ],
+    )
+    .await?;
+    operator_cli(
+        &services,
+        &tokens,
+        &["team", "create", "relay", "--member", tag, "--member", peer],
+    )
+    .await?;
+    let objective = operator_cli(
+        &services,
+        &tokens,
+        &[
+            "objective",
+            "create",
+            "partition-objective",
+            "--owner",
+            tag,
+            "--team",
+            "relay",
+            "Relay through the partition",
+        ],
+    )
+    .await?;
+    let task_id = objective["starting_task_id"]
+        .as_str()
+        .context("Objective starting Task")?
+        .to_owned();
+    let steps = root.join("partition-steps");
+    let steps_argument = format!("--partition-steps={}", steps.display());
+    let peer_argument = format!("--partition-peer={peer}");
+    let host = start_host(
+        &mut operator,
+        &tokens,
+        services.gateway_address,
+        root,
+        0,
+        tag,
+        &[&steps_argument, &peer_argument],
+    )
+    .await?;
+    // A Work Session may be delegated only to a Tag with a registered Worker
+    // Host. This one holds whatever it claims for the peer and is never released.
+    let _peer_host = start_host(
+        &mut operator,
+        &tokens,
+        services.gateway_address,
+        root,
+        1,
+        peer,
+        &[],
+    )
+    .await?;
+    std::fs::write(&host.release, "")?;
+    let mut input_id = String::new();
+    for (index, step) in PARTITION_STEPS.iter().enumerate() {
+        wait_for_marker(&step_marker(&steps, step, "ready"), &host).await?;
+        if *step == "take" {
+            let queued = operator_cli(
+                &services,
+                &tokens,
+                &[
+                    "input",
+                    "queue",
+                    &task_id,
+                    "Check the partition",
+                    "--operation-id",
+                    "partition-input",
+                ],
+            )
+            .await?;
+            input_id = queued["input_id"]
+                .as_str()
+                .context("live input ID")?
+                .to_owned();
+            std::fs::write(step_marker(&steps, step, "go"), "")?;
+            continue;
+        }
+        let refused = host.proxy.refused();
+        host.proxy.partition();
+        std::fs::write(step_marker(&steps, step, "go"), "")?;
+        sleep(if index == 0 {
+            Duration::from_secs(18)
+        } else {
+            Duration::from_secs(4)
+        })
+        .await;
+        // The call cannot have finished: the fixture would have moved on.
+        if let Some(next) = PARTITION_STEPS.get(index + 1) {
+            ensure!(
+                !step_marker(&steps, next, "ready").exists(),
+                "{step} finished while its Worker Host was partitioned"
+            );
+        }
+        let current = task_state(&mut operator, &tokens, &task_id).await?;
+        ensure!(
+            current.state() == TaskState::Running,
+            "the Attempt did not ride out the {step} partition: {:?} {:?}\n{}\nadapter: {}",
+            current.state(),
+            current.result,
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        ensure!(
+            host.proxy.refused() > refused,
+            "the {step} partition refused no reconnect"
+        );
+        let accepted = host.proxy.accepted();
+        host.proxy.restore();
+        // Let the host reconnect and renew its lease before the next partition,
+        // so partitions never add up to more than one lease.
+        let reconnected = Instant::now() + Duration::from_secs(20);
+        while host.proxy.accepted() == accepted {
+            ensure!(
+                Instant::now() < reconnected,
+                "the Worker Host never reconnected after the {step} partition"
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+        sleep(Duration::from_secs(3)).await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let finished = loop {
+        let current = task_state(&mut operator, &tokens, &task_id).await?;
+        if !matches!(current.state(), TaskState::Queued | TaskState::Running) {
+            break current;
+        }
+        ensure!(Instant::now() < deadline, "Task never finished");
+        sleep(Duration::from_millis(50)).await;
+    };
+    ensure!(
+        finished.state() == TaskState::Succeeded,
+        "Task ended {:?}: {:?}\n{}",
+        finished.state(),
+        finished.result,
+        host.process.logs()
+    );
+    ensure!(
+        finished
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains(&format!(
+                "Relayed through partition: {}; input Check the partition",
+                PARTITION_STEPS.join(", ")
+            ))),
+        "unexpected result {:?}",
+        finished.result
+    );
+    let usage = operator
+        .list_native_usage(tokens.request(ListNativeUsageRequest {
+            task_id: task_id.clone(),
+            attempt_id: finished.attempt_id.clone().unwrap_or_default(),
+            after_sequence: 0,
+            limit: 10,
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        usage.reports.len() == 1
+            && usage.reports[0]
+                .native_usage
+                .as_ref()
+                .is_some_and(|native| native.total_tokens == Some(5)),
+        "usage was not recorded exactly once: {:?}",
+        usage.reports
+    );
+    let mailbox = operator_cli(&services, &tokens, &["mailbox", peer]).await?;
+    let messages = mailbox["messages"].as_array().context("Mailbox messages")?;
+    ensure!(
+        messages
+            .iter()
+            .filter(|message| message["text"] == "Sent through a partition")
+            .count()
+            == 1,
+        "the Mailbox message was not delivered exactly once: {mailbox}"
+    );
+    let posts = operator_cli(&services, &tokens, &["team", "posts", "relay"]).await?;
+    ensure!(
+        posts["posts"]
+            .as_array()
+            .context("Workstream posts")?
+            .iter()
+            .filter(|post| post["body"] == "Posted through a partition")
+            .count()
+            == 1,
+        "the Workstream post was not written exactly once: {posts}"
+    );
+    // The live input's follower Task is newer in the same Session, so the
+    // question is not listed as actionable; it is still published once.
+    let question = operator_cli(&services, &tokens, &["inbox", "question", &task_id]).await?;
+    ensure!(
+        question["text"] == "Which route survives the partition?",
+        "the question was not published: {question}"
+    );
+    let session = finished.session_id.clone();
+    let sessions = operator_cli(
+        &services,
+        &tokens,
+        &[
+            "work-sessions",
+            "list",
+            "--parent-tag",
+            tag,
+            "--parent-session",
+            &session,
+        ],
+    )
+    .await?;
+    ensure!(
+        sessions["work_sessions"]
+            .as_array()
+            .context("Work Sessions")?
+            .len()
+            == 1,
+        "the Work Session was not started exactly once: {sessions}"
+    );
+    let receipt = operator_cli(&services, &tokens, &["input", "get", &input_id]).await?;
+    ensure!(
+        receipt["state"] == "LIVE_INPUT_STATE_ACCEPTED",
+        "live input was not settled: {receipt}"
+    );
+    ensure!(host.launches()? == 1, "the adapter ran more than once");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_adapter_calls_through_partition(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+    with_postgres("partition_calls", exercise_adapter_calls_through_partition).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,9 +1534,12 @@ async fn stalled_watch_consumer_keeps_gateway_memory_and_upstream_reads_bounded(
     );
 
     // Other callers are unaffected while the stream is stalled.
-    let health = Endpoint::from_shared(format!("http://{address}"))?
-        .connect()
-        .await?;
+    let health = protocol::negotiated(
+        Endpoint::from_shared(format!("http://{address}"))?
+            .connect()
+            .await?,
+    )
+    .await?;
     let serving = tonic_health::pb::health_client::HealthClient::new(health)
         .check(tonic_health::pb::HealthCheckRequest {
             service: String::new(),
@@ -1668,7 +2009,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
 
     // The real services refuse old peers and peers in the wrong role.
     let services = Services::start(&sqlite(root), root, &tokens).await?;
-    let gateway = services.channel().await?;
+    let gateway = services.raw_channel().await?;
     assert_eq!(
         negotiate(
             gateway.clone(),
@@ -1702,7 +2043,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         wrong_role,
         "the SuperTag Gateway refused this Gateway: a Gateway cannot connect directly to the SuperTag Gateway"
     );
-    let private = services.control_plane_channel().await?;
+    let private = services.raw_control_plane_channel().await?;
     let old_gateway = negotiate_versions(
         private.clone(),
         ServiceRole::Gateway,
@@ -1730,4 +2071,391 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         "Gateway stopped after refusing peers"
     );
     Ok(())
+}
+
+/// The Gateway and Control Plane refuse every call that does not name a
+/// negotiated protocol version, so a peer that skipped `Negotiate` reaches only
+/// negotiation and health. Operator clients negotiate: the CLI works against
+/// the real Gateway and refuses one from another protocol epoch.
+async fn exercise_protocol_fence(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let skipped = |status: Status, service: &str| {
+        status.code() == tonic::Code::FailedPrecondition
+            && status.message().starts_with(&format!(
+                "this SuperTag {service} refuses a call that did not negotiate a protocol version"
+            ))
+    };
+
+    // A Gateway caller that skipped negotiation is refused before any handler runs.
+    let raw = services.raw_channel().await?;
+    let refused = OperatorClient::new(raw.clone())
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    let refused = supertag_protocol::v2::worker_host_client::WorkerHostClient::new(raw.clone())
+        .register_host(authenticated_request(
+            supertag_protocol::v2::RegisterHostRequest {
+                incarnation_id: Uuid::new_v4().to_string(),
+            },
+            "unenrolled-host-token",
+            None,
+        )?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    // A version from another epoch is refused as incompatible.
+    let refused = OperatorClient::new(supertag_protocol::negotiation::bind(raw.clone(), 1))
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(
+        refused.code() == tonic::Code::FailedPrecondition
+            && refused.message().starts_with(
+                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+            ),
+        "{refused:?}"
+    );
+    // Health stays open to probes that cannot negotiate.
+    let health = tonic_health::pb::health_client::HealthClient::new(raw)
+        .check(tonic_health::pb::HealthCheckRequest {
+            service: String::new(),
+        })
+        .await?
+        .into_inner();
+    ensure!(
+        health.status == tonic_health::pb::health_check_response::ServingStatus::Serving as i32
+    );
+    // A negotiated caller reaches the handler.
+    let missing = OperatorClient::new(services.channel().await?)
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(missing.code() == tonic::Code::NotFound, "{missing:?}");
+
+    // The Control Plane fences its private callers the same way.
+    let refused = OperatorClient::new(services.raw_control_plane_channel().await?)
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: "absent".into(),
+            },
+            &tokens.gateway,
+            Some("operator:local"),
+        )?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Control Plane"), "{refused:?}");
+
+    // The CLI negotiates as an operator client.
+    let gateway = format!("http://{}", services.gateway_address);
+    let mut list = binary(&["list-tags", "--gateway", &gateway]);
+    list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    let listed = run(list).await?;
+    ensure!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    // ...and refuses a Gateway from another protocol epoch before any call.
+    let (old_gateway, old_server) = serve_fake(
+        Server::builder().add_service(
+            Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Operator])
+                .with_versions(OLD_EPOCH)
+                .service(),
+        ),
+    )
+    .await?;
+    let mut list = binary(&["list-tags", "--gateway", &format!("http://{old_gateway}")]);
+    list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    let refused = run(list).await?;
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    ensure!(
+        !refused.status.success()
+            && stderr.contains("the SuperTag Gateway refused this operator client: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag 0.1.0) offered [2]"),
+        "unclear operator failure: {stderr}"
+    );
+    old_server.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_protocol_fence(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
+    with_postgres("protocol_fence", exercise_protocol_fence).await
+}
+
+// ---------------------------------------------------------------------------
+// TLS through an idle-closing TCP proxy
+
+/// A TCP relay like an operator's proxy: it closes a link that carried no bytes
+/// in either direction for `idle`, and a partition severs every link and
+/// refuses new ones until restored.
+struct IdleProxy {
+    address: SocketAddr,
+    partitioned: Arc<AtomicBool>,
+    refused: Arc<AtomicU64>,
+    links: Arc<Mutex<Vec<AbortHandle>>>,
+    task: JoinHandle<()>,
+}
+
+impl IdleProxy {
+    async fn start(target: SocketAddr, idle: Duration) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let partitioned = Arc::new(AtomicBool::new(false));
+        let refused = Arc::new(AtomicU64::new(0));
+        let links: Arc<Mutex<Vec<AbortHandle>>> = Arc::default();
+        let (state, refusals, open) = (partitioned.clone(), refused.clone(), links.clone());
+        let task = tokio::spawn(async move {
+            while let Ok((downstream, _)) = listener.accept().await {
+                let mut open = open.lock().unwrap();
+                if state.load(Ordering::SeqCst) {
+                    refusals.fetch_add(1, Ordering::SeqCst);
+                    continue;
+                }
+                let link = tokio::spawn(async move {
+                    if let Ok(upstream) = TcpStream::connect(target).await {
+                        relay_until_idle(downstream, upstream, idle).await;
+                    }
+                });
+                open.retain(|link| !link.is_finished());
+                open.push(link.abort_handle());
+            }
+        });
+        Ok(Self {
+            address,
+            partitioned,
+            refused,
+            links,
+            task,
+        })
+    }
+
+    fn partition(&self) {
+        let mut links = self.links.lock().unwrap();
+        self.partitioned.store(true, Ordering::SeqCst);
+        for link in links.drain(..) {
+            link.abort();
+        }
+    }
+
+    fn restore(&self) {
+        let _links = self.links.lock().unwrap();
+        self.partitioned.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Drop for IdleProxy {
+    fn drop(&mut self) {
+        self.partition();
+        self.task.abort();
+    }
+}
+
+/// Copies bytes both ways until either side closes or the link is idle.
+async fn relay_until_idle(downstream: TcpStream, upstream: TcpStream, idle: Duration) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (mut down_read, mut down_write) = downstream.into_split();
+    let (mut up_read, mut up_write) = upstream.into_split();
+    let (mut from_client, mut from_server) = (vec![0; 16 * 1024], vec![0; 16 * 1024]);
+    loop {
+        tokio::select! {
+            read = down_read.read(&mut from_client) => match read {
+                Ok(0) | Err(_) => return,
+                Ok(count) => if up_write.write_all(&from_client[..count]).await.is_err() {
+                    return;
+                },
+            },
+            read = up_read.read(&mut from_server) => match read {
+                Ok(0) | Err(_) => return,
+                Ok(count) => if down_write.write_all(&from_server[..count]).await.is_err() {
+                    return;
+                },
+            },
+            () = sleep(idle) => return,
+        }
+    }
+}
+
+/// Ports `tests/worklet-grpc-proxy-operational.test.ts`: a Worker Host reaches a
+/// TLS Gateway through a TCP proxy that closes links idle for 400 ms. The host
+/// stays ready through idle time, reconnects after a partition severs every
+/// link, and then runs a Task exactly once.
+async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let pki = Pki::authority(root, "supertag-proxy-ca").await?;
+    let gateway_leaf = pki.leaf("gateway").await?;
+    let host_leaf = pki.leaf("worker-host").await?;
+    let operator_leaf = pki.leaf("operator").await?;
+
+    let mut command = binary(&["control-plane"]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Service::spawn(command, root, "proxy-control-plane")?;
+    let private = format!("http://{}", control_plane.address().await?);
+    let mut command = binary(&["gateway", "--control-plane", &private]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    server_tls(&mut command, &gateway_leaf, &pki.ca());
+    let mut gateway = Service::spawn(command, root, "proxy-gateway")?;
+    let gateway_address = gateway.address().await?;
+    let public = format!("https://{gateway_address}");
+    let proxy = IdleProxy::start(gateway_address, Duration::from_millis(400)).await?;
+    let proxied = format!("https://{}", proxy.address);
+
+    let operator = |args: &[&str]| {
+        let mut command = binary(args);
+        command
+            .args(["--gateway", &public])
+            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+        client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
+        command
+    };
+    run_json(operator(&[
+        "put-tag",
+        "proxied",
+        "--instructions",
+        "Answer through the proxy",
+    ]))
+    .await?;
+    let issued = run_json(operator(&[
+        "create-auth-key",
+        "proxy-host",
+        "--tag",
+        "proxied",
+    ]))
+    .await?;
+    let key = root.join("proxy-host.key");
+    std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
+    let state = root.join("proxy-host");
+    let mut enroll = binary(&["enroll-host", "proxy-host", "--gateway", &proxied]);
+    enroll
+        .arg("--state-directory")
+        .arg(&state)
+        .arg("--auth-key")
+        .arg(format!("file:{}", key.display()));
+    client_tls(&mut enroll, &pki.ca(), Some(&host_leaf));
+    assert_eq!(run_json(enroll).await?["host_id"], "proxy-host");
+
+    let (adapter, launches) = recording_adapter(root, "proxy-host")?;
+    let mut command = binary(&["worker-host", "--gateway", &proxied]);
+    command
+        .arg("--state-directory")
+        .arg(&state)
+        .arg("--adapter")
+        .arg(&adapter);
+    client_tls(&mut command, &pki.ca(), Some(&host_leaf));
+    let mut host = Service::spawn(command, root, "proxy-worker-host")?;
+
+    // Idle time. The host's claim connection carries traffic often enough to stay
+    // open; its other Gateway channels sit idle, and when the proxy closes them
+    // they reconnect on their next call. Neither stops the host.
+    let host_ready = || {
+        let mut command = binary(&["host", "--gateway", &public, "get", "proxy-host"]);
+        command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+        client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
+        run_json(command)
+    };
+    let deadline = Instant::now() + STARTUP;
+    while !host_ready()
+        .await
+        .is_ok_and(|host| host["phase"] == "ready")
+    {
+        ensure!(
+            Instant::now() < deadline,
+            "Worker Host never connected through the proxy: {}",
+            host.logs()
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+    sleep(Duration::from_millis(1500)).await;
+    ensure!(
+        host.running()?,
+        "Worker Host stopped while idle: {}",
+        host.logs()
+    );
+    ensure!(
+        host_ready().await?["phase"] == "ready",
+        "Worker Host lost readiness while idle behind the proxy"
+    );
+
+    // A partition severs the link; the host reconnects once it heals.
+    proxy.partition();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while proxy.refused.load(Ordering::SeqCst) == 0 {
+        ensure!(
+            Instant::now() < deadline,
+            "Worker Host never tried to reconnect"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    proxy.restore();
+
+    let submitted = run_json(operator(&[
+        "submit",
+        "--tag",
+        "proxied",
+        "--session",
+        "proxy",
+        "Verify proxy recovery",
+    ]))
+    .await?;
+    let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let task = loop {
+        let task = run_json(operator(&["get-task", &task_id])).await?;
+        if matches!(
+            task["state"].as_str(),
+            Some("TASK_STATE_SUCCEEDED" | "TASK_STATE_FAILED" | "TASK_STATE_CANCELLED")
+        ) {
+            break task;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "Task never finished: {task}\n{}",
+            host.logs()
+        );
+        sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    assert_eq!(
+        task["result"],
+        "Answer through the proxy: Verify proxy recovery []"
+    );
+    let launched = std::fs::read_to_string(&launches)?.lines().count();
+    assert_eq!(launched, 1, "the adapter ran {launched} times");
+    ensure!(host.running()? && gateway.running()? && control_plane.running()?);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_tls_worker_host_traverses_an_idle_closing_proxy() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_tls_proxy_traversal(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_tls_worker_host_traverses_an_idle_closing_proxy() -> Result<()> {
+    with_postgres("proxy_traversal", exercise_tls_proxy_traversal).await
 }

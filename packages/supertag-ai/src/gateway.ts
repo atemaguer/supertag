@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import {
   ArtifactCatalog,
@@ -9,6 +9,10 @@ import {
 } from "../../runtime/sdk/src/rust-harness/gen/supertag/runtime/v2/artifact_pb.js";
 import { GithubPublications } from "../../runtime/sdk/src/rust-harness/gen/supertag/runtime/v2/github_publications_pb.js";
 import { GithubWorkspaces } from "../../runtime/sdk/src/rust-harness/gen/supertag/runtime/v2/github_workspaces_pb.js";
+import {
+  ProtocolNegotiation,
+  ServiceRole,
+} from "../../runtime/sdk/src/rust-harness/gen/supertag/runtime/v2/negotiation_pb.js";
 import {
   PolicyCatalog,
   SurfacePolicyCatalog,
@@ -52,7 +56,45 @@ function gatewayOrigin(value: string): URL {
   return url;
 }
 
-/** Connect operator applications to the SuperTag Gateway over gRPC. */
+/** Names, on every call, the protocol version this client negotiated with the Gateway. */
+const PROTOCOL_HEADER = "x-supertag-protocol";
+/** The SuperTag protocol versions this client speaks. */
+const PROTOCOL_VERSIONS = [2];
+
+function refusedByGateway(error: unknown): ConnectError {
+  const status = ConnectError.from(error);
+  if (status.code === Code.Unimplemented) {
+    return new ConnectError(
+      "incompatible SuperTag protocol: the Gateway does not offer SuperTag protocol negotiation",
+      Code.FailedPrecondition,
+    );
+  }
+  if (
+    status.code === Code.FailedPrecondition ||
+    status.code === Code.PermissionDenied ||
+    status.code === Code.InvalidArgument
+  ) {
+    return new ConnectError(
+      `the SuperTag Gateway refused this operator client: ${status.rawMessage}`,
+      Code.FailedPrecondition,
+    );
+  }
+  return status;
+}
+
+function protocolRefusal(error: unknown): boolean {
+  const status = ConnectError.from(error);
+  return (
+    status.code === Code.FailedPrecondition &&
+    (status.rawMessage.startsWith("incompatible SuperTag protocol") ||
+      status.rawMessage.includes("did not negotiate a protocol version"))
+  );
+}
+
+/**
+ * Connect operator applications to the SuperTag Gateway over gRPC. The first call negotiates the
+ * SuperTag protocol version, which every call then names; the Gateway refuses calls without it.
+ */
 export function createGatewayClient(options: GatewayClientOptions) {
   const url = gatewayOrigin(options.url);
   if (
@@ -78,16 +120,71 @@ export function createGatewayClient(options: GatewayClientOptions) {
   );
   const authorization = `Bearer ${options.token}`;
   let closed = false;
+  // The exchange carries no credentials.
+  const negotiation = createClient(
+    ProtocolNegotiation,
+    createGrpcTransport({
+      baseUrl: url.origin,
+      sessionManager: session,
+      readMaxBytes: 4096,
+      writeMaxBytes: 4096,
+    }),
+  );
+  let negotiated: Promise<number> | undefined;
+  const protocolVersion = () => {
+    negotiated ??= (async () => {
+      let answer: Awaited<ReturnType<typeof negotiation.negotiate>>;
+      try {
+        answer = await negotiation.negotiate(
+          {
+            role: ServiceRole.OPERATOR,
+            protocolVersions: PROTOCOL_VERSIONS,
+            buildVersion: "supertag-ai",
+          },
+          { timeoutMs: 5_000 },
+        );
+      } catch (error) {
+        throw refusedByGateway(error);
+      }
+      if (answer.role !== ServiceRole.GATEWAY) {
+        throw new ConnectError(
+          "this operator client expected a SuperTag Gateway but reached another service",
+          Code.FailedPrecondition,
+        );
+      }
+      if (
+        !PROTOCOL_VERSIONS.includes(answer.protocolVersion) ||
+        !answer.protocolVersions.includes(answer.protocolVersion)
+      ) {
+        throw new ConnectError(
+          `incompatible SuperTag protocol: the Gateway selected protocol ${answer.protocolVersion}; run the same SuperTag release on the Gateway and this client`,
+          Code.FailedPrecondition,
+        );
+      }
+      return answer.protocolVersion;
+    })().catch((error: unknown) => {
+      negotiated = undefined;
+      throw error;
+    });
+    return negotiated;
+  };
   const transport = createGrpcTransport({
     baseUrl: url.origin,
     sessionManager: session,
     readMaxBytes: 1024 * 1024,
     writeMaxBytes: 1024 * 1024,
     interceptors: [
-      (next) => (request) => {
+      (next) => async (request) => {
         if (closed) throw new Error("Gateway client is closed");
         request.header.set("authorization", authorization);
-        return next(request);
+        request.header.set(PROTOCOL_HEADER, String(await protocolVersion()));
+        try {
+          return await next(request);
+        } catch (error) {
+          // A Gateway replaced by another release refuses the held version; negotiate again.
+          if (protocolRefusal(error)) negotiated = undefined;
+          throw error;
+        }
       },
     ],
   });

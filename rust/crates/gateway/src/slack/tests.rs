@@ -21,7 +21,9 @@ pub(super) fn config(directory: &Path) -> SlackConfig {
 pub(super) fn connector(directory: &Path) -> Result<Slack> {
     Slack::new(
         config(directory),
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        supertag_protocol::negotiation::bind_current(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         "fixture-gateway-token".into(),
     )
 }

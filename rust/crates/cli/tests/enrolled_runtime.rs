@@ -1,5 +1,7 @@
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -170,7 +172,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
 
     // Commit the CLI's pending operation without delivering its receipt to that
     // process. The retry must keep both the candidate credential and operation ID.
-    let mut enrollment = HostEnrollmentClient::connect(public.clone()).await?;
+    let mut enrollment = HostEnrollmentClient::new(protocol::dial(public.clone()).await?);
     let mut request = authenticated_request(
         EnrollHostRequest {
             host_id: "review-host".into(),

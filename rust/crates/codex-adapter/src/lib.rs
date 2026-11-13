@@ -44,7 +44,13 @@ pub struct CodexOptions {
     pub environment: BTreeMap<OsString, OsString>,
 }
 
+/// Bounds one native app-server exchange and local process steps.
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bounds one call to the supervising Worker Host. The host repeats an
+/// idempotent upstream call across a Gateway partition until its execution
+/// authority (a 30-second lease) ends, so the adapter waits longer than that
+/// lease for the host's answer instead of failing the Task on its own timer.
+const HOST_CALL_TIMEOUT: Duration = Duration::from_secs(65);
 const MAX_LINE: usize = 4 * 1024 * 1024;
 const MAX_STREAM: usize = 64 * 1024 * 1024;
 const MAX_EVENT: usize = 16_384;
@@ -69,7 +75,6 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     let artifact_channel = endpoint.clone().connect_timeout(RPC_TIMEOUT).connect_lazy();
     let channel = endpoint
         .connect_timeout(RPC_TIMEOUT)
-        .timeout(RPC_TIMEOUT)
         .connect()
         .await
         .context("connect to supervising Worker Host")?;
@@ -170,8 +175,17 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
 
 fn request<T>(message: T, token: &str) -> Result<Request<T>> {
     let mut request = authenticated_request(message, token, None)?;
-    request.set_timeout(RPC_TIMEOUT);
+    request.set_timeout(HOST_CALL_TIMEOUT);
     Ok(request)
+}
+
+/// A call whose outcome is unknown because the Worker Host could not reach
+/// its Gateway in time, rather than a refusal.
+fn transient(status: &tonic::Status) -> bool {
+    matches!(
+        status.code(),
+        tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
+    )
 }
 
 async fn execute(

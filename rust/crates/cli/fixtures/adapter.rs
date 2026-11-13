@@ -1,6 +1,7 @@
 mod artifact_acquisition;
 mod budget;
 mod commit_reviews;
+mod partition_calls;
 
 use std::{io::Read, time::Duration};
 
@@ -656,6 +657,18 @@ async fn main() -> Result<()> {
             ensure!(Instant::now() < deadline, "release file never appeared");
             sleep(Duration::from_millis(20)).await;
         }
+    }
+    if let Some(base) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--partition-steps=")
+            .map(std::path::PathBuf::from)
+    }) {
+        let peer = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--partition-peer=").map(str::to_owned))
+            .context("partition steps require a peer Tag")?;
+        result.push('\n');
+        result.push_str(
+            &partition_calls::exercise(&base, &peer, &bootstrap, &task, &mut harness).await?,
+        );
     }
     if take_live {
         let input = take_input(&mut harness, &bootstrap.token).await?;

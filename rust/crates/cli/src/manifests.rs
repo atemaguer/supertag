@@ -10,8 +10,8 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::v2::*;
-use tonic::transport::Channel;
 
 use crate::{
     Connection,
@@ -423,7 +423,7 @@ fn load(sources: Vec<ProvisionSource>, provision: bool) -> Result<Vec<Manifest>>
 }
 
 pub(crate) async fn provision(
-    channel: Channel,
+    channel: ProtocolChannel,
     token: &str,
     sources: Vec<ProvisionSource>,
 ) -> Result<()> {

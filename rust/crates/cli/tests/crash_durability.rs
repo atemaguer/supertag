@@ -24,6 +24,10 @@
 //! server with `fsync`, `synchronous_commit`, and `full_page_writes` on, and sets
 //! `SUPERTAG_RUST_TEST_REQUIRE_DURABLE_POSTGRES=1` so each case refuses a server
 //! with test durability settings.
+#[path = "support/protocol.rs"]
+mod protocol;
+#[path = "support/provider_delivery_crash.rs"]
+mod provider_delivery_crash;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -35,6 +39,7 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use hmac::{Hmac, Mac};
@@ -498,12 +503,15 @@ impl<'a> System<'a> {
         })
     }
 
-    async fn operator(&self) -> Result<OperatorClient<Channel>> {
-        let channel = Channel::from_shared(format!("http://{}", self.public))?
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(3))
-            .connect()
-            .await?;
+    async fn operator(&self) -> Result<OperatorClient<ProtocolChannel>> {
+        let channel = protocol::negotiated(
+            Channel::from_shared(format!("http://{}", self.public))?
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(3))
+                .connect()
+                .await?,
+        )
+        .await?;
         Ok(OperatorClient::new(channel))
     }
 
@@ -522,8 +530,9 @@ impl<'a> System<'a> {
                 allowed_actions: vec!["files:read".into()],
             })?)
             .await?;
-        let mut policy =
-            SurfacePolicyCatalogClient::connect(format!("http://{}", self.public)).await?;
+        let mut policy = SurfacePolicyCatalogClient::new(
+            protocol::dial(format!("http://{}", self.public)).await?,
+        );
         policy
             .put_surface_account(self.credentials.request(PutSurfaceAccountRequest {
                 operation_id: "account-fixture".into(),
@@ -1097,6 +1106,18 @@ async fn run_sqlite(case: Case) -> Result<()> {
 }
 
 async fn run_postgres(case: Case) -> Result<()> {
+    with_crash_postgres(move |database, directory| async move {
+        exercise(case, &database, &directory).await
+    })
+    .await
+}
+
+/// Runs a crash scenario against its own PostgreSQL database and always drops it.
+async fn with_crash_postgres<F, Fut>(scenario: F) -> Result<()>
+where
+    F: FnOnce(String, PathBuf) -> Fut,
+    Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+{
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .context("PostgreSQL crash cases require SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")?;
     let admin_url = std::fs::read_to_string(path)?;
@@ -1121,7 +1142,7 @@ async fn run_postgres(case: Case) -> Result<()> {
     let directory = TempDir::new()?;
     let path = directory.path().to_owned();
     // Isolate assertion panics so database cleanup also runs when a check fails.
-    let result = tokio::spawn(async move { exercise(case, &database, &path).await }).await;
+    let result = tokio::spawn(scenario(database, path)).await;
     let cleanup = admin
         .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
         .await;
@@ -1266,4 +1287,85 @@ crash_matrix! {
         case(ControlPlane, "control-plane.settle-reply.after-commit", Slack, Delivered);
     gateway_reply_settled =>
         case(Gateway, "gateway.reply.settled", Slack, Delivered);
+}
+
+use provider_delivery_crash::{DeliveryCase, Provider, Settles, delivery, exercise_delivery};
+
+async fn run_delivery_sqlite(case: DeliveryCase) -> Result<()> {
+    let directory = TempDir::new()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("state.db").display()
+    );
+    exercise_delivery(case, &database, directory.path()).await
+}
+
+async fn run_delivery_postgres(case: DeliveryCase) -> Result<()> {
+    with_crash_postgres(move |database, directory| async move {
+        exercise_delivery(case, &database, &directory).await
+    })
+    .await
+}
+
+/// GitHub, Linear, Lark, and Microsoft Teams reply delivery: the Gateway is killed
+/// at each durable boundary and restarted on its delivery journal.
+macro_rules! delivery_crash_matrix {
+    ($($name:ident => $case:expr;)*) => {
+        mod provider_sqlite {
+            use super::*;
+            $(
+                #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+                async fn $name() -> Result<()> {
+                    run_delivery_sqlite($case).await
+                }
+            )*
+        }
+
+        mod provider_postgres {
+            use super::*;
+            $(
+                #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+                #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+                async fn $name() -> Result<()> {
+                    run_delivery_postgres($case).await
+                }
+            )*
+        }
+    };
+}
+
+use Provider::{Github, Lark, Linear, MicrosoftTeams};
+use Settles::Uncertain;
+
+delivery_crash_matrix! {
+    github_reply_claimed => delivery(Github, "claimed", Settles::Delivered);
+    github_reply_sending_journaled =>
+        delivery(Github, "sending-journaled", Uncertain { posts: 0 });
+    github_reply_provider_answered =>
+        delivery(Github, "provider-answered", Uncertain { posts: 1 });
+    github_reply_settle_journaled => delivery(Github, "settle-journaled", Settles::Delivered);
+    github_reply_settled => delivery(Github, "settled", Settles::Delivered);
+
+    linear_reply_claimed => delivery(Linear, "claimed", Settles::Delivered);
+    linear_reply_sending_journaled =>
+        delivery(Linear, "sending-journaled", Uncertain { posts: 0 });
+    linear_reply_provider_answered =>
+        delivery(Linear, "provider-answered", Uncertain { posts: 1 });
+    linear_reply_settle_journaled => delivery(Linear, "settle-journaled", Settles::Delivered);
+    linear_reply_settled => delivery(Linear, "settled", Settles::Delivered);
+
+    lark_reply_claimed => delivery(Lark, "claimed", Settles::Delivered);
+    lark_reply_sending_journaled => delivery(Lark, "sending-journaled", Uncertain { posts: 0 });
+    lark_reply_provider_answered => delivery(Lark, "provider-answered", Uncertain { posts: 1 });
+    lark_reply_settle_journaled => delivery(Lark, "settle-journaled", Settles::Delivered);
+    lark_reply_settled => delivery(Lark, "settled", Settles::Delivered);
+
+    microsoft_teams_reply_claimed => delivery(MicrosoftTeams, "claimed", Settles::Delivered);
+    microsoft_teams_reply_sending_journaled =>
+        delivery(MicrosoftTeams, "sending-journaled", Uncertain { posts: 0 });
+    microsoft_teams_reply_provider_answered =>
+        delivery(MicrosoftTeams, "provider-answered", Uncertain { posts: 1 });
+    microsoft_teams_reply_settle_journaled =>
+        delivery(MicrosoftTeams, "settle-journaled", Settles::Delivered);
+    microsoft_teams_reply_settled => delivery(MicrosoftTeams, "settled", Settles::Delivered);
 }

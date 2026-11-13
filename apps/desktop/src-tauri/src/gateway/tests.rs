@@ -168,7 +168,7 @@ async fn gateway_fixture(
         .await
         .unwrap();
     let gateway = Gateway::new(
-        channel,
+        supertag_protocol::negotiation::bind_current(channel),
         "private-test-token".into(),
         token.into(),
         "operator:desktop-test".into(),
@@ -178,11 +178,27 @@ async fn gateway_fixture(
     let address = format!("http://{}", listener.local_addr().unwrap());
     let gateway_task = tokio::spawn(
         Server::builder()
+            .layer(supertag_protocol::negotiation::fence(
+                v2::ServiceRole::Gateway,
+            ))
+            .add_service(gateway.negotiation_service())
             .add_service(gateway.operator_service())
             .add_service(gateway.conversations_service())
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
-    let mut operator = OperatorClient::connect(address.clone()).await.unwrap();
+    let mut operator = OperatorClient::new(
+        supertag_protocol::negotiation::connect(
+            Endpoint::from_shared(address.clone())
+                .unwrap()
+                .connect()
+                .await
+                .unwrap(),
+            v2::ServiceRole::Operator,
+            v2::ServiceRole::Gateway,
+        )
+        .await
+        .unwrap(),
+    );
     operator
         .put_tag(
             authenticated_request(
@@ -536,7 +552,9 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     );
     let client = GatewayState::default();
     client.0.write().await.session = Some(Arc::new(Session {
-        channel: endpoint(&address).unwrap().connect().await.unwrap(),
+        channel: supertag_protocol::negotiation::bind_current(
+            endpoint(&address).unwrap().connect().await.unwrap(),
+        ),
         authorization: bearer("artifact-operator").unwrap(),
     }));
 

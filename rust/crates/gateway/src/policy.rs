@@ -1,6 +1,7 @@
 use crate::Gateway;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 
 impl Gateway {
     pub fn policy_service(&self) -> policy_catalog_server::PolicyCatalogServer<Self> {
@@ -10,7 +11,7 @@ impl Gateway {
     }
 }
 
-fn client(channel: Channel) -> policy_catalog_client::PolicyCatalogClient<Channel> {
+fn client(channel: ProtocolChannel) -> policy_catalog_client::PolicyCatalogClient<ProtocolChannel> {
     policy_catalog_client::PolicyCatalogClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

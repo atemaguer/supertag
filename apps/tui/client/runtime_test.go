@@ -25,12 +25,23 @@ import (
 
 func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	t.Helper()
+	negotiation := testNegotiation(t, []uint32{2})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 || r.Header.Get("Content-Type") != "application/grpc" {
 			t.Errorf("expected binary gRPC/HTTP2, got %s %s", r.Proto, r.Header.Get("Content-Type"))
 		}
+		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
+			if r.Header.Get("Authorization") != "" {
+				t.Error("negotiation carried a credential")
+			}
+			negotiation.ServeHTTP(w, r)
+			return
+		}
 		if r.Header.Get("Authorization") != "Bearer test-operator" || r.Header.Get(clientVersionHeader) != "test-version" {
 			t.Error("missing expected authentication or version header")
+		}
+		if r.Header.Get(protocolHeader) != "2" {
+			t.Errorf("call %s did not name the negotiated protocol version", r.URL.Path)
 		}
 		handler.ServeHTTP(w, r)
 	}))
@@ -56,6 +67,53 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	}
 	t.Cleanup(c.Close)
 	return c
+}
+
+// testNegotiation answers ProtocolNegotiation.Negotiate as a Gateway speaking versions.
+func testNegotiation(t *testing.T, versions []uint32) http.Handler {
+	mux := http.NewServeMux()
+	testRPC(mux, rpc.ProtocolNegotiationNegotiateProcedure, func(_ context.Context, req *v2.NegotiateProtocolRequest) (*v2.NegotiateProtocolResponse, error) {
+		if req.GetRole() != v2.ServiceRole_SERVICE_ROLE_OPERATOR || req.GetBuildVersion() != "test-version" {
+			t.Errorf("negotiation request = %v", req)
+		}
+		for _, version := range versions {
+			if slices.Contains(req.GetProtocolVersions(), version) {
+				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
+			}
+		}
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]"))
+	})
+	return mux
+}
+
+func TestRuntimeV2RefusesAGatewayFromAnotherProtocolEpoch(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
+			testNegotiation(t, []uint32{1}).ServeHTTP(w, r)
+			return
+		}
+		calls.Add(1)
+		http.Error(w, "unexpected call", http.StatusTeapot)
+	}))
+	server.Config.Protocols = new(http.Protocols)
+	server.Config.Protocols.SetUnencryptedHTTP2(true)
+	server.Start()
+	t.Cleanup(server.Close)
+	c, err := NewRuntimeV2(Target{URL: server.URL, Token: "test-operator"}, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	_, err = c.ListTags(t.Context())
+	var refused *APIError
+	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition ||
+		refused.Message != "the SuperTag Gateway refused this operator client: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]" {
+		t.Fatalf("ListTags against an old Gateway = %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("an operator call reached a Gateway that refused negotiation")
+	}
 }
 
 func testRPC[Req, Res any](mux *http.ServeMux, path string, call func(context.Context, *Req) (*Res, error)) {

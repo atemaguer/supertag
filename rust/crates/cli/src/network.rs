@@ -5,6 +5,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use supertag_protocol::{
+    negotiation::{ProtocolChannel, connect},
+    v2::ServiceRole,
+};
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig};
 
 pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
@@ -30,6 +34,13 @@ pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
         "listeners outside loopback require TLS"
     );
     Ok(Server::builder())
+}
+
+/// Connects to a Gateway as an operator client and negotiates the protocol
+/// version every later call names; the Gateway refuses calls that skip this.
+pub async fn operator_channel(endpoint: &Endpoint) -> Result<ProtocolChannel> {
+    let channel = endpoint.connect().await?;
+    Ok(connect(channel, ServiceRole::Operator, ServiceRole::Gateway).await?)
 }
 
 pub async fn endpoint(uri: String, private: bool) -> Result<Endpoint> {

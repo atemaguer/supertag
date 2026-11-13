@@ -26,9 +26,16 @@ if _version_not_supported:
 
 
 class ProtocolNegotiationStub:
-    """Each service connection begins with this exchange. A peer that shares no
-    protocol version, or that connects in the wrong role, is refused before it
-    can register, claim, or forward work. The exchange carries no credentials.
+    """Each service and operator connection begins with this exchange. A peer that
+    shares no protocol version, or that connects in the wrong role, is refused
+    before it can register, claim, forward work, or make an operator call. The
+    exchange carries no credentials.
+
+    After negotiating, the client sends the selected version in the
+    `x-supertag-protocol` metadata header on every other call. The Gateway and
+    Control Plane refuse a call without it, or naming a version they do not
+    speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
+    health service are exempt.
     """
 
     def __init__(self, channel):
@@ -45,9 +52,16 @@ class ProtocolNegotiationStub:
 
 
 class ProtocolNegotiationServicer:
-    """Each service connection begins with this exchange. A peer that shares no
-    protocol version, or that connects in the wrong role, is refused before it
-    can register, claim, or forward work. The exchange carries no credentials.
+    """Each service and operator connection begins with this exchange. A peer that
+    shares no protocol version, or that connects in the wrong role, is refused
+    before it can register, claim, forward work, or make an operator call. The
+    exchange carries no credentials.
+
+    After negotiating, the client sends the selected version in the
+    `x-supertag-protocol` metadata header on every other call. The Gateway and
+    Control Plane refuse a call without it, or naming a version they do not
+    speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
+    health service are exempt.
     """
 
     def Negotiate(self, request, context):
@@ -73,9 +87,16 @@ def add_ProtocolNegotiationServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ProtocolNegotiation:
-    """Each service connection begins with this exchange. A peer that shares no
-    protocol version, or that connects in the wrong role, is refused before it
-    can register, claim, or forward work. The exchange carries no credentials.
+    """Each service and operator connection begins with this exchange. A peer that
+    shares no protocol version, or that connects in the wrong role, is refused
+    before it can register, claim, forward work, or make an operator call. The
+    exchange carries no credentials.
+
+    After negotiating, the client sends the selected version in the
+    `x-supertag-protocol` metadata header on every other call. The Gateway and
+    Control Plane refuse a call without it, or naming a version they do not
+    speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
+    health service are exempt.
     """
 
     @staticmethod

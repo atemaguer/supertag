@@ -566,10 +566,8 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
         return Ok(());
     }
     let (endpoint, token) = local::connection(directory)?;
-    let channel = crate::network::endpoint(endpoint, false)
-        .await?
-        .connect()
-        .await?;
+    let channel =
+        crate::network::operator_channel(&crate::network::endpoint(endpoint, false).await?).await?;
     let mut client = OperatorClient::new(channel);
     for host_id in &hosts {
         match client
@@ -907,7 +905,7 @@ async fn host_states(
     let Ok(endpoint) = crate::network::endpoint(endpoint, false).await else {
         return hosts;
     };
-    let Ok(channel) = endpoint.connect().await else {
+    let Ok(channel) = crate::network::operator_channel(&endpoint).await else {
         return hosts;
     };
     let mut client = OperatorClient::new(channel);

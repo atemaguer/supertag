@@ -24,7 +24,9 @@ const WAIT: Duration = Duration::from_secs(4);
 async fn watch_registration_fences_replacement_stop_and_disconnect() {
     let state = GatewayState::default();
     let session = Arc::new(Session {
-        channel: Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        channel: supertag_protocol::negotiation::bind_current(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         authorization: bearer("operator-token").unwrap(),
     });
     {
@@ -193,7 +195,7 @@ async fn watch_resumes_and_stops_the_real_stream_without_a_unary_deadline() {
             .serve_with_incoming(TcpListenerStream::new(socket)),
     );
     let session = Arc::new(Session {
-        channel: endpoint.connect().await.unwrap(),
+        channel: supertag_protocol::negotiation::bind_current(endpoint.connect().await.unwrap()),
         authorization: bearer("operator-token").unwrap(),
     });
     let (send, mut receive) = mpsc::unbounded_channel::<Value>();

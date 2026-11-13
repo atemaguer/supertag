@@ -1,6 +1,7 @@
 use crate::Gateway;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 impl Gateway {
     pub fn inbox_service(&self) -> inbox_server::InboxServer<Self> {
         inbox_server::InboxServer::new(self.clone())
@@ -8,7 +9,7 @@ impl Gateway {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 }
-fn client(channel: Channel) -> inbox_client::InboxClient<Channel> {
+fn client(channel: ProtocolChannel) -> inbox_client::InboxClient<ProtocolChannel> {
     inbox_client::InboxClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

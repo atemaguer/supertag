@@ -54,13 +54,7 @@ pub enum CaptureCommand {
 
 pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Result<()> {
     let (channel, token) = if matches!(command, CaptureCommand::Download { .. }) {
-        let target = crate::resolve_target(connection)?;
-        let channel = target
-            .endpoint(Duration::from_secs(65))
-            .await?
-            .connect()
-            .await?;
-        (channel, target.token)
+        crate::connect_operator_with_timeout(connection, Duration::from_secs(65)).await?
     } else {
         connect_operator(connection).await?
     };

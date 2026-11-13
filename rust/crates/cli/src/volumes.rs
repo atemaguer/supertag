@@ -95,13 +95,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
         command,
         VolumeCommand::Copy { .. } | VolumeCommand::Download { .. }
     ) {
-        let target = crate::resolve_target(connection)?;
-        let channel = target
-            .endpoint(VOLUME_TRANSFER_TIMEOUT)
-            .await?
-            .connect()
-            .await?;
-        (channel, target.token)
+        crate::connect_operator_with_timeout(connection, VOLUME_TRANSFER_TIMEOUT).await?
     } else {
         connect_operator(connection).await?
     };

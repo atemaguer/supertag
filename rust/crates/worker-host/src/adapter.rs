@@ -99,24 +99,20 @@ impl Bridge {
         F: FnMut(RegisteredHost, Request<M>) -> Fut,
         Fut: std::future::Future<Output = Result<Response<R>, Status>>,
     {
-        loop {
-            let deadline = self.inputs.active_deadline()?;
-            let sent = Instant::now();
-            let mut upstream = authenticated_request(message.clone(), &self.host_token, None)?;
-            upstream.set_timeout(
-                deadline
-                    .saturating_duration_since(sent)
-                    .min(Duration::from_secs(5)),
-            );
-            match call(self.host.clone(), upstream).await {
-                Ok(response) => return Ok(response.into_inner()),
-                Err(error) if crate::retryable(&error) => {
-                    time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(250)))
-                        .await;
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        self.retry(message, |request| call(self.host.clone(), request))
+            .await
+            .map(Response::into_inner)
+    }
+
+    /// Repeats one idempotent upstream call within execution authority; see
+    /// `InputLane::retry`, which every adapter-facing retry goes through.
+    async fn retry<M, R, F, Fut>(&self, message: M, call: F) -> Result<Response<R>, Status>
+    where
+        M: Clone,
+        F: FnMut(Request<M>) -> Fut,
+        Fut: std::future::Future<Output = Result<Response<R>, Status>>,
+    {
+        self.inputs.retry(message, &self.host_token, call).await
     }
 
     fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -285,20 +281,22 @@ impl Harness for Bridge {
                     amount_minor,
                 })
         };
-        let mut upstream = authenticated_request(
-            ReportAttemptUsageRequest {
-                attempt: Some(self.attempt()),
-                sequence: usage.sequence,
-                amount_minor: usage.amount_minor,
-                currency: usage.currency,
-                estimated: usage.estimated,
-                native_usage: usage.native_usage,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
-        let response = self.host.clone().report_attempt_usage(upstream).await?;
+        // The Control Plane accepts an exact repeat of a usage sequence, so a
+        // report whose answer the transport lost is safely sent again.
+        let report = ReportAttemptUsageRequest {
+            attempt: Some(self.attempt()),
+            sequence: usage.sequence,
+            amount_minor: usage.amount_minor,
+            currency: usage.currency,
+            estimated: usage.estimated,
+            native_usage: usage.native_usage,
+        };
+        let response = self
+            .retry(report, |request| {
+                let mut host = self.host.clone();
+                async move { host.report_attempt_usage(request).await }
+            })
+            .await?;
         if let Some((sequence, tokens)) = native_receipt
             && sequence >= state.native_usage_sequence
         {

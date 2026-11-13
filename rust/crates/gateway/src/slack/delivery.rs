@@ -703,7 +703,9 @@ mod tests {
         let temporary = tempfile::tempdir()?;
         let slack = super::super::Slack::new(
             crate::slack::tests::config(&temporary.path().join("slack")),
-            Endpoint::from_shared(format!("http://{address}"))?.connect_lazy(),
+            supertag_protocol::negotiation::bind_current(
+                Endpoint::from_shared(format!("http://{address}"))?.connect_lazy(),
+            ),
             "fixture-gateway-token".into(),
         )?;
         let target = Claim {

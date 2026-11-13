@@ -11,6 +11,7 @@ rust-version.workspace = true
 crash-points = ["dep:libc"]
 
 [dependencies]
+http = "1"
 icu_properties = "2"
 libc = { workspace = true, optional = true }
 prost.workspace = true
@@ -21,6 +22,8 @@ sha2.workspace = true
 subtle.workspace = true
 tonic.workspace = true
 tonic-prost.workspace = true
+tower-layer = "0.3"
+tower-service = "0.3"
 unicode-normalization = "0.1"
 url = "2"
 uuid.workspace = true

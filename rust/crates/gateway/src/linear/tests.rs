@@ -24,7 +24,9 @@ fn config(directory: &Path) -> LinearConfig {
 fn connector(directory: &Path) -> Result<Linear> {
     Linear::new(
         config(directory),
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        supertag_protocol::negotiation::bind_current(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         "private-token".into(),
     )
 }

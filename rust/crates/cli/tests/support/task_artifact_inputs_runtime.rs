@@ -14,9 +14,14 @@ async fn interrupt_input_receipt(
         transport::{Endpoint, Server},
     };
 
-    let channel = Endpoint::from_shared(services.private.clone())?
-        .connect()
-        .await?;
+    let channel = supertag_protocol::negotiation::connect(
+        Endpoint::from_shared(services.private.clone())?
+            .connect()
+            .await?,
+        supertag_protocol::v2::ServiceRole::Gateway,
+        supertag_protocol::v2::ServiceRole::ControlPlane,
+    )
+    .await?;
     let gateway = Gateway::new(
         channel,
         services.gateway_token.clone(),

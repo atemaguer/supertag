@@ -1,8 +1,9 @@
 use anyhow::{Result, ensure};
 use clap::Subcommand;
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 use uuid::Uuid;
 
 use crate::{Connection, connect_operator, request};
@@ -199,7 +200,7 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
 }
 
 async fn get(
-    client: &mut teams_client::TeamsClient<Channel>,
+    client: &mut teams_client::TeamsClient<ProtocolChannel>,
     token: &str,
     team: String,
 ) -> Result<Team> {

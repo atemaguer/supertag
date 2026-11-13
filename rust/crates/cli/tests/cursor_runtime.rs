@@ -1,6 +1,8 @@
 //! Cursor's private adapter and runner through real split services and disposable Workspaces.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -11,6 +13,7 @@ use std::{
     process::Stdio,
     time::Duration,
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -236,7 +239,7 @@ struct Runtime<'a> {
     gateway: Child,
     control: Child,
     endpoint: String,
-    operator: OperatorClient<Channel>,
+    operator: OperatorClient<ProtocolChannel>,
     database: String,
     credentials: &'a Credentials,
 }
@@ -251,10 +254,13 @@ impl<'a> Runtime<'a> {
             .arg("--checkpoint-directory")
             .arg(root.join("blobs"));
         let (gateway, endpoint) = service(gateway).await?;
-        let channel = Channel::from_shared(endpoint.clone())?
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await?;
+        let channel = protocol::negotiated(
+            Channel::from_shared(endpoint.clone())?
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
+                .await?,
+        )
+        .await?;
         Ok(Self {
             gateway,
             control,

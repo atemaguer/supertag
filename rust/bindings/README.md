@@ -2,6 +2,12 @@
 
 These generated bindings describe `supertag.runtime.v2`. The Go module exposes protobuf messages
 and Connect clients. Pass `connect.WithGRPC()` when constructing a client for the Rust Gateway.
+
+The Gateway and Control Plane refuse every call that does not name a negotiated protocol version.
+A client first calls `ProtocolNegotiation.Negotiate` with its role (`SERVICE_ROLE_OPERATOR` for an
+operator application) and the versions it speaks, then sends the selected version in the
+`x-supertag-protocol` metadata header on every other call. Only negotiation and the standard gRPC
+health service are exempt.
 TypeScript exports protobuf-es messages and service descriptors. Python exposes protobuf messages
 and native gRPC stubs.
 

@@ -16,6 +16,7 @@ use axum::{
 };
 use serde_json::json;
 use std::{future::Future, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -25,7 +26,6 @@ use supertag_protocol::{
 };
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Channel;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -51,7 +51,7 @@ pub(crate) async fn refuse_while_draining(
 }
 
 pub(crate) struct Owner<'a> {
-    pub(crate) control_plane: &'a ConnectorClient<Channel>,
+    pub(crate) control_plane: &'a ConnectorClient<ProtocolChannel>,
     pub(crate) gateway_token: &'a str,
     pub(crate) principal: &'a str,
     pub(crate) journal: &'a Journal,

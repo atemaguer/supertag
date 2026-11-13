@@ -59,7 +59,7 @@ use supertag_gateway::{
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
-    negotiation::{Negotiator, negotiate},
+    negotiation::{Negotiator, ProtocolChannel, connect, fence},
     v2::{
         ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
         GetTagRequest, GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest,
@@ -88,7 +88,7 @@ use supertag_worker_host::HostOptions;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -1737,7 +1737,10 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         }
     });
     let watch_shutdown = CancellationToken::new();
-    let mut builder = builder.layer(plane.audit_layer());
+    // Refuse every call from a peer that skipped protocol negotiation.
+    let mut builder = builder
+        .layer(fence(ServiceRole::ControlPlane))
+        .layer(plane.audit_layer());
     let served = builder
         .add_service(health_service)
         .add_service(plane.operator_access_service())
@@ -1869,18 +1872,17 @@ async fn gateway(
     checkpoint_directory: Option<PathBuf>,
     connectors: GatewayConnectors,
 ) -> Result<()> {
-    let mut builder = network::server(listen, false).await?;
+    // Refuse every call from a peer that skipped protocol negotiation.
+    let mut builder = network::server(listen, false)
+        .await?
+        .layer(fence(ServiceRole::Gateway));
     let channel = network::endpoint(control_plane, true)
         .await?
         .connect()
         .await?;
-    // Refuse an incompatible Control Plane before accepting any public traffic.
-    negotiate(
-        channel.clone(),
-        ServiceRole::Gateway,
-        ServiceRole::ControlPlane,
-    )
-    .await?;
+    // Refuse an incompatible Control Plane before accepting any public traffic,
+    // and name the selected version on every call to it.
+    let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
     let gateway_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
     let slack = match connectors.slack {
         Some((address, state_directory)) => {
@@ -2201,7 +2203,7 @@ async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
 }
 
 async fn slack_connector(
-    channel: Channel,
+    channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Slack> {
@@ -2244,7 +2246,7 @@ fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
 fn github_workspace_publisher(
     directory: PathBuf,
     blobs: &std::path::Path,
-    channel: Channel,
+    channel: ProtocolChannel,
     token: String,
 ) -> Result<supertag_gateway::github::publication::GithubPublisher> {
     let publisher = supertag_gateway::github::publication::GithubPublisher::new(
@@ -2283,7 +2285,7 @@ fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources
 }
 
 fn github_connector(
-    channel: Channel,
+    channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Github> {
@@ -2372,7 +2374,7 @@ fn github_authentication() -> Result<GithubAuthentication> {
 }
 
 fn linear_connector(
-    channel: Channel,
+    channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Linear> {
@@ -2401,7 +2403,7 @@ fn linear_connector(
 }
 
 fn lark_connector(
-    channel: Channel,
+    channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Lark> {
@@ -2437,7 +2439,7 @@ fn lark_connector(
 }
 
 fn microsoft_teams_connector(
-    channel: Channel,
+    channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<MicrosoftTeams> {
@@ -2496,7 +2498,7 @@ async fn termination_signal() {
     }
 }
 
-async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, String)> {
+async fn operator(connection: Connection) -> Result<(OperatorClient<ProtocolChannel>, String)> {
     let (channel, token) = connect_operator(connection).await?;
     Ok((
         OperatorClient::new(channel)
@@ -2506,13 +2508,19 @@ async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, St
     ))
 }
 
-async fn connect_operator(connection: Connection) -> Result<(Channel, String)> {
+/// Connects to the Gateway as an operator client. The Gateway refuses every
+/// call from a client that did not negotiate a protocol version first.
+async fn connect_operator(connection: Connection) -> Result<(ProtocolChannel, String)> {
+    connect_operator_with_timeout(connection, Duration::from_secs(15)).await
+}
+
+/// [`connect_operator`] with a per-call timeout for long transfers.
+async fn connect_operator_with_timeout(
+    connection: Connection,
+    timeout: Duration,
+) -> Result<(ProtocolChannel, String)> {
     let target = resolve_target(connection)?;
-    let channel = target
-        .endpoint(Duration::from_secs(15))
-        .await?
-        .connect()
-        .await?;
+    let channel = network::operator_channel(&target.endpoint(timeout).await?).await?;
     Ok((channel, target.token))
 }
 

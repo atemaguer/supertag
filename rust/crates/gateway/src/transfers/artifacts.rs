@@ -431,8 +431,8 @@ impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
 }
 
 fn artifact_client(
-    channel: Channel,
-) -> artifact_directory_client::ArtifactDirectoryClient<Channel> {
+    channel: ProtocolChannel,
+) -> artifact_directory_client::ArtifactDirectoryClient<ProtocolChannel> {
     artifact_directory_client::ArtifactDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

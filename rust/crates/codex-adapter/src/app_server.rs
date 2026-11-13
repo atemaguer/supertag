@@ -20,10 +20,10 @@ use tonic::{Code, transport::Channel};
 
 use crate::{
     MAX_STREAM, RPC_TIMEOUT, auth, checkpoint::UsageCounters, config::Policy, events, publish,
-    read_line, request,
+    read_line, request, transient,
 };
 
-type Take = Pin<Box<dyn Future<Output = (Instant, Result<TakeInputResponse>)> + Send>>;
+type Take = Pin<Box<dyn Future<Output = (Instant, Result<Option<TakeInputResponse>>)> + Send>>;
 
 struct Transport {
     input: Option<ChildStdin>,
@@ -901,10 +901,16 @@ pub(crate) async fn execute(
                 taken=async {taking.as_mut().expect("guarded input take").await}, if taking.is_some()=>{
                     taking=None;
                     let (sent,taken)=taken;
-                    let taken=taken?;
-                    if let Some(input)=taken.input {
+                    // A take that a Gateway partition interrupted delivered nothing to
+                    // Codex. Any input its lost answer carried lapses to unknown at the
+                    // Control Plane and is never replayed, so polling simply continues.
+                    // When the host did receive a committed take whose dispatch
+                    // authority had already ended, it records the input Rejected
+                    // itself and answers with an empty take.
+                    if let Some(input)=taken?.and_then(|taken|taken.input.map(|input|(input,taken.valid_for_ms))) {
+                        let (input,valid_for_ms)=input;
                         ensure!(input.task_id==task.task_id && input.attempt_id==attempt_id && input.state()==LiveInputState::Dispatching,"Codex input has mismatched Attempt identity or state");
-                        let deadline=sent.checked_add(Duration::from_millis(taken.valid_for_ms)).context("invalid Codex input authority")?;
+                        let deadline=sent.checked_add(Duration::from_millis(valid_for_ms)).context("invalid Codex input authority")?;
                         if stream.completed || Instant::now()>=deadline {
                             settle(harness,token,&input,LiveInputReceipt::Rejected).await?;
                         } else {
@@ -919,7 +925,7 @@ pub(crate) async fn execute(
                 _=poll.tick()=>{
                     if !stream.completed && taking.is_none() && pending.is_none() {
                         let mut client=harness.clone();let token=token.to_owned();
-                        taking=Some(Box::pin(async move {let sent=Instant::now();let response=async {Ok(client.take_live_input(request(HarnessTakeLiveInputRequest{},&token)?).await.context("could not receive Codex live input")?.into_inner())}.await;(sent,response)}));
+                        taking=Some(Box::pin(async move {let sent=Instant::now();let response=async {match client.take_live_input(request(HarnessTakeLiveInputRequest{},&token)?).await {Ok(response)=>Ok(Some(response.into_inner())),Err(status) if transient(&status)=>Ok(None),Err(status)=>Err(anyhow::Error::new(status).context("could not receive Codex live input"))}}.await;(sent,response)}));
                     }
                 }
             }

@@ -34,7 +34,7 @@ impl Fixture {
             initial_error: None,
         }
     }
-    async fn client(&self) -> Result<(ConnectorClient<Channel>, AbortOnDrop)> {
+    async fn client(&self) -> Result<(ConnectorClient<ProtocolChannel>, AbortOnDrop)> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let fixture = self.clone();
@@ -48,7 +48,10 @@ impl Fixture {
         let channel = Endpoint::from_shared(format!("http://{address}"))?
             .connect()
             .await?;
-        Ok((ConnectorClient::new(channel), AbortOnDrop(server)))
+        Ok((
+            ConnectorClient::new(supertag_protocol::negotiation::bind_current(channel)),
+            AbortOnDrop(server),
+        ))
     }
 }
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
