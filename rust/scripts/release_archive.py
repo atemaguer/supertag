@@ -286,10 +286,15 @@ def extract_release(path, destination, checksum=None):
         destination.mkdir(mode=0o700)
         root = destination / (package_root(manifest["version"], manifest["platform"], manifest["profile"]) + "-complete")
         root.mkdir(mode=0o755)
+        root.chmod(0o755)
         # No extractall: every parent is a validated directory; links are created last.
         for name, entry in sorted(manifest["entries"].items(), key=lambda item: (item[0].count("/"), item[0])):
             if entry["type"] == "directory":
-                (root / name).mkdir(mode=0o755)
+                directory = root / name
+                directory.mkdir(mode=entry["mode"])
+                # mkdir applies the caller's umask; the verified archive's
+                # explicit mode must also survive a private 0077 environment.
+                directory.chmod(entry["mode"])
         with tarfile.open(candidate, "r:gz") as archive:
             for member in archive:
                 if member.isfile():

@@ -150,6 +150,17 @@ class NativeReleaseContracts(unittest.TestCase):
         extracted = release.extract_release(path, self.root / "unordered")
         self.assertEqual((extracted / "supertag").read_bytes(), (self.stage / "supertag").read_bytes())
 
+    def test_extraction_restores_directory_modes_with_private_umask(self):
+        archive = self.package()
+        previous = os.umask(0o077)
+        try:
+            extracted = release.extract_release(archive, self.root / "private-umask")
+        finally:
+            os.umask(previous)
+        self.assertEqual(extracted.stat().st_mode & 0o777, 0o755)
+        for name, entry in release.validate_release(archive)["entries"].items():
+            self.assertEqual((extracted / name).lstat().st_mode & 0o777, entry["mode"], name)
+
     def test_failed_smoke_never_publishes_a_final_archive(self):
         source = self.root / "build-source"
         (source / "rust").mkdir(parents=True)
