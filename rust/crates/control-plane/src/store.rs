@@ -91,7 +91,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 72;
+        const SCHEMA_VERSION: i64 = 73;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -250,6 +250,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0070_enrollment_roles.sql"),
                 include_str!("../migrations/sqlite/0071_attempt_applied_limits.sql"),
                 include_str!("../migrations/sqlite/0072_coordination_observation.sql"),
+                include_str!("../migrations/sqlite/0073_objective_notice_homes.sql"),
             ]
         } else {
             [
@@ -327,6 +328,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0070_enrollment_roles.sql"),
                 include_str!("../migrations/postgresql/0071_attempt_applied_limits.sql"),
                 include_str!("../migrations/postgresql/0072_coordination_observation.sql"),
+                include_str!("../migrations/postgresql/0073_objective_notice_homes.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

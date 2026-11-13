@@ -25,6 +25,7 @@ fn create(id: &str) -> CreateObjectiveRequest {
         budget_currency: None,
         team_id: None,
         runtime_actions: None,
+        notification_task_id: None,
     }
 }
 

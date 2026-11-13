@@ -41,7 +41,7 @@ const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
 const WEBHOOK_TIMEOUT: Duration = Duration::from_millis(2500);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_WEBHOOK_BYTES: usize = 128 * 1024;
-const POST_MESSAGE: &str = "https://slack.com/api/chat.postMessage";
+pub(crate) const POST_MESSAGE: &str = "https://slack.com/api/chat.postMessage";
 
 pub struct SlackConfig {
     pub account_id: String,

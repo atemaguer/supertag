@@ -192,6 +192,8 @@ async function runFixture() {
       toolNames,
     });
     emit({ type: "agent", agentId });
+    // Cursor SDK activity, which the bridge reports as a `progress.updated` Task event.
+    emit({ type: "event", event: { type: "thinking" } });
 
     const existing = await call("read", { file_path: "workspace.txt" });
     assert.equal(existing.isError, false, "admitted Workspace read failed");

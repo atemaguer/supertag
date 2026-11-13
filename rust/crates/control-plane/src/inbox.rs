@@ -233,7 +233,14 @@ impl Store {
         // All Control Plane mutations use this lock. Rolling it back leaves this
         // projection read-only while keeping its component reads consistent.
         let (mut tx, order) = self.write().await?;
-        let page = inbox_page_in(&mut tx, order, self.execution_now_ms(), principal, input).await?;
+        let mut page =
+            inbox_page_in(&mut tx, order, self.execution_now_ms(), principal, input).await?;
+        // Each item says whether and how its notice reached the operator.
+        for item in &mut page.items {
+            item.notification = Some(
+                crate::operator_notifications::item_status_in(&mut tx, principal, item).await?,
+            );
+        }
         tx.rollback().await?;
         Ok(page)
     }
@@ -318,6 +325,7 @@ pub(crate) async fn inbox_page_in(
                     asked_at_ms: question.asked_at_ms,
                 }),
                 approval: None,
+                notification: None,
             });
         }
     }
@@ -378,6 +386,7 @@ pub(crate) async fn inbox_page_in(
                     reason,
                     question: None,
                     approval: None,
+                    notification: None,
                 });
             }
         }
@@ -394,7 +403,7 @@ pub(crate) async fn inbox_page_in(
             let task_id: String = row.try_get("task_id")?;
             let attempt_id: Option<String> = row.try_get("attempt_id")?;
             let key = format!("task_attention:{task_id}");
-            items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None });
+            items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None, notification: None });
         }
     }
     if wants(&cursor, InboxItemKind::Approval) {
@@ -551,6 +560,7 @@ async fn mcp_logins_in(
                 ),
                 question: None,
                 approval: None,
+                notification: None,
             });
         }
     }

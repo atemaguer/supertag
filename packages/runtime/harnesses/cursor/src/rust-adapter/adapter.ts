@@ -303,6 +303,27 @@ export async function runAdapter(
           } else if (event.type === "output.message") {
             if (event.final) result = safeText(event.text, secrets);
             else await publish(text(event.text));
+          } else if (event.type === "progress.updated") {
+            // Cursor's activity reaches the surface as `progress.updated` Task events, as the
+            // TypeScript Worker yields them. Progress is cosmetic: an oversized one is skipped.
+            const progress = JSON.stringify({
+              type: "progress.updated",
+              progress: {
+                summary: safeText(event.progress.summary, secrets),
+                ...(event.progress.items
+                  ? {
+                      items: event.progress.items.map((item) => ({
+                        ...item,
+                        text: safeText(item.text, secrets),
+                      })),
+                    }
+                  : {}),
+              },
+            });
+            if (progress.length <= 4000) {
+              const sequence = ++eventSequence;
+              await receipt(() => client.publish({ sequence, text: progress }, options()));
+            }
           } else if (event.type === "usage.updated") {
             const usage = {
               sequence: ++usageSequence,

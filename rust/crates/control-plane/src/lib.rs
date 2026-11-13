@@ -102,6 +102,12 @@ impl ControlPlane {
         })
     }
 
+    /// Records the deployment's default thread for Objective notices, or clears it.
+    pub async fn set_default_notification_task(&self, task_id: Option<&str>) -> anyhow::Result<()> {
+        self.store.set_default_notification_task(task_id).await?;
+        Ok(())
+    }
+
     /// Records a credential from the Control Plane's startup configuration, such as the
     /// bootstrap `host:local` or `gateway:local`.
     pub async fn seed_enrollment(

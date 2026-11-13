@@ -845,6 +845,7 @@ pub(crate) async fn pending_in(
                 resource: value.resource,
                 summary: value.summary,
             }),
+            notification: None,
         });
     }
     Ok(items)

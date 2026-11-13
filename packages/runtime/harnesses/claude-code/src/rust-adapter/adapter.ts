@@ -21,6 +21,11 @@ import {
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { ClaudeProcessTree } from "../process-tree.js";
+import {
+  type ClaudeProgressItem,
+  claudeApiRetryProgress,
+  claudeTaskProgress,
+} from "../progress.js";
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "../query.js";
 import { ClaudeSessionStore, readClaudeTranscripts } from "../session-store.js";
 import { claudeUsageTracker } from "../usage.js";
@@ -240,6 +245,7 @@ export async function runAdapter(
   let nativeSessionId: string | undefined;
   let mirrorFailed = false;
   let eventSequence = 0n;
+  const progressItems = new Map<string, ClaudeProgressItem>();
   let nativeUsageSequence = 0n;
   let costOnlySequence = 0n;
   let lastTotalCostUsd: number | undefined;
@@ -507,6 +513,28 @@ export async function runAdapter(
         const roundingNoise = Math.min(1e-9, Number.EPSILON * Math.max(1, Math.abs(rawCost ?? 0)));
         if (currentCostUsd - maxBudgetUsd > roundingNoise)
           throw new SafeAdapterFailure("Claude reported USD budget exceeded.");
+      }
+      // Background tasks and API retries reach the surface as `progress.updated` Task events,
+      // as the TypeScript Worker yields them. A progress event too large for one Task event is
+      // skipped: progress is cosmetic and never fails the Attempt.
+      for (const progress of [
+        claudeApiRetryProgress(message),
+        claudeTaskProgress(message, progressItems),
+      ]) {
+        if (progress === undefined) continue;
+        const safe = (text: string) => redact(text, secrets).replaceAll("\0", "");
+        const event = JSON.stringify({
+          type: "progress.updated",
+          progress: {
+            summary: safe(progress.summary),
+            ...(progress.items
+              ? { items: progress.items.map((item) => ({ ...item, text: safe(item.text) })) }
+              : {}),
+          },
+        });
+        if (Buffer.byteLength(event) > 16000) continue;
+        const sequence = ++eventSequence;
+        await receipt(() => client.publish({ sequence, text: event }, options()));
       }
       if (message.type === "assistant") {
         const text = message.message.content

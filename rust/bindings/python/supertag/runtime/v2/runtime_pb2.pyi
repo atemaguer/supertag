@@ -45,6 +45,15 @@ class InboxItemKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     INBOX_ITEM_KIND_APPROVAL: _ClassVar[InboxItemKind]
     INBOX_ITEM_KIND_MCP_LOGIN: _ClassVar[InboxItemKind]
 
+class InboxNotificationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    INBOX_NOTIFICATION_STATUS_UNSPECIFIED: _ClassVar[InboxNotificationStatus]
+    INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED: _ClassVar[InboxNotificationStatus]
+    INBOX_NOTIFICATION_STATUS_PENDING: _ClassVar[InboxNotificationStatus]
+    INBOX_NOTIFICATION_STATUS_DELIVERED: _ClassVar[InboxNotificationStatus]
+    INBOX_NOTIFICATION_STATUS_FAILED: _ClassVar[InboxNotificationStatus]
+    INBOX_NOTIFICATION_STATUS_UNAVAILABLE: _ClassVar[InboxNotificationStatus]
+
 class ApprovalState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     APPROVAL_STATE_UNSPECIFIED: _ClassVar[ApprovalState]
@@ -284,6 +293,12 @@ INBOX_ITEM_KIND_OBJECTIVE_LIMIT: InboxItemKind
 INBOX_ITEM_KIND_TASK_ATTENTION: InboxItemKind
 INBOX_ITEM_KIND_APPROVAL: InboxItemKind
 INBOX_ITEM_KIND_MCP_LOGIN: InboxItemKind
+INBOX_NOTIFICATION_STATUS_UNSPECIFIED: InboxNotificationStatus
+INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED: InboxNotificationStatus
+INBOX_NOTIFICATION_STATUS_PENDING: InboxNotificationStatus
+INBOX_NOTIFICATION_STATUS_DELIVERED: InboxNotificationStatus
+INBOX_NOTIFICATION_STATUS_FAILED: InboxNotificationStatus
+INBOX_NOTIFICATION_STATUS_UNAVAILABLE: InboxNotificationStatus
 APPROVAL_STATE_UNSPECIFIED: ApprovalState
 APPROVAL_STATE_PENDING: ApprovalState
 APPROVAL_STATE_APPROVED: ApprovalState
@@ -582,7 +597,7 @@ class ListInboxItemsResponse(_message.Message):
     def __init__(self, as_of_ms: _Optional[int] = ..., items: _Optional[_Iterable[_Union[InboxItem, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., truncated_kinds: _Optional[_Iterable[_Union[InboxItemKind, str]]] = ...) -> None: ...
 
 class InboxItem(_message.Message):
-    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question", "approval")
+    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question", "approval", "notification")
     KEY_FIELD_NUMBER: _ClassVar[int]
     OCCURRENCE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -594,6 +609,7 @@ class InboxItem(_message.Message):
     REASON_FIELD_NUMBER: _ClassVar[int]
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_FIELD_NUMBER: _ClassVar[int]
+    NOTIFICATION_FIELD_NUMBER: _ClassVar[int]
     key: str
     occurrence: str
     kind: InboxItemKind
@@ -605,7 +621,16 @@ class InboxItem(_message.Message):
     reason: str
     question: InboxQuestion
     approval: InboxApproval
-    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ..., approval: _Optional[_Union[InboxApproval, _Mapping]] = ...) -> None: ...
+    notification: InboxNotification
+    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ..., approval: _Optional[_Union[InboxApproval, _Mapping]] = ..., notification: _Optional[_Union[InboxNotification, _Mapping]] = ...) -> None: ...
+
+class InboxNotification(_message.Message):
+    __slots__ = ("status", "reason")
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    status: InboxNotificationStatus
+    reason: str
+    def __init__(self, status: _Optional[_Union[InboxNotificationStatus, str]] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class InboxApproval(_message.Message):
     __slots__ = ("approval_id", "tag_id", "action", "resource", "summary")
@@ -2888,7 +2913,7 @@ class HarnessCompleteResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class CreateObjectiveRequest(_message.Message):
-    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id", "runtime_actions")
+    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id", "runtime_actions", "notification_task_id")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2899,6 +2924,7 @@ class CreateObjectiveRequest(_message.Message):
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    NOTIFICATION_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     objective_id: str
     owner_tag_id: str
@@ -2909,7 +2935,8 @@ class CreateObjectiveRequest(_message.Message):
     budget_currency: str
     team_id: str
     runtime_actions: RuntimeActions
-    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ...) -> None: ...
+    notification_task_id: str
+    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., notification_task_id: _Optional[str] = ...) -> None: ...
 
 class RuntimeActions(_message.Message):
     __slots__ = ("actions",)
@@ -2918,7 +2945,7 @@ class RuntimeActions(_message.Message):
     def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by", "notification_task_id")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2938,6 +2965,7 @@ class Objective(_message.Message):
     CANCELLED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     CANCELLATION_REASON_FIELD_NUMBER: _ClassVar[int]
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
+    NOTIFICATION_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -2957,7 +2985,8 @@ class Objective(_message.Message):
     cancelled_at_ms: int
     cancellation_reason: str
     created_by: str
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ...) -> None: ...
+    notification_task_id: str
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ..., notification_task_id: _Optional[str] = ...) -> None: ...
 
 class Team(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")

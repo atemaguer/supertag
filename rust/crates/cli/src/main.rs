@@ -418,7 +418,7 @@ enum Command {
         /// slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable.
         #[arg(
             long,
-            long_help = "Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector."
+            long_help = "Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
         )]
         notify: Vec<String>,
     },
@@ -1375,6 +1375,12 @@ async fn control_plane(
         operator_principal.clone(),
     )
     .await?;
+    // The deployment's default thread for Objective notices (TypeScript parity).
+    plane
+        .set_default_notification_task(
+            nonempty_env("SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID").as_deref(),
+        )
+        .await?;
     // A single-machine deployment's own Worker Host and Gateway start enrolled.
     for (variable, role) in [
         (
@@ -1756,9 +1762,13 @@ async fn gateway(
         }
         None => None,
     };
+    let slack_sender = match slack.as_ref() {
+        Some((slack, _)) => Some(slack.operator_sender()),
+        None => notification_slack_sender().await?,
+    };
     let notifier = operator_notifier(
         &connectors.notify,
-        slack.as_ref().map(|(slack, _)| slack.operator_sender()),
+        slack_sender,
         channel.clone(),
         gateway_token,
     )?;
@@ -1936,6 +1946,26 @@ fn operator_notifier(
         channel,
         gateway_token,
     )
+}
+
+/// The Slack Surface Account a Gateway without a Slack connector posts `slack:` notify
+/// destinations as: `SUPERTAG_NOTIFY_SLACK_TEAM_ID`, with its bot token from
+/// `SUPERTAG_NOTIFY_SLACK_BOT_TOKEN` or the credential vault entry
+/// `SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID`.
+async fn notification_slack_sender() -> Result<Option<supertag_gateway::notifications::SlackSender>>
+{
+    let Some(team_id) = nonempty_env("SUPERTAG_NOTIFY_SLACK_TEAM_ID") else {
+        return Ok(None);
+    };
+    let bot_token = SurfaceSecrets::new("Slack", "SUPERTAG_NOTIFY_SLACK", "slack", &team_id)
+        .get("SUPERTAG_NOTIFY_SLACK_BOT_TOKEN", "botToken")
+        .await?;
+    let sender = supertag_gateway::notifications::SlackSender::new(bot_token, team_id)?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(url) = std::env::var("SUPERTAG_TEST_SLACK_API_URL") {
+        return Ok(Some(sender.with_test_url(&url)?));
+    }
+    Ok(Some(sender))
 }
 
 /// Test builds may notify a loopback HTTP webhook; release builds require HTTPS.

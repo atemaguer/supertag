@@ -338,5 +338,22 @@ fn item_json(item: InboxItem) -> Value {
             "resource": approval.resource,
             "summary": approval.summary,
         })),
+        "notification": item.notification.map(|notification| json!({
+            "status": notification_status(notification.status()),
+            "reason": (!notification.reason.is_empty()).then_some(notification.reason),
+        })),
     })
+}
+
+/// TypeScript's Inbox notification status words.
+fn notification_status(status: InboxNotificationStatus) -> &'static str {
+    match status {
+        InboxNotificationStatus::Unspecified | InboxNotificationStatus::NotConfigured => {
+            "not configured"
+        }
+        InboxNotificationStatus::Pending => "pending",
+        InboxNotificationStatus::Delivered => "delivered",
+        InboxNotificationStatus::Failed => "failed",
+        InboxNotificationStatus::Unavailable => "unavailable",
+    }
 }

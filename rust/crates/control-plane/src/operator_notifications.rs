@@ -81,7 +81,7 @@ impl Store {
         let (mut tx, order) = self.write().await?;
         let now = self.execution_now_ms();
         let (inbox, complete) = inbox_in(&mut tx, order, now, principal).await?;
-        let items = items_in(&mut tx, inbox).await?;
+        let items = items_in(&mut tx, principal, inbox).await?;
         record_in(&mut tx, principal, &destinations, &items, now).await?;
         // A lease that lapsed on the last attempt is never claimed again.
         sqlx::query("UPDATE supertag_v2_operator_notifications SET status=$1,failed_at_ms=$2,last_error=$3,lease_token=NULL,lease_expires_at_ms=NULL WHERE principal=$4 AND status=$5 AND lease_expires_at_ms<=$2 AND attempt_count>=max_attempts")
@@ -308,7 +308,11 @@ fn valid_key(key: &str, provider: NotificationProvider) -> bool {
 /// Inbox items with what the outbox needs: a ledger key, a headline, and whether an approval
 /// blocks work. As in TypeScript, every approval the Inbox lists blocks: the Inbox lists one only
 /// while a Session waits on it, either running or ended waiting as the Session's latest Task.
-async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Result<Vec<Item>> {
+async fn items_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    inbox: Vec<InboxItem>,
+) -> Result<Vec<Item>> {
     let mut items = Vec::with_capacity(inbox.len());
     for item in inbox {
         let kind = InboxItemKind::try_from(item.kind).unwrap_or(InboxItemKind::Unspecified);
@@ -321,22 +325,10 @@ async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Resul
                 | InboxItemKind::ObjectiveLimit
                 | InboxItemKind::Approval
         ) && match &objective_id {
-            Some(objective) => sqlx::query_scalar::<_, String>(
-                "SELECT objective_id FROM supertag_v2_surface_objectives WHERE objective_id=$1",
-            )
-            .bind(objective)
-            .fetch_optional(&mut **tx)
-            .await?
-            .is_some(),
+            Some(objective) => carried_in(tx, principal, objective, &item).await?,
             None => false,
         };
-        let key = if item.occurrence == item.key
-            || item.occurrence.starts_with(&format!("{}:", item.key))
-        {
-            item.occurrence.clone()
-        } else {
-            item.key.clone()
-        };
+        let key = ledger_key(&item);
         let (headline, command) = headline(kind, &item, blocking_approval);
         items.push(Item {
             key,
@@ -348,6 +340,155 @@ async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Resul
         });
     }
     Ok(items)
+}
+
+/// TS `objectiveThreadCarries`: the Objective's notice home (its chosen thread, its start
+/// thread, or the deployment default) verifies, and the item's notification has not failed.
+/// A failed delivery there, such as a withdrawn limit notice, falls back to the operator's Slack.
+async fn carried_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    objective_id: &str,
+    item: &InboxItem,
+) -> Result<bool> {
+    if crate::surface_objectives::notice_home_in(tx, objective_id)
+        .await?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    let status = item_status_in(tx, principal, item).await?;
+    Ok(status.status != InboxNotificationStatus::Failed as i32)
+}
+
+/// The outbox ledger key of an Inbox item: its occurrence, so a new occurrence is told again.
+fn ledger_key(item: &InboxItem) -> String {
+    if item.occurrence == item.key || item.occurrence.starts_with(&format!("{}:", item.key)) {
+        item.occurrence.clone()
+    } else {
+        item.key.clone()
+    }
+}
+
+/// Whether the operator heard about an Inbox item (TypeScript's Inbox enricher over
+/// `listOperatorNotificationsForItems` and `BudgetNotifications.describe`): delivered through
+/// any of this operator's destinations, else pending with the next retry, else the newest
+/// failure. A budget or limit item no destination took reports its notice in the Objective's
+/// thread instead.
+pub(crate) async fn item_status_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    item: &InboxItem,
+) -> Result<InboxNotification> {
+    let status = |status: InboxNotificationStatus, reason: &str| InboxNotification {
+        status: status as i32,
+        reason: reason.into(),
+    };
+    let deliveries = sqlx::query("SELECT n.destination_key, n.status, n.attempt_count, n.max_attempts, n.last_error FROM supertag_v2_operator_notification_items i JOIN supertag_v2_operator_notifications n ON n.notification_id=i.notification_id WHERE i.principal=$1 AND i.item_key=$2 ORDER BY n.created_order DESC")
+        .bind(principal).bind(ledger_key(item)).fetch_all(&mut **tx).await?;
+    if !deliveries.is_empty() {
+        let mut via = Vec::new();
+        for row in &deliveries {
+            if row.try_get::<i64, _>("status")? == DELIVERED {
+                let destination: String = row.try_get("destination_key")?;
+                let kind = destination.split(':').next().unwrap_or_default().to_owned();
+                if !via.contains(&kind) {
+                    via.push(kind);
+                }
+            }
+        }
+        if !via.is_empty() {
+            return Ok(status(
+                InboxNotificationStatus::Delivered,
+                &format!("via {}", via.join(",")),
+            ));
+        }
+        for row in &deliveries {
+            if matches!(row.try_get::<i64, _>("status")?, PENDING | DELIVERING) {
+                let maximum: i64 = row.try_get("max_attempts")?;
+                let next = (row.try_get::<i64, _>("attempt_count")? + 1).min(maximum);
+                return Ok(status(
+                    InboxNotificationStatus::Pending,
+                    &format!("retry {next}/{maximum}"),
+                ));
+            }
+        }
+        let error: Option<String> = deliveries[0].try_get("last_error")?;
+        return Ok(match error.as_deref() {
+            Some("Desktop notification unavailable") => {
+                status(InboxNotificationStatus::Unavailable, "")
+            }
+            error => status(
+                InboxNotificationStatus::Failed,
+                error.unwrap_or("delivery failed"),
+            ),
+        });
+    }
+    let kind = InboxItemKind::try_from(item.kind).unwrap_or(InboxItemKind::Unspecified);
+    let prefix = match kind {
+        InboxItemKind::ObjectiveBudget => "objective_budget",
+        InboxItemKind::ObjectiveLimit => "objective_limit",
+        _ => return Ok(status(InboxNotificationStatus::NotConfigured, "")),
+    };
+    let Some(limit_key) = item
+        .key
+        .strip_prefix(&format!("{prefix}:{}:", item.objective_id))
+    else {
+        return Ok(status(InboxNotificationStatus::NotConfigured, ""));
+    };
+    let notice = sqlx::query("SELECT r.reply_id, r.state FROM supertag_v2_objective_notices n JOIN supertag_v2_replies r ON r.task_id=n.task_id WHERE n.objective_id=$1 AND n.limit_key=$2 ORDER BY r.ready_order DESC LIMIT 1")
+        .bind(&item.objective_id).bind(limit_key).fetch_optional(&mut **tx).await?;
+    let Some(notice) = notice else {
+        let chosen: Option<String> = sqlx::query_scalar(
+            "SELECT notification_task_id FROM supertag_v2_objectives WHERE objective_id=$1",
+        )
+        .bind(&item.objective_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .flatten();
+        // A thread the operator chose that no longer verifies is a failure, not an Objective
+        // that was never given one.
+        return Ok(if chosen.is_some() {
+            status(
+                InboxNotificationStatus::Failed,
+                "The Objective's notification thread could not be verified; no external notification was delivered.",
+            )
+        } else {
+            status(
+                InboxNotificationStatus::NotConfigured,
+                "The Objective has no thread and no operator notification destination is configured.",
+            )
+        });
+    };
+    let reply: String = notice.try_get("reply_id")?;
+    Ok(
+        match ReplyState::try_from(notice.try_get::<i64, _>("state")? as i32) {
+            Ok(ReplyState::Delivered) => status(
+                InboxNotificationStatus::Delivered,
+                "via the Objective's thread",
+            ),
+            Ok(ReplyState::Pending | ReplyState::Claimed) => status(
+                InboxNotificationStatus::Pending,
+                "Waiting for Gateway delivery to the Objective's thread.",
+            ),
+            Ok(ReplyState::Uncertain) => status(
+                InboxNotificationStatus::Failed,
+                &format!(
+                    "Delivery to the Objective's thread is uncertain; inspect supertag get reply {reply}."
+                ),
+            ),
+            _ => {
+                let withdrawn: Option<String> = sqlx::query_scalar("SELECT evidence FROM supertag_v2_reply_audit WHERE reply_id=$1 AND kind='withdrawn' LIMIT 1")
+                    .bind(&reply).fetch_optional(&mut **tx).await?;
+                status(
+                    InboxNotificationStatus::Failed,
+                    withdrawn.as_deref().unwrap_or(
+                        "Gateway delivery to the Objective's thread failed; inspect the surface and its retry policy.",
+                    ),
+                )
+            }
+        },
+    )
 }
 
 async fn record_in(

@@ -78,6 +78,7 @@ async fn report_completion_in(
         &record.value.objective_id,
         &record.value.owner_tag_id,
         &format!("objective-completed:{}", record.value.revision),
+        None,
         &completion_report(
             &record.value.objective_id,
             record.completion_summary.as_deref(),
@@ -266,6 +267,7 @@ fn record_row(row: &AnyRow) -> Result<Record> {
             cancelled_at_ms: None,
             cancellation_reason: None,
             created_by: row.try_get("created_by")?,
+            notification_task_id: row.try_get("notification_task_id")?,
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -438,6 +440,9 @@ pub fn validate_manifest_objective(input: &CreateObjectiveRequest) -> Result<()>
             return Err(invalid("budget currency requires a limit"));
         }
     }
+    if let Some(task) = &input.notification_task_id {
+        name("notification Task ID", task)?;
+    }
     Ok(())
 }
 
@@ -484,6 +489,20 @@ impl Store {
             ),
             None => None,
         };
+        // Choosing another conversation's surface thread for notices is an operator's call.
+        if input.notification_task_id.is_some() && !principal.starts_with("operator:") {
+            return Err(StoreError::PermissionDenied);
+        }
+        // TS `createObjective`: the chosen thread must verify when it is chosen.
+        if let Some(task) = &input.notification_task_id
+            && crate::surface_objectives::task_home_in(&mut tx, task)
+                .await?
+                .is_none()
+        {
+            return Err(invalid(
+                "notification Task must be a surface Task whose Tag is active and whose Surface Account is enabled",
+            ));
+        }
         let session_id = Uuid::new_v4().to_string();
         let mut state = limits::LimitState::default();
         if let Some(deadline) = input.deadline_ms {
@@ -492,9 +511,9 @@ impl Store {
                 at: timestamp(now_ms)?,
             });
         }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14)")
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15)")
             .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).execute(&mut *tx).await?;
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
         let prompt = format!(
@@ -1501,6 +1520,7 @@ pub(crate) async fn reconcile_in(
                 &record.value.objective_id,
                 &record.value.owner_tag_id,
                 &format!("limit:{}", notice.key),
+                Some(&notice.key),
                 &home_limit_text(&record, &notice, now_ms),
                 now_ms,
             )
@@ -1512,6 +1532,23 @@ pub(crate) async fn reconcile_in(
         cancel_open_in(tx, objective_id, None).await?;
     }
     Ok(())
+}
+
+/// Whether a limit notice still applies: its Objective is open and its limit event holds.
+pub(crate) async fn limit_notice_applies_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    limit_key: &str,
+) -> Result<bool> {
+    let record = match get_in(tx, objective_id).await {
+        Ok(record) => record,
+        Err(StoreError::NotFound(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    Ok(!record.closed()
+        && limits::limit_events(&record.limits)
+            .iter()
+            .any(|event| event.key == limit_key))
 }
 
 pub(crate) async fn objective_sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Result<()> {

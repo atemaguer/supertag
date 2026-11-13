@@ -6,8 +6,9 @@
 //! `apps/cli/src/notification-command.ts`, `createOperatorNotificationSender` in
 //! `apps/cli/src/gateway-surfaces.ts`, and `parseNotificationDestination` in
 //! `packages/control-plane/src/operator-channel.ts`. Destination syntax, webhook payloads, and
-//! redaction match. The Slack sender posts with this Gateway's Slack connector, so a Slack
-//! destination needs `supertag gateway --slack-listen`, and renders the text through the Slack
+//! redaction match. The Slack sender posts with this Gateway's Slack connector or, when it runs
+//! none, with the Slack Surface Account named by `SUPERTAG_NOTIFY_SLACK_TEAM_ID` (as `supertag up`
+//! does for a Slack surface without a location), and renders the text through the Slack
 //! renderer, as TypeScript sends a `status` presentation through `renderSlackPresentation`: text
 //! an agent wrote can never post a live mention.
 //!
@@ -183,6 +184,52 @@ pub struct SlackSender {
     pub(crate) post_message: reqwest::Url,
     pub(crate) bot_token: String,
     pub(crate) team_id: String,
+}
+
+impl SlackSender {
+    /// A sender for a Slack Surface Account this Gateway runs no connector for: the local
+    /// `supertag up` Gateway when Slack serves only notifications.
+    pub fn new(bot_token: String, team_id: String) -> Result<Self> {
+        ensure!(
+            team_id.len() > 1
+                && team_id.len() <= 32
+                && team_id.starts_with('T')
+                && team_id
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()),
+            "invalid Slack workspace ID"
+        );
+        ensure!(!bot_token.trim().is_empty(), "Slack bot token is required");
+        Ok(Self {
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(3))
+                .timeout(SEND_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .retry(reqwest::retry::never())
+                .no_proxy()
+                .build()?,
+            post_message: crate::slack::POST_MESSAGE.parse()?,
+            bot_token,
+            team_id,
+        })
+    }
+
+    /// Test builds post to a loopback mock of the Slack API.
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn with_test_url(mut self, url: &str) -> Result<Self> {
+        let url: reqwest::Url = url.parse().context("invalid test Slack URL")?;
+        ensure!(
+            url.scheme() == "http"
+                && url.host_str().is_some_and(|host| {
+                    host.trim_matches(['[', ']'])
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback())
+                }),
+            "test Slack URL must use HTTP and a loopback IP"
+        );
+        self.post_message = url;
+        Ok(self)
+    }
 }
 
 /// How desktop notifications are shown.

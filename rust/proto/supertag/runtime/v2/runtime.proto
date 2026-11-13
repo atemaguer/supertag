@@ -248,6 +248,26 @@ message InboxItem {
   string reason = 9;
   InboxQuestion question = 10;
   InboxApproval approval = 11;
+  // Whether the operator heard about this item: through this operator's notify
+  // destinations or, for a budget or limit item, the Objective's notice thread.
+  InboxNotification notification = 5300;
+}
+
+enum InboxNotificationStatus {
+  INBOX_NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  // No destination is configured for this item.
+  INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED = 1;
+  INBOX_NOTIFICATION_STATUS_PENDING = 2;
+  INBOX_NOTIFICATION_STATUS_DELIVERED = 3;
+  INBOX_NOTIFICATION_STATUS_FAILED = 4;
+  // The desktop notifier could not run.
+  INBOX_NOTIFICATION_STATUS_UNAVAILABLE = 5;
+}
+
+message InboxNotification {
+  InboxNotificationStatus status = 1;
+  // Where it was delivered, the next retry, or why it failed.
+  string reason = 2;
 }
 
 message InboxApproval {
@@ -2058,6 +2078,9 @@ message CreateObjectiveRequest {
   optional string team_id = 9;
   // Omit to capture the owner's current runtime grants. An empty selection grants none.
   RuntimeActions runtime_actions = 10;
+  // A surface Task whose thread gets the Objective's limit notices and completion
+  // report, in place of the thread it was started in or the deployment default.
+  optional string notification_task_id = 5300;
 }
 
 message RuntimeActions {
@@ -2088,6 +2111,8 @@ message Objective {
   // The principal that created it, such as `operator:local` or
   // `client:alice-laptop`. Empty for an Objective a surface thread started.
   string created_by = 4100;
+  // The surface Task an operator chose for the Objective's notices.
+  optional string notification_task_id = 5300;
 }
 
 message Team {

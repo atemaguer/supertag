@@ -172,14 +172,19 @@ supply a channel name, webhook URL, or credentials.
 
 When work exhausts its execution budget, the Control Plane notifies this destination without
 running another agent turn, and the pending decision stays in the operator inbox. It chooses the
-verified surface Task that originated the Objective first, then the deployment default
-`SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`.
+surface Task an operator set as the Objective's notification Task first, then the verified surface
+Task that originated the Objective, then the deployment default
+`SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`. A notice still waiting for delivery is withdrawn when its
+limit changes, the Objective closes, or its destination changes or stops verifying; the operator's
+Slack notification destination then reports it instead. In an Objective's notification thread,
+`@SuperTag approve`, `@SuperTag pause`, and `@SuperTag resume` act on that Objective.
 
 ### Set the deployment default
 
-Add `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID` to the Control Plane's environment and restart it. The
-shared deployment configuration accepts this optional variable on all supported platforms. The
-referenced Task must belong to a verified surface conversation; arbitrary Task IDs do not grant
+Add `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID` to the Control Plane's environment and restart it.
+Start every Control Plane replica with the same value. The shared deployment configuration accepts
+this optional variable on all supported platforms. The
+referenced Task must be one a person's message started in a verified surface conversation; arbitrary Task IDs do not grant
 permission to send to a destination. A headless deployment gets such a Task the same way as any
 other: a person mentions the Tag once in the operator conversation through a connected
 **Surface Account**, an enrolled external workspace or account. Copy that Task's ID from
