@@ -133,6 +133,7 @@ impl Gateway {
         tokio::time::timeout(timeout, call(self.control_plane.clone(), request))
             .await
             .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+            .map_err(supertag_protocol::upstream_status)
     }
 
     async fn forward_host<T, R, F>(
@@ -169,7 +170,9 @@ impl Gateway {
                     .metadata_mut()
                     .insert(HOST_GENERATION_HEADER, host.generation.into());
             }
-            call(self.control_plane.clone(), upstream).await
+            call(self.control_plane.clone(), upstream)
+                .await
+                .map_err(supertag_protocol::upstream_status)
         })
         .await
         .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
@@ -322,6 +325,7 @@ fn request_budget<T>(request: &Request<T>) -> Result<Duration, Status> {
 }
 
 fn host_authentication_error(error: Status) -> Status {
+    let error = supertag_protocol::upstream_status(error);
     match error.code() {
         Code::PermissionDenied | Code::Unauthenticated => {
             Status::unauthenticated("valid Worker Host credential required")
@@ -664,12 +668,16 @@ impl Operator for Gateway {
         &self,
         request: Request<SubmitTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).submit_task(request).await },
-        )
-        .await
+        supertag_protocol::crash_point("gateway.submit", "before-forward");
+        let task = self
+            .forward(
+                request,
+                &self.credentials.operator,
+                |channel, request| async { operator_client(channel).submit_task(request).await },
+            )
+            .await?;
+        supertag_protocol::crash_point("gateway.submit", "after-forward");
+        Ok(task)
     }
 
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
@@ -837,20 +845,30 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<ClaimTaskRequest>,
     ) -> Result<Response<ClaimTaskResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
-            worker_host_client(channel).claim_task(request).await
-        })
-        .await
+        supertag_protocol::crash_point("gateway.claim", "before-forward");
+        let claim = self
+            .forward_host(request, true, |channel, request| async {
+                worker_host_client(channel).claim_task(request).await
+            })
+            .await?;
+        if claim.get_ref().assignment.is_some() {
+            supertag_protocol::crash_point("gateway.claim", "after-forward");
+        }
+        Ok(claim)
     }
 
     async fn start_task(
         &self,
         request: Request<StartTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward_host(request, true, |channel, request| async {
-            worker_host_client(channel).start_task(request).await
-        })
-        .await
+        supertag_protocol::crash_point("gateway.start", "before-forward");
+        let task = self
+            .forward_host(request, true, |channel, request| async {
+                worker_host_client(channel).start_task(request).await
+            })
+            .await?;
+        supertag_protocol::crash_point("gateway.start", "after-forward");
+        Ok(task)
     }
 
     async fn inspect_attempt(
@@ -901,20 +919,28 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<AppendEventRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
-        self.forward_host(request, true, |channel, request| async {
-            worker_host_client(channel).append_event(request).await
-        })
-        .await
+        supertag_protocol::crash_point("gateway.append-event", "before-forward");
+        let event = self
+            .forward_host(request, true, |channel, request| async {
+                worker_host_client(channel).append_event(request).await
+            })
+            .await?;
+        supertag_protocol::crash_point("gateway.append-event", "after-forward");
+        Ok(event)
     }
 
     async fn finish_task(
         &self,
         request: Request<FinishTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward_host(request, true, |channel, request| async {
-            worker_host_client(channel).finish_task(request).await
-        })
-        .await
+        supertag_protocol::crash_point("gateway.finish", "before-forward");
+        let task = self
+            .forward_host(request, true, |channel, request| async {
+                worker_host_client(channel).finish_task(request).await
+            })
+            .await?;
+        supertag_protocol::crash_point("gateway.finish", "after-forward");
+        Ok(task)
     }
 }
 

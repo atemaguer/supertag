@@ -4,6 +4,10 @@ use subtle::ConstantTimeEq;
 use tonic::{Request, Status, metadata::MetadataValue};
 
 pub mod artifacts;
+mod crash_points;
+#[cfg(feature = "crash-points")]
+pub use crash_points::crash_now;
+pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};
 pub mod git_outputs;
 pub mod output_policy;
 pub mod task_artifact_inputs;
@@ -46,6 +50,26 @@ pub fn matches_bearer<T>(request: &Request<T>, token: &str) -> bool {
     candidate.is_some_and(|candidate| {
         !token.is_empty() && bool::from(candidate.as_bytes().ct_eq(token.as_bytes()))
     })
+}
+
+/// Whether a client-side call failed because its connection broke after the
+/// request may have been sent, for example when the peer process was killed
+/// mid-call. tonic reports this as `Unknown` with a transport error source. Like
+/// `Unavailable`, the outcome is unknown, so callers retry only idempotent work.
+pub fn interrupted_transport(status: &Status) -> bool {
+    status.code() == tonic::Code::Unknown
+        && std::iter::successors(std::error::Error::source(status), |error| error.source())
+            .any(|error| error.is::<tonic::transport::Error>())
+}
+
+/// Report an interrupted upstream connection as `Unavailable`, so a downstream
+/// client applies its existing retry rules instead of failing permanently.
+pub fn upstream_status(status: Status) -> Status {
+    if interrupted_transport(&status) {
+        Status::unavailable("upstream connection was interrupted")
+    } else {
+        status
+    }
 }
 
 pub fn authenticated_request<T>(

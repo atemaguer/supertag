@@ -222,6 +222,7 @@ impl Harness for Bridge {
         )?;
         upstream.set_timeout(Duration::from_secs(5));
         let event = self.host.clone().append_event(upstream).await?;
+        supertag_protocol::crash_point("worker-host.append-event", "answered");
         drop(state);
         Ok(event)
     }

@@ -260,11 +260,12 @@ impl operator_server::Operator for ControlPlane {
         request: Request<SubmitTaskRequest>,
     ) -> Result<Response<Task>, Status> {
         let principal = self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store
-                .submit_task(&principal, &request.into_inner())
-                .await?,
-        ))
+        let task = self
+            .store
+            .submit_task(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.submit", "after-commit");
+        Ok(Response::new(task))
     }
 
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
@@ -425,19 +426,21 @@ impl worker_host_server::WorkerHost for ControlPlane {
         let input = request.into_inner();
         let harness = HarnessKind::try_from(input.harness_kind)
             .map_err(|_| Status::invalid_argument("unknown harness kind"))?;
-        Ok(Response::new(ClaimTaskResponse {
-            assignment: self
-                .store
-                .claim_task_with_sources(
-                    &principal,
-                    &input.operation_id,
-                    (&input.workspace_ids, &input.gateway_workspace_ids),
-                    harness,
-                    &input.context_contracts,
-                    input.execution_profile.as_ref(),
-                )
-                .await?,
-        }))
+        let assignment = self
+            .store
+            .claim_task_with_sources(
+                &principal,
+                &input.operation_id,
+                (&input.workspace_ids, &input.gateway_workspace_ids),
+                harness,
+                &input.context_contracts,
+                input.execution_profile.as_ref(),
+            )
+            .await?;
+        if assignment.is_some() {
+            supertag_protocol::crash_point("control-plane.claim", "after-commit");
+        }
+        Ok(Response::new(ClaimTaskResponse { assignment }))
     }
 
     async fn start_task(
@@ -445,11 +448,12 @@ impl worker_host_server::WorkerHost for ControlPlane {
         request: Request<StartTaskRequest>,
     ) -> Result<Response<Task>, Status> {
         let principal = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .start_task(&principal, &request.into_inner())
-                .await?,
-        ))
+        let task = self
+            .store
+            .start_task(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.start", "after-commit");
+        Ok(Response::new(task))
     }
 
     async fn inspect_attempt(
@@ -511,11 +515,12 @@ impl worker_host_server::WorkerHost for ControlPlane {
         request: Request<AppendEventRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
         let principal = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .append_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        let event = self
+            .store
+            .append_event(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.append-event", "after-commit");
+        Ok(Response::new(event))
     }
 
     async fn finish_task(
@@ -523,11 +528,12 @@ impl worker_host_server::WorkerHost for ControlPlane {
         request: Request<FinishTaskRequest>,
     ) -> Result<Response<Task>, Status> {
         let principal = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .finish_task(&principal, &request.into_inner())
-                .await?,
-        ))
+        let task = self
+            .store
+            .finish_task(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.finish", "after-commit");
+        Ok(Response::new(task))
     }
 }
 
@@ -593,11 +599,12 @@ impl connector_server::Connector for ControlPlane {
         request: Request<AcceptSlackEventRequest>,
     ) -> Result<Response<AcceptSlackEventResponse>, Status> {
         let principal = self.principal(&request, "connector:")?;
-        Ok(Response::new(
-            self.store
-                .accept_slack_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        let accepted = self
+            .store
+            .accept_slack_event(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.slack-admission", "after-commit");
+        Ok(Response::new(accepted))
     }
 
     async fn accept_github_event(
@@ -665,11 +672,14 @@ impl connector_server::Connector for ControlPlane {
         request: Request<ClaimReplyRequest>,
     ) -> Result<Response<ClaimReplyResponse>, Status> {
         let principal = self.principal(&request, "connector:")?;
-        Ok(Response::new(
-            self.store
-                .claim_reply(&principal, &request.into_inner().operation_id)
-                .await?,
-        ))
+        let claim = self
+            .store
+            .claim_reply(&principal, &request.into_inner().operation_id)
+            .await?;
+        if claim.reply.is_some() {
+            supertag_protocol::crash_point("control-plane.claim-reply", "after-commit");
+        }
+        Ok(Response::new(claim))
     }
 
     async fn settle_reply(
@@ -677,11 +687,12 @@ impl connector_server::Connector for ControlPlane {
         request: Request<SettleReplyRequest>,
     ) -> Result<Response<Reply>, Status> {
         let principal = self.principal(&request, "connector:")?;
-        Ok(Response::new(
-            self.store
-                .settle_reply(&principal, &request.into_inner())
-                .await?,
-        ))
+        let reply = self
+            .store
+            .settle_reply(&principal, &request.into_inner())
+            .await?;
+        supertag_protocol::crash_point("control-plane.settle-reply", "after-commit");
+        Ok(Response::new(reply))
     }
 }
 

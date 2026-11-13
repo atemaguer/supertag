@@ -429,6 +429,7 @@ pub async fn run(
                     journal.clear()?;
                     continue;
                 }
+                supertag_protocol::crash_point("worker-host.claim", "journaled");
                 let response = host
                     .claim_task(request(claim, &token)?)
                     .await;
@@ -444,9 +445,11 @@ pub async fn run(
                     ready();
                 }
                 if let Some(assignment) = assignment {
+                    supertag_protocol::crash_point("worker-host.claim", "assigned");
                     journal.save(&Entry::Starting {
                         attempt: Attempt::from_assignment(assignment)?,
                     })?;
+                    supertag_protocol::crash_point("worker-host.start", "journaled");
                 } else {
                     journal.clear()?;
                     if options.once {
@@ -777,6 +780,7 @@ pub async fn run(
                     }
                     continue;
                 }
+                supertag_protocol::crash_point("worker-host.finish", "journaled");
                 let outcome = host
                     .finish_task(request(
                         FinishTaskRequest {
@@ -816,13 +820,16 @@ pub async fn run(
                         }
                         continue;
                     }
-                    Ok(response) => ensure!(
-                        matches!(
-                            response.get_ref().state(),
-                            TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
-                        ),
-                        "Finish returned a nonterminal Task"
-                    ),
+                    Ok(response) => {
+                        ensure!(
+                            matches!(
+                                response.get_ref().state(),
+                                TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+                            ),
+                            "Finish returned a nonterminal Task"
+                        );
+                        supertag_protocol::crash_point("worker-host.finish", "answered");
+                    }
                     Err(error) if retryable(&error) => {
                         wait_for_work(&shutdown).await;
                         continue;
@@ -973,7 +980,12 @@ async fn run_assignment(
             .await
     };
     let task = match start {
-        Ok(response) => response.into_inner(),
+        Ok(response) => {
+            if can_launch {
+                supertag_protocol::crash_point("worker-host.start", "answered");
+            }
+            response.into_inner()
+        }
         Err(error) if retryable(&error) => {
             wait_for_work(shutdown).await;
             return Ok(());
@@ -1338,6 +1350,7 @@ async fn run_assignment(
             .as_ref()
             .map(|prepared| Box::new(prepared.clone())),
     })?;
+    supertag_protocol::crash_point("worker-host.execute", "journaled");
     let mcp = if supertag_protocol::mcp::grants(&task).next().is_some() {
         let cancel = shutdown.child_token();
         match with_authority(
@@ -1850,7 +1863,7 @@ fn retryable(error: &Status) -> bool {
     matches!(
         error.code(),
         Code::Unavailable | Code::DeadlineExceeded | Code::Cancelled
-    )
+    ) || supertag_protocol::interrupted_transport(error)
 }
 
 async fn wait_for_work(shutdown: &CancellationToken) {

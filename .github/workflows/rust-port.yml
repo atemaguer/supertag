@@ -196,6 +196,38 @@ jobs:
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
 
+  # Small hard-crash lane with production PostgreSQL durability settings. The runtime job's
+  # PostgreSQL proves logical behavior; this job proves the crash matrix with fsync,
+  # synchronous_commit, and full_page_writes on. Run locally with
+  # rust/scripts/durable-postgres-crash-lane.sh.
+  crash-durability:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start PostgreSQL with production durability settings
+        run: |
+          docker run --detach --name supertag-durable-postgres \
+            --env POSTGRES_USER=supertag --env POSTGRES_PASSWORD=rust-port-durable-database \
+            --env POSTGRES_DB=supertag_test --publish 127.0.0.1:5433:5432 \
+            postgres:17-alpine -c fsync=on -c synchronous_commit=on -c full_page_writes=on
+          for attempt in $(seq 1 30); do
+            if docker exec supertag-durable-postgres pg_isready -h 127.0.0.1 -U supertag -d supertag_test; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs supertag-durable-postgres
+          exit 1
+      - name: Run the crash matrix against durable PostgreSQL
+        run: |
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-durable-postgres-url"
+          printf '%s' 'postgresql://supertag:rust-port-durable-database@127.0.0.1:5433/supertag_test' > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          sh scripts/durable-postgres-crash-lane.sh
+
   bindings:
     runs-on: ubuntu-latest
     steps:

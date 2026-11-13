@@ -505,6 +505,7 @@ impl Store {
         let id = &task.task_id;
         sqlx::query("INSERT INTO supertag_v2_admissions (principal, operation_id, request_digest, task_id) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(id).execute(&mut *transaction).await?;
+        supertag_protocol::crash_point("control-plane.submit", "before-commit");
         transaction.commit().await?;
         Ok(task)
     }
@@ -744,6 +745,7 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
+        supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
         Ok(Some(Assignment {
             task: Some(task),
@@ -829,6 +831,7 @@ impl Store {
         let task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Claimed as i64 {
             crate::objectives::objective_started_in(&mut transaction, &task).await?;
+            supertag_protocol::crash_point("control-plane.start", "before-commit");
         }
         transaction.commit().await?;
         Ok(task)
@@ -899,6 +902,7 @@ impl Store {
             .bind(&input.task_id)
             .execute(&mut *transaction)
             .await?;
+            supertag_protocol::crash_point("control-plane.append-event", "before-commit");
         }
         transaction.commit().await?;
         Ok(TaskEvent {
@@ -1027,6 +1031,9 @@ impl Store {
             crate::github_publications::finish_in(&mut transaction, &task).await?;
         }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        if state == TaskState::Running {
+            supertag_protocol::crash_point("control-plane.finish", "before-commit");
+        }
         transaction.commit().await?;
         Ok(task)
     }

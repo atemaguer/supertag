@@ -164,6 +164,7 @@ impl Store {
             &task.task_id,
         )
         .await?;
+        supertag_protocol::crash_point("control-plane.slack-admission", "before-commit");
         tx.commit().await?;
         Ok(AcceptSlackEventResponse { task: Some(task) })
     }

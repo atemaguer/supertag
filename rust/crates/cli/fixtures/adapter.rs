@@ -23,6 +23,20 @@ use supertag_protocol::{
 use tokio::time::{Instant, sleep, timeout};
 use tonic::{Code, Request, transport::Channel};
 
+/// Crash-durability matrix hook: `--crash-at=<boundary>` kills this adapter with
+/// `SIGKILL` at that boundary after recording it in `--crash-marker=<path>`.
+fn crash_at(boundary: &str) {
+    let selected = std::env::args().any(|arg| arg.strip_prefix("--crash-at=") == Some(boundary));
+    if selected {
+        let marker = std::env::args_os().find_map(|arg| {
+            arg.to_str()
+                .and_then(|arg| arg.strip_prefix("--crash-marker="))
+                .map(std::ffi::OsString::from)
+        });
+        supertag_protocol::crash_now(&format!("adapter.{boundary}"), marker.as_deref());
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut bootstrap = Vec::new();
@@ -187,6 +201,7 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.clone().context("fixture received no Task")?;
+    crash_at("attached");
     budget::exercise(&bootstrap, &task, &mut harness).await?;
     commit_reviews::exercise(&bootstrap, &task, run.coordination.as_ref()).await?;
     let may_start = run
@@ -520,6 +535,7 @@ async fn main() -> Result<()> {
             None,
         )?)
         .await?;
+    crash_at("published");
 
     let mut result = format!(
         "{}: {} [{}]",
@@ -675,6 +691,7 @@ async fn main() -> Result<()> {
             None,
         )?)
         .await?;
+    crash_at("completed");
     if take_live {
         let closed = harness
             .take_live_input(authenticated_request(
