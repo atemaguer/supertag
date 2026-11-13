@@ -17,6 +17,7 @@ use tempfile::NamedTempFile;
 use tokio::time;
 use tonic::transport::Channel;
 const REPLY_FILE: &str = "reply.json";
+const OWNER_FILE: &str = "connector-owner";
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Claim {
@@ -51,6 +52,7 @@ pub(crate) struct Journal {
     directory: PathBuf,
     account_id: String,
     provider: String,
+    owner_id: String,
     _lock: File,
 }
 
@@ -75,14 +77,23 @@ impl Journal {
         let lock = open_private(&directory.join("delivery.lock"), true)?;
         lock.try_lock()
             .context("Surface delivery state is already in use")?;
+        let directory = directory.canonicalize()?;
+        let owner_id = owner_id(&directory)?;
         let journal = Self {
-            directory: directory.canonicalize()?,
+            directory,
             account_id: account_id.into(),
             provider: provider.into(),
+            owner_id,
             _lock: lock,
         };
         journal.load()?;
         Ok(journal)
+    }
+
+    /// Stable connector owner identity of this private state directory. A
+    /// restarted Gateway with the same state reclaims its ownership at once.
+    pub(crate) fn owner_id(&self) -> &str {
+        &self.owner_id
     }
 
     pub(crate) fn load(&self) -> Result<Option<Entry>> {
@@ -130,6 +141,48 @@ impl Journal {
         fs::remove_file(self.directory.join(REPLY_FILE))?;
         File::open(&self.directory)?.sync_all()?;
         Ok(())
+    }
+}
+
+fn owner_id(directory: &Path) -> Result<String> {
+    let path = directory.join(OWNER_FILE);
+    match open_private(&path, false) {
+        Ok(file) => {
+            let mut value = String::new();
+            file.take(65).read_to_string(&mut value)?;
+            let value = value.trim().to_owned();
+            ensure!(
+                uuid::Uuid::parse_str(&value).is_ok(),
+                "invalid connector owner identity"
+            );
+            Ok(value)
+        }
+        Err(error)
+            if error
+                .downcast_ref::<io::Error>()
+                .is_some_and(|e| e.kind() == io::ErrorKind::NotFound) =>
+        {
+            let value = uuid::Uuid::new_v4().to_string();
+            let mut staged = NamedTempFile::new_in(directory)?;
+            staged.write_all(value.as_bytes())?;
+            staged.as_file().sync_all()?;
+            staged.persist(&path)?;
+            File::open(directory)?.sync_all()?;
+            Ok(value)
+        }
+        Err(error) => Err(error).context("open connector owner identity"),
+    }
+}
+
+/// Claim a reply. A lost ownership lease is not an error: the driver reclaims or waits.
+pub(crate) async fn claim_call<T>(
+    call: impl Future<Output = Result<T, tonic::Status>>,
+    operation: &str,
+) -> Result<Option<T>> {
+    match time::timeout(DELIVERY_TIMEOUT, call).await {
+        Ok(Err(error)) if error.code() == tonic::Code::FailedPrecondition => Ok(None),
+        Ok(result) => private_call(async { result }, operation).await,
+        Err(_) => Ok(None),
     }
 }
 

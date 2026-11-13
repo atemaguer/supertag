@@ -153,6 +153,10 @@ impl Slack {
             .route("/slack/events", post(webhook))
             .layer(DefaultBodyLimit::max(MAX_WEBHOOK_BYTES))
             .layer(middleware::from_fn(webhook_deadline))
+            .layer(middleware::from_fn_with_state(
+                stop.clone(),
+                crate::ownership::refuse_while_draining,
+            ))
             .with_state(self.clone());
         let web = async {
             axum::serve(listener, router)

@@ -154,6 +154,10 @@ impl MicrosoftTeams {
             .route("/microsoft-teams/messages", post(webhook))
             .layer(DefaultBodyLimit::max(128 * 1024))
             .layer(middleware::from_fn(deadline))
+            .layer(middleware::from_fn_with_state(
+                stop.clone(),
+                crate::ownership::refuse_while_draining,
+            ))
             .with_state(self.clone());
         let web = async {
             axum::serve(listener, router)

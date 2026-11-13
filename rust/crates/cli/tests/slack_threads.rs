@@ -179,23 +179,40 @@ impl Drop for Process {
 struct MockSlack {
     endpoint: String,
     requests: Arc<Mutex<Vec<Value>>>,
+    gate: Arc<tokio::sync::Semaphore>,
     server: tokio::task::JoinHandle<Result<()>>,
 }
 
 impl MockSlack {
     async fn start() -> Result<Self> {
+        Self::start_with(tokio::sync::Semaphore::MAX_PERMITS).await
+    }
+
+    /// Record each post at once but answer it only after `release`.
+    async fn start_held() -> Result<Self> {
+        Self::start_with(0).await
+    }
+
+    fn release(&self) {
+        self.gate.add_permits(1024);
+    }
+
+    async fn start_with(permits: usize) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = format!("http://{}/chat.postMessage", listener.local_addr()?);
         let requests = Arc::new(Mutex::new(Vec::new()));
         let observed = requests.clone();
+        let gate = Arc::new(tokio::sync::Semaphore::new(permits));
+        let held = gate.clone();
         let server = tokio::spawn(async move {
             loop {
                 let (mut connection, _) = listener.accept().await?;
                 let request =
                     tokio::time::timeout(Duration::from_secs(5), mock_request(&mut connection))
                         .await??;
-                let mut requests = observed.lock().await;
-                requests.push(request);
+                observed.lock().await.push(request);
+                held.acquire().await?.forget();
+                let requests = observed.lock().await;
                 let body = json!({"ok":true,"channel":CHANNEL,"ts":format!("1794470100.{:06}",requests.len())}).to_string();
                 drop(requests);
                 connection.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await?;
@@ -205,6 +222,7 @@ impl MockSlack {
         Ok(Self {
             endpoint,
             requests,
+            gate,
             server,
         })
     }
@@ -856,4 +874,437 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads() -
     gateway.stop().await?;
     cp.stop().await?;
     Ok(())
+}
+
+/// A disposable database for one process test: SQLite in the test directory, or a
+/// fresh PostgreSQL database from `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`.
+struct Database {
+    url: String,
+    admin: Option<(String, String)>,
+}
+
+impl Database {
+    async fn create(directory: &Path, postgres: bool) -> Result<Self> {
+        if !postgres {
+            return Ok(Self {
+                url: format!("sqlite://{}?mode=rwc", directory.join("state.db").display()),
+                admin: None,
+            });
+        }
+        use sqlx::Executor;
+        let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+            .context("disposable PostgreSQL URL file required")?;
+        let admin = std::fs::read_to_string(path)?.trim().to_owned();
+        let name = format!("supertag_slack_{}", Uuid::new_v4().simple());
+        let mut connection = sqlx::PgConnection::connect(&admin).await?;
+        connection
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await?;
+        connection.close().await?;
+        let mut url = url::Url::parse(&admin)?;
+        url.set_path(&name);
+        Ok(Self {
+            url: url.to_string(),
+            admin: Some((admin, name)),
+        })
+    }
+
+    async fn connect(&self) -> Result<sqlx::AnyConnection> {
+        sqlx::any::install_default_drivers();
+        Ok(sqlx::AnyConnection::connect(&self.url).await?)
+    }
+
+    async fn drop_database(self) -> Result<()> {
+        use sqlx::Executor;
+        if let Some((admin, name)) = self.admin {
+            let mut connection = sqlx::PgConnection::connect(&admin).await?;
+            connection
+                .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+                .await?;
+            connection.close().await?;
+        }
+        Ok(())
+    }
+
+    async fn reply(&self, task: &str) -> Result<Option<(i64, Option<String>)>> {
+        let mut connection = self.connect().await?;
+        let row =
+            sqlx::query("SELECT state, provider_receipt FROM supertag_v2_replies WHERE task_id=$1")
+                .bind(task)
+                .fetch_optional(&mut connection)
+                .await?;
+        connection.close().await?;
+        use sqlx::Row;
+        Ok(match row {
+            Some(row) => Some((row.try_get("state")?, row.try_get("provider_receipt")?)),
+            None => None,
+        })
+    }
+
+    async fn delivered(&self, task: &str) -> Result<()> {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if let Some((state, receipt)) = self.reply(task).await? {
+                if state == ReplyState::Delivered as i64 {
+                    ensure!(receipt.is_some(), "delivered reply has no provider receipt");
+                    return Ok(());
+                }
+                ensure!(
+                    state == ReplyState::Pending as i64 || state == ReplyState::Claimed as i64,
+                    "reply settled as {state}, not delivered"
+                );
+            }
+            ensure!(Instant::now() < deadline, "Slack reply was not delivered");
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn owner(&self) -> Result<Option<String>> {
+        let mut connection = self.connect().await?;
+        let owner = sqlx::query_scalar(
+            "SELECT owner_id FROM supertag_v2_connector_leases WHERE account_id=$1 AND expires_at_ms>0",
+        )
+        .bind(ACCOUNT)
+        .fetch_optional(&mut connection)
+        .await?;
+        connection.close().await?;
+        Ok(owner)
+    }
+
+    async fn await_owner(&self, owner: &str, within: Duration) -> Result<()> {
+        let deadline = Instant::now() + within;
+        while self.owner().await?.as_deref() != Some(owner) {
+            ensure!(
+                Instant::now() < deadline,
+                "connector ownership did not move to {owner}"
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+        Ok(())
+    }
+}
+
+fn owner_id(directory: &Path, state: &str) -> Result<String> {
+    Ok(
+        std::fs::read_to_string(directory.join(state).join("connector-owner"))?
+            .trim()
+            .to_owned(),
+    )
+}
+
+async fn put_builder(credentials: &Credentials, public: &str) -> Result<()> {
+    OperatorClient::connect(public.to_owned())
+        .await?
+        .put_tag(credentials.operator(PutTagRequest {
+            tag_id: "builder".into(),
+            instructions: "Original Tag".into(),
+            allowed_actions: vec!["files:read".into()],
+            ..Default::default()
+        })?)
+        .await?;
+    Ok(())
+}
+
+async fn run_host(
+    credentials: &Credentials,
+    directory: &Path,
+    gateway: &str,
+    name: &str,
+    task: &Task,
+) -> Result<Task> {
+    // An Objective may queue its own owner turns ahead of this one; run them too.
+    for _ in 0..4 {
+        let mut command = credentials.command(&[
+            "worker-host",
+            "--gateway",
+            gateway,
+            "--adapter",
+            ADAPTER,
+            "--once",
+            "--state-directory",
+        ]);
+        command.arg(directory.join(name));
+        Process::spawn(command, directory, name)?.success().await?;
+        let completed = OperatorClient::connect(gateway.to_owned())
+            .await?
+            .get_task(credentials.operator(GetTaskRequest {
+                task_id: task.task_id.clone(),
+            })?)
+            .await?
+            .into_inner();
+        if completed.state() == TaskState::Succeeded {
+            return Ok(completed);
+        }
+    }
+    anyhow::bail!("Task did not succeed")
+}
+
+async fn control_plane(
+    credentials: &Credentials,
+    directory: &Path,
+    database: &Database,
+) -> Result<(Process, String)> {
+    let mut command = credentials.command(&["control-plane"]);
+    command.env("SUPERTAG_DATABASE_URL", &database.url);
+    let mut cp = Process::spawn(command, directory, "cp")?;
+    let private = cp.endpoints(1).await?.remove(0);
+    Ok((cp, private))
+}
+
+/// TS `tests/gateway-drain.test.ts`, across processes: a draining Gateway refuses
+/// new provider events, finishes the reply it is sending, settles it, and hands
+/// connector ownership to a second Gateway, which delivers the next reply. No
+/// reply is lost, repeated, or left uncertain.
+async fn drain_hands_connector_to_second_gateway(postgres: bool) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let directory = directory.path();
+    let database = Database::create(directory, postgres).await?;
+    let credentials = Credentials::new();
+    let (mut cp, private) = control_plane(&credentials, directory, &database).await?;
+    let held = MockSlack::start_held().await?;
+    let standby = MockSlack::start().await?;
+    let (mut first, first_public, first_http) = gateway(
+        &credentials,
+        &private,
+        directory,
+        "gateway-a",
+        "builder",
+        &held,
+    )
+    .await?;
+    let first_owner = owner_id(directory, "gateway-a")?;
+    database.await_owner(&first_owner, WAIT).await?;
+    let (mut second, second_public, second_http) = gateway(
+        &credentials,
+        &private,
+        directory,
+        "gateway-b",
+        "builder",
+        &standby,
+    )
+    .await?;
+    let second_owner = owner_id(directory, "gateway-b")?;
+    assert_ne!(first_owner, second_owner);
+    put_builder(&credentials, &first_public).await?;
+
+    // Ingress is stateless: the standby Gateway accepts the event, and the owner delivers.
+    let mention = payload("EvDRAIN1", THREAD, true, "Inspect before the drain");
+    assert_eq!(
+        signed(&second_http, &mention).await?,
+        reqwest::StatusCode::OK
+    );
+    let mut connector = ConnectorClient::connect(private.clone()).await?;
+    let first_task = receipt(&mut connector, &credentials, &mention).await?;
+    run_host(
+        &credentials,
+        directory,
+        &second_public,
+        "host-one",
+        &first_task,
+    )
+    .await?;
+    let deadline = Instant::now() + WAIT;
+    while held.requests.lock().await.is_empty() {
+        ensure!(Instant::now() < deadline, "owner did not start sending");
+        sleep(Duration::from_millis(10)).await;
+    }
+    // The owner's post is in flight. Begin draining it.
+    ensure!(unsafe { libc::kill(first.child.id() as i32, libc::SIGTERM) } == 0);
+    let challenge = json!({"type":"url_verification","challenge":"drain-probe"});
+    let deadline = Instant::now() + WAIT;
+    loop {
+        match signed(&first_http, &challenge).await {
+            Ok(status) if status == reqwest::StatusCode::OK => {}
+            Ok(status) => {
+                assert_eq!(status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+                break;
+            }
+            // A listener that stopped accepting also refuses new ingress.
+            Err(_) => break,
+        }
+        ensure!(Instant::now() < deadline, "drain did not refuse ingress");
+        sleep(Duration::from_millis(10)).await;
+    }
+    let refused = payload(
+        "EvDRAINREFUSED",
+        "1794470001.100000",
+        true,
+        "Arrives while draining",
+    );
+    ensure!(
+        !matches!(
+            signed(&first_http, &refused).await,
+            Ok(reqwest::StatusCode::OK)
+        ),
+        "draining Gateway accepted a new provider event"
+    );
+    // The in-flight post is neither abandoned nor taken over while it is sent.
+    sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        database
+            .reply(&first_task.task_id)
+            .await?
+            .map(|(state, _)| state),
+        Some(ReplyState::Claimed as i64)
+    );
+    assert!(standby.requests.lock().await.is_empty());
+    held.release();
+    first.success().await?;
+    database.delivered(&first_task.task_id).await?;
+    ensure!(
+        !directory.join("gateway-a/reply.json").exists(),
+        "drained Gateway left an unsettled delivery"
+    );
+    // Release, not lease expiry, hands the account over.
+    database
+        .await_owner(&second_owner, Duration::from_secs(5))
+        .await?;
+
+    // The provider retries the refused event at the remaining Gateway.
+    assert_eq!(
+        signed(&second_http, &refused).await?,
+        reqwest::StatusCode::OK
+    );
+    let second_task = receipt(&mut connector, &credentials, &refused).await?;
+    assert_eq!(second_task.session_id, first_task.session_id);
+    run_host(
+        &credentials,
+        directory,
+        &second_public,
+        "host-two",
+        &second_task,
+    )
+    .await?;
+    database.delivered(&second_task.task_id).await?;
+    second.stop().await?;
+    cp.stop().await?;
+    assert_eq!(held.requests.lock().await.len(), 1);
+    assert_eq!(standby.requests.lock().await.len(), 1);
+    for request in held
+        .requests
+        .lock()
+        .await
+        .iter()
+        .chain(standby.requests.lock().await.iter())
+    {
+        assert_eq!(request["thread_ts"], THREAD);
+    }
+    let mut connection = database.connect().await?;
+    let unsettled: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_replies WHERE state<>$1")
+            .bind(ReplyState::Delivered as i64)
+            .fetch_one(&mut connection)
+            .await?;
+    connection.close().await?;
+    assert_eq!(unsettled, 0);
+    database.drop_database().await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_drain_hands_connector_to_second_gateway() -> Result<()> {
+    drain_hands_connector_to_second_gateway(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_drain_hands_connector_to_second_gateway() -> Result<()> {
+    drain_hands_connector_to_second_gateway(true).await
+}
+
+/// TS `tests/objective-surface-execution.test.ts` over signed Slack webhooks: an
+/// explicit invocation starts an Objective whose turns answer in the thread, a
+/// plain thread reply is its next turn, and `pause` answers in the thread.
+async fn slack_thread_starts_and_steers_an_objective(postgres: bool) -> Result<()> {
+    use supertag_protocol::v2::{ListObjectivesRequest, objectives_client::ObjectivesClient};
+    let directory = tempfile::tempdir()?;
+    let directory = directory.path();
+    let database = Database::create(directory, postgres).await?;
+    let credentials = Credentials::new();
+    let (mut cp, private) = control_plane(&credentials, directory, &database).await?;
+    let mock = MockSlack::start().await?;
+    let (mut gateway, public, http) = gateway(
+        &credentials,
+        &private,
+        directory,
+        "gateway",
+        "builder",
+        &mock,
+    )
+    .await?;
+    put_builder(&credentials, &public).await?;
+    let mut connector = ConnectorClient::connect(private.clone()).await?;
+
+    let start = payload(
+        "EvOBJECTIVE",
+        THREAD,
+        true,
+        "<@UBOT1> objective Validate the fixture",
+    );
+    assert_eq!(signed(&http, &start).await?, reqwest::StatusCode::OK);
+    let starting = receipt(&mut connector, &credentials, &start).await?;
+    let objectives = ObjectivesClient::connect(public.clone())
+        .await?
+        .list_objectives(credentials.operator(ListObjectivesRequest::default())?)
+        .await?
+        .into_inner()
+        .objectives;
+    assert_eq!(objectives.len(), 1);
+    let objective = &objectives[0];
+    assert_eq!(objective.outcome, "Validate the fixture");
+    assert_eq!(objective.starting_task_id, starting.task_id);
+    assert!(!starting.session_id.starts_with("slack:"));
+    let completed = run_host(&credentials, directory, &public, "host-start", &starting).await?;
+    assert!(
+        completed
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("Validate the fixture"))
+    );
+    database.delivered(&starting.task_id).await?;
+
+    let mut steer = payload(
+        "EvSTEER",
+        "1794470001.100000",
+        false,
+        "Focus on solo practices instead",
+    );
+    steer["event"]["user"] = "UBOB1".into();
+    assert_eq!(signed(&http, &steer).await?, reqwest::StatusCode::OK);
+    let turn = receipt(&mut connector, &credentials, &steer).await?;
+    assert_eq!(turn.session_id, starting.session_id);
+    run_host(&credentials, directory, &public, "host-steer", &turn).await?;
+    database.delivered(&turn.task_id).await?;
+
+    let pause = payload("EvPAUSE", "1794470002.100000", true, "<@UBOT1> pause");
+    assert_eq!(signed(&http, &pause).await?, reqwest::StatusCode::OK);
+    let answered = receipt(&mut connector, &credentials, &pause).await?;
+    assert_eq!(answered.state(), TaskState::Succeeded);
+    database.delivered(&answered.task_id).await?;
+    gateway.stop().await?;
+    cp.stop().await?;
+    let requests = mock.requests.lock().await;
+    // The starting turn, any owner turns it queued, the steering turn, and the pause.
+    assert!(requests.len() >= 3);
+    for request in requests.iter() {
+        assert_eq!(request["thread_ts"], THREAD);
+    }
+    assert!(
+        requests[requests.len() - 1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("Paused. Objective {}", objective.objective_id))
+    );
+    drop(requests);
+    database.drop_database().await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_slack_thread_starts_and_steers_an_objective() -> Result<()> {
+    slack_thread_starts_and_steers_an_objective(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_slack_thread_starts_and_steers_an_objective() -> Result<()> {
+    slack_thread_starts_and_steers_an_objective(true).await
 }

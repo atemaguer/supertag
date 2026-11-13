@@ -19,10 +19,23 @@ impl Store {
         principal: &str,
         operation_id: &str,
     ) -> Result<ClaimReplyResponse> {
+        self.claim_reply_as(principal, operation_id, None).await
+    }
+
+    /// `owner` fences the claim to the account's current connector ownership lease.
+    pub(crate) async fn claim_reply_as(
+        &self,
+        principal: &str,
+        operation_id: &str,
+        owner: Option<&str>,
+    ) -> Result<ClaimReplyResponse> {
         let account = connector_account(principal)?;
         name("operation ID", operation_id)?;
         let (mut tx, _) = self.write().await?;
         let now = self.execution_now_ms();
+        if let Some(owner) = owner {
+            crate::connector_leases::current_in(&mut tx, account, owner, now).await?;
+        }
         sweep_in(&mut tx, now).await?;
         if let Some(prior) = sqlx::query("SELECT reply_id,lease_token FROM supertag_v2_reply_claims WHERE account_id=$1 AND operation_id=$2").bind(account).bind(operation_id).fetch_optional(&mut *tx).await? {
             let reply = reply_row(&reply_in(&mut tx, account, &prior.try_get::<String,_>("reply_id")?).await?)?;

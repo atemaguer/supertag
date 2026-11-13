@@ -9,6 +9,7 @@ mod artifact_volumes;
 mod budget_pool;
 mod checkpoints;
 mod commit_reviews;
+mod connector_leases;
 mod context;
 mod conversations;
 mod external_effects;
@@ -26,6 +27,7 @@ mod policy;
 mod replies;
 mod review_artifacts;
 mod store;
+mod surface_objectives;
 mod surface_policy;
 mod tags;
 mod task_artifact_inputs;
@@ -667,9 +669,44 @@ impl connector_server::Connector for ControlPlane {
         let principal = self.principal(&request, "connector:")?;
         Ok(Response::new(
             self.store
-                .claim_reply(&principal, &request.into_inner().operation_id)
+                .claim_owned_reply(&principal, &request.into_inner())
                 .await?,
         ))
+    }
+
+    async fn claim_connector(
+        &self,
+        request: Request<ClaimConnectorRequest>,
+    ) -> Result<Response<ConnectorLease>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .claim_connector(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn renew_connector(
+        &self,
+        request: Request<RenewConnectorRequest>,
+    ) -> Result<Response<ConnectorLease>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .renew_connector(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn release_connector(
+        &self,
+        request: Request<ReleaseConnectorRequest>,
+    ) -> Result<Response<ReleaseConnectorResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        self.store
+            .release_connector(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReleaseConnectorResponse {}))
     }
 
     async fn settle_reply(
@@ -839,7 +876,8 @@ mod tests {
             cp.claim_reply(
                 authenticated_request(
                     ClaimReplyRequest {
-                        operation_id: "delivery".into()
+                        operation_id: "delivery".into(),
+                        connector_lease_token: String::new(),
                     },
                     "private-key",
                     Some("operator:alice")

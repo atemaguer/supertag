@@ -15,6 +15,7 @@ mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
 pub mod microsoft_teams;
+mod ownership;
 mod policy;
 #[cfg(test)]
 mod readiness_tests;

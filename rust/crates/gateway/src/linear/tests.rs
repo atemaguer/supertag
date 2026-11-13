@@ -184,7 +184,7 @@ async fn namespace_isolated_and_recovered_sending_never_reposts() -> Result<()> 
     drop(linear);
     assert!(Journal::open(&path, "github/shared", "github").is_err());
     let recovered = connector(dir.path())?;
-    assert!(recovered.0.advance_delivery().await?);
+    assert!(recovered.0.advance_delivery("").await?);
     assert!(matches!(
         recovered.0.journal.load()?,
         Some(Entry::Settle {

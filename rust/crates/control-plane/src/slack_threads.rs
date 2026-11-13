@@ -100,23 +100,40 @@ impl Store {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
-        let Some(task) = admit_connector_task_in(
+        let origin = VerifiedConnectorOrigin {
+            connector_account_id: account,
+            tag_id: &tag,
+            scope: VerifiedScope::Slack {
+                team_id: &input.team_id,
+                channel_id: &input.channel_id,
+            },
+        };
+        let now_ms = self.execution_now_ms();
+        let handled = Box::pin(crate::surface_objectives::handle_in(
             &mut tx,
             order,
-            VerifiedConnectorOrigin {
-                connector_account_id: account,
-                tag_id: &tag,
-                scope: VerifiedScope::Slack {
-                    team_id: &input.team_id,
-                    channel_id: &input.channel_id,
-                },
+            crate::surface_objectives::Message {
+                origin,
+                conversation_id: &input.channel_id,
+                thread_id: &input.thread_ts,
+                event_id: &input.event_id,
+                prompt: &input.prompt,
+                // Unaddressed messages in inactive threads were ignored above.
+                addressed: true,
             },
-            &session,
-            &input.prompt,
-            self.execution_now_ms(),
-        )
-        .await?
-        else {
+            now_ms,
+        ))
+        .await?;
+        let (task, answered) = match handled {
+            crate::surface_objectives::Handled::Ordinary => (
+                admit_connector_task_in(&mut tx, order, origin, &session, &input.prompt, now_ms)
+                    .await?,
+                false,
+            ),
+            crate::surface_objectives::Handled::Work(task) => (task, false),
+            crate::surface_objectives::Handled::Status(task) => (Some(task), true),
+        };
+        let Some(task) = task else {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
@@ -164,6 +181,9 @@ impl Store {
             &task.task_id,
         )
         .await?;
+        if answered {
+            crate::surface_objectives::reply_in(&mut tx, &task).await?;
+        }
         tx.commit().await?;
         Ok(AcceptSlackEventResponse { task: Some(task) })
     }

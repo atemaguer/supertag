@@ -1,34 +1,30 @@
 use super::{Connector, DELIVERY_TIMEOUT, bounded_json, numeric_id, service_url};
-use crate::delivery_journal::{Claim, Entry, Outcome, private_call, settle_call, with_claim_lease};
+use crate::delivery_journal::{
+    Claim, Entry, Outcome, claim_call, private_call, settle_call, with_claim_lease,
+};
 use anyhow::{Result, ensure};
 use serde_json::json;
-use std::time::Duration;
 use supertag_protocol::v2::{
     ClaimReplyRequest, GetMicrosoftTeamsReplyRouteRequest, MicrosoftTeamsReplyRoute, Reply,
     ReplyState, SettleReplyRequest,
 };
-use tokio::time;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-const POLL_INTERVAL: Duration = Duration::from_secs(1);
 impl Connector {
     pub(super) async fn deliver(&self, shutdown: &CancellationToken) -> Result<()> {
-        while !shutdown.is_cancelled() {
-            let advance = tokio::select! {
-                _ = shutdown.cancelled() => break,
-                advance = self.advance_delivery() => advance?,
-            };
-            if !advance {
-                tokio::select! {
-                    _ = shutdown.cancelled() => break,
-                    _ = time::sleep(POLL_INTERVAL) => {}
-                }
-            }
+        crate::ownership::Owner {
+            control_plane: &self.control_plane,
+            gateway_token: &self.gateway_token,
+            principal: &self.principal,
+            journal: &self.journal,
         }
-        Ok(())
+        .drive(shutdown, |owner| async move {
+            self.advance_delivery(&owner).await
+        })
+        .await
     }
 
-    pub(super) async fn advance_delivery(&self) -> Result<bool> {
+    pub(super) async fn advance_delivery(&self, owner: &str) -> Result<bool> {
         let entry = match self.journal.load()? {
             Some(entry) => entry,
             None => {
@@ -41,8 +37,14 @@ impl Connector {
         };
         match entry {
             Entry::Claim { operation_id } => {
-                let request = self.request(ClaimReplyRequest { operation_id }, DELIVERY_TIMEOUT)?;
-                let Some(claim) = private_call(
+                let request = self.request(
+                    ClaimReplyRequest {
+                        operation_id,
+                        connector_lease_token: owner.into(),
+                    },
+                    DELIVERY_TIMEOUT,
+                )?;
+                let Some(claim) = claim_call(
                     self.control_plane.clone().claim_reply(request),
                     "claim Microsoft Teams reply",
                 )
