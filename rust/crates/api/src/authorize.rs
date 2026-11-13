@@ -124,7 +124,8 @@ const OC: u16 = OPERATOR | CLIENT;
 const ANY: u16 = OPERATOR | GATEWAY | HOST | CLIENT;
 
 /// Every RPC of the runtime protocol and who may call it on the Control Plane's public listener.
-/// `*` covers every method of a service that has no exact entry. See
+/// `*` covers every method of a service that has no exact entry. A `*` entry never admits a
+/// client: each method a client may call is listed by name. See
 /// contributing/auth-key-roles-design.md, section 4.
 const TABLE: &[(&str, &str, u16)] = &[
     ("ProtocolNegotiation", "*", OPEN),
@@ -162,18 +163,46 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("ArtifactPublications", "*", O),
     ("Spend", "*", O),
     ("Metrics", "*", O),
-    // Conversations and own work.
-    ("Conversations", "*", OC),
-    ("Objectives", "*", OC),
-    ("Objectives", "SetLimits", O),
-    ("Objectives", "SetRuntimeActions", O),
-    ("ObjectiveOverviews", "*", OC),
-    ("OperatorEvents", "*", OC),
-    ("LiveInputs", "*", OC),
-    ("WorkSessions", "*", OC),
-    ("ArtifactCatalog", "*", OC),
+    // Conversations and own work. Every client method is listed by name, so a new method on
+    // these services is operator-only until it is classified.
+    ("Conversations", "*", O),
+    ("Conversations", "ListConversations", OC),
+    ("Conversations", "ListMessages", OC),
+    ("Conversations", "SendMessage", OC),
+    ("Conversations", "GetMessage", OC),
+    ("Conversations", "ListMessageEvents", OC),
+    ("Objectives", "*", O),
+    ("Objectives", "CreateObjective", OC),
+    ("Objectives", "GetObjective", OC),
+    ("Objectives", "ListObjectives", OC),
+    ("Objectives", "ListCommitReviews", OC),
+    ("Objectives", "PauseObjective", OC),
+    ("Objectives", "ResumeObjective", OC),
+    ("Objectives", "CancelObjective", OC),
+    ("Objectives", "ReviewObjective", OC),
+    ("Objectives", "CompleteObjective", OC),
+    ("ObjectiveOverviews", "*", O),
+    ("ObjectiveOverviews", "GetObjectiveOverview", OC),
+    ("OperatorEvents", "*", O),
+    ("OperatorEvents", "Watch", OC),
+    ("LiveInputs", "*", O),
+    ("LiveInputs", "QueueInput", OC),
+    ("LiveInputs", "GetInput", OC),
+    ("LiveInputs", "ResolveInput", OC),
+    ("WorkSessions", "*", O),
+    ("WorkSessions", "Get", OC),
+    ("WorkSessions", "List", OC),
+    ("ArtifactCatalog", "*", O),
+    ("ArtifactCatalog", "Get", OC),
+    ("ArtifactCatalog", "List", OC),
     ("ArtifactTransfers", "DownloadFile", OC),
-    ("Inbox", "*", OC),
+    ("Inbox", "*", O),
+    ("Inbox", "ListItems", OC),
+    ("Inbox", "GetQuestion", OC),
+    ("Inbox", "AnswerQuestion", OC),
+    ("Inbox", "GetApproval", OC),
+    ("Inbox", "ListApprovals", OC),
+    ("Inbox", "DecideApproval", OC),
     // Execution.
     ("WorkerHost", "*", HOST),
     ("AttemptInputs", "*", HOST),
@@ -535,6 +564,16 @@ mod tests {
             assert!(
                 *method == "*" || found.method.iter().any(|m| m.name() == *method),
                 "stale table entry {service}/{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_service_wide_entry_admits_a_client() {
+        for (service, method, access) in TABLE {
+            assert!(
+                *method != "*" || access & CLIENT == 0,
+                "{service}/* admits a client; list each client method by name"
             );
         }
     }

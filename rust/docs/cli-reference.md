@@ -2362,7 +2362,7 @@ Options:
           Host and client keys: a Tag the enrollee may run (host) or talk to (client). Repeat for more Tags
 
       --all-tags
-          Host and client keys: every Tag
+          Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no Surface Account names, which admit work on any Tag, and deliver the admin operator's notifications
 
   -h, --help
           Print help (see a summary with '-h')

@@ -194,6 +194,9 @@ export type Enrollment = Message<"supertag.runtime.v2.Enrollment"> & {
   allowedTagIds: string[];
 
   /**
+   * Every Tag. A Gateway with it serves connector accounts no Surface Account
+   * names and delivers the admin operator's notifications.
+   *
    * @generated from field: bool all_tags = 10;
    */
   allTags: boolean;

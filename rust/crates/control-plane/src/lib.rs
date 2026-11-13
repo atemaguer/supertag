@@ -955,8 +955,7 @@ mod tests {
                 thread_id: None,
             }),
         };
-        // A connector call names its account; only a Gateway may make one, and the first
-        // Gateway to act for an unmanaged account keeps it.
+        // A connector call names its account; only a Gateway may make one.
         for (principal, code) in [
             ("operator:alice", tonic::Code::PermissionDenied),
             ("client:laptop", tonic::Code::PermissionDenied),
@@ -975,5 +974,142 @@ mod tests {
             cp.accept_event(missing).await.unwrap_err().code(),
             tonic::Code::InvalidArgument
         );
+    }
+
+    /// Accounts no Surface Account names admit work on any Tag, and the admin operator's
+    /// notifications span every Tag, so only a Gateway whose Auth Key trusts it with every Tag
+    /// serves them. A Gateway enrolled without it is refused both.
+    #[tokio::test]
+    async fn only_a_gateway_trusted_with_every_tag_serves_unnamed_accounts_and_notifications() {
+        use sha2::{Digest, Sha256};
+        use supertag_protocol::v2::operator_notifications_server::OperatorNotifications;
+        let cp = ControlPlane::open(
+            "sqlite::memory:",
+            "private-key".into(),
+            "operator:local".into(),
+        )
+        .await
+        .unwrap();
+        cp.seed_enrollment(Role::Gateway, "local", &Sha256::digest(b"local gateway"))
+            .await
+            .unwrap();
+        let key = Sha256::digest(b"narrow gateway key").to_vec();
+        cp.store
+            .create_auth_key(
+                "operator:local",
+                &CreateAuthKeyRequest {
+                    name: "narrow".into(),
+                    role: PrincipalRole::Gateway.into(),
+                    operation_id: "narrow-key".into(),
+                    key_digest: key.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        cp.store
+            .enroll(
+                &key,
+                &EnrollRequest {
+                    role: PrincipalRole::Gateway.into(),
+                    name: "narrow".into(),
+                    operation_id: "narrow-enroll".into(),
+                    token_digest: Sha256::digest(b"narrow credential").to_vec(),
+                },
+            )
+            .await
+            .unwrap();
+        // No Auth Key enrolls a host or Gateway as `local`, the name the Control Plane seeds.
+        let squat = Sha256::digest(b"squatting gateway key").to_vec();
+        cp.store
+            .create_auth_key(
+                "operator:local",
+                &CreateAuthKeyRequest {
+                    name: "squat".into(),
+                    role: PrincipalRole::Gateway.into(),
+                    operation_id: "squat-key".into(),
+                    key_digest: squat.clone(),
+                    all_tags: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            cp.store
+                .enroll(
+                    &squat,
+                    &EnrollRequest {
+                        role: PrincipalRole::Gateway.into(),
+                        name: "local".into(),
+                        operation_id: "squat-enroll".into(),
+                        token_digest: Sha256::digest(b"squat credential").to_vec(),
+                    },
+                )
+                .await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+        for (gateway, admitted) in [
+            ("gateway:local", true),
+            ("gateway:narrow", false),
+            ("gateway:unenrolled", false),
+        ] {
+            let claimed = cp
+                .claim(
+                    authenticated_request(
+                        ClaimOperatorNotificationRequest::default(),
+                        "private-key",
+                        Some(gateway),
+                    )
+                    .unwrap(),
+                )
+                .await;
+            assert_eq!(claimed.is_ok(), admitted, "{gateway} notifications");
+            if !admitted {
+                assert_eq!(claimed.unwrap_err().code(), tonic::Code::PermissionDenied);
+            }
+            let settled = cp
+                .settle(
+                    authenticated_request(
+                        SettleOperatorNotificationRequest {
+                            notification_id: "missing".into(),
+                            lease_token: "lease".into(),
+                            delivered: true,
+                            ..Default::default()
+                        },
+                        "private-key",
+                        Some(gateway),
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap_err()
+                .code();
+            assert_eq!(
+                settled,
+                if admitted {
+                    tonic::Code::NotFound
+                } else {
+                    tonic::Code::PermissionDenied
+                },
+                "{gateway} settle"
+            );
+            let mut request = authenticated_request(
+                ClaimConnectorRequest {
+                    owner_id: "owner".into(),
+                },
+                "private-key",
+                Some(gateway),
+            )
+            .unwrap();
+            request
+                .metadata_mut()
+                .insert(CONNECTOR_ACCOUNT_HEADER, "made-up-account".parse().unwrap());
+            let leased = cp.claim_connector(request).await;
+            assert_eq!(leased.is_ok(), admitted, "{gateway} unnamed account");
+            if !admitted {
+                assert_eq!(leased.unwrap_err().code(), tonic::Code::PermissionDenied);
+            }
+        }
     }
 }

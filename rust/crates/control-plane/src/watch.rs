@@ -225,7 +225,8 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                     }
                     position = notice.position;
                     let shared = notice.owner.is_empty()
-                        && (notice.change.kind == WatchKind::Team as i32
+                        && ((notice.change.kind == WatchKind::Team as i32
+                                && store.client_sees_team(client_tags.as_deref(), &notice.change.team_id).await.map_err(Status::from)?)
                             || (notice.change.kind == WatchKind::Tag as i32
                                 && client_tags.as_ref().is_none_or(|tags| tags.contains(&notice.change.tag_id))));
                     if (crate::store::sees_owner(&principal, &notice.owner) || shared)

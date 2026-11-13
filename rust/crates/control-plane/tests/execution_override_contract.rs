@@ -1,5 +1,6 @@
 mod support;
 
+use sha2::Digest;
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{ControlPlane, HostAuthority, Store, StoreError};
 use supertag_protocol::{authenticated_request, v2::connector_server::Connector, v2::*};
@@ -59,8 +60,8 @@ async fn accept(
     principal: &str,
     input: &AcceptEventRequest,
 ) -> Result<Task, Status> {
-    // The Gateway names the connector account it acts for; the first Gateway to act for an
-    // unmanaged account keeps it.
+    // The Gateway names the connector account it acts for; the first Gateway trusted with every
+    // Tag to act for an unmanaged account keeps it.
     let mut request = authenticated_request(input.clone(), KEY, Some("gateway:fixture")).unwrap();
     request.metadata_mut().insert(
         supertag_protocol::CONNECTOR_ACCOUNT_HEADER,
@@ -137,6 +138,14 @@ async fn contract(url: &str) {
     let cp = ControlPlane::open(url, KEY.into(), "operator:local".into())
         .await
         .unwrap();
+    // A seeded Gateway is trusted with every Tag, so it may serve unmanaged accounts.
+    cp.seed_enrollment(
+        supertag_control_plane::Role::Gateway,
+        "fixture",
+        &sha2::Sha256::digest(b"fixture gateway"),
+    )
+    .await
+    .unwrap();
     let store = Store::open(url).await.unwrap();
     let mut read = sqlx::AnyConnection::connect(url).await.unwrap();
     let range = put_tag(&store, &["first", "chosen"], &["medium", "high"]).await;

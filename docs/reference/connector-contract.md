@@ -35,10 +35,11 @@ Before any other call, the connector calls `ProtocolNegotiation.Negotiate` with 
 ## Credentials
 
 A connector is an enrolled Gateway. An operator creates a gateway Auth Key, and the connector
-enrolls once:
+enrolls once. `AcceptEvent` serves accounts no Surface Account names, and those admit work on any
+Tag, so the key must trust the connector with every Tag:
 
 ```sh
-supertag auth-key create discord-acme --role gateway
+supertag auth-key create discord-acme --role gateway --all-tags
 supertag gateway enroll discord-acme --control-plane https://cp.example.com \
   --state-directory /var/lib/discord-acme --auth-key file:/run/secrets/auth-key
 ```
@@ -54,7 +55,8 @@ directory. The Control Plane keeps only its digest. Every call then carries two 
 The Control Plane authenticates the credential as `gateway:NAME` and checks the account against
 it. A Surface Account names the Gateway that serves it (`gateway: NAME`), and calls for its
 locations from any other Gateway fail with `PERMISSION_DENIED`. An account no Surface Account
-names belongs to the first Gateway that acts for it, until that Gateway is revoked.
+names belongs to the first Gateway enrolled with `--all-tags` that acts for it, until that Gateway
+is revoked. A Gateway enrolled without `--all-tags` is refused every such account.
 `AcceptEvent` also refuses an `account_id` that differs from the header's account. A Gateway
 calls only the Connector, reply progress, and operator notification services. It cannot read the
 Inbox, submit work, or administer anything. Rotate its credential with

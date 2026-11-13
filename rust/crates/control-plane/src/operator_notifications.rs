@@ -11,8 +11,9 @@
 //!
 //! Differences: reconciliation runs inside each Gateway claim instead of a separate Control Plane
 //! loop, because only the Gateway knows its destinations; the Control Plane stores destination
-//! keys, never webhook URLs. Activity is checked against the Inbox read by the same claim. Gateways
-//! claim and settle as `gateway:NAME` and never read the Inbox themselves: the Control Plane renders
+//! keys, never webhook URLs. Activity is checked against the Inbox read by the same claim. Only a
+//! Gateway whose Auth Key trusts it with every Tag claims and settles, as `gateway:NAME`, and it
+//! never reads the Inbox itself: the Control Plane renders
 //! the admin operator's Inbox into the outbox, which is keyed by that operator's principal, as
 //! TypeScript reads one admin Inbox. A message whose lease lapses on its last attempt fails instead
 //! of being claimed again.
@@ -724,6 +725,18 @@ pub(crate) fn redact_urls(text: &str) -> String {
 }
 
 impl crate::ControlPlane {
+    /// A Gateway whose Auth Key trusts it with every Tag: the admin operator's Inbox spans them.
+    async fn notifying_gateway<T>(
+        &self,
+        request: &tonic::Request<T>,
+    ) -> std::result::Result<(), tonic::Status> {
+        let gateway = self.principal(request, "gateway:")?;
+        self.store
+            .ensure_gateway_every_tag(&gateway["gateway:".len()..])
+            .await?;
+        Ok(())
+    }
+
     pub fn operator_notifications_service(
         &self,
     ) -> operator_notifications_server::OperatorNotificationsServer<Self> {
@@ -740,8 +753,9 @@ impl operator_notifications_server::OperatorNotifications for crate::ControlPlan
         request: tonic::Request<ClaimOperatorNotificationRequest>,
     ) -> std::result::Result<tonic::Response<ClaimOperatorNotificationResponse>, tonic::Status>
     {
-        // A Gateway delivers the admin operator's notifications; it never reads the Inbox itself.
-        self.principal(&request, "gateway:")?;
+        // A Gateway trusted with every Tag delivers the admin operator's notifications; it never
+        // reads the Inbox itself.
+        self.notifying_gateway(&request).await?;
         Ok(tonic::Response::new(
             self.store
                 .claim_operator_notification(&self.admin_operator, request.get_ref())
@@ -753,7 +767,7 @@ impl operator_notifications_server::OperatorNotifications for crate::ControlPlan
         &self,
         request: tonic::Request<SettleOperatorNotificationRequest>,
     ) -> std::result::Result<tonic::Response<OperatorNotification>, tonic::Status> {
-        self.principal(&request, "gateway:")?;
+        self.notifying_gateway(&request).await?;
         Ok(tonic::Response::new(
             self.store
                 .settle_operator_notification(&self.admin_operator, request.get_ref())

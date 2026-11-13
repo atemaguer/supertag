@@ -830,7 +830,7 @@ mod roles {
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     allowed_tag_ids: tags.iter().map(|tag| (*tag).into()).collect(),
-                    all_tags: tags.is_empty() && role != PrincipalRole::Gateway,
+                    all_tags: tags.is_empty(),
                     reusable,
                     ..Default::default()
                 },

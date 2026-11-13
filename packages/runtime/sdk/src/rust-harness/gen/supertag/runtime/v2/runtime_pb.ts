@@ -3509,6 +3509,10 @@ export type CreateAuthKeyRequest = Message<"supertag.runtime.v2.CreateAuthKeyReq
   allowedTagIds: string[];
 
   /**
+   * Every Tag. A gateway key takes this or nothing: it lets the Gateway serve
+   * connector accounts no Surface Account names, which admit work on any Tag,
+   * and deliver the admin operator's notifications.
+   *
    * @generated from field: bool all_tags = 6;
    */
   allTags: boolean;

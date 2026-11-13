@@ -1172,6 +1172,9 @@ message CreateAuthKeyRequest {
   // For a host key, the Tags its hosts may run; for a client key, the Tags its
   // clients may talk to. Refused for a gateway key.
   repeated string allowed_tag_ids = 5;
+  // Every Tag. A gateway key takes this or nothing: it lets the Gateway serve
+  // connector accounts no Surface Account names, which admit work on any Tag,
+  // and deliver the admin operator's notifications.
   bool all_tags = 6;
   // A reusable key enrolls any number of principals; a one-time key enrolls one.
   // Each enrollee chooses its own name.

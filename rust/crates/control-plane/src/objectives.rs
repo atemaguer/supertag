@@ -478,7 +478,7 @@ impl Store {
         let runtime_actions = select_runtime_actions(&allowed, input.runtime_actions.as_ref())?;
         let team_id = match &input.team_id {
             Some(team) => Some(
-                crate::teams::team_by_reference_in(&mut tx, team)
+                crate::teams::visible_team_in(&mut tx, principal, team)
                     .await?
                     .team_id,
             ),
@@ -840,7 +840,7 @@ impl Store {
         Ok(objective)
     }
 
-    /// An operator completes an open Objective, ongoing or not, with a required assessment.
+    /// An operator, or the client that created it, completes an open Objective, ongoing or not, with a required assessment.
     /// Its open Tasks are cancelled. Unlike approval, it posts no completion report.
     pub async fn complete_objective(
         &self,
@@ -865,6 +865,7 @@ impl Store {
         }
         let fingerprint = digest("complete", input);
         let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
         let now_ms = self.execution_now_ms();
         if let Some(prior) =
             replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?

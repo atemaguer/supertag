@@ -120,12 +120,13 @@ credential is refused on the next call and ends open streams within about a seco
 | --- | --- |
 | Admin operator | Everything an operator may, plus Operator Tokens |
 | Operator | Configuration, fleet, recovery, audit, Auth Keys and enrollments, and all work |
-| Client | Tags and Teams its Auth Key allows, its own conversations and Objectives, its Inbox items |
+| Client | Tags its Auth Key allows, Teams made only of those Tags, its own conversations and Objectives, and their Inbox items |
 | Worker Host | Execution of the work it claims, for its current generation |
-| Gateway | Connector, reply progress, and operator notification calls, for the Surface Accounts that name it |
+| Gateway | Connector and reply progress calls for the Surface Accounts that name it. With `--all-tags` on its key, also accounts no Surface Account names and the admin operator's notifications |
 
 A client is a device. It sees only the work it started, never work without an owner, and never
-Worker Host status. It starts work only through conversations and Objectives. It decides an
+Worker Host status. Its Inbox lists the questions and limits of its own Objectives, never
+execution recovery or MCP logins, which are Worker Host work. It starts work only through conversations and Objectives. It decides an
 approval only when a Permission Set names it as `client:NAME`. The audit log records every
 caller by its full principal, and an enrollment by the Auth Key that admitted it,
 `auth-key:NAME`. Client certificates are an optional network filter in front of all of this.

@@ -9219,7 +9219,10 @@ type CreateAuthKeyRequest struct {
 	// For a host key, the Tags its hosts may run; for a client key, the Tags its
 	// clients may talk to. Refused for a gateway key.
 	AllowedTagIds []string `protobuf:"bytes,5,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
-	AllTags       bool     `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	// Every Tag. A gateway key takes this or nothing: it lets the Gateway serve
+	// connector accounts no Surface Account names, which admit work on any Tag,
+	// and deliver the admin operator's notifications.
+	AllTags bool `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
 	// A reusable key enrolls any number of principals; a one-time key enrolls one.
 	// Each enrollee chooses its own name.
 	Reusable bool `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`

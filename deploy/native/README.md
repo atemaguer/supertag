@@ -32,9 +32,12 @@ loopback inside its container. It holds no operator credential.
 Every caller authenticates with its own credential, and the Control Plane checks each call
 against one table of roles. The deployment's Gateway is `gateway:local`: setup gives the Control
 Plane `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL` and the Gateway the same value as
-`SUPERTAG_GATEWAY_CREDENTIAL`. It may call only the surface services, and only for the Surface
-Accounts that name it (`gateway: local`). To add another Gateway, create a gateway Auth Key and
-enroll it with `supertag gateway enroll NAME`.
+`SUPERTAG_GATEWAY_CREDENTIAL`. It may call only the surface services, for the Surface Accounts
+that name it (`gateway: local`). It is trusted with every Tag, so it also delivers operator
+notifications. To add another Gateway, create a gateway Auth Key and enroll it with
+`supertag gateway enroll NAME`. Add `--all-tags` to the key only for a Gateway that delivers
+operator notifications or serves accounts no Surface Account names. No Auth Key enrolls a host or
+Gateway named `local`.
 
 | Platform | Definitions | Public Control Plane path | Gateway to Control Plane |
 | --- | --- | --- | --- |

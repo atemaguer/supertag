@@ -76,7 +76,9 @@ pub enum AuthKeyCommand {
         /// for more Tags.
         #[arg(long, conflicts_with = "all_tags")]
         tag: Vec<String>,
-        /// Host and client keys: every Tag.
+        /// Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no
+        /// Surface Account names, which admit work on any Tag, and deliver the admin operator's
+        /// notifications.
         #[arg(long)]
         all_tags: bool,
     },
@@ -115,8 +117,8 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
             all_tags,
         } => {
             anyhow::ensure!(
-                role != KeyRole::Gateway || (tag.is_empty() && !all_tags),
-                "a gateway Auth Key takes no --tag or --all-tags"
+                role != KeyRole::Gateway || tag.is_empty(),
+                "a gateway Auth Key takes no --tag; only --all-tags"
             );
             anyhow::ensure!(
                 role == KeyRole::Gateway || !tag.is_empty() || all_tags,

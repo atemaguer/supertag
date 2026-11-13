@@ -146,44 +146,78 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
         "a connector without an enrolled Gateway credential was admitted"
     );
 
-    // A second, enrolled Gateway cannot act for the account the first one serves.
-    let key = json(operator(&[
-        "auth-key",
-        "create",
-        "second-connector",
-        "--role",
-        "gateway",
-    ]))
+    // An account no Surface Account names admits work on any Tag. A second Gateway enrolled
+    // with every Tag still cannot act for the account the first one serves, and a Gateway
+    // enrolled without every Tag cannot act for any such account.
+    let enroll = |name: &'static str, all_tags: bool| {
+        let (operator, tokens, url) = (&operator, &tokens, &url);
+        let state = directory.path().join(name);
+        async move {
+            let mut create = vec!["auth-key", "create", name, "--role", "gateway"];
+            if all_tags {
+                create.push("--all-tags");
+            }
+            let key = json(operator(&create)).await?;
+            let key = key["auth_key"].as_str().context("auth_key")?;
+            let mut enroll = command(
+                BINARY,
+                &[
+                    "gateway",
+                    "enroll",
+                    name,
+                    "--control-plane",
+                    url,
+                    "--state-directory",
+                    state.to_str().context("state path")?,
+                ],
+                tokens,
+            );
+            enroll.env("SUPERTAG_AUTH_KEY", key);
+            assert_eq!(json(enroll).await?["principal"], format!("gateway:{name}"));
+            let enrollment: Value =
+                serde_json::from_slice(&std::fs::read(state.join("enrollment.json"))?)?;
+            anyhow::Ok(enrollment["token"].as_str().context("token")?.to_owned())
+        }
+    };
+    let refused = |mut call: Command, credential: String, why: &'static str| async move {
+        call.env("SUPERTAG_GATEWAY_CREDENTIAL", &credential);
+        let refused = timeout(WAIT, call.output()).await??;
+        ensure!(
+            !refused.status.success()
+                && String::from_utf8_lossy(&refused.stderr).contains("permission"),
+            "{why}: {}",
+            String::from_utf8_lossy(&refused.stderr)
+        );
+        anyhow::Ok(())
+    };
+    let second = enroll("second", true).await?;
+    refused(
+        accept(),
+        second,
+        "a second Gateway acted for another Gateway's account",
+    )
     .await?;
-    let key = key["auth_key"].as_str().context("auth_key")?;
-    let second_state = directory.path().join("second-gateway");
-    let mut enroll = command(
-        BINARY,
+    let narrow = enroll("narrow", false).await?;
+    let unnamed = command(
+        CONNECTOR,
         &[
-            "gateway",
-            "enroll",
-            "second",
-            "--control-plane",
+            "accept",
             &url,
-            "--state-directory",
-            second_state.to_str().context("state path")?,
+            "example/unclaimed",
+            "event-3",
+            "helper",
+            "room-1",
+            "room-1",
+            "Not allowed",
         ],
         &tokens,
     );
-    enroll.env("SUPERTAG_AUTH_KEY", key);
-    assert_eq!(json(enroll).await?["principal"], "gateway:second");
-    let enrollment: Value =
-        serde_json::from_slice(&std::fs::read(second_state.join("enrollment.json"))?)?;
-    let second = enrollment["token"].as_str().context("token")?.to_owned();
-    let mut rival = accept();
-    rival.env("SUPERTAG_GATEWAY_CREDENTIAL", &second);
-    let refused = timeout(WAIT, rival.output()).await??;
-    ensure!(
-        !refused.status.success()
-            && String::from_utf8_lossy(&refused.stderr).contains("permission"),
-        "a second Gateway acted for another Gateway's account: {}",
-        String::from_utf8_lossy(&refused.stderr)
-    );
+    refused(
+        unnamed,
+        narrow,
+        "a Gateway without every Tag acted for an unnamed account",
+    )
+    .await?;
 
     let mut host = command(
         BINARY,

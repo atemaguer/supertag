@@ -303,7 +303,9 @@ type Enrollment struct {
 	CredentialRevision uint64 `protobuf:"varint,8,opt,name=credential_revision,json=credentialRevision,proto3" json:"credential_revision,omitempty"`
 	// Clients: the Tags it may talk to. Hosts: the Tags it may run.
 	AllowedTagIds []string `protobuf:"bytes,9,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
-	AllTags       bool     `protobuf:"varint,10,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	// Every Tag. A Gateway with it serves connector accounts no Surface Account
+	// names and delivers the admin operator's notifications.
+	AllTags       bool `protobuf:"varint,10,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

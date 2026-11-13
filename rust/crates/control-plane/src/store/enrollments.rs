@@ -96,9 +96,13 @@ impl Store {
         if role != Role::Host && (input.ephemeral || !input.labels.is_empty()) {
             return Err(invalid("only host Auth Keys are ephemeral or grant labels"));
         }
+        // A gateway key lists no Tags. Its optional `all_tags` lets the Gateway serve connector
+        // accounts no Surface Account names, which admit work on any Tag.
         let tags_apply = role != Role::Gateway;
-        if !tags_apply && (input.all_tags || !input.allowed_tag_ids.is_empty()) {
-            return Err(invalid("a gateway Auth Key takes no Tag scope"));
+        if !tags_apply && !input.allowed_tag_ids.is_empty() {
+            return Err(invalid(
+                "a gateway Auth Key lists no Tags; it takes only all Tags or none",
+            ));
         }
         let labels = parse_labels(&input.labels, LabelField::AuthKey)?;
         name("operation ID", &input.operation_id)?;
@@ -287,6 +291,13 @@ impl Store {
         crate::audit::note_actor(&actor);
         let role = required_role(input.role)?;
         enrollee_name(&input.name)?;
+        // The Control Plane seeds `host:local` and `gateway:local` from its configuration, so no
+        // Auth Key may take that name first and stop it from starting.
+        if role != Role::Client && input.name == BOOTSTRAP_NAME {
+            return Err(invalid(
+                "the name local is reserved for the Control Plane's own host and Gateway",
+            ));
+        }
         name("operation ID", &input.operation_id)?;
         let token = credential_digest(&input.token_digest)?;
         if key == token {
@@ -369,7 +380,7 @@ impl Store {
             &token,
             Some(&key_label),
             if role == Role::Client { &tags } else { &[] },
-            role == Role::Client && all_tags,
+            role != Role::Host && all_tags,
             now,
         )
         .await?;
@@ -401,7 +412,8 @@ impl Store {
     }
 
     /// Records a credential from the Control Plane's startup configuration: `host:local` with
-    /// every Tag, or `gateway:local`. Restarting with the same credential changes nothing.
+    /// every Tag, or `gateway:local`, which may serve any connector account with every Tag.
+    /// Restarting with the same credential changes nothing.
     pub async fn seed_enrollment(&self, role: Role, id: &str, token_digest: &[u8]) -> Result<()> {
         enrollee_name(id)?;
         if role == Role::Client {
@@ -428,7 +440,17 @@ impl Store {
         }
         credential_unused_in(&mut transaction, &token).await?;
         let now = self.execution_now_ms();
-        insert_enrollment_in(&mut transaction, role, id, &token, None, &[], false, now).await?;
+        insert_enrollment_in(
+            &mut transaction,
+            role,
+            id,
+            &token,
+            None,
+            &[],
+            role == Role::Gateway,
+            now,
+        )
+        .await?;
         if role == Role::Host {
             if super::hosts::host_exists_in(&mut transaction, id).await? {
                 return Err(StoreError::Conflict(
@@ -808,6 +830,9 @@ fn auth_key_name(value: &str) -> Result<()> {
 
 /// 1 to 250 ASCII letters, digits, hyphens, underscores or dots: a Worker Host ID, Gateway name
 /// or client name.
+/// The name of the host and Gateway the Control Plane seeds from its configuration.
+const BOOTSTRAP_NAME: &str = "local";
+
 pub(crate) fn enrollee_name(id: &str) -> Result<()> {
     if id.is_empty()
         || id.len() > 250

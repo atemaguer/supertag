@@ -95,6 +95,8 @@ message Enrollment {
   uint64 credential_revision = 8;
   // Clients: the Tags it may talk to. Hosts: the Tags it may run.
   repeated string allowed_tag_ids = 9;
+  // Every Tag. A Gateway with it serves connector accounts no Surface Account
+  // names and delivers the admin operator's notifications.
   bool all_tags = 10;
 }
 
