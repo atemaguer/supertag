@@ -103,7 +103,7 @@ export const WorkspaceVolumes: GenService<{
   serviceDesc(file_supertag_runtime_v2_workspace_volume, 0);
 
 /**
- * The Control Plane and Gateway check the live Attempt before disclosing
+ * The Control Plane checks the live Attempt before disclosing
  * file artifact Volume paths to its trusted Worker Host for alias rejection.
  *
  * @generated from service supertag.runtime.v2.AttemptWorkspaceMounts

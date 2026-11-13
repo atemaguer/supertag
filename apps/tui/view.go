@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+
+	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
 const railWidth = 24
@@ -109,8 +111,8 @@ func (m model) renderConversation() string {
 		case m.tagsErr != nil:
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
 		case m.client.RuntimeV2():
-			return wrap.Render("No Tags are set up on this Gateway.\n\n" +
-				"Run supertag tag put --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
+			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
+				"Run supertag tag put --help for setup. For a shared Control Plane, ask its operator to set up a Tag.")
 		default:
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
 				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +
@@ -288,13 +290,15 @@ func railState(tag *operatorv1.Tag, open int) string {
 // palette and to switch to another Control Plane when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
 	left := " " + contextLabel(m.client.Target()) + "  "
-	if hosts := m.hostSummary(); hosts != "" {
+	if client.IsClientCredential(m.client.Target().Token) {
+		left += "client device  "
+	} else if hosts := m.hostSummary(); hosts != "" {
 		left += hosts + "  "
 	}
 	left += "ctrl+k commands  "
 	if m.switchable {
 		if m.client.RuntimeV2() {
-			left += "ctrl+p Gateways  "
+			left += "ctrl+p Control Planes  "
 		} else {
 			left += "ctrl+p Control Planes  "
 		}

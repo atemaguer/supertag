@@ -51,7 +51,7 @@ async fn download(
             .credentials
             .command(&[
                 "artifact",
-                "--gateway",
+                "--control-plane",
                 &runtime.endpoint,
                 "download",
                 artifact,

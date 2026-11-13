@@ -31,7 +31,7 @@ use axum::{
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use supertag_gateway::credential_vault::{CredentialVault, FileCredentialVault};
+use supertag_credential_vault::{CredentialVault, FileCredentialVault};
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -389,27 +389,25 @@ impl Services {
             "# Local services\nservices:\n  control-plane:\n    type: control-plane\n",
         )?;
         let (provider, origin) = provider_fixture().await?;
-        let gateway_token = Uuid::new_v4().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator_token = Uuid::new_v4().to_string();
         let mut command = Command::new(BINARY);
         command
             .arg("control-plane")
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", Uuid::new_v4().to_string())
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .env(
+                "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
+                supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            )
             .env("SUPERTAG_DATABASE_URL", database);
         let mut control_plane = Process::spawn(command, directory.path())?;
         let private = control_plane.endpoints(1).await?.remove(0);
-        let mut command = Command::new(BINARY);
-        command
-            .args(["gateway", "--control-plane", &private])
-            .env_clear()
-            .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-        let mut gateway = Process::spawn(command, directory.path())?;
-        let public = gateway.endpoints(1).await?.remove(0);
+        let public = private.clone();
         let services = Self {
             directory,
             state,
@@ -419,7 +417,7 @@ impl Services {
             public,
             provider,
             origin,
-            _processes: vec![control_plane, gateway],
+            _processes: vec![control_plane],
         };
         services.prepare().await?;
         Ok(services)
@@ -493,7 +491,7 @@ impl Services {
     ) -> Result<Output> {
         let mut child = Command::new(BINARY)
             .args(args)
-            .args(["--gateway", &self.public, "--state-directory"])
+            .args(["--control-plane", &self.public, "--state-directory"])
             .arg(state)
             .env_clear()
             .env("HOME", self.directory.path())
@@ -544,7 +542,7 @@ impl Services {
 
     fn json(&self, args: &[&str]) -> Result<Value> {
         let output = Command::new(BINARY)
-            .args(["--gateway", &self.public])
+            .args(["--control-plane", &self.public])
             .args(args)
             .env_clear()
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token)
@@ -578,7 +576,8 @@ impl Services {
             .args(flags)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", Uuid::new_v4().to_string())
             .env("SUPERTAG_STATE_DIR", &self.state)
             .env(
@@ -903,7 +902,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     let response = signed_slack(&endpoints[1], &event, SLACK_SIGNING).await?;
     ensure!(response.status() == StatusCode::OK, "{response:?}");
     let mut connector = ConnectorClient::new(protocol::dial(services.private.clone()).await?);
-    let mut request = authenticated_request(
+    let mut request = supertag_protocol::connector_request(
         AcceptSlackEventRequest {
             account_id: location_id.clone(),
             event_id: "EvSETUP1".into(),
@@ -916,7 +915,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
             prompt: "check the release".into(),
         },
         &services.gateway_token,
-        Some(&format!("connector:{location_id}")),
+        &location_id,
     )?;
     request.set_timeout(Duration::from_secs(5));
     let task = connector
@@ -1636,30 +1635,5 @@ async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
         "{response:?}"
     );
     stop(supervisor)?;
-    Ok(())
-}
-
-/// A GitHub Workspace and a GitHub Surface connector read the same `SUPERTAG_GITHUB_*`
-/// variables, so one Gateway refuses to run both rather than cross their credentials.
-#[test]
-fn gateway_refuses_a_github_workspace_beside_a_github_connector() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let output = Command::new(BINARY)
-        .args(["gateway", "--control-plane", "http://127.0.0.1:9"])
-        .arg("--github-workspace-directory")
-        .arg(directory.path().join("sources"))
-        .args(["--github-listen", "127.0.0.1:0", "--github-state-directory"])
-        .arg(directory.path().join("github"))
-        .env_clear()
-        .env("SUPERTAG_GATEWAY_TOKEN", Uuid::new_v4().to_string())
-        .env("SUPERTAG_OPERATOR_TOKEN", Uuid::new_v4().to_string())
-        .stdin(Stdio::null())
-        .output()?;
-    let stderr = String::from_utf8(output.stderr)?;
-    ensure!(!output.status.success(), "{stderr}");
-    ensure!(
-        stderr.contains("'--github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>' cannot be used with '--github-listen <GITHUB_LISTEN>'"),
-        "{stderr}"
-    );
     Ok(())
 }

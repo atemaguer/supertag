@@ -25,8 +25,10 @@ const (
 	PlacementName = "supertag.runtime.v2.Placement"
 	// AuthKeysName is the fully-qualified name of the AuthKeys service.
 	AuthKeysName = "supertag.runtime.v2.AuthKeys"
-	// HostCredentialsName is the fully-qualified name of the HostCredentials service.
-	HostCredentialsName = "supertag.runtime.v2.HostCredentials"
+	// EnrollmentsName is the fully-qualified name of the Enrollments service.
+	EnrollmentsName = "supertag.runtime.v2.Enrollments"
+	// CredentialDirectoryName is the fully-qualified name of the CredentialDirectory service.
+	CredentialDirectoryName = "supertag.runtime.v2.CredentialDirectory"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -47,9 +49,25 @@ const (
 	AuthKeysListAuthKeysProcedure = "/supertag.runtime.v2.AuthKeys/ListAuthKeys"
 	// AuthKeysGetAuthKeyProcedure is the fully-qualified name of the AuthKeys's GetAuthKey RPC.
 	AuthKeysGetAuthKeyProcedure = "/supertag.runtime.v2.AuthKeys/GetAuthKey"
-	// HostCredentialsRotateHostCredentialProcedure is the fully-qualified name of the HostCredentials's
-	// RotateHostCredential RPC.
-	HostCredentialsRotateHostCredentialProcedure = "/supertag.runtime.v2.HostCredentials/RotateHostCredential"
+	// EnrollmentsEnrollProcedure is the fully-qualified name of the Enrollments's Enroll RPC.
+	EnrollmentsEnrollProcedure = "/supertag.runtime.v2.Enrollments/Enroll"
+	// EnrollmentsWhoAmIProcedure is the fully-qualified name of the Enrollments's WhoAmI RPC.
+	EnrollmentsWhoAmIProcedure = "/supertag.runtime.v2.Enrollments/WhoAmI"
+	// EnrollmentsRotateCredentialProcedure is the fully-qualified name of the Enrollments's
+	// RotateCredential RPC.
+	EnrollmentsRotateCredentialProcedure = "/supertag.runtime.v2.Enrollments/RotateCredential"
+	// EnrollmentsGetEnrollmentProcedure is the fully-qualified name of the Enrollments's GetEnrollment
+	// RPC.
+	EnrollmentsGetEnrollmentProcedure = "/supertag.runtime.v2.Enrollments/GetEnrollment"
+	// EnrollmentsListEnrollmentsProcedure is the fully-qualified name of the Enrollments's
+	// ListEnrollments RPC.
+	EnrollmentsListEnrollmentsProcedure = "/supertag.runtime.v2.Enrollments/ListEnrollments"
+	// EnrollmentsRevokeEnrollmentProcedure is the fully-qualified name of the Enrollments's
+	// RevokeEnrollment RPC.
+	EnrollmentsRevokeEnrollmentProcedure = "/supertag.runtime.v2.Enrollments/RevokeEnrollment"
+	// CredentialDirectoryResolveProcedure is the fully-qualified name of the CredentialDirectory's
+	// Resolve RPC.
+	CredentialDirectoryResolveProcedure = "/supertag.runtime.v2.CredentialDirectory/Resolve"
 )
 
 // PlacementClient is a client for the supertag.runtime.v2.Placement service.
@@ -276,76 +294,295 @@ func (UnimplementedAuthKeysHandler) GetAuthKey(context.Context, *connect.Request
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.GetAuthKey is not implemented"))
 }
 
-// HostCredentialsClient is a client for the supertag.runtime.v2.HostCredentials service.
-type HostCredentialsClient interface {
-	// Replaces the host's credential. The previous credential stops working at
-	// once. A revoked host must be enrolled under a new ID instead.
-	RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error)
+// EnrollmentsClient is a client for the supertag.runtime.v2.Enrollments service.
+type EnrollmentsClient interface {
+	// Presented with an Auth Key (`stak_` and 64 hex digits) as the bearer: the
+	// only call that accepts one. The request's role must equal the key's.
+	// Repeating an enrollment with the same operation ID, name and digest returns
+	// the same enrollment, until the key is revoked.
+	Enroll(context.Context, *connect.Request[runtimev2.EnrollRequest]) (*connect.Response[runtimev2.Enrollment], error)
+	// The caller's own principal.
+	WhoAmI(context.Context, *connect.Request[runtimev2.WhoAmIRequest]) (*connect.Response[runtimev2.WhoAmIResponse], error)
+	// Replaces an enrolled credential. An enrollee rotates its own (empty name);
+	// an operator rotates any. The previous credential stops working at once,
+	// including for open streams.
+	RotateCredential(context.Context, *connect.Request[runtimev2.RotateCredentialRequest]) (*connect.Response[runtimev2.CredentialRotation], error)
+	GetEnrollment(context.Context, *connect.Request[runtimev2.GetEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error)
+	// By role, then name.
+	ListEnrollments(context.Context, *connect.Request[runtimev2.ListEnrollmentsRequest]) (*connect.Response[runtimev2.ListEnrollmentsResponse], error)
+	// Idempotent. The credential is refused from then on, including by calls and
+	// streams already in progress. Revoking a host also fences its execution.
+	RevokeEnrollment(context.Context, *connect.Request[runtimev2.RevokeEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error)
 }
 
-// NewHostCredentialsClient constructs a client for the supertag.runtime.v2.HostCredentials service.
-// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
-// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// NewEnrollmentsClient constructs a client for the supertag.runtime.v2.Enrollments service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewHostCredentialsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostCredentialsClient {
+func NewEnrollmentsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) EnrollmentsClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	hostCredentialsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("HostCredentials").Methods()
-	return &hostCredentialsClient{
-		rotateHostCredential: connect.NewClient[runtimev2.RotateHostCredentialRequest, runtimev2.HostCredentialRotation](
+	enrollmentsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("Enrollments").Methods()
+	return &enrollmentsClient{
+		enroll: connect.NewClient[runtimev2.EnrollRequest, runtimev2.Enrollment](
 			httpClient,
-			baseURL+HostCredentialsRotateHostCredentialProcedure,
-			connect.WithSchema(hostCredentialsMethods.ByName("RotateHostCredential")),
+			baseURL+EnrollmentsEnrollProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("Enroll")),
+			connect.WithClientOptions(opts...),
+		),
+		whoAmI: connect.NewClient[runtimev2.WhoAmIRequest, runtimev2.WhoAmIResponse](
+			httpClient,
+			baseURL+EnrollmentsWhoAmIProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("WhoAmI")),
+			connect.WithClientOptions(opts...),
+		),
+		rotateCredential: connect.NewClient[runtimev2.RotateCredentialRequest, runtimev2.CredentialRotation](
+			httpClient,
+			baseURL+EnrollmentsRotateCredentialProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("RotateCredential")),
+			connect.WithClientOptions(opts...),
+		),
+		getEnrollment: connect.NewClient[runtimev2.GetEnrollmentRequest, runtimev2.Enrollment](
+			httpClient,
+			baseURL+EnrollmentsGetEnrollmentProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("GetEnrollment")),
+			connect.WithClientOptions(opts...),
+		),
+		listEnrollments: connect.NewClient[runtimev2.ListEnrollmentsRequest, runtimev2.ListEnrollmentsResponse](
+			httpClient,
+			baseURL+EnrollmentsListEnrollmentsProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("ListEnrollments")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeEnrollment: connect.NewClient[runtimev2.RevokeEnrollmentRequest, runtimev2.Enrollment](
+			httpClient,
+			baseURL+EnrollmentsRevokeEnrollmentProcedure,
+			connect.WithSchema(enrollmentsMethods.ByName("RevokeEnrollment")),
 			connect.WithClientOptions(opts...),
 		),
 	}
 }
 
-// hostCredentialsClient implements HostCredentialsClient.
-type hostCredentialsClient struct {
-	rotateHostCredential *connect.Client[runtimev2.RotateHostCredentialRequest, runtimev2.HostCredentialRotation]
+// enrollmentsClient implements EnrollmentsClient.
+type enrollmentsClient struct {
+	enroll           *connect.Client[runtimev2.EnrollRequest, runtimev2.Enrollment]
+	whoAmI           *connect.Client[runtimev2.WhoAmIRequest, runtimev2.WhoAmIResponse]
+	rotateCredential *connect.Client[runtimev2.RotateCredentialRequest, runtimev2.CredentialRotation]
+	getEnrollment    *connect.Client[runtimev2.GetEnrollmentRequest, runtimev2.Enrollment]
+	listEnrollments  *connect.Client[runtimev2.ListEnrollmentsRequest, runtimev2.ListEnrollmentsResponse]
+	revokeEnrollment *connect.Client[runtimev2.RevokeEnrollmentRequest, runtimev2.Enrollment]
 }
 
-// RotateHostCredential calls supertag.runtime.v2.HostCredentials.RotateHostCredential.
-func (c *hostCredentialsClient) RotateHostCredential(ctx context.Context, req *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error) {
-	return c.rotateHostCredential.CallUnary(ctx, req)
+// Enroll calls supertag.runtime.v2.Enrollments.Enroll.
+func (c *enrollmentsClient) Enroll(ctx context.Context, req *connect.Request[runtimev2.EnrollRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return c.enroll.CallUnary(ctx, req)
 }
 
-// HostCredentialsHandler is an implementation of the supertag.runtime.v2.HostCredentials service.
-type HostCredentialsHandler interface {
-	// Replaces the host's credential. The previous credential stops working at
-	// once. A revoked host must be enrolled under a new ID instead.
-	RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error)
+// WhoAmI calls supertag.runtime.v2.Enrollments.WhoAmI.
+func (c *enrollmentsClient) WhoAmI(ctx context.Context, req *connect.Request[runtimev2.WhoAmIRequest]) (*connect.Response[runtimev2.WhoAmIResponse], error) {
+	return c.whoAmI.CallUnary(ctx, req)
 }
 
-// NewHostCredentialsHandler builds an HTTP handler from the service implementation. It returns the
-// path on which to mount the handler and the handler itself.
+// RotateCredential calls supertag.runtime.v2.Enrollments.RotateCredential.
+func (c *enrollmentsClient) RotateCredential(ctx context.Context, req *connect.Request[runtimev2.RotateCredentialRequest]) (*connect.Response[runtimev2.CredentialRotation], error) {
+	return c.rotateCredential.CallUnary(ctx, req)
+}
+
+// GetEnrollment calls supertag.runtime.v2.Enrollments.GetEnrollment.
+func (c *enrollmentsClient) GetEnrollment(ctx context.Context, req *connect.Request[runtimev2.GetEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return c.getEnrollment.CallUnary(ctx, req)
+}
+
+// ListEnrollments calls supertag.runtime.v2.Enrollments.ListEnrollments.
+func (c *enrollmentsClient) ListEnrollments(ctx context.Context, req *connect.Request[runtimev2.ListEnrollmentsRequest]) (*connect.Response[runtimev2.ListEnrollmentsResponse], error) {
+	return c.listEnrollments.CallUnary(ctx, req)
+}
+
+// RevokeEnrollment calls supertag.runtime.v2.Enrollments.RevokeEnrollment.
+func (c *enrollmentsClient) RevokeEnrollment(ctx context.Context, req *connect.Request[runtimev2.RevokeEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return c.revokeEnrollment.CallUnary(ctx, req)
+}
+
+// EnrollmentsHandler is an implementation of the supertag.runtime.v2.Enrollments service.
+type EnrollmentsHandler interface {
+	// Presented with an Auth Key (`stak_` and 64 hex digits) as the bearer: the
+	// only call that accepts one. The request's role must equal the key's.
+	// Repeating an enrollment with the same operation ID, name and digest returns
+	// the same enrollment, until the key is revoked.
+	Enroll(context.Context, *connect.Request[runtimev2.EnrollRequest]) (*connect.Response[runtimev2.Enrollment], error)
+	// The caller's own principal.
+	WhoAmI(context.Context, *connect.Request[runtimev2.WhoAmIRequest]) (*connect.Response[runtimev2.WhoAmIResponse], error)
+	// Replaces an enrolled credential. An enrollee rotates its own (empty name);
+	// an operator rotates any. The previous credential stops working at once,
+	// including for open streams.
+	RotateCredential(context.Context, *connect.Request[runtimev2.RotateCredentialRequest]) (*connect.Response[runtimev2.CredentialRotation], error)
+	GetEnrollment(context.Context, *connect.Request[runtimev2.GetEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error)
+	// By role, then name.
+	ListEnrollments(context.Context, *connect.Request[runtimev2.ListEnrollmentsRequest]) (*connect.Response[runtimev2.ListEnrollmentsResponse], error)
+	// Idempotent. The credential is refused from then on, including by calls and
+	// streams already in progress. Revoking a host also fences its execution.
+	RevokeEnrollment(context.Context, *connect.Request[runtimev2.RevokeEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error)
+}
+
+// NewEnrollmentsHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewHostCredentialsHandler(svc HostCredentialsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	hostCredentialsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("HostCredentials").Methods()
-	hostCredentialsRotateHostCredentialHandler := connect.NewUnaryHandler(
-		HostCredentialsRotateHostCredentialProcedure,
-		svc.RotateHostCredential,
-		connect.WithSchema(hostCredentialsMethods.ByName("RotateHostCredential")),
+func NewEnrollmentsHandler(svc EnrollmentsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	enrollmentsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("Enrollments").Methods()
+	enrollmentsEnrollHandler := connect.NewUnaryHandler(
+		EnrollmentsEnrollProcedure,
+		svc.Enroll,
+		connect.WithSchema(enrollmentsMethods.ByName("Enroll")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/supertag.runtime.v2.HostCredentials/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	enrollmentsWhoAmIHandler := connect.NewUnaryHandler(
+		EnrollmentsWhoAmIProcedure,
+		svc.WhoAmI,
+		connect.WithSchema(enrollmentsMethods.ByName("WhoAmI")),
+		connect.WithHandlerOptions(opts...),
+	)
+	enrollmentsRotateCredentialHandler := connect.NewUnaryHandler(
+		EnrollmentsRotateCredentialProcedure,
+		svc.RotateCredential,
+		connect.WithSchema(enrollmentsMethods.ByName("RotateCredential")),
+		connect.WithHandlerOptions(opts...),
+	)
+	enrollmentsGetEnrollmentHandler := connect.NewUnaryHandler(
+		EnrollmentsGetEnrollmentProcedure,
+		svc.GetEnrollment,
+		connect.WithSchema(enrollmentsMethods.ByName("GetEnrollment")),
+		connect.WithHandlerOptions(opts...),
+	)
+	enrollmentsListEnrollmentsHandler := connect.NewUnaryHandler(
+		EnrollmentsListEnrollmentsProcedure,
+		svc.ListEnrollments,
+		connect.WithSchema(enrollmentsMethods.ByName("ListEnrollments")),
+		connect.WithHandlerOptions(opts...),
+	)
+	enrollmentsRevokeEnrollmentHandler := connect.NewUnaryHandler(
+		EnrollmentsRevokeEnrollmentProcedure,
+		svc.RevokeEnrollment,
+		connect.WithSchema(enrollmentsMethods.ByName("RevokeEnrollment")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Enrollments/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case HostCredentialsRotateHostCredentialProcedure:
-			hostCredentialsRotateHostCredentialHandler.ServeHTTP(w, r)
+		case EnrollmentsEnrollProcedure:
+			enrollmentsEnrollHandler.ServeHTTP(w, r)
+		case EnrollmentsWhoAmIProcedure:
+			enrollmentsWhoAmIHandler.ServeHTTP(w, r)
+		case EnrollmentsRotateCredentialProcedure:
+			enrollmentsRotateCredentialHandler.ServeHTTP(w, r)
+		case EnrollmentsGetEnrollmentProcedure:
+			enrollmentsGetEnrollmentHandler.ServeHTTP(w, r)
+		case EnrollmentsListEnrollmentsProcedure:
+			enrollmentsListEnrollmentsHandler.ServeHTTP(w, r)
+		case EnrollmentsRevokeEnrollmentProcedure:
+			enrollmentsRevokeEnrollmentHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 }
 
-// UnimplementedHostCredentialsHandler returns CodeUnimplemented from all methods.
-type UnimplementedHostCredentialsHandler struct{}
+// UnimplementedEnrollmentsHandler returns CodeUnimplemented from all methods.
+type UnimplementedEnrollmentsHandler struct{}
 
-func (UnimplementedHostCredentialsHandler) RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostCredentials.RotateHostCredential is not implemented"))
+func (UnimplementedEnrollmentsHandler) Enroll(context.Context, *connect.Request[runtimev2.EnrollRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.Enroll is not implemented"))
+}
+
+func (UnimplementedEnrollmentsHandler) WhoAmI(context.Context, *connect.Request[runtimev2.WhoAmIRequest]) (*connect.Response[runtimev2.WhoAmIResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.WhoAmI is not implemented"))
+}
+
+func (UnimplementedEnrollmentsHandler) RotateCredential(context.Context, *connect.Request[runtimev2.RotateCredentialRequest]) (*connect.Response[runtimev2.CredentialRotation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.RotateCredential is not implemented"))
+}
+
+func (UnimplementedEnrollmentsHandler) GetEnrollment(context.Context, *connect.Request[runtimev2.GetEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.GetEnrollment is not implemented"))
+}
+
+func (UnimplementedEnrollmentsHandler) ListEnrollments(context.Context, *connect.Request[runtimev2.ListEnrollmentsRequest]) (*connect.Response[runtimev2.ListEnrollmentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.ListEnrollments is not implemented"))
+}
+
+func (UnimplementedEnrollmentsHandler) RevokeEnrollment(context.Context, *connect.Request[runtimev2.RevokeEnrollmentRequest]) (*connect.Response[runtimev2.Enrollment], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Enrollments.RevokeEnrollment is not implemented"))
+}
+
+// CredentialDirectoryClient is a client for the supertag.runtime.v2.CredentialDirectory service.
+type CredentialDirectoryClient interface {
+	Resolve(context.Context, *connect.Request[runtimev2.ResolveCredentialRequest]) (*connect.Response[runtimev2.ResolvedCredential], error)
+}
+
+// NewCredentialDirectoryClient constructs a client for the supertag.runtime.v2.CredentialDirectory
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewCredentialDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CredentialDirectoryClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	credentialDirectoryMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("CredentialDirectory").Methods()
+	return &credentialDirectoryClient{
+		resolve: connect.NewClient[runtimev2.ResolveCredentialRequest, runtimev2.ResolvedCredential](
+			httpClient,
+			baseURL+CredentialDirectoryResolveProcedure,
+			connect.WithSchema(credentialDirectoryMethods.ByName("Resolve")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// credentialDirectoryClient implements CredentialDirectoryClient.
+type credentialDirectoryClient struct {
+	resolve *connect.Client[runtimev2.ResolveCredentialRequest, runtimev2.ResolvedCredential]
+}
+
+// Resolve calls supertag.runtime.v2.CredentialDirectory.Resolve.
+func (c *credentialDirectoryClient) Resolve(ctx context.Context, req *connect.Request[runtimev2.ResolveCredentialRequest]) (*connect.Response[runtimev2.ResolvedCredential], error) {
+	return c.resolve.CallUnary(ctx, req)
+}
+
+// CredentialDirectoryHandler is an implementation of the supertag.runtime.v2.CredentialDirectory
+// service.
+type CredentialDirectoryHandler interface {
+	Resolve(context.Context, *connect.Request[runtimev2.ResolveCredentialRequest]) (*connect.Response[runtimev2.ResolvedCredential], error)
+}
+
+// NewCredentialDirectoryHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewCredentialDirectoryHandler(svc CredentialDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	credentialDirectoryMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("CredentialDirectory").Methods()
+	credentialDirectoryResolveHandler := connect.NewUnaryHandler(
+		CredentialDirectoryResolveProcedure,
+		svc.Resolve,
+		connect.WithSchema(credentialDirectoryMethods.ByName("Resolve")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.CredentialDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case CredentialDirectoryResolveProcedure:
+			credentialDirectoryResolveHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedCredentialDirectoryHandler returns CodeUnimplemented from all methods.
+type UnimplementedCredentialDirectoryHandler struct{}
+
+func (UnimplementedCredentialDirectoryHandler) Resolve(context.Context, *connect.Request[runtimev2.ResolveCredentialRequest]) (*connect.Response[runtimev2.ResolvedCredential], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CredentialDirectory.Resolve is not implemented"))
 }

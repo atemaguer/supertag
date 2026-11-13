@@ -27,7 +27,7 @@ use serde_json::json;
 use sha2::Sha256;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_MESSAGE_BYTES, connector_request,
     v2::{
         AcceptSlackEventRequest, connector_client::ConnectorClient,
         reply_progress_client::ReplyProgressClient,
@@ -61,7 +61,7 @@ struct Connector {
     config: SlackConfig,
     control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
-    principal: String,
+    account: String,
     http: reqwest::Client,
     post_message: reqwest::Url,
     journal: Journal,
@@ -105,8 +105,8 @@ impl Slack {
             !config.signing_secret.trim().is_empty() && !config.bot_token.trim().is_empty(),
             "Slack signing secret and bot token are required"
         );
-        let principal = format!("connector:{}", config.account_id);
-        authenticated_request((), &gateway_token, Some(&principal))
+        let account = config.account_id.clone();
+        connector_request((), &gateway_token, &account)
             .context("invalid private Slack connector credential")?;
         let journal = Journal::open(&config.state_directory, &config.account_id, "slack")?;
         // A separate private journal, so an acknowledgement in flight never blocks a final reply.
@@ -132,7 +132,7 @@ impl Slack {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             progress_journal,
             gateway_token,
-            principal,
+            account,
             http,
             post_message: POST_MESSAGE.parse()?,
             journal,
@@ -216,8 +216,7 @@ async fn webhook_deadline(request: HttpRequest, next: Next) -> Response {
 
 impl Connector {
     fn request<T>(&self, message: T, deadline: Duration) -> Result<Request<T>> {
-        let mut request =
-            authenticated_request(message, &self.gateway_token, Some(&self.principal))?;
+        let mut request = connector_request(message, &self.gateway_token, &self.account)?;
         request.set_timeout(deadline);
         Ok(request)
     }

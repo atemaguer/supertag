@@ -16,14 +16,16 @@ async fn enroll(
     directory: &Path,
 ) -> Result<()> {
     let issued = json(credentials.operator(
-        &["auth-key", "create", id, "--host", id, "--tag", "builder"],
+        &[
+            "auth-key", "create", id, "--role", "host", "--tag", "builder",
+        ],
         gateway,
     ))
     .await?;
     let key_path = directory.with_extension("key");
     std::fs::write(&key_path, field(&issued, "auth_key")?)?;
     std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
-    let mut enroll = credentials.command(&["host", "enroll", id, "--gateway", gateway]);
+    let mut enroll = credentials.command(&["host", "enroll", id, "--control-plane", gateway]);
     enroll
         .arg("--state-directory")
         .arg(directory)
@@ -74,13 +76,13 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     git(&repository, &["commit", "--quiet", "-m", "base"]).await?;
     let base = git(&repository, &["rev-parse", "HEAD"]).await?;
     let credentials = Credentials::new();
-    let mut control = credentials.command(&["control-plane"]);
-    control.env("SUPERTAG_DATABASE_URL", &database);
-    let (mut control, private) = service(control).await?;
     let cas = root.join("cas");
-    let mut gateway = credentials.command(&["gateway", "--control-plane", &private]);
-    gateway.arg("--checkpoint-directory").arg(&cas);
-    let (mut gateway, public) = service(gateway).await?;
+    let mut control = credentials.command(&["control-plane"]);
+    control
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .arg("--transfer-directory")
+        .arg(&cas);
+    let (mut control, public) = service(control).await?;
     json(credentials.operator(
         &[
             "tag",
@@ -113,8 +115,13 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     let peer = format!("https://{listen}");
     let (cert, key) = peer_certificate(&root).await?;
     let producer = |once: bool| {
-        let mut command =
-            credentials.command(&["worker-host", "--gateway", &public, "--adapter", ADAPTER]);
+        let mut command = credentials.command(&[
+            "worker-host",
+            "--control-plane",
+            &public,
+            "--adapter",
+            ADAPTER,
+        ]);
         command
             .env_remove("SUPERTAG_HOST_TOKEN")
             .arg("--state-directory")
@@ -172,7 +179,14 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     let private_digest = format!("{:x}", Sha256::digest(b"separate private file\n"));
     std::fs::remove_file(cas.join(private_digest))?;
 
-    json(credentials.command(&["host", "--gateway", &public, "drain", "direct-producer"])).await?;
+    json(credentials.command(&[
+        "host",
+        "--control-plane",
+        &public,
+        "drain",
+        "direct-producer",
+    ]))
+    .await?;
     let mut restarting = producer(false);
     restarting.stdout(Stdio::piped());
     let mut producer = restarting.spawn()?;
@@ -231,7 +245,8 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
         .strip_prefix("derived:")
         .context("consumer receipt")?;
     let metadata =
-        json(credentials.command(&["get", "--gateway", &public, "artifact", derived])).await?;
+        json(credentials.command(&["get", "--control-plane", &public, "artifact", derived]))
+            .await?;
     assert_eq!(
         metadata["inputs"],
         serde_json::json!([{"artifact_id":artifact,"paths":["evidence.txt"]}])
@@ -239,7 +254,6 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     assert!(!removed.exists());
     assert_eq!(std::fs::read(&direct_copy)?, bytes);
     producer.kill().await?;
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }

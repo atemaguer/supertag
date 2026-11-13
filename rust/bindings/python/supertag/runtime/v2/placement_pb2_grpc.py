@@ -152,7 +152,7 @@ class Placement:
 class AuthKeysStub:
     """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
     name is never reused. Revocation blocks new joins, including replays of
-    earlier joins; hosts that already joined keep their enrollment.
+    earlier joins; principals that already joined keep their enrollment.
     """
 
     def __init__(self, channel):
@@ -181,7 +181,7 @@ class AuthKeysStub:
 class AuthKeysServicer:
     """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
     name is never reused. Revocation blocks new joins, including replays of
-    earlier joins; hosts that already joined keep their enrollment.
+    earlier joins; principals that already joined keep their enrollment.
     """
 
     def RevokeAuthKey(self, request, context):
@@ -232,7 +232,7 @@ def add_AuthKeysServicer_to_server(servicer, server):
 class AuthKeys:
     """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
     name is never reused. Revocation blocks new joins, including replays of
-    earlier joins; hosts that already joined keep their enrollment.
+    earlier joins; principals that already joined keep their enrollment.
     """
 
     @staticmethod
@@ -317,9 +317,13 @@ class AuthKeys:
             _registered_method=True)
 
 
-class HostCredentialsStub:
-    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
-    the caller generates the secret, so the Control Plane never receives it.
+class EnrollmentsStub:
+    """Joining a deployment, and the credentials joining issues. A host, Gateway or
+    client enrolls once with an Auth Key of its role and from then on presents
+    its own credential, `stcr_` and 64 hex digits, as the bearer. Only the
+    credential's SHA-256 digest is stored; the enrollee generates the secret, so
+    the Control Plane never receives it. Principals are `host:NAME`,
+    `gateway:NAME` and `client:NAME`; names are never reused within a role.
     """
 
     def __init__(self, channel):
@@ -328,49 +332,146 @@ class HostCredentialsStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.RotateHostCredential = channel.unary_unary(
-                '/supertag.runtime.v2.HostCredentials/RotateHostCredential',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.FromString,
+        self.Enroll = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/Enroll',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.EnrollRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
+                _registered_method=True)
+        self.WhoAmI = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/WhoAmI',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIResponse.FromString,
+                _registered_method=True)
+        self.RotateCredential = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/RotateCredential',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateCredentialRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.CredentialRotation.FromString,
+                _registered_method=True)
+        self.GetEnrollment = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/GetEnrollment',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetEnrollmentRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
+                _registered_method=True)
+        self.ListEnrollments = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/ListEnrollments',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsResponse.FromString,
+                _registered_method=True)
+        self.RevokeEnrollment = channel.unary_unary(
+                '/supertag.runtime.v2.Enrollments/RevokeEnrollment',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeEnrollmentRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
                 _registered_method=True)
 
 
-class HostCredentialsServicer:
-    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
-    the caller generates the secret, so the Control Plane never receives it.
+class EnrollmentsServicer:
+    """Joining a deployment, and the credentials joining issues. A host, Gateway or
+    client enrolls once with an Auth Key of its role and from then on presents
+    its own credential, `stcr_` and 64 hex digits, as the bearer. Only the
+    credential's SHA-256 digest is stored; the enrollee generates the secret, so
+    the Control Plane never receives it. Principals are `host:NAME`,
+    `gateway:NAME` and `client:NAME`; names are never reused within a role.
     """
 
-    def RotateHostCredential(self, request, context):
-        """Replaces the host's credential. The previous credential stops working at
-        once. A revoked host must be enrolled under a new ID instead.
+    def Enroll(self, request, context):
+        """Presented with an Auth Key (`stak_` and 64 hex digits) as the bearer: the
+        only call that accepts one. The request's role must equal the key's.
+        Repeating an enrollment with the same operation ID, name and digest returns
+        the same enrollment, until the key is revoked.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WhoAmI(self, request, context):
+        """The caller's own principal.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RotateCredential(self, request, context):
+        """Replaces an enrolled credential. An enrollee rotates its own (empty name);
+        an operator rotates any. The previous credential stops working at once,
+        including for open streams.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetEnrollment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListEnrollments(self, request, context):
+        """By role, then name.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RevokeEnrollment(self, request, context):
+        """Idempotent. The credential is refused from then on, including by calls and
+        streams already in progress. Revoking a host also fences its execution.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_HostCredentialsServicer_to_server(servicer, server):
+def add_EnrollmentsServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'RotateHostCredential': grpc.unary_unary_rpc_method_handler(
-                    servicer.RotateHostCredential,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.SerializeToString,
+            'Enroll': grpc.unary_unary_rpc_method_handler(
+                    servicer.Enroll,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.EnrollRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.SerializeToString,
+            ),
+            'WhoAmI': grpc.unary_unary_rpc_method_handler(
+                    servicer.WhoAmI,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIResponse.SerializeToString,
+            ),
+            'RotateCredential': grpc.unary_unary_rpc_method_handler(
+                    servicer.RotateCredential,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateCredentialRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.CredentialRotation.SerializeToString,
+            ),
+            'GetEnrollment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetEnrollment,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetEnrollmentRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.SerializeToString,
+            ),
+            'ListEnrollments': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListEnrollments,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsResponse.SerializeToString,
+            ),
+            'RevokeEnrollment': grpc.unary_unary_rpc_method_handler(
+                    servicer.RevokeEnrollment,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeEnrollmentRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.HostCredentials', rpc_method_handlers)
+            'supertag.runtime.v2.Enrollments', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.HostCredentials', rpc_method_handlers)
+    server.add_registered_method_handlers('supertag.runtime.v2.Enrollments', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class HostCredentials:
-    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
-    the caller generates the secret, so the Control Plane never receives it.
+class Enrollments:
+    """Joining a deployment, and the credentials joining issues. A host, Gateway or
+    client enrolls once with an Auth Key of its role and from then on presents
+    its own credential, `stcr_` and 64 hex digits, as the bearer. Only the
+    credential's SHA-256 digest is stored; the enrollee generates the secret, so
+    the Control Plane never receives it. Principals are `host:NAME`,
+    `gateway:NAME` and `client:NAME`; names are never reused within a role.
     """
 
     @staticmethod
-    def RotateHostCredential(request,
+    def Enroll(request,
             target,
             options=(),
             channel_credentials=None,
@@ -383,9 +484,222 @@ class HostCredentials:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.HostCredentials/RotateHostCredential',
-            supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.FromString,
+            '/supertag.runtime.v2.Enrollments/Enroll',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.EnrollRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WhoAmI(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Enrollments/WhoAmI',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.WhoAmIResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RotateCredential(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Enrollments/RotateCredential',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateCredentialRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.CredentialRotation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetEnrollment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Enrollments/GetEnrollment',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.GetEnrollmentRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListEnrollments(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Enrollments/ListEnrollments',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListEnrollmentsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RevokeEnrollment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Enrollments/RevokeEnrollment',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeEnrollmentRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.Enrollment.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class CredentialDirectoryStub:
+    """Internal to the Control Plane: its API tier resolves the digest of a
+    presented Operator Token or enrolled credential with the state owner.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Resolve = channel.unary_unary(
+                '/supertag.runtime.v2.CredentialDirectory/Resolve',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolveCredentialRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolvedCredential.FromString,
+                _registered_method=True)
+
+
+class CredentialDirectoryServicer:
+    """Internal to the Control Plane: its API tier resolves the digest of a
+    presented Operator Token or enrolled credential with the state owner.
+    """
+
+    def Resolve(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_CredentialDirectoryServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Resolve': grpc.unary_unary_rpc_method_handler(
+                    servicer.Resolve,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolveCredentialRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolvedCredential.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.CredentialDirectory', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.CredentialDirectory', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class CredentialDirectory:
+    """Internal to the Control Plane: its API tier resolves the digest of a
+    presented Operator Token or enrolled credential with the state owner.
+    """
+
+    @staticmethod
+    def Resolve(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.CredentialDirectory/Resolve',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolveCredentialRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ResolvedCredential.FromString,
             options,
             channel_credentials,
             insecure,

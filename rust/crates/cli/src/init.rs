@@ -320,7 +320,11 @@ pub async fn init(args: InitArgs) -> Result<()> {
         };
         let mut checked = Vec::new();
         let mut runnable = false;
-        for host in config.hosts.iter().filter(|host| host.gateway.is_none()) {
+        for host in config
+            .hosts
+            .iter()
+            .filter(|host| host.control_plane.is_none())
+        {
             for adapter in &host.harnesses {
                 let found = match adapter.harness_kind() {
                     HarnessKind::ClaudeCode => Found::ClaudeCode,
@@ -460,11 +464,11 @@ fn answers(
 ) -> Result<Answers> {
     let free = (DEFAULT_PORT..=u16::MAX)
         .find(|port| port_free(*port))
-        .context("no free local port for the Gateway")?;
+        .context("no free local port for the Control Plane")?;
     let port = match ask.as_deref_mut() {
         None => free,
         Some(prompter) => loop {
-            let answer = prompter.ask("Gateway port", &free.to_string())?;
+            let answer = prompter.ask("Control Plane port", &free.to_string())?;
             match answer.parse::<u16>() {
                 Ok(port) if port > 0 && port_free(port) => break port,
                 Ok(port) if port > 0 => outln!("Port {port} is in use; choose another."),

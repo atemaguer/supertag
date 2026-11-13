@@ -1,57 +1,88 @@
 //! `supertag auth-key create|revoke`, and the Auth Key reads behind `supertag get auth-key`.
+//!
+//! An Auth Key admits one role: Worker Hosts (`host enroll`), Gateways (`gateway enroll`), or
+//! clients (`supertag connect`). Each enrollee chooses its own name.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES,
+    AUTH_KEY_SECRET_PREFIX, MAX_MESSAGE_BYTES, new_secret,
     v2::{auth_keys_client::AuthKeysClient, operator_client::OperatorClient, *},
 };
 use uuid::Uuid;
+
+/// The one role every enrollee of an Auth Key takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum KeyRole {
+    /// Worker Hosts, with `supertag host enroll`.
+    Host,
+    /// Gateways, with `supertag gateway enroll`.
+    Gateway,
+    /// Clients (a device running the CLI, terminal UI, or desktop app), with `supertag connect`.
+    Client,
+}
+
+impl KeyRole {
+    fn proto(self) -> PrincipalRole {
+        match self {
+            Self::Host => PrincipalRole::Host,
+            Self::Gateway => PrincipalRole::Gateway,
+            Self::Client => PrincipalRole::Client,
+        }
+    }
+}
+
+/// The lowercase role name of a principal role, as the CLI prints it.
+pub fn role_name(role: i32) -> &'static str {
+    match PrincipalRole::try_from(role) {
+        Ok(PrincipalRole::Operator) => "operator",
+        Ok(PrincipalRole::Host) => "host",
+        Ok(PrincipalRole::Gateway) => "gateway",
+        Ok(PrincipalRole::Client) => "client",
+        _ => "unspecified",
+    }
+}
 
 use crate::{Connection, connect_operator, request};
 
 #[derive(Subcommand)]
 pub enum AuthKeyCommand {
-    /// Create a named, scoped Auth Key: one-time for a named Worker Host, or reusable.
+    /// Create a named Auth Key for one role: one-time for a single enrollee, or reusable. Every
+    /// enrollee chooses its own name.
     Create {
         /// The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused.
         name: String,
-        /// Worker Host ID a one-time key enrolls. Omit with --reusable.
-        #[arg(
-            long = "host",
-            required_unless_present = "reusable",
-            conflicts_with = "reusable"
-        )]
-        host_id: Option<String>,
-        /// Enroll any number of Worker Hosts, each choosing its own ID.
+        /// The role every enrollee takes. It never changes.
+        #[arg(long, value_enum)]
+        role: KeyRole,
+        /// Enroll any number of principals instead of one.
         #[arg(long)]
         reusable: bool,
-        /// Remove hosts that join with this key once they go offline.
+        /// Host keys only: remove hosts that join with this key once they go offline.
         #[arg(long)]
         ephemeral: bool,
-        /// Label granted to every host that joins. Repeat for more labels.
+        /// Host keys only: a label granted to every host that joins. Repeat for more labels.
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable.
         #[arg(long)]
         expires_in_seconds: Option<u64>,
-        /// Tag whose Tasks hosts enrolled with this key may run. Repeat for more Tags.
-        #[arg(
-            long,
-            conflicts_with = "all_tags",
-            required_unless_present = "all_tags"
-        )]
+        /// Host and client keys: a Tag the enrollee may run (host) or talk to (client). Repeat
+        /// for more Tags.
+        #[arg(long, conflicts_with = "all_tags")]
         tag: Vec<String>,
-        /// Let hosts enrolled with this key run Tasks for every Tag.
+        /// Every Tag. On a gateway key, it lets the Gateway serve connector accounts that no
+        /// Surface Account names, which admit work on any Tag, and deliver the admin operator's
+        /// notifications.
         #[arg(long)]
         all_tags: bool,
     },
-    /// Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled.
+    /// Stop an Auth Key from enrolling anyone else. Principals that joined stay enrolled.
     Revoke { name: String },
 }
 
@@ -77,7 +108,7 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
     let output = match command {
         AuthKeyCommand::Create {
             name,
-            host_id,
+            role,
             reusable,
             ephemeral,
             labels,
@@ -85,14 +116,26 @@ pub async fn run(connection: Connection, command: AuthKeyCommand) -> Result<()> 
             tag,
             all_tags,
         } => {
-            let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+            anyhow::ensure!(
+                role != KeyRole::Gateway || tag.is_empty(),
+                "a gateway Auth Key takes no --tag; only --all-tags"
+            );
+            anyhow::ensure!(
+                role == KeyRole::Gateway || !tag.is_empty() || all_tags,
+                "choose --tag TAG (repeatable) or --all-tags"
+            );
+            anyhow::ensure!(
+                role == KeyRole::Host || (!ephemeral && labels.is_empty()),
+                "only a host Auth Key takes --ephemeral or --label"
+            );
+            let secret = new_secret(AUTH_KEY_SECRET_PREFIX);
             let key = OperatorClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
                 .create_auth_key(request(
                     CreateAuthKeyRequest {
                         name,
-                        host_id: host_id.unwrap_or_default(),
+                        role: role.proto().into(),
                         reusable,
                         ephemeral,
                         labels,
@@ -142,8 +185,8 @@ pub fn view(key: &AuthKey) -> Value {
     };
     json!({
         "name": key.name,
+        "role": role_name(key.role),
         "phase": phase,
-        "host_id": key.host_id,
         "reusable": key.reusable,
         "ephemeral": key.ephemeral,
         "labels": key.labels,

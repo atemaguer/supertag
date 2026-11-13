@@ -491,11 +491,9 @@ fn running(task: &AnyRow, now: i64) -> Result<bool> {
     Ok(task.try_get::<i64, _>("state")? == TaskState::Running as i64 && lease_is_live(task, now)?)
 }
 
+/// Operators and clients direct input into Tasks they can see.
 fn validate_operator(principal: &str) -> Result<()> {
-    let operator = principal
-        .strip_prefix("operator:")
-        .ok_or(StoreError::PermissionDenied)?;
-    name("operator identity", operator)
+    crate::store::actor(principal)
 }
 
 fn required_text(kind: &str, value: &str) -> Result<()> {

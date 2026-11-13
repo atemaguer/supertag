@@ -1,9 +1,15 @@
-# SuperTag Control Plane on Fly.io. Private: it defines no public service and no public IP, so only
-# apps in the same organization reach it, over the 6PN network at
-# supertag-control-plane.internal:3435 with mutual TLS. Deploy the hosted image by digest:
+# SuperTag Control Plane on Fly.io: the public native gRPC endpoint for operators, Worker Hosts,
+# and Gateways. Port 443 passes raw TCP to the Control Plane (handlers = []): it terminates TLS
+# with its own certificate, so gRPC over HTTP/2 and optional client certificates reach it
+# unchanged. Shared IPv4 addresses do not route raw TCP services: allocate a dedicated IPv4
+# address with `fly ips allocate-v4 --app supertag-control-plane`. A Gateway reaches it over the
+# 6PN network at supertag-control-plane.internal:3434, so its certificate names that host too.
+# Deploy the hosted image by digest:
 #   fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
-# Secrets: control-plane.env from `supertag setup deployment fly`, plus SUPERTAG_TLS_CERT_PEM,
-# SUPERTAG_TLS_KEY_PEM, and SUPERTAG_TLS_CLIENT_CA_PEM. Run exactly one Machine.
+# Secrets: control-plane.env from `supertag setup deployment fly`, plus SUPERTAG_TLS_CERT_PEM and
+# SUPERTAG_TLS_KEY_PEM, and SUPERTAG_TLS_CLIENT_CA_PEM to require client certificates, which a
+# Gateway needs. Run exactly one Machine: its volume holds the transfer directory, and every
+# Control Plane process runs the controllers.
 app = "supertag-control-plane"
 primary_region = "iad"
 kill_signal = "SIGTERM"
@@ -13,14 +19,27 @@ kill_timeout = "30s"
   strategy = "immediate"
 
 [processes]
-  app = "control-plane --listen [::]:3435"
+  app = "control-plane --listen [::]:3434 --transfer-directory /var/lib/supertag/transfers"
 
-[checks.control_plane_tls]
-  type = "tcp"
-  port = 3435
-  interval = "15s"
-  timeout = "5s"
-  grace_period = "30s"
+[[mounts]]
+  source = "supertag_control_plane_state"
+  destination = "/var/lib/supertag"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3434
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443
+    handlers = []
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
 
 [[vm]]
   cpu_kind = "shared"

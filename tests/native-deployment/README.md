@@ -50,10 +50,10 @@ directories from these variables:
 - `SUPERTAG_CONTROL_ENV_FILE` and `SUPERTAG_CONTROL_TLS_DIRECTORY`.
 - `SUPERTAG_GATEWAY_ENV_FILE` and `SUPERTAG_GATEWAY_TLS_DIRECTORY`.
 
-The Control Plane file supplies `SUPERTAG_DATABASE_URL`, its Gateway token, the synthetic
-bootstrap Host token, and the server TLS certificate/key and client CA paths. The Gateway
-file supplies its upstream Gateway token, operator token, server TLS identity, upstream CA,
-and client TLS identity. The rehearsal creates these files privately. Never put lasting
+The Control Plane file supplies `SUPERTAG_DATABASE_URL`, the Gateway's bootstrap credential,
+the synthetic bootstrap Host token, and the server TLS certificate/key and client CA paths. The
+Gateway file supplies its enrolled credential, server TLS identity, upstream CA, and client TLS
+identity. The rehearsal creates these files privately. Never put lasting
 credentials into command arguments or tracked Compose files.
 
 The standard read-only gRPC health check uses the same TLS configuration as the normal CLI:

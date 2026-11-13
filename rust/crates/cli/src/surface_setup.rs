@@ -17,10 +17,8 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Subcommand, ValueEnum};
-use supertag_gateway::{
-    credential_vault::CredentialVault,
-    surface_setup::{self, Endpoints, Verified},
-};
+use supertag_credential_vault::CredentialVault;
+use supertag_gateway::surface_setup::{self, Endpoints, Verified};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
@@ -52,9 +50,10 @@ use crate::{
 /// directory (which also holds the file credential vault).
 #[derive(Args, Clone)]
 pub struct Target {
-    /// Gateway URL or saved Gateway name. Defaults to this machine's running local services.
+    /// Control Plane URL or saved Control Plane name. Defaults to this machine's running local
+    /// services.
     #[arg(long, value_name = "URL|NAME")]
-    gateway: Option<String>,
+    control_plane: Option<String>,
     /// State directory with supertag.yaml and the file credential vault. Defaults to
     /// SUPERTAG_STATE_DIR, then ~/.supertag.
     #[arg(long)]
@@ -79,6 +78,10 @@ pub struct Common {
     /// Defaults to the provider name.
     #[arg(long)]
     name: Option<String>,
+    /// The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local
+    /// services' Gateway is local.
+    #[arg(long, default_value = "local")]
+    gateway: String,
     #[command(flatten)]
     target: Target,
 }
@@ -309,9 +312,10 @@ impl Local {
         ProtocolChannel,
         String,
     )> {
-        let local = self.target.gateway.is_none() && crate::ROOT_GATEWAY.get().is_none();
+        let local =
+            self.target.control_plane.is_none() && crate::ROOT_CONTROL_PLANE.get().is_none();
         let (channel, token) = crate::connect_operator(Connection {
-            gateway: self.target.gateway.clone(),
+            control_plane: self.target.control_plane.clone(),
             state_directory: local.then(|| self.state.clone()),
         })
         .await?;
@@ -833,7 +837,11 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
     // Choose where the secrets go before asking for them.
     let vault = context.vault()?;
     let verified = verify(&kind, &prompter, &endpoints).await?;
-    finish(context, vault, name, provider, listen, prior, verified).await
+    let gateway = common.gateway.clone();
+    finish(
+        context, vault, name, gateway, provider, listen, prior, verified,
+    )
+    .await
 }
 
 /// The verification arguments of each provider.
@@ -949,10 +957,12 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn finish(
     context: Local,
     vault: CredentialVault,
     name: String,
+    gateway: String,
     provider: Provider,
     listen: Option<SocketAddr>,
     prior: Option<Surface>,
@@ -1015,6 +1025,7 @@ async fn finish(
                     identity: Some(identity),
                     enabled: true,
                     revision: 0,
+                    gateway: gateway.clone(),
                 }),
             },
             &token,

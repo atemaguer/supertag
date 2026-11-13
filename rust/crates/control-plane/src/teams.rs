@@ -88,11 +88,28 @@ impl Store {
     }
 
     pub async fn get_team(&self, principal: &str, reference: &str) -> Result<Team> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         let mut tx = self.pool.begin().await?;
-        let team = team_by_reference_in(&mut tx, reference).await?;
+        let team = visible_team_in(&mut tx, principal, reference).await?;
         tx.commit().await?;
         Ok(team)
+    }
+
+    /// Whether a client sees the Team now. Operators see every Team; a deleted Team is unseen.
+    pub(crate) async fn client_sees_team(
+        &self,
+        tags: Option<&[String]>,
+        team_id: &str,
+    ) -> Result<bool> {
+        let Some(tags) = tags else {
+            return Ok(true);
+        };
+        let members: Vec<String> =
+            sqlx::query_scalar("SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1")
+                .bind(team_id)
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(!members.is_empty() && members.iter().all(|tag| tags.contains(tag)))
     }
 
     pub async fn list_teams(
@@ -100,7 +117,7 @@ impl Store {
         principal: &str,
         input: &ListTeamsRequest,
     ) -> Result<ListTeamsResponse> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         if !input.cursor.is_empty() {
             team_name(&input.cursor)?;
         }
@@ -114,16 +131,35 @@ impl Store {
             name("member Tag ID", &input.member_tag_id)?;
             validate_members(&mut tx, std::slice::from_ref(&input.member_tag_id)).await?;
         }
+        // A client whose Auth Key limits its Tags sees only Teams made entirely of those Tags.
+        let allowed = crate::store::client_tags_in(&mut tx, principal).await?;
+        let outside = match &allowed {
+            None => String::new(),
+            Some(tags) if tags.is_empty() => " AND 1=0".into(),
+            Some(tags) => format!(
+                " AND NOT EXISTS (SELECT 1 FROM supertag_v2_team_members outside WHERE outside.team_id=t.team_id AND outside.tag_id NOT IN ({}))",
+                (4..4 + tags.len())
+                    .map(|index| format!("${index}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        };
         // Limit Teams before expanding their membership, keeping the entire
         // page under the public gRPC message bound with one database read.
-        let rows = sqlx::query("WITH page AS (
+        let sql = format!("WITH page AS (
                 SELECT t.* FROM supertag_v2_teams t WHERE t.name > $1
-                AND ($2='' OR EXISTS (SELECT 1 FROM supertag_v2_team_members filter WHERE filter.team_id=t.team_id AND filter.tag_id=$2))
+                AND ($2='' OR EXISTS (SELECT 1 FROM supertag_v2_team_members filter WHERE filter.team_id=t.team_id AND filter.tag_id=$2)){outside}
                 ORDER BY t.name LIMIT $3
             ) SELECT page.*,m.tag_id AS member_tag_id FROM page
-              JOIN supertag_v2_team_members m ON m.team_id=page.team_id ORDER BY page.name,m.tag_id")
-            .bind(&input.cursor).bind(&input.member_tag_id).bind(limit as i64 + 1)
-            .fetch_all(&mut *tx).await?;
+              JOIN supertag_v2_team_members m ON m.team_id=page.team_id ORDER BY page.name,m.tag_id");
+        let mut query = sqlx::query(&sql)
+            .bind(&input.cursor)
+            .bind(&input.member_tag_id)
+            .bind(limit as i64 + 1);
+        for tag in allowed.iter().flatten() {
+            query = query.bind(tag);
+        }
+        let rows = query.fetch_all(&mut *tx).await?;
         let mut teams: Vec<Team> = Vec::new();
         let mut next_cursor = String::new();
         for row in rows {
@@ -290,6 +326,22 @@ pub(crate) async fn delete_team_in(
         .execute(&mut **tx)
         .await?;
     crate::apply_sets::forget(tx, "Team", &team.team_id).await
+}
+
+/// A Team by ID or name as `principal` sees it: a client whose Auth Key limits its Tags sees
+/// only Teams made entirely of those Tags, and any other Team as if it did not exist.
+pub(crate) async fn visible_team_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    reference: &str,
+) -> Result<Team> {
+    let team = team_by_reference_in(tx, reference).await?;
+    if let Some(tags) = crate::store::client_tags_in(tx, principal).await?
+        && !team.member_tag_ids.iter().all(|tag| tags.contains(tag))
+    {
+        return Err(StoreError::NotFound("Team was not found".into()));
+    }
+    Ok(team)
 }
 
 pub(crate) async fn team_by_reference_in(
@@ -574,7 +626,7 @@ impl teams_server::Teams for ControlPlane {
         &self,
         request: Request<GetTeamRequest>,
     ) -> std::result::Result<Response<Team>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_team(&principal, &request.into_inner().team)
@@ -586,7 +638,7 @@ impl teams_server::Teams for ControlPlane {
         &self,
         request: Request<ListTeamsRequest>,
     ) -> std::result::Result<Response<ListTeamsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_teams(&principal, &request.into_inner())

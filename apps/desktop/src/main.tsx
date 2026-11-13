@@ -2,33 +2,34 @@ import "@fontsource-variable/geist";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
-import { GatewaySelector } from "./components/gateway-selector";
+import { ControlPlaneSelector } from "./components/control-plane-selector";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import {
-  type Gateway,
-  type GatewayActivation,
-  type GatewayList,
-  type GatewayProfile,
-  gatewaySession,
-  nativeGateway,
+  type ControlPlane,
+  type ControlPlaneActivation,
+  type ControlPlaneList,
+  type ControlPlaneProfile,
+  controlPlaneSession,
+  nativeControlPlane,
   type Tag,
-} from "./gateway";
+} from "./control-plane";
 import { describe } from "./lib/polling";
 import "./shadcn.css";
 import "./style.css";
 
 interface Connection {
-  gateway: Gateway;
+  controlPlane: ControlPlane;
   tags: Tag[];
   preview: boolean;
   id?: string;
   origin?: string;
+  principal?: string;
 }
 
 function App({ initialConnection }: { initialConnection?: Connection }) {
   const [connection, setConnection] = useState(initialConnection);
-  const [gateways, setGateways] = useState<GatewayList>({ profiles: [] });
-  const [editor, setEditor] = useState<{ profile?: GatewayProfile }>();
+  const [controlPlanes, setControlPlanes] = useState<ControlPlaneList>({ profiles: [] });
+  const [editor, setEditor] = useState<{ profile?: ControlPlaneProfile }>();
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(!initialConnection);
   const [writing, setWriting] = useState(false);
@@ -37,27 +38,31 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
 
-  const activate = useCallback(({ gateways, connectionId, tags }: GatewayActivation) => {
-    setGateways(gateways);
-    setConnection({
-      gateway: gatewaySession(connectionId),
-      tags,
-      preview: false,
-      id: connectionId,
-      origin: gateways.active ?? undefined,
-    });
-  }, []);
+  const activate = useCallback(
+    ({ controlPlanes, connectionId, tags, principal }: ControlPlaneActivation) => {
+      setControlPlanes(controlPlanes);
+      setConnection({
+        controlPlane: controlPlaneSession(connectionId),
+        tags,
+        preview: false,
+        id: connectionId,
+        origin: controlPlanes.active ?? undefined,
+        principal,
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (initialConnection) return;
     let live = true;
     async function restore() {
       try {
-        const saved = await nativeGateway.list();
+        const saved = await nativeControlPlane.list();
         if (!live) return;
-        setGateways(saved);
+        setControlPlanes(saved);
         if (saved.active) {
-          const next = await nativeGateway.select(saved.active);
+          const next = await nativeControlPlane.select(saved.active);
           if (live) activate(next);
         }
       } catch (error) {
@@ -95,7 +100,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     }
   }
 
-  function open(profile?: GatewayProfile, button = trigger.current) {
+  function open(profile?: ControlPlaneProfile, button = trigger.current) {
     if (pendingSwitch.current || pendingWrites.current > 0) return;
     opener.current = button;
     setError("");
@@ -106,26 +111,27 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     return change(async () => {
       if (connection?.preview && !forget) {
         setConnection(undefined);
-        setGateways(await nativeGateway.list());
+        setControlPlanes(await nativeControlPlane.list());
         return;
       }
-      setGateways(await nativeGateway.clear(forget));
+      setControlPlanes(await nativeControlPlane.clear(forget));
       if (!forget || forget === connection?.origin) setConnection(undefined);
       setEditor(undefined);
     });
   }
 
   const selector = (
-    <GatewaySelector
+    <ControlPlaneSelector
       active={connection?.origin}
-      profiles={gateways.profiles}
+      principal={connection?.principal}
+      profiles={controlPlanes.profiles}
       preview={connection?.preview}
       busy={writing}
       switching={switching}
       trigger={trigger}
       onSelect={(origin) => {
         if (origin !== connection?.origin)
-          void change(async () => activate(await nativeGateway.select(origin)));
+          void change(async () => activate(await nativeControlPlane.select(origin)));
       }}
       onEdit={open}
       onDisconnect={() => void clear()}
@@ -138,7 +144,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         <Workspace
           key={connection.id ?? "preview"}
           connectionId={connection.id}
-          gateway={connection.gateway}
+          controlPlane={connection.controlPlane}
           initialTags={connection.tags}
           selector={selector}
           switching={switching}
@@ -171,7 +177,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           }}
           onSave={(address, name, token) =>
             void change(async () => {
-              activate(await nativeGateway.save(address, name, token));
+              activate(await nativeControlPlane.save(address, name, token));
               setEditor(undefined);
             })
           }
@@ -187,10 +193,10 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewGateway } = await import("./preview");
+    const { previewControlPlane } = await import("./preview");
     initialConnection = {
-      gateway: previewGateway,
-      tags: await previewGateway.tags(),
+      controlPlane: previewControlPlane,
+      tags: await previewControlPlane.tags(),
       preview: true,
     };
   }

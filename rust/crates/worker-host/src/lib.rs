@@ -24,8 +24,7 @@ mod workspaces;
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::{
-    PendingRotation, abandon_credential_rotation, begin_credential_rotation, enroll,
-    finish_credential_rotation,
+    EnrolledRole, credential, enroll, enrolled_control_plane, rotate_own_credential,
 };
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::{
@@ -74,7 +73,7 @@ use tonic::{
 use uuid::Uuid;
 
 pub struct HostOptions {
-    pub gateway: supertag_transport::Target,
+    pub control_plane: supertag_transport::Target,
     pub token: Option<String>,
     pub state_directory: PathBuf,
     pub adapter_guardian: PathBuf,
@@ -123,7 +122,7 @@ pub(crate) struct HostHeaders {
 
 impl HostHeaders {
     /// Names a registered generation and the protocol version this host
-    /// negotiated with its Gateway on every call.
+    /// negotiated with its Control Plane on every call.
     pub(crate) fn new(generation: u64, protocol: u32) -> Self {
         Self {
             generation: MetadataValue::from(generation),
@@ -228,7 +227,7 @@ fn claim_request(
     ClaimTaskRequest {
         operation_id,
         workspace_ids: workspaces.ids(),
-        gateway_workspace_ids: workspaces.gateway_ids(),
+        gateway_workspace_ids: workspaces.control_plane_ids(),
         harness_kind: options.harness as i32,
         context_contracts: options.context_catalog.supported_contracts(),
         execution_profile: Some(McpCatalog::advertised(
@@ -335,7 +334,7 @@ pub async fn run(
         Some(token) if !token.is_empty() => token.clone(),
         Some(_) => bail!("Worker Host credential is empty"),
         None if options.lane.is_some() => bail!("a supervised lane needs its Host credential"),
-        None => enrollment::host_token(&journal, &options.gateway)?,
+        None => enrollment::host_token(&journal, &options.control_plane)?,
     };
     let incarnation_id = match &options.lane {
         Some(lane) => {
@@ -344,16 +343,16 @@ pub async fn run(
         }
         None => journal.incarnation()?,
     };
-    let channel = options.gateway.clone().connect_lazy();
+    let channel = options.control_plane.clone().connect_lazy();
     let (registration, protocol) = loop {
         if shutdown.is_cancelled() {
             return Ok(());
         }
-        // Refuse an incompatible Gateway before registering for work.
+        // Refuse an incompatible Control Plane before registering for work.
         let protocol = match negotiation::negotiate(
             channel.clone(),
             ServiceRole::WorkerHost,
-            ServiceRole::Gateway,
+            ServiceRole::ControlPlane,
         )
         .await
         {
@@ -389,7 +388,7 @@ pub async fn run(
     };
     let headers = HostHeaders::new(registration.generation, protocol);
     let inputs = AttemptInputsClient::with_interceptor(
-        options.gateway.clone().connect_lazy(),
+        options.control_plane.clone().connect_lazy(),
         headers.clone(),
     )
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -414,7 +413,7 @@ pub async fn run(
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
             options
-                .gateway
+                .control_plane
                 .clone()
                 .timeout(Duration::from_secs(65))
                 .connect_lazy(),
@@ -474,7 +473,7 @@ pub async fn run(
             workspaces
                 .ids()
                 .into_iter()
-                .chain(workspaces.gateway_ids())
+                .chain(workspaces.control_plane_ids())
                 .collect(),
             (
                 {

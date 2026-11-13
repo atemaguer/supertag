@@ -37,20 +37,26 @@ async fn exercise(database: &str) {
             .unwrap();
     }
     let page = store
-        .list_tags(&ListTagsRequest {
-            limit: 1,
-            cursor: String::new(),
-            include_retired: false,
-        })
+        .list_tags(
+            "operator:local",
+            &ListTagsRequest {
+                limit: 1,
+                cursor: String::new(),
+                include_retired: false,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page.tags[0].tag_id, "engineer");
     let last = store
-        .list_tags(&ListTagsRequest {
-            limit: 1,
-            cursor: page.next_cursor,
-            include_retired: false,
-        })
+        .list_tags(
+            "operator:local",
+            &ListTagsRequest {
+                limit: 1,
+                cursor: page.next_cursor,
+                include_retired: false,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(last.tags[0].tag_id, "writer");

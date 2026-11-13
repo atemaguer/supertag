@@ -660,7 +660,7 @@ class PolicyCatalog:
 
 
 class SurfacePolicyCatalogStub:
-    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """Operator-managed policy bindings. Surface credentials stay at the Gateway.
     """
 
     def __init__(self, channel):
@@ -707,7 +707,7 @@ class SurfacePolicyCatalogStub:
 
 
 class SurfacePolicyCatalogServicer:
-    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """Operator-managed policy bindings. Surface credentials stay at the Gateway.
     """
 
     def PutSurfaceAccount(self, request, context):
@@ -799,7 +799,7 @@ def add_SurfacePolicyCatalogServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class SurfacePolicyCatalog:
-    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """Operator-managed policy bindings. Surface credentials stay at the Gateway.
     """
 
     @staticmethod

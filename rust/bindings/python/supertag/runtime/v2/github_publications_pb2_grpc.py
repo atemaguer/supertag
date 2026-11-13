@@ -187,7 +187,7 @@ class GithubPublications:
 
 
 class GithubPublisherStub:
-    """Private Gateway-to-Control-Plane service. The authenticated publisher is
+    """Internal to the Control Plane: its GitHub publisher calls the state owner. The publisher is
     bound to a configured GitHub account. A claim is never permission to write.
     """
 
@@ -225,7 +225,7 @@ class GithubPublisherStub:
 
 
 class GithubPublisherServicer:
-    """Private Gateway-to-Control-Plane service. The authenticated publisher is
+    """Internal to the Control Plane: its GitHub publisher calls the state owner. The publisher is
     bound to a configured GitHub account. A claim is never permission to write.
     """
 
@@ -296,7 +296,7 @@ def add_GithubPublisherServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class GithubPublisher:
-    """Private Gateway-to-Control-Plane service. The authenticated publisher is
+    """Internal to the Control Plane: its GitHub publisher calls the state owner. The publisher is
     bound to a configured GitHub account. A claim is never permission to write.
     """
 

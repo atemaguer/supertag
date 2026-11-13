@@ -19,7 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     authenticated_request,
-    v2::{EnrollHostRequest, host_enrollment_client::HostEnrollmentClient},
+    v2::{EnrollRequest, PrincipalRole, enrollments_client::EnrollmentsClient},
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -79,7 +79,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
     let mut command = binary(args);
     command
-        .args(["--gateway", gateway])
+        .args(["--control-plane", gateway])
         .env("SUPERTAG_OPERATOR_TOKEN", token);
     command
 }
@@ -87,7 +87,7 @@ fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
 fn worker(gateway: &str, state: &Path) -> Command {
     let mut command = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         gateway,
         "--adapter",
         ADAPTER,
@@ -106,18 +106,15 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
     let mut control = binary(&["control-plane"]);
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_DATABASE_URL", database);
-    let (mut control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (mut gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (mut control, public) = service(control).await?;
 
     for tag in ["other-team", "reviewer"] {
         json(operator(
@@ -129,23 +126,17 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     }
     let issued = json(operator(
         &[
-            "auth-key",
-            "create",
-            "review",
-            "--host",
-            "review-host",
-            "--tag",
-            "reviewer",
+            "auth-key", "create", "review", "--role", "host", "--tag", "reviewer",
         ],
         &public,
         &operator_token,
     ))
     .await?;
-    assert_eq!(issued["host_id"], "review-host");
+    assert_eq!(issued["role"], "host");
     assert_eq!(issued["allowed_tag_ids"], serde_json::json!(["reviewer"]));
     let auth_key = field(&issued, "auth_key")?;
     let key_file = directory.path().join("join.key");
-    std::fs::write(&key_file, "unissued-test-key\n")?;
+    std::fs::write(&key_file, format!("stak_{}\n", "0".repeat(64)))?;
     std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
     let key_argument = format!("file:{}", key_file.display());
     let state = directory.path().join("worker-state");
@@ -154,7 +145,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
             "host",
             "enroll",
             "review-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--auth-key",
             &key_argument,
@@ -166,7 +157,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     assert!(!failed.status.success());
     let failure = String::from_utf8_lossy(&failed.stderr);
     ensure!(
-        failure.contains("valid Worker Host credential required"),
+        failure.contains("the Auth Key does not admit this enrollment"),
         "enrollment failed for an unexpected reason: {failure}"
     );
     let enrollment_file = state.join("enrollment.json");
@@ -175,16 +166,17 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         0o600
     );
     let pending: Value = serde_json::from_slice(&std::fs::read(&enrollment_file)?)?;
-    assert!(pending["receipt"].is_null());
+    assert!(pending["revision"].is_null());
     let candidate = field(&pending, "token")?;
     let operation_id = field(&pending, "operation_id")?;
 
     // Commit the CLI's pending operation without delivering its receipt to that
     // process. The retry must keep both the candidate credential and operation ID.
-    let mut enrollment = HostEnrollmentClient::new(protocol::dial(public.clone()).await?);
+    let mut enrollment = EnrollmentsClient::new(protocol::dial(public.clone()).await?);
     let mut request = authenticated_request(
-        EnrollHostRequest {
-            host_id: "review-host".into(),
+        EnrollRequest {
+            role: PrincipalRole::Host.into(),
+            name: "review-host".into(),
             operation_id: operation_id.into(),
             token_digest: Sha256::digest(candidate).to_vec(),
         },
@@ -192,12 +184,12 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         None,
     )?;
     request.set_timeout(WAIT);
-    enrollment.enroll_host(request).await?;
+    enrollment.enroll(request).await?;
     std::fs::write(&key_file, format!("{auth_key}\n"))?;
     let joined = json(enroll()).await?;
     assert_eq!(
         joined,
-        serde_json::json!({"host_id": "review-host", "generation": 0})
+        serde_json::json!({"host_id": "review-host", "principal": "host:review-host"})
     );
     let saved: Value = serde_json::from_slice(&std::fs::read(&enrollment_file)?)?;
     ensure!(
@@ -205,7 +197,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         "pending credential changed"
     );
     assert_eq!(field(&saved, "operation_id")?, operation_id);
-    assert_eq!(saved["receipt"]["generation"], 0);
+    assert_eq!(saved["revision"], 1);
 
     let submit = |tag| {
         operator(
@@ -255,10 +247,9 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     assert!(!denied.status.success());
     let failure = String::from_utf8_lossy(&denied.stderr);
     ensure!(
-        failure.contains("valid Worker Host credential required"),
+        failure.contains("valid bearer credential required"),
         "revoked Worker Host failed for an unexpected reason: {failure}"
     );
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }

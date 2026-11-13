@@ -1,4 +1,4 @@
-//! Real Control Plane, Gateway and Worker Host processes with a provider-shaped OpenCode CLI.
+//! Real Control Plane and Worker Host processes with a provider-shaped OpenCode CLI.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -146,9 +146,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self) -> Command {
@@ -156,7 +156,8 @@ impl Credentials {
         command
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -171,7 +172,6 @@ impl Credentials {
 }
 struct Runtime {
     // Drop the public service before its private dependency.
-    _gateway: Process,
     _control: Process,
     operator: OperatorClient<ProtocolChannel>,
     endpoint: String,
@@ -210,11 +210,7 @@ impl Runtime {
             .arg("control-plane")
             .env("SUPERTAG_DATABASE_URL", &database);
         let mut control = Process::spawn(control, directory, "control", true)?;
-        let private = control.endpoint().await?;
-        let mut gateway = credentials.command();
-        gateway.args(["gateway", "--control-plane", &private]);
-        let mut gateway = Process::spawn(gateway, directory, "gateway", true)?;
-        let endpoint = gateway.endpoint().await?;
+        let endpoint = control.endpoint().await?;
         let channel = protocol::negotiated(
             Channel::from_shared(endpoint.clone())?
                 .connect_timeout(Duration::from_secs(3))
@@ -224,7 +220,6 @@ impl Runtime {
         )
         .await?;
         Ok(Self {
-            _gateway: gateway,
             _control: control,
             operator: OperatorClient::new(channel),
             endpoint,
@@ -287,7 +282,7 @@ impl Runtime {
         let mut host = self.credentials.command();
         host.args([
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &self.endpoint,
             "--once",
             "--harness",
@@ -904,7 +899,7 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: Str
                 "tag",
                 "put",
                 "reviewer",
-                "--gateway",
+                "--control-plane",
                 &runtime.endpoint,
                 "--instructions",
                 "Review the fixture change",

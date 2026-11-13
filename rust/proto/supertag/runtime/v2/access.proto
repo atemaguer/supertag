@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package supertag.runtime.v2;
 
-// Operator Tokens and the audit log, reached through the Gateway.
+// Operator Tokens and the audit log, on the Control Plane's public endpoint.
 //
 // An Operator Token is a named, revocable credential that one teammate or
 // machine presents instead of the admin operator token. Calls made with it act
-// as the operator `token:NAME`. Only the admin operator token creates, lists,
+// as `operator:token:NAME`. Only the admin operator token creates, lists,
 // reads, rotates, and revokes Operator Tokens. Every operator may read the
 // audit log.
 service OperatorAccess {
@@ -23,11 +23,6 @@ service OperatorAccess {
   rpc RevokeOperatorToken(RevokeOperatorTokenRequest) returns (OperatorToken);
   // Newest first.
   rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse);
-}
-
-// Private Gateway-to-Control Plane resolution of a presented Operator Token.
-service OperatorDirectory {
-  rpc Authenticate(AuthenticateOperatorRequest) returns (OperatorIdentity);
 }
 
 message CreateOperatorTokenRequest {
@@ -77,7 +72,7 @@ enum OperatorTokenPhase {
 // A token as an operator sees it. It never includes the secret or its digest.
 message OperatorToken {
   string name = 1;
-  // The operator calls made with it act as, such as `token:laptop-2`.
+  // The principal calls made with it act as, such as `operator:token:laptop-2`.
   string operator_id = 2;
   OperatorTokenPhase phase = 3;
   int64 created_at_ms = 4;
@@ -88,18 +83,8 @@ message OperatorToken {
   optional int64 rotated_at_ms = 8;
   // 1 for the first secret; increases with each rotation.
   uint64 secret_revision = 9;
-  // The bare operator ID that created it.
+  // The principal that created it, the admin operator.
   string created_by = 10;
-}
-
-message AuthenticateOperatorRequest {
-  // SHA-256 of the presented bearer secret.
-  bytes token_digest = 1;
-}
-
-message OperatorIdentity {
-  // The bare operator ID, such as `token:laptop-2`.
-  string operator_id = 1;
 }
 
 enum AuditOutcome {
@@ -108,13 +93,15 @@ enum AuditOutcome {
   AUDIT_OUTCOME_FAILED = 2;
 }
 
-// One administrative or authority-changing operator call. It names who acted
-// and on what, never a credential, digest, or request body.
+// One administrative or authority-changing call. It names who acted and on
+// what, never a credential, digest, or request body.
 message AuditEntry {
   string id = 1;
   // When the Control Plane finished handling the call.
   int64 at_ms = 2;
-  // The bare operator ID, such as `local` or `token:laptop-2`.
+  // The full principal, such as `operator:local`, `operator:token:laptop-2`,
+  // `client:alice-laptop`, `gateway:edge`, `host:builder`, or
+  // `auth-key:NAME` for an enrollment.
   string actor = 3;
   // Such as `tag.put`, `operator-token.revoke`, or `approval.decide`.
   string action = 4;
@@ -130,7 +117,7 @@ message AuditEntry {
 message ListAuditEntriesRequest {
   // Only entries at or after this time. 0 lists from the oldest.
   int64 since_ms = 1;
-  // Only entries by this exact bare operator ID. Empty lists every operator's.
+  // Only entries by this exact principal. Empty lists every actor's.
   string actor = 2;
   // 0 means 50; more than 500 is refused.
   uint32 limit = 3;

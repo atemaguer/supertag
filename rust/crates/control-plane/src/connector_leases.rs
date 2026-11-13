@@ -7,12 +7,89 @@ use crate::{
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::v2::{
     ClaimConnectorRequest, ConnectorLease, ReleaseConnectorRequest, RenewConnectorRequest,
+    SurfaceAccount,
 };
 use uuid::Uuid;
 
 pub(crate) const CONNECTOR_LEASE_MS: i64 = 15_000;
 
 impl Store {
+    /// Checks that `gateway` (a Gateway name) serves the connector account. A managed account is
+    /// served by the Gateway its SurfaceAccount names. An unmanaged account admits work on any
+    /// Tag, so only a Gateway enrolled with every Tag may serve one: the first such Gateway that
+    /// acts for it, until that Gateway is revoked; then the next one takes it over.
+    pub async fn bind_connector_account(&self, gateway: &str, account: &str) -> Result<()> {
+        name("connector account", account)?;
+        let managed = sqlx::query(
+            "SELECT a.payload FROM supertag_v2_managed_connector_aliases alias
+             JOIN supertag_v2_surface_accounts a ON a.account_id=alias.account_id
+             WHERE alias.connector_account_id=$1",
+        )
+        .bind(account)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(row) = managed {
+            let surface: SurfaceAccount =
+                crate::policy::decode(&row.try_get::<Vec<u8>, _>("payload")?)?;
+            return if surface.gateway == gateway {
+                Ok(())
+            } else {
+                Err(StoreError::PermissionDenied)
+            };
+        }
+        self.ensure_gateway_every_tag(gateway).await?;
+        let bound: Option<String> = sqlx::query_scalar(
+            "SELECT gateway FROM supertag_v2_connector_gateways WHERE connector_account_id=$1",
+        )
+        .bind(account)
+        .fetch_optional(&self.pool)
+        .await?;
+        if bound.as_deref() == Some(gateway) {
+            return Ok(());
+        }
+        let (mut tx, _) = self.write().await?;
+        let current: Option<String> = sqlx::query_scalar(
+            "SELECT b.gateway FROM supertag_v2_connector_gateways b
+             JOIN supertag_v2_enrollments e ON e.role='gateway' AND e.name=b.gateway
+             WHERE b.connector_account_id=$1 AND e.revoked_at_ms IS NULL",
+        )
+        .bind(account)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match current {
+            Some(current) if current == gateway => {}
+            Some(_) => return Err(StoreError::PermissionDenied),
+            None => {
+                sqlx::query(
+                    "DELETE FROM supertag_v2_connector_gateways WHERE connector_account_id=$1",
+                )
+                .bind(account)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("INSERT INTO supertag_v2_connector_gateways (connector_account_id,gateway,bound_at_ms) VALUES ($1,$2,$3)")
+                    .bind(account).bind(gateway).bind(self.execution_now_ms())
+                    .execute(&mut *tx).await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Refuses a Gateway that its Auth Key did not trust with every Tag. Only such a Gateway
+    /// serves accounts no Surface Account names, and delivers the admin operator's notifications.
+    pub(crate) async fn ensure_gateway_every_tag(&self, gateway: &str) -> Result<()> {
+        let every_tag: Option<i64> = sqlx::query_scalar(
+            "SELECT all_tags FROM supertag_v2_enrollments WHERE role='gateway' AND name=$1 AND revoked_at_ms IS NULL",
+        )
+        .bind(gateway)
+        .fetch_optional(&self.pool)
+        .await?;
+        if every_tag != Some(1) {
+            return Err(StoreError::PermissionDenied);
+        }
+        Ok(())
+    }
+
     /// Grant ownership when the account is free, expired, or already held by the
     /// same stable owner (a restarted Gateway with the same private state).
     pub async fn claim_connector(

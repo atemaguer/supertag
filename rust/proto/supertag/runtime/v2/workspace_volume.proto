@@ -15,7 +15,7 @@ message PutWorkspaceVolumeRequest {
 }
 message GetWorkspaceVolumeRequest { string volume_id = 1; }
 
-// The Control Plane and Gateway check the live Attempt before disclosing
+// The Control Plane checks the live Attempt before disclosing
 // file artifact Volume paths to its trusted Worker Host for alias rejection.
 service AttemptWorkspaceMounts {
   rpc Preflight(InspectAttemptRequest) returns (WorkspaceMountPreflight);

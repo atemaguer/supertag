@@ -55,9 +55,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -66,7 +66,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -85,7 +86,11 @@ impl Credentials {
 }
 
 fn request<T>(input: T, token: &str, principal: Option<&str>) -> Result<Request<T>> {
-    let mut request = authenticated_request(input, token, principal)?;
+    // A Gateway names the connector account it acts for; nobody names a principal.
+    let mut request = match principal.and_then(|principal| principal.strip_prefix("connector:")) {
+        Some(account) => supertag_protocol::connector_request(input, token, account)?,
+        None => authenticated_request(input, token, None)?,
+    };
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -265,7 +270,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -527,8 +532,9 @@ async fn gateway(
         .env("SUPERTAG_LARK_ALLOWED_USERS", "ou_alice")
         .env("SUPERTAG_TEST_LARK_ORIGIN", &mock.origin);
     let mut child = Process::spawn(command, directory, "gateway")?;
-    let public = child.endpoints(1).await?.remove(0);
-    Ok((child, public))
+    child.endpoints(1).await?;
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only Lark.
+    Ok((child, private.to_owned()))
 }
 fn payload(event: &str, message: &str, mention: bool) -> Value {
     let mut message = json!({"message_id":message,"chat_id":CHAT,"chat_type":"group","message_type":"text","content":json!({"text":if mention{"@_user_1 inspect"}else{"follow up"}}).to_string(),"mentions":if mention{json!([{"key":"@_user_1","id":{"open_id":"ou_bot"}}])}else{json!([])}});

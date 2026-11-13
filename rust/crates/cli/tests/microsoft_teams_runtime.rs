@@ -65,9 +65,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -76,7 +76,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -95,7 +96,11 @@ impl Credentials {
 }
 
 fn request<T>(input: T, token: &str, principal: Option<&str>) -> Result<Request<T>> {
-    let mut request = authenticated_request(input, token, principal)?;
+    // A Gateway names the connector account it acts for; nobody names a principal.
+    let mut request = match principal.and_then(|principal| principal.strip_prefix("connector:")) {
+        Some(account) => supertag_protocol::connector_request(input, token, account)?,
+        None => authenticated_request(input, token, None)?,
+    };
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -248,7 +253,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -449,7 +454,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_MICROSOFT_TEAMS_ORIGIN", &mock.origin);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload(id: &str) -> Value {
     json!({"type":"message","id":id,"replyToId":ROOT,"serviceUrl":SERVICE,"channelId":"msteams","from":{"id":"29:alice","aadObjectId":USER},"recipient":{"id":format!("28:{APP}")},"conversation":{"id":CONVERSATION,"conversationType":"channel","tenantId":TENANT},"text":"<at>SuperTag</at> inspect","entities":[{"type":"mention","text":"<at>SuperTag</at>","mentioned":{"id":format!("28:{APP}")}}],"channelData":{"tenant":{"id":TENANT},"team":{"id":"19:internal","aadGroupId":TEAM},"channel":{"id":CHANNEL}}})

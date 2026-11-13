@@ -548,11 +548,15 @@ func (*SurfaceAccountIdentity_Lark) isSurfaceAccountIdentity_Provider() {}
 func (*SurfaceAccountIdentity_MicrosoftTeams) isSurfaceAccountIdentity_Provider() {}
 
 type SurfaceAccount struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	AccountId     string                  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	Identity      *SurfaceAccountIdentity `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
-	Enabled       bool                    `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Revision      uint64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	state     protoimpl.MessageState  `protogen:"open.v1"`
+	AccountId string                  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	Identity  *SurfaceAccountIdentity `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	Enabled   bool                    `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Revision  uint64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	// Required: the enrolled Gateway, `gateway:NAME` by its NAME, that serves the
+	// account. Connector and reply calls for the account's locations are refused
+	// from any other Gateway.
+	Gateway       string `protobuf:"bytes,4100,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -613,6 +617,13 @@ func (x *SurfaceAccount) GetRevision() uint64 {
 		return x.Revision
 	}
 	return 0
+}
+
+func (x *SurfaceAccount) GetGateway() string {
+	if x != nil {
+		return x.Gateway
+	}
+	return ""
 }
 
 type SlackSurfaceChannel struct {
@@ -3519,13 +3530,14 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x04lark\x18\x04 \x01(\v2(.supertag.runtime.v2.LarkSurfaceIdentityH\x00R\x04lark\x12]\n" +
 	"\x0fmicrosoft_teams\x18\x05 \x01(\v22.supertag.runtime.v2.MicrosoftTeamsSurfaceIdentityH\x00R\x0emicrosoftTeamsB\n" +
 	"\n" +
-	"\bprovider\"\xae\x01\n" +
+	"\bprovider\"\xc9\x01\n" +
 	"\x0eSurfaceAccount\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12G\n" +
 	"\bidentity\x18\x02 \x01(\v2+.supertag.runtime.v2.SurfaceAccountIdentityR\bidentity\x12\x18\n" +
 	"\aenabled\x18\x03 \x01(\bR\aenabled\x12\x1a\n" +
-	"\brevision\x18\x04 \x01(\x04R\brevision\"4\n" +
+	"\brevision\x18\x04 \x01(\x04R\brevision\x12\x19\n" +
+	"\agateway\x18\x84  \x01(\tR\agateway\"4\n" +
 	"\x13SlackSurfaceChannel\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\">\n" +

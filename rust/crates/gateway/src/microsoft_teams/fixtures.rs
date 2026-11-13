@@ -7,7 +7,7 @@ use ring::{
 use rustls_pki_types::{PrivateKeyDer, pem::PemObject as _};
 use serde_json::{Value, json};
 pub fn token(claims: Value, kid: &str) -> String {
-    let pem = include_bytes!("../github/auth/fixtures/app-test-key.pem");
+    let pem = include_bytes!("../github/fixtures/app-test-key.pem");
     let key = match PrivateKeyDer::from_pem_slice(pem).unwrap() {
         PrivateKeyDer::Pkcs8(key) => RsaKeyPair::from_pkcs8(key.secret_pkcs8_der()).unwrap(),
         PrivateKeyDer::Pkcs1(key) => RsaKeyPair::from_der(key.secret_pkcs1_der()).unwrap(),

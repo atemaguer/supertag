@@ -40,7 +40,7 @@ func (c *runtimeClient) listOpenObjectives(ctx context.Context) ([]*operatorv1.O
 
 func (c *runtimeClient) createObjective(ctx context.Context, objective NewObjective) (*operatorv1.CreateObjectiveResponse, error) {
 	if objective.Workspace != "" {
-		return nil, &APIError{Code: connect.CodeFailedPrecondition, Message: "Configure the Workspace on the owner Tag. This Gateway uses the Tag's Workspace for its Objective."}
+		return nil, &APIError{Code: connect.CodeFailedPrecondition, Message: "Configure the Workspace on the owner Tag. This Control Plane uses the Tag's Workspace for its Objective."}
 	}
 	id := objective.ID
 	if id == "" {
@@ -85,7 +85,7 @@ func (c *runtimeClient) getObjective(ctx context.Context, id string) (*v2.Object
 		return nil, apiError(err)
 	}
 	if res.Msg.GetObjectiveId() != id {
-		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different Objective."}
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different Objective."}
 	}
 	return res.Msg, nil
 }
@@ -126,11 +126,11 @@ func (c *runtimeClient) describeObjective(ctx context.Context, id string) (*oper
 		page := reviews.Msg.GetReviews()
 		next := reviews.Msg.GetNextBeforeOrder()
 		if len(page) > remaining || next != 0 && (len(page) == 0 || before != 0 && next >= before) {
-			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned an invalid commit review page."}
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned an invalid commit review page."}
 		}
 		for _, review := range page {
 			if review.GetObjectiveId() != id {
-				return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a commit review for a different Objective."}
+				return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a commit review for a different Objective."}
 			}
 			view.CommitReviews = append(view.CommitReviews, runtimeCommitReview(review))
 		}

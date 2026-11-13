@@ -1,6 +1,6 @@
-//! Operator access through separate Control Plane and Gateway processes: an audit entry commits
+//! Operator access through a Control Plane process: an audit entry commits
 //! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
-//! and `supertag connect` saves a proven operator token for `--gateway NAME`.
+//! and `supertag connect` saves a proven operator token for `--control-plane NAME`.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -16,7 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     authenticated_request,
-    v2::{EnrollHostRequest, host_enrollment_client::HostEnrollmentClient},
+    v2::{EnrollRequest, PrincipalRole, enrollments_client::EnrollmentsClient},
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -51,12 +51,11 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
     Ok((child, format!("http://{address}")))
 }
 
-/// Separate Control Plane and Gateway processes sharing one database and credentials.
+/// A Control Plane process and the credentials it shares across restarts.
 struct Services {
     gateway_token: String,
     operator_token: String,
     control: Child,
-    gateway: Child,
     public: String,
 }
 
@@ -64,7 +63,7 @@ impl Services {
     async fn start(database: &str, crash: Option<(&str, &Path)>) -> Result<Self> {
         Self::start_with(
             database,
-            Uuid::new_v4().to_string(),
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             Uuid::new_v4().to_string(),
             crash,
         )
@@ -79,24 +78,20 @@ impl Services {
     ) -> Result<Self> {
         let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
         control
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_DATABASE_URL", database);
         if let Some((point, marker)) = crash {
             control
                 .env("SUPERTAG_TEST_CRASH_POINT", point)
                 .env("SUPERTAG_TEST_CRASH_MARKER", marker);
         }
-        let (control, private) = service(control).await?;
-        let mut gateway = binary(&["gateway", "--control-plane", &private]);
-        gateway
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-        let (gateway, public) = service(gateway).await?;
+        let (control, public) = service(control).await?;
         Ok(Self {
             gateway_token,
             operator_token,
             control,
-            gateway,
             public,
         })
     }
@@ -104,7 +99,7 @@ impl Services {
     fn operator(&self, args: &[&str]) -> Command {
         let mut command = binary(args);
         command
-            .args(["--gateway", &self.public])
+            .args(["--control-plane", &self.public])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
         command
     }
@@ -141,7 +136,6 @@ impl Services {
     }
 
     async fn stop(mut self) -> Result<(String, String)> {
-        self.gateway.kill().await?;
         self.control.kill().await?;
         Ok((self.gateway_token, self.operator_token))
     }
@@ -157,7 +151,7 @@ database_tests! {
     #[tokio::test]
     worker_host_joins_are_recorded_under_their_auth_key;
     #[tokio::test]
-    connect_gateway_saves_a_proven_token_for_later_commands;
+    connect_saves_a_proven_token_for_later_commands;
 }
 
 /// The Control Plane dies after committing an audited change and before answering. The change
@@ -211,8 +205,20 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
     assert_eq!(
         services.audit().await?,
         [
-            entry("local", "tag.put", "Tag/reviewer", "succeeded", "OK"),
-            entry("local", "tag.message", "Tag/reviewer", "succeeded", "OK"),
+            entry(
+                "operator:local",
+                "tag.put",
+                "Tag/reviewer",
+                "succeeded",
+                "OK"
+            ),
+            entry(
+                "operator:local",
+                "tag.message",
+                "Tag/reviewer",
+                "succeeded",
+                "OK"
+            ),
         ]
     );
     services.stop().await?;
@@ -238,19 +244,20 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
             "auth-key",
             "create",
             "review-key",
-            "--host",
-            "review-host",
+            "--role",
+            "host",
             "--tag",
             "reviewer",
         ])
         .await?;
     let auth_key = issued["auth_key"].as_str().context("auth_key")?;
     let key_name = issued["name"].as_str().context("name")?;
-    let mut enrollment = HostEnrollmentClient::new(protocol::dial(services.public.clone()).await?);
+    let mut enrollment = EnrollmentsClient::new(protocol::dial(services.public.clone()).await?);
     let mut join = async |key: &str, host: &str, operation: &str| {
         let mut request = authenticated_request(
-            EnrollHostRequest {
-                host_id: host.into(),
+            EnrollRequest {
+                role: PrincipalRole::Host.into(),
+                name: host.into(),
                 operation_id: operation.into(),
                 token_digest: Sha256::digest(format!("credential for {host}")).to_vec(),
             },
@@ -258,40 +265,42 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
             None,
         )?;
         request.set_timeout(WAIT);
-        anyhow::Ok(enrollment.enroll_host(request).await)
+        anyhow::Ok(enrollment.enroll(request).await)
     };
+    // Only an Auth Key enrolls; any other bearer is refused before anything is looked up.
     let unknown = join("unissued-test-key", "review-host", "unknown")
         .await?
         .unwrap_err();
     assert_eq!(unknown.code(), Code::Unauthenticated, "{unknown:?}");
     // The key is looked up before the request is checked, so an unknown caller cannot write
     // entries by sending invalid joins.
+    let unissued = format!("stak_{}", "0".repeat(64));
     for _ in 0..3 {
-        let invalid = join("unissued-test-key", "", "invalid").await?.unwrap_err();
-        assert_eq!(invalid.code(), Code::Unauthenticated, "{invalid:?}");
+        let invalid = join(&unissued, "", "invalid").await?.unwrap_err();
+        assert_eq!(invalid.code(), Code::PermissionDenied, "{invalid:?}");
     }
     // A known key's invalid join is recorded under the key.
     let invalid = join(auth_key, "", "invalid").await?.unwrap_err();
     assert_eq!(invalid.code(), Code::InvalidArgument, "{invalid:?}");
     join(auth_key, "review-host", "join").await??;
-    // A one-time key designates its host; another host may not use it.
+    // A one-time key admits one enrollee; another may not use it.
     let refused = join(auth_key, "other-host", "other").await?.unwrap_err();
-    assert_ne!(refused.code(), Code::Ok);
+    assert_eq!(refused.code(), Code::PermissionDenied);
 
     let actor = format!("auth-key:{key_name}");
     let joins = services
         .audit()
         .await?
         .into_iter()
-        .filter(|entry| entry[1] == "worker-host.join")
+        .filter(|entry| entry[1] == "enrollment.join")
         .collect::<Vec<_>>();
     assert_eq!(joins.len(), 3, "{joins:?}");
     assert_eq!(
         joins[0],
         entry(
             &actor,
-            "worker-host.join",
-            "WorkerHost",
+            "enrollment.join",
+            "Enrollment",
             "failed",
             "INVALID_ARGUMENT"
         )
@@ -300,7 +309,7 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         joins[1],
         entry(
             &actor,
-            "worker-host.join",
+            "enrollment.join",
             "WorkerHost/review-host",
             "succeeded",
             "OK"
@@ -310,8 +319,8 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         joins[2],
         entry(
             &actor,
-            "worker-host.join",
-            "WorkerHost",
+            "enrollment.join",
+            "Enrollment",
             "failed",
             "PERMISSION_DENIED"
         )
@@ -320,9 +329,9 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     Ok(())
 }
 
-/// `supertag connect` checks the token first, saves the Gateway owner-only in the
+/// `supertag connect` checks the token first, saves the Control Plane owner-only in the
 /// terminal UI's store as the active one, and later commands use it by name.
-async fn connect_gateway_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
+async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     let home = tempfile::tempdir()?;
     let connect = |token: &str, name: &str, url: &str, replace: bool| {
@@ -343,14 +352,14 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     };
     let store = if cfg!(target_os = "macos") {
         home.path()
-            .join("Library/Application Support/supertag/tui-gateways.json")
+            .join("Library/Application Support/supertag/tui-control-planes.json")
     } else {
-        home.path().join(".config/supertag/tui-gateways.json")
+        home.path().join(".config/supertag/tui-control-planes.json")
     };
 
     let (saved, stderr) = connect("not-the-token", "prod", &services.public, false).await?;
     ensure!(!saved, "a refused token was saved");
-    ensure!(stderr.contains("refused the operator token"), "{stderr}");
+    ensure!(stderr.contains("refused the credential"), "{stderr}");
     ensure!(!store.exists(), "nothing is saved for a refused token");
 
     let token = services.operator_token.clone();
@@ -371,12 +380,15 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["version"], 1);
     assert_eq!(profiles["active"], "prod");
-    assert_eq!(profiles["gateways"][0]["name"], "prod");
-    assert_eq!(profiles["gateways"][0]["url"], services.public.as_str());
-    assert_eq!(profiles["gateways"][0]["token"], token.as_str());
+    assert_eq!(profiles["control_planes"][0]["name"], "prod");
+    assert_eq!(
+        profiles["control_planes"][0]["url"],
+        services.public.as_str()
+    );
+    assert_eq!(profiles["control_planes"][0]["token"], token.as_str());
 
-    // A later command names the saved Gateway and needs no token in its environment.
-    let mut listed = binary(&["get", "tags", "--gateway", "prod"]);
+    // A later command names the saved Control Plane and needs no token in its environment.
+    let mut listed = binary(&["get", "tags", "--control-plane", "prod"]);
     listed.env("HOME", home.path());
     let output = timeout(WAIT, listed.output()).await??;
     ensure!(
@@ -389,12 +401,12 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     ensure!(!saved && stderr.contains("--replace"), "{stderr}");
     // Replacing a connection keeps the Workspace the terminal UI chose for it.
     let mut profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    profiles["gateways"][0]["workspace"] = "project".into();
+    profiles["control_planes"][0]["workspace"] = "project".into();
     std::fs::write(&store, serde_json::to_vec(&profiles)?)?;
     let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
     ensure!(saved, "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["gateways"][0]["workspace"], "project");
+    assert_eq!(profiles["control_planes"][0]["workspace"], "project");
     // A URL that cannot be saved is refused before the token is sent anywhere.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
@@ -419,7 +431,107 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     let (saved, stderr) = connect(&token, "prod", "http://127.0.0.2:1", true).await?;
     ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
+    assert_eq!(profiles["control_planes"].as_array().map(Vec::len), Some(1));
+
+    // A client Auth Key joins this device as client:NAME; only the enrolled credential is saved,
+    // and the device reaches only the Tags its key allows.
+    for tag in ["allowed", "hidden"] {
+        services
+            .json(&["tag", "put", tag, "--instructions", "Help"])
+            .await?;
+    }
+    let issued = services
+        .json(&[
+            "auth-key", "create", "laptops", "--role", "client", "--tag", "allowed",
+        ])
+        .await?;
+    assert_eq!(issued["role"], "client");
+    let key = issued["auth_key"].as_str().context("auth_key")?.to_owned();
+    let mut join = binary(&[
+        "connect",
+        &services.public,
+        "--name",
+        "work",
+        "--client-name",
+        "alice-laptop",
+    ]);
+    join.env("HOME", home.path())
+        .env("SUPERTAG_OPERATOR_TOKEN", &key);
+    let joined = timeout(WAIT, join.output()).await??;
+    ensure!(
+        joined.status.success(),
+        "{}",
+        String::from_utf8_lossy(&joined.stderr)
+    );
+    let joined: Value = serde_json::from_slice(&joined.stdout)?;
+    assert_eq!(joined["connected_as"], "client:alice-laptop");
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    let saved = profiles["control_planes"]
+        .as_array()
+        .context("control_planes")?
+        .iter()
+        .find(|entry| entry["name"] == "work")
+        .context("work")?["token"]
+        .as_str()
+        .context("token")?
+        .to_owned();
+    ensure!(
+        saved != key && saved.starts_with("stcr_"),
+        "the Auth Key was saved"
+    );
+    let as_client = |args: &[&str]| {
+        let mut command = binary(args);
+        command
+            .args(["--control-plane", "work"])
+            .env("HOME", home.path());
+        command
+    };
+    let tags = timeout(WAIT, as_client(&["get", "tags"]).output()).await??;
+    ensure!(
+        tags.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tags.stderr)
+    );
+    let tags: Value = serde_json::from_slice(&tags.stdout)?;
+    let names: Vec<&str> = tags["tags"]
+        .as_array()
+        .context("tags")?
+        .iter()
+        .filter_map(|tag| tag["tag_id"].as_str())
+        .collect();
+    assert_eq!(names, ["allowed"]);
+    for args in [
+        &["tag", "put", "allowed", "--instructions", "Mine now"][..],
+        &["get", "hosts"][..],
+        &["get", "tag", "hidden"][..],
+    ] {
+        let refused = timeout(WAIT, as_client(args).output()).await??;
+        ensure!(!refused.status.success(), "a client ran {args:?}");
+    }
+    // The one-time key admits no second device.
+    let mut again = binary(&["connect", &services.public, "--name", "again"]);
+    again
+        .env("HOME", home.path())
+        .env("SUPERTAG_OPERATOR_TOKEN", &key);
+    let again = timeout(WAIT, again.output()).await??;
+    ensure!(
+        !again.status.success()
+            && String::from_utf8_lossy(&again.stderr).contains("refused the Auth Key"),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    // Enrollment and the client's own calls are recorded under their full principals.
+    let audit = services.audit().await?;
+    assert!(
+        audit.contains(&entry(
+            "auth-key:laptops",
+            "enrollment.join",
+            "Client/alice-laptop",
+            "succeeded",
+            "OK"
+        )),
+        "{audit:?}"
+    );
     services.stop().await?;
     Ok(())
 }

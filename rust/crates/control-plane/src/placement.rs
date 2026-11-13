@@ -378,21 +378,6 @@ impl auth_keys_server::AuthKeys for ControlPlane {
     }
 }
 
-#[tonic::async_trait]
-impl host_credentials_server::HostCredentials for ControlPlane {
-    async fn rotate_host_credential(
-        &self,
-        request: Request<RotateHostCredentialRequest>,
-    ) -> std::result::Result<Response<HostCredentialRotation>, Status> {
-        let principal = self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store
-                .rotate_host_credential(&principal, request.get_ref())
-                .await?,
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

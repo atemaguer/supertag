@@ -1,11 +1,11 @@
-//! Volume manifests, source settings, and location aliases through separate Control Plane and
-//! Gateway processes and the operator CLI.
+//! Volume manifests, source settings, and location aliases through a separate Control Plane
+//! process and the operator CLI.
 //!
 //! A Volume source names a location only: a canonical `file:///absolute/path` or
 //! `s3://bucket/prefix`. Unlike TypeScript, it carries no endpoint, region, path style, or
-//! credential name; each Gateway maps a Volume ID to its storage endpoint and credentials. So
+//! credential name; each Control Plane maps a Volume ID to its storage endpoint and credentials. So
 //! the CLI and the Control Plane refuse every setting in a source, and storage that two
-//! endpoints could alias can only be reached through Gateway mappings, never through a Volume
+//! endpoints could alias can only be reached through Control Plane mappings, never through a Volume
 //! that a Task mounts. Workspace data Volumes are file Volumes, and a path alias of artifact
 //! storage is refused in both directions.
 #[path = "../../../test-support/prerequisites.rs"]

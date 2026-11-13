@@ -20,7 +20,7 @@ service HarnessEffects {
   rpc Fail(HarnessFailEffectRequest) returns (EffectReceipt);
 }
 
-// Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+// Worker Host to Control Plane, with the Attempt's execution authority.
 service AttemptEffects {
   rpc Begin(BeginEffectRequest) returns (EffectReceipt);
   rpc Complete(CompleteEffectRequest) returns (EffectReceipt);

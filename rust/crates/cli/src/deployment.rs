@@ -1,6 +1,6 @@
-//! `supertag setup deployment`, `check deployment`, and `verify deployment` for the three
-//! separately deployed service roles: a private Control Plane, a public Gateway, and outbound
-//! Worker Hosts.
+//! `supertag setup deployment`, `check deployment`, and `verify deployment` for the separately
+//! deployed service roles: a public Control Plane, an optional Gateway for collaboration
+//! surfaces, and outbound Worker Hosts.
 //!
 //! Ports `apps/cli/src/deploy.ts` and `deploy/shared/src/index.ts`. Setup writes one private
 //! environment file per role instead of one file for a single Node service. Worker Hosts are not
@@ -30,11 +30,13 @@ use tonic_health::pb::{
 };
 use uuid::Uuid;
 
-/// The Control Plane's private gRPC port in every definition.
-pub const CONTROL_PLANE_PORT: u16 = 3435;
-/// The Gateway's gRPC port inside its container in every definition.
-pub const GATEWAY_PORT: u16 = 3434;
-/// The Gateway's persistent state mount: checkpoints and the file credential vault.
+/// The Control Plane's public gRPC port inside its container in every definition.
+pub const CONTROL_PLANE_PORT: u16 = 3434;
+/// The Gateway's test notification listener, reachable only inside its container.
+#[cfg(test)]
+const GATEWAY_LISTEN: &str = "127.0.0.1:3436";
+/// Each service's persistent state mount: the Control Plane's transfer directory, and the
+/// Gateway's file credential vault and connector state.
 pub const STATE_DIRECTORY: &str = "/var/lib/supertag";
 /// Where each container finds its TLS files, mounted (Compose) or written from secrets by
 /// `deploy/docker/rust-hosted-entrypoint.sh` (Fly.io and Railway).
@@ -55,11 +57,32 @@ const TLS_KEYS: [&str; 6] = [
     "SUPERTAG_CLIENT_CERT_FILE",
     "SUPERTAG_CLIENT_KEY_FILE",
 ];
-const CONTROL_PLANE_KEYS: [&str; 2] = ["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"];
-const GATEWAY_KEYS: [&str; 10] = [
-    "SUPERTAG_GATEWAY_TOKEN",
+/// The GitHub Workspace account (`--github-workspace-directory`) and the credential vault it may
+/// read its secret from are optional Control Plane settings.
+const CONTROL_PLANE_KEYS: [&str; 18] = [
+    "SUPERTAG_DATABASE_URL",
+    "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
     "SUPERTAG_OPERATOR_TOKEN",
     "SUPERTAG_OPERATOR_PRINCIPAL",
+    "SUPERTAG_STATE_DIR",
+    "SUPERTAG_GITHUB_ACCOUNT_ID",
+    "SUPERTAG_GITHUB_REPOSITORY_ID",
+    "SUPERTAG_GITHUB_REPOSITORY",
+    "SUPERTAG_GITHUB_TOKEN",
+    "SUPERTAG_GITHUB_APP_ID",
+    "SUPERTAG_GITHUB_INSTALLATION_ID",
+    "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+    "SUPERTAG_CREDENTIAL_VAULT",
+    "VAULT_ADDR",
+    "VAULT_TOKEN",
+    "VAULT_NAMESPACE",
+    "SUPERTAG_VAULT_MOUNT",
+    "SUPERTAG_VAULT_PATH_PREFIX",
+];
+/// The Gateway holds no operator credential: it acts as `gateway:local` with the enrolled
+/// credential the Control Plane seeds from `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`.
+const GATEWAY_KEYS: [&str; 8] = [
+    "SUPERTAG_GATEWAY_CREDENTIAL",
     "SUPERTAG_STATE_DIR",
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
@@ -70,16 +93,17 @@ const GATEWAY_KEYS: [&str; 10] = [
 ];
 const OPERATOR_KEYS: [&str; 1] = ["SUPERTAG_OPERATOR_TOKEN"];
 const POSTGRES_KEYS: [&str; 3] = ["POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"];
-const SECRET_KEYS: [&str; 5] = [
+const SECRET_KEYS: [&str; 6] = [
     "SUPERTAG_DATABASE_URL",
-    "SUPERTAG_GATEWAY_TOKEN",
+    "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+    "SUPERTAG_GATEWAY_CREDENTIAL",
     "SUPERTAG_OPERATOR_TOKEN",
     "VAULT_TOKEN",
     "POSTGRES_PASSWORD",
 ];
 
-/// A platform whose model hosts a private Control Plane, a public native gRPC Gateway with its
-/// own TLS, and a private mutual-TLS hop between them.
+/// A platform whose model hosts a public native gRPC Control Plane with its own TLS, and an
+/// optional Gateway that reaches it over the platform's private network.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Platform {
     /// Docker Compose on your own server: deploy/compose.native.yaml.
@@ -100,7 +124,7 @@ impl Platform {
     }
 
     /// The private DNS name the Gateway uses for the Control Plane in this platform's
-    /// definitions. The Control Plane's certificate must carry it.
+    /// definitions. The Control Plane's certificate must carry it as well as its public host.
     pub fn control_plane_host(self) -> &'static str {
         match self {
             Self::Compose => "control-plane",
@@ -116,13 +140,13 @@ impl Platform {
     fn next_steps(self) -> &'static str {
         match self {
             Self::Compose => {
-                "Put each role's TLS files in its own directory (see deploy/native/README.md), then start deploy/compose.native.yaml with deploy/compose.native.ingress.yaml, passing these files as SUPERTAG_POSTGRES_ENV_FILE, SUPERTAG_CONTROL_ENV_FILE, and SUPERTAG_GATEWAY_ENV_FILE."
+                "Put each role's TLS files in its own directory (see deploy/native/README.md), then start deploy/compose.native.yaml with deploy/compose.native.ingress.yaml, passing these files as SUPERTAG_POSTGRES_ENV_FILE, SUPERTAG_CONTROL_ENV_FILE, and SUPERTAG_GATEWAY_ENV_FILE. Add --profile gateway to run the Gateway for collaboration surfaces."
             }
             Self::Fly => {
-                "Import control-plane.env into the supertag-control-plane app and gateway.env into the supertag-gateway app with `fly secrets import`, set each app's TLS PEM secrets, then deploy deploy/native/fly/control-plane.toml and deploy/native/fly/gateway.toml (see deploy/native/README.md)."
+                "Import control-plane.env into the supertag-control-plane app with `fly secrets import`, set its TLS PEM secrets, then deploy deploy/native/fly/control-plane.toml. For collaboration surfaces, also import gateway.env into the supertag-gateway app and deploy deploy/native/fly/gateway.toml (see deploy/native/README.md)."
             }
             Self::Railway => {
-                "Paste control-plane.env and gateway.env into the supertag-control-plane and supertag-gateway services' variables, add each service's TLS PEM variables, and use deploy/native/railway/control-plane.json and gateway.json as their config files (see deploy/native/README.md)."
+                "Paste control-plane.env into the supertag-control-plane service's variables, add its TLS PEM variables, and use deploy/native/railway/control-plane.json as its config file. For collaboration surfaces, also paste gateway.env into a supertag-gateway service configured by deploy/native/railway/gateway.json (see deploy/native/README.md)."
             }
         }
     }
@@ -142,13 +166,13 @@ pub enum CheckCommand {
 
 #[derive(Subcommand)]
 pub enum VerifyCommand {
-    /// Check a deployed Gateway: health, authentication, the Control Plane hop, and readiness.
+    /// Check a deployed Control Plane: health, authentication, and readiness.
     Deployment(VerifyArgs),
 }
 
 #[derive(Args)]
 #[command(
-    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
+    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
 )]
 pub struct SetupArgs {
     platform: Platform,
@@ -170,10 +194,10 @@ pub struct CheckArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Gateway's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Gateway requires client certificates. Verification registers no Worker Host and runs no Task."
+    after_help = "The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Control Plane's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Control Plane requires client certificates. Verification registers no Worker Host and runs no Task."
 )]
 pub struct VerifyArgs {
-    /// The Gateway's public HTTPS origin, such as https://supertag.example.com.
+    /// The Control Plane's public HTTPS origin, such as https://supertag.example.com.
     url: String,
     /// Private env file that holds SUPERTAG_OPERATOR_TOKEN.
     #[arg(long)]
@@ -217,8 +241,8 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
         .context("resolve the deployment directory")?;
     out!(
         "Saved {platform} deployment configuration to {} (contains secrets; keep private).\n\
-         The Gateway reaches the Control Plane at https://{host}:{CONTROL_PLANE_PORT}; the Control Plane certificate must name {host}.\n\
-         The Gateway serves TLS itself on container port {GATEWAY_PORT}; its certificate must name the public host operators and Worker Hosts use.\n\
+         The Control Plane serves TLS itself on container port {CONTROL_PLANE_PORT}; its certificate must name the public host operators and Worker Hosts use.\n\
+         A Gateway reaches the Control Plane at https://{host}:{CONTROL_PLANE_PORT}, so the certificate must also name {host}. It presents a client certificate, so a Control Plane serving a Gateway requires client certificates.\n\
          {}\n",
         directory.display(),
         args.platform.next_steps(),
@@ -265,20 +289,28 @@ pub fn configure(
         }
         (_, None) => required("SUPERTAG_DATABASE_URL")?,
     };
-    let gateway_token = supplied("SUPERTAG_GATEWAY_TOKEN").unwrap_or_else(token);
+    // The deployment's own Gateway is `gateway:local`: the Control Plane seeds its enrolled
+    // credential at startup, and only the Gateway presents it.
+    let gateway_credential = supplied("SUPERTAG_GATEWAY_CREDENTIAL").unwrap_or_else(|| {
+        supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX)
+    });
     let operator_token = supplied("SUPERTAG_OPERATOR_TOKEN").unwrap_or_else(token);
 
     let mut control_plane = Environment::from([
         ("SUPERTAG_DATABASE_URL".into(), database),
-        ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token.clone()),
-    ]);
-    let mut gateway = Environment::from([
-        ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token),
+        (
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
+            gateway_credential.clone(),
+        ),
         ("SUPERTAG_OPERATOR_TOKEN".into(), operator_token.clone()),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
     ]);
+    let mut gateway = Environment::from([
+        ("SUPERTAG_GATEWAY_CREDENTIAL".into(), gateway_credential),
+        ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
+    ]);
     if let Some(principal) = supplied("SUPERTAG_OPERATOR_PRINCIPAL") {
-        gateway.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
+        control_plane.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
     }
     let vault = supplied("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_else(|| "file".into());
     if vault == "vault" {
@@ -298,17 +330,15 @@ pub fn configure(
     gateway.insert("SUPERTAG_CREDENTIAL_VAULT".into(), vault);
     if platform == Platform::Compose {
         let file = |name: &str| format!("{TLS_DIRECTORY}/{name}");
+        // The Control Plane's server CA lets its own health probe check it.
         for (key, name) in [
             ("SUPERTAG_TLS_CERT_FILE", "server.pem"),
             ("SUPERTAG_TLS_KEY_FILE", "server.key"),
             ("SUPERTAG_SERVER_CA_FILE", "server-ca.pem"),
-            ("SUPERTAG_CLIENT_CERT_FILE", "client.pem"),
-            ("SUPERTAG_CLIENT_KEY_FILE", "client.key"),
         ] {
             control_plane.insert(key.into(), file(name));
-            gateway.insert(key.into(), file(name));
         }
-        control_plane.insert("SUPERTAG_TLS_CLIENT_CA_FILE".into(), file("client-ca.pem"));
+        gateway.insert("SUPERTAG_SERVER_CA_FILE".into(), file("server-ca.pem"));
     }
     let files = Files {
         control_plane,
@@ -360,56 +390,74 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
         )),
         Some(_) => {}
     }
+    match control("SUPERTAG_OPERATOR_TOKEN") {
+        None => issues.push(format!(
+            "{CONTROL_PLANE_FILE}: Missing SUPERTAG_OPERATOR_TOKEN"
+        )),
+        Some(token) if !strong_token(token) => issues.push(format!(
+            "{CONTROL_PLANE_FILE}: SUPERTAG_OPERATOR_TOKEN must be at least 32 characters of letters, digits, and -._~+/"
+        )),
+        Some(token) if token.starts_with("stop_") || token.starts_with("stak_") || token.starts_with("stcr_") => {
+            issues.push(format!(
+                "{CONTROL_PLANE_FILE}: SUPERTAG_OPERATOR_TOKEN must not look like an issued credential"
+            ))
+        }
+        Some(_) => {}
+    }
     for (file, key, value) in [
         (
             CONTROL_PLANE_FILE,
-            "SUPERTAG_GATEWAY_TOKEN",
-            control("SUPERTAG_GATEWAY_TOKEN"),
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+            control("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"),
         ),
         (
             GATEWAY_FILE,
-            "SUPERTAG_GATEWAY_TOKEN",
-            gateway("SUPERTAG_GATEWAY_TOKEN"),
-        ),
-        (
-            GATEWAY_FILE,
-            "SUPERTAG_OPERATOR_TOKEN",
-            gateway("SUPERTAG_OPERATOR_TOKEN"),
+            "SUPERTAG_GATEWAY_CREDENTIAL",
+            gateway("SUPERTAG_GATEWAY_CREDENTIAL"),
         ),
     ] {
         match value {
             None => issues.push(format!("{file}: Missing {key}")),
-            Some(token) if !strong_token(token) => issues.push(format!(
-                "{file}: {key} must be at least 32 characters of letters, digits, and -._~+/"
-            )),
+            Some(credential)
+                if !supertag_protocol::is_secret(
+                    supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+                    credential,
+                ) =>
+            {
+                issues.push(format!("{file}: {key} must be stcr_ and 64 hex digits"))
+            }
             Some(_) => {}
         }
     }
-    if control("SUPERTAG_GATEWAY_TOKEN") != gateway("SUPERTAG_GATEWAY_TOKEN") {
-        issues.push("SUPERTAG_GATEWAY_TOKEN differs between the Control Plane and Gateway".into());
-    }
-    if gateway("SUPERTAG_GATEWAY_TOKEN").is_some()
-        && gateway("SUPERTAG_GATEWAY_TOKEN") == gateway("SUPERTAG_OPERATOR_TOKEN")
-    {
-        issues.push("SUPERTAG_OPERATOR_TOKEN must differ from SUPERTAG_GATEWAY_TOKEN".into());
+    if control("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL") != gateway("SUPERTAG_GATEWAY_CREDENTIAL") {
+        issues.push(
+            "the Gateway's SUPERTAG_GATEWAY_CREDENTIAL differs from the Control Plane's SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
+        );
     }
     if files
         .operator
         .get("SUPERTAG_OPERATOR_TOKEN")
         .map(String::as_str)
-        != gateway("SUPERTAG_OPERATOR_TOKEN")
+        != control("SUPERTAG_OPERATOR_TOKEN")
     {
         issues.push(format!(
-            "{OPERATOR_FILE}: SUPERTAG_OPERATOR_TOKEN differs from the Gateway's"
+            "{OPERATOR_FILE}: SUPERTAG_OPERATOR_TOKEN differs from the Control Plane's"
         ));
     }
-    if let Some(principal) = gateway("SUPERTAG_OPERATOR_PRINCIPAL")
-        && !principal.strip_prefix("operator:").is_some_and(|id| {
-            !id.is_empty() && id.len() <= 255 && id.bytes().all(|byte| byte.is_ascii_graphic())
-        })
-    {
+    for (file, principal) in [(CONTROL_PLANE_FILE, control("SUPERTAG_OPERATOR_PRINCIPAL"))] {
+        if let Some(principal) = principal
+            && !principal.strip_prefix("operator:").is_some_and(|id| {
+                !id.is_empty() && id.len() <= 255 && id.bytes().all(|byte| byte.is_ascii_graphic())
+            })
+        {
+            issues.push(format!(
+                "{file}: SUPERTAG_OPERATOR_PRINCIPAL must be operator:NAME"
+            ));
+        }
+    }
+    if control("SUPERTAG_STATE_DIR") != Some(STATE_DIRECTORY) {
         issues.push(format!(
-            "{GATEWAY_FILE}: SUPERTAG_OPERATOR_PRINCIPAL must be operator:NAME"
+            "{CONTROL_PLANE_FILE}: the transfer directory requires the persistent mount at SUPERTAG_STATE_DIR={STATE_DIRECTORY}"
         ));
     }
     match gateway("SUPERTAG_CREDENTIAL_VAULT") {
@@ -456,31 +504,47 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
                     }
                 }
             };
-        // The Control Plane always requires client certificates; its own client identity
-        // serves the container health probe.
+        // The Control Plane serves TLS; its server CA serves the container health probe.
+        // Client certificates are an optional network filter in front of authentication.
         required(
             &files.control_plane,
             CONTROL_PLANE_FILE,
-            &TLS_KEYS,
+            &[
+                "SUPERTAG_TLS_CERT_FILE",
+                "SUPERTAG_TLS_KEY_FILE",
+                "SUPERTAG_SERVER_CA_FILE",
+            ],
             &mut issues,
         );
         required(
             &files.gateway,
             GATEWAY_FILE,
-            &[
-                "SUPERTAG_TLS_CERT_FILE",
-                "SUPERTAG_TLS_KEY_FILE",
-                "SUPERTAG_SERVER_CA_FILE",
-                "SUPERTAG_CLIENT_CERT_FILE",
-                "SUPERTAG_CLIENT_KEY_FILE",
-            ],
+            &["SUPERTAG_SERVER_CA_FILE"],
             &mut issues,
         );
-        if let Some(path) = gateway("SUPERTAG_TLS_CLIENT_CA_FILE")
-            && !path.starts_with('/')
+        for (environment, file) in [
+            (&files.control_plane, CONTROL_PLANE_FILE),
+            (&files.gateway, GATEWAY_FILE),
+        ] {
+            for key in TLS_KEYS {
+                if let Some(path) = environment.get(key)
+                    && !path.starts_with('/')
+                {
+                    issues.push(format!("{file}: {key} must name an absolute mounted file"));
+                }
+            }
+            if environment.contains_key("SUPERTAG_CLIENT_CERT_FILE")
+                != environment.contains_key("SUPERTAG_CLIENT_KEY_FILE")
+            {
+                issues.push(format!(
+                    "{file}: set both SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE, or neither"
+                ));
+            }
+        }
+        if gateway("SUPERTAG_TLS_CERT_FILE").is_some() || gateway("SUPERTAG_TLS_KEY_FILE").is_some()
         {
             issues.push(format!(
-                "{GATEWAY_FILE}: SUPERTAG_TLS_CLIENT_CA_FILE must name an absolute mounted file"
+                "{GATEWAY_FILE}: the Gateway listens on loopback and serves no TLS"
             ));
         }
     }
@@ -723,7 +787,7 @@ impl Drop for EchoOff {
     }
 }
 
-/// An invalid but well-formed bearer value: the Gateway must refuse it as a Worker Host.
+/// An invalid but well-formed bearer value: the Control Plane must refuse it as a Worker Host.
 const INVALID_HOST_CREDENTIAL: &str = "supertag-deployment-verification-invalid-credential";
 
 pub async fn verify(command: VerifyCommand) -> Result<()> {
@@ -748,12 +812,12 @@ pub async fn verify(command: VerifyCommand) -> Result<()> {
     .filter(|token| !token.trim().is_empty())
     .context("SUPERTAG_OPERATOR_TOKEN is required")?;
     let origin = args.url.trim_end_matches('/').to_owned();
-    // The Gateway refuses operator calls that skip protocol negotiation.
+    // The Control Plane refuses operator calls that skip protocol negotiation.
     let channel = crate::network::operator_channel(
         &crate::network::operator_endpoint(origin, Duration::from_secs(15), None).await?,
     )
     .await
-    .context("could not reach the Gateway over TLS; check the URL, its certificate, and SUPERTAG_SERVER_CA_FILE")?;
+    .context("could not reach the Control Plane over TLS; check the URL, its certificate, and SUPERTAG_SERVER_CA_FILE")?;
     out!(
         "{}",
         verify_channel(channel, &token, args.require_ready).await?
@@ -776,7 +840,7 @@ pub async fn verify_channel(
         .map(|response| response.into_inner().status);
     ensure!(
         matches!(health, Ok(status) if status == ServingStatus::Serving as i32),
-        "Gateway health check failed"
+        "Control Plane health check failed"
     );
     let operator = || {
         OperatorClient::new(channel.clone())
@@ -790,7 +854,7 @@ pub async fn verify_channel(
     anonymous.set_timeout(Duration::from_secs(15));
     match operator().list_hosts(anonymous).await {
         Err(status) if status.code() == Code::Unauthenticated => {}
-        _ => bail!("Gateway did not reject an anonymous operator request"),
+        _ => bail!("Control Plane did not reject an anonymous operator request"),
     }
     let mut probe =
         authenticated_request(ReportHostRequest::default(), INVALID_HOST_CREDENTIAL, None)?;
@@ -801,13 +865,10 @@ pub async fn verify_channel(
         .await
     {
         Err(status) if status.code() == Code::Unauthenticated => {}
-        Err(status) => bail!(
-            "Worker Host credential check failed ({:?}); check the Gateway's connection to the Control Plane",
-            status.code()
-        ),
-        Ok(_) => bail!("Gateway accepted an invalid Worker Host credential"),
+        Err(status) => bail!("Worker Host credential check failed ({:?})", status.code()),
+        Ok(_) => bail!("Control Plane accepted an invalid Worker Host credential"),
     }
-    // An authenticated read crosses the Gateway's private mutual-TLS hop to the Control Plane.
+    // An authenticated read reaches the Control Plane's state.
     let mut ready = 0usize;
     let mut cursor = String::new();
     for _ in 0..64 {
@@ -825,7 +886,7 @@ pub async fn verify_channel(
             .await
             .map_err(|status| {
                 anyhow::anyhow!(
-                    "Gateway operator authentication or Control Plane access failed ({:?})",
+                    "Control Plane operator authentication failed ({:?})",
                     status.code()
                 )
             })?
@@ -847,7 +908,7 @@ pub async fn verify_channel(
         "Readiness check failed: no Worker Host is ready"
     );
     Ok(format!(
-        "Gateway health, anonymous and invalid Worker Host credential rejection, and operator authentication through the Control Plane passed. Readiness: {}.\n",
+        "Control Plane health, anonymous and invalid Worker Host credential rejection, and operator authentication passed. Readiness: {}.\n",
         if ready > 0 {
             format!(
                 "ready ({ready} Worker Host{})",
@@ -886,29 +947,43 @@ mod tests {
         for platform in [Platform::Compose, Platform::Fly, Platform::Railway] {
             let files = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])?;
             assert_eq!(files.control_plane["SUPERTAG_DATABASE_URL"], DATABASE);
+            // The deployment's Gateway is gateway:local: the Control Plane seeds the credential
+            // only that Gateway presents.
             assert_eq!(
-                files.control_plane["SUPERTAG_GATEWAY_TOKEN"],
-                files.gateway["SUPERTAG_GATEWAY_TOKEN"]
+                files.control_plane["SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"],
+                files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"]
             );
+            assert!(supertag_protocol::is_secret(
+                supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+                &files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"]
+            ));
             assert_eq!(
                 files.operator["SUPERTAG_OPERATOR_TOKEN"],
-                files.gateway["SUPERTAG_OPERATOR_TOKEN"]
+                files.control_plane["SUPERTAG_OPERATOR_TOKEN"]
             );
-            assert_ne!(
-                files.gateway["SUPERTAG_OPERATOR_TOKEN"],
-                files.gateway["SUPERTAG_GATEWAY_TOKEN"]
-            );
+            assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_PRINCIPAL"));
+            // A Gateway never holds an operator credential.
+            assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_TOKEN"));
             assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "file");
             assert_eq!(files.gateway["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
+            assert_eq!(files.control_plane["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             // Role separation: only the Control Plane holds the database credential, and only
-            // the Gateway and operator hold the operator token.
+            // the Gateway holds surface credentials.
             assert!(!files.gateway.contains_key("SUPERTAG_DATABASE_URL"));
-            assert!(!files.control_plane.contains_key("SUPERTAG_OPERATOR_TOKEN"));
-            assert!(files.postgres.is_none());
-            assert_eq!(
-                files
+            assert!(
+                !files
                     .control_plane
-                    .contains_key("SUPERTAG_TLS_CLIENT_CA_FILE"),
+                    .contains_key("SUPERTAG_CREDENTIAL_VAULT")
+            );
+            assert!(files.postgres.is_none());
+            // Client certificates are an optional filter, never generated by setup.
+            assert!(
+                !files
+                    .control_plane
+                    .contains_key("SUPERTAG_TLS_CLIENT_CA_FILE")
+            );
+            assert_eq!(
+                files.control_plane.contains_key("SUPERTAG_TLS_CERT_FILE"),
                 platform == Platform::Compose
             );
         }
@@ -917,11 +992,11 @@ mod tests {
 
     #[test]
     fn compose_generates_its_database_and_supplied_tokens_are_kept() -> Result<()> {
-        let token = "a".repeat(40);
+        let token = format!("stcr_{}", "a".repeat(64));
         let files = configured(
             Platform::Compose,
             &[
-                ("SUPERTAG_GATEWAY_TOKEN", &token),
+                ("SUPERTAG_GATEWAY_CREDENTIAL", &token),
                 ("SUPERTAG_OPERATOR_PRINCIPAL", "operator:ops"),
             ],
         )?;
@@ -933,13 +1008,20 @@ mod tests {
                 postgres["POSTGRES_PASSWORD"]
             )
         );
-        assert_eq!(files.gateway["SUPERTAG_GATEWAY_TOKEN"], token);
-        assert_eq!(files.gateway["SUPERTAG_OPERATOR_PRINCIPAL"], "operator:ops");
+        assert_eq!(files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"], token);
         assert_eq!(
-            files.control_plane["SUPERTAG_TLS_CLIENT_CA_FILE"],
-            "/run/supertag-tls/client-ca.pem"
+            files.control_plane["SUPERTAG_OPERATOR_PRINCIPAL"],
+            "operator:ops"
         );
-        assert!(!files.gateway.contains_key("SUPERTAG_TLS_CLIENT_CA_FILE"));
+        assert_eq!(
+            files.control_plane["SUPERTAG_TLS_CERT_FILE"],
+            "/run/supertag-tls/server.pem"
+        );
+        assert_eq!(
+            files.gateway["SUPERTAG_SERVER_CA_FILE"],
+            "/run/supertag-tls/server-ca.pem"
+        );
+        assert!(!files.gateway.contains_key("SUPERTAG_TLS_CERT_FILE"));
         Ok(())
     }
 
@@ -987,9 +1069,14 @@ mod tests {
                 "hosted deployments require PostgreSQL",
             ),
             (
-                "SUPERTAG_GATEWAY_TOKEN",
+                "SUPERTAG_GATEWAY_CREDENTIAL",
                 "private-short",
-                "SUPERTAG_GATEWAY_TOKEN must be at least 32 characters",
+                "SUPERTAG_GATEWAY_CREDENTIAL must be stcr_ and 64 hex digits",
+            ),
+            (
+                "SUPERTAG_OPERATOR_TOKEN",
+                "private-short",
+                "SUPERTAG_OPERATOR_TOKEN must be at least 32 characters",
             ),
             (
                 "SUPERTAG_CREDENTIAL_VAULT",
@@ -1024,18 +1111,20 @@ mod tests {
         .to_string();
         assert!(error.contains("VAULT_ADDR must be an HTTPS URL"), "{error}");
         assert!(!error.contains("private-"), "{error}");
-        let same = "b".repeat(40);
+        let issued = format!("stop_{}", "b".repeat(64));
         let error = configured(
             Platform::Fly,
             &[
                 ("SUPERTAG_DATABASE_URL", DATABASE),
-                ("SUPERTAG_GATEWAY_TOKEN", &same),
-                ("SUPERTAG_OPERATOR_TOKEN", &same),
+                ("SUPERTAG_OPERATOR_TOKEN", &issued),
             ],
         )
         .unwrap_err()
         .to_string();
-        assert!(error.contains("must differ"), "{error}");
+        assert!(
+            error.contains("must not look like an issued credential"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1052,15 +1141,15 @@ mod tests {
             .insert("SUPERTAG_DATABASE_URL".into(), DATABASE.into());
         files
             .control_plane
-            .remove("SUPERTAG_TLS_CLIENT_CA_FILE")
-            .context("client CA")?;
+            .remove("SUPERTAG_TLS_CERT_FILE")
+            .context("server certificate")?;
         files
             .gateway
             .insert("SUPERTAG_TLS_CERT_FILE".into(), "relative.pem".into());
         let error = validate(Platform::Compose, &files).unwrap_err().to_string();
         for expected in [
             "gateway.env: unknown deployment environment key SUPERTAG_DATABASE_URL",
-            "control-plane.env: Missing SUPERTAG_TLS_CLIENT_CA_FILE",
+            "control-plane.env: Missing SUPERTAG_TLS_CERT_FILE",
             "gateway.env: SUPERTAG_TLS_CERT_FILE must name an absolute mounted file",
         ] {
             assert!(error.contains(expected), "{expected}: {error}");
@@ -1069,11 +1158,14 @@ mod tests {
         files
             .operator
             .insert("SUPERTAG_OPERATOR_TOKEN".into(), "c".repeat(40));
-        files
-            .control_plane
-            .insert("SUPERTAG_GATEWAY_TOKEN".into(), "d".repeat(40));
+        files.control_plane.insert(
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
+            format!("stcr_{}", "d".repeat(64)),
+        );
         let error = validate(Platform::Fly, &files).unwrap_err().to_string();
-        assert!(error.contains("differs between the Control Plane and Gateway"));
+        assert!(error.contains(
+            "SUPERTAG_GATEWAY_CREDENTIAL differs from the Control Plane's SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"
+        ));
         assert!(error.contains("operator.env: SUPERTAG_OPERATOR_TOKEN differs"));
         files.postgres = Some(Environment::new());
         assert!(validate(Platform::Fly, &files).is_err());
@@ -1148,7 +1240,7 @@ mod tests {
         assert!(https_origin("https://vault.example.com/v1", true));
     }
 
-    /// How a fake Gateway answers each verification step, to show that `verify deployment`
+    /// How a fake Control Plane answers each verification step, to show that `verify deployment`
     /// fails closed. `None` health means an HTTPS edge that is not a gRPC service at all.
     #[derive(Clone, Copy)]
     struct Fake {
@@ -1240,7 +1332,7 @@ mod tests {
         }
     }
 
-    /// Runs `verify_channel` against a loopback fake Gateway and returns its outcome and the
+    /// Runs `verify_channel` against a loopback fake Control Plane and returns its outcome and the
     /// requests the fake received.
     async fn verify_against(fake: Fake) -> Result<(Result<String>, Vec<(String, String)>)> {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1266,11 +1358,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verification_fails_closed_for_an_unsafe_or_broken_gateway() -> Result<()> {
+    async fn verification_fails_closed_for_an_unsafe_or_broken_control_plane() -> Result<()> {
         let (outcome, seen) = verify_against(SAFE).await?;
         assert!(
             outcome?.contains("anonymous and invalid Worker Host credential rejection"),
-            "safe Gateway"
+            "safe Control Plane"
         );
         assert_eq!(
             seen,
@@ -1296,21 +1388,21 @@ mod tests {
                     health: None,
                     ..SAFE
                 },
-                "Gateway health check failed",
+                "Control Plane health check failed",
             ),
             (
                 Fake {
                     health: Some(ServingStatus::NotServing),
                     ..SAFE
                 },
-                "Gateway health check failed",
+                "Control Plane health check failed",
             ),
             (
                 Fake {
                     anonymous_operator: Code::Ok,
                     ..SAFE
                 },
-                "Gateway did not reject an anonymous operator request",
+                "Control Plane did not reject an anonymous operator request",
             ),
             // Refusing anonymous calls for another reason is not proof of authentication.
             (
@@ -1318,14 +1410,14 @@ mod tests {
                     anonymous_operator: Code::Unavailable,
                     ..SAFE
                 },
-                "Gateway did not reject an anonymous operator request",
+                "Control Plane did not reject an anonymous operator request",
             ),
             (
                 Fake {
                     invalid_host: Code::Ok,
                     ..SAFE
                 },
-                "Gateway accepted an invalid Worker Host credential",
+                "Control Plane accepted an invalid Worker Host credential",
             ),
             (
                 Fake {
@@ -1346,7 +1438,7 @@ mod tests {
                     operator: Code::Unauthenticated,
                     ..SAFE
                 },
-                "Gateway operator authentication or Control Plane access failed (Unauthenticated)",
+                "Control Plane operator authentication failed (Unauthenticated)",
             ),
         ] {
             let (outcome, _) = verify_against(fake).await?;
@@ -1377,8 +1469,10 @@ mod tests {
         let entrypoint = read("docker/rust-hosted-entrypoint.sh");
         let dockerfile = read("docker/rust-service.Dockerfile");
 
-        let listen_control = format!("control-plane --listen [::]:{CONTROL_PLANE_PORT}");
-        let listen_gateway = format!("gateway --listen [::]:{GATEWAY_PORT}");
+        let listen_control = format!(
+            "control-plane --listen [::]:{CONTROL_PLANE_PORT} --transfer-directory {STATE_DIRECTORY}/transfers"
+        );
+        let listen_gateway = format!("gateway --listen {GATEWAY_LISTEN}");
         for (platform, control, gateway) in [
             (Platform::Fly, &fly_control, &fly_gateway),
             (Platform::Railway, &railway_control, &railway_gateway),
@@ -1390,18 +1484,14 @@ mod tests {
             assert!(control.contains(&listen_control), "{platform:?}");
             assert!(gateway.contains(&listen_gateway), "{platform:?}");
             assert!(gateway.contains(&upstream), "{platform:?}");
-            assert!(
-                gateway.contains(&format!(
-                    "--checkpoint-directory {STATE_DIRECTORY}/checkpoints"
-                )),
-                "{platform:?}"
-            );
         }
-        // Fly: the Control Plane has no public service; the Gateway passes raw TLS through.
-        assert!(!fly_control.contains("[[services]]") && !fly_control.contains("http_service"));
-        assert!(fly_gateway.contains(&format!("internal_port = {GATEWAY_PORT}")));
-        assert!(fly_gateway.contains("handlers = []"));
-        assert!(!fly_gateway.contains("http_service") && !fly_gateway.contains("\"tls\""));
+        // Fly: the Control Plane is public and passes raw TLS through; the Gateway has no
+        // public service.
+        assert!(fly_control.contains(&format!("internal_port = {CONTROL_PLANE_PORT}")));
+        assert!(fly_control.contains("handlers = []"));
+        assert!(!fly_control.contains("http_service") && !fly_control.contains("\"tls\""));
+        assert!(fly_control.contains(&format!("destination = \"{STATE_DIRECTORY}\"")));
+        assert!(!fly_gateway.contains("[[services]]") && !fly_gateway.contains("http_service"));
         assert!(fly_gateway.contains(&format!("destination = \"{STATE_DIRECTORY}\"")));
         // Railway: the start command replaces the image entrypoint, so it names it.
         for definition in [&railway_control, &railway_gateway] {
@@ -1424,14 +1514,50 @@ mod tests {
         }
         assert!(entrypoint.contains(TLS_DIRECTORY));
         assert!(dockerfile.contains("AS hosted"));
-        // Compose: the private network publishes nothing; only the ingress override does.
+        // The image's default commands are the Compose commands: a public Control Plane and a
+        // Gateway that only dials it.
+        for (stage, command) in [
+            (
+                "AS control-plane",
+                format!(
+                    "[\"control-plane\", \"--listen\", \"0.0.0.0:{CONTROL_PLANE_PORT}\", \"--transfer-directory\", \"{STATE_DIRECTORY}/transfers\"]"
+                ),
+            ),
+            (
+                "AS gateway",
+                format!(
+                    "[\"gateway\", \"--listen\", \"{GATEWAY_LISTEN}\", \"--control-plane\", \"https://control-plane:{CONTROL_PLANE_PORT}\"]"
+                ),
+            ),
+        ] {
+            let stage = &dockerfile[dockerfile.find(stage).expect(stage)..];
+            let stage = &stage[..stage[1..]
+                .find("\nFROM ")
+                .map_or(stage.len(), |end| end + 1)];
+            assert!(stage.contains(&format!("CMD {command}")), "{stage}");
+            assert!(
+                compose.contains(&format!("command: {command}")),
+                "{command}"
+            );
+        }
+        let gateway_stage = &dockerfile[dockerfile.find("AS gateway").expect("gateway stage")..];
+        assert!(
+            !gateway_stage[..gateway_stage.find("\nFROM ").unwrap_or(gateway_stage.len())]
+                .contains("EXPOSE")
+        );
+        // Compose: the private network publishes nothing; only the ingress override does. The
+        // Gateway runs only with its profile.
         assert!(compose.contains(&format!("target: {TLS_DIRECTORY}")));
         assert!(!compose.contains("ports:"));
+        assert!(compose.contains("profiles: [gateway]"));
+        assert!(compose.contains(&format!(
+            "\"--transfer-directory\", \"{STATE_DIRECTORY}/transfers\""
+        )));
         // PostgreSQL is healthy only once it accepts TCP connections, not while its first-start
         // init server listens on the Unix socket alone; every service restarts after a failure.
         assert!(compose.contains("pg_isready -h 127.0.0.1 -p 5432"));
         assert_eq!(compose.matches("restart: unless-stopped").count(), 3);
-        assert!(ingress.contains("ports:") && ingress.contains(&format!(":{GATEWAY_PORT}")));
-        assert!(!ingress.contains("control-plane:"));
+        assert!(ingress.contains("ports:") && ingress.contains(&format!(":{CONTROL_PLANE_PORT}")));
+        assert!(!ingress.contains("gateway:"));
     }
 }

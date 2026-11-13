@@ -27,7 +27,7 @@ fn submission(tag: &str) -> SubmitTaskRequest {
 fn auth_key(operation_id: &str) -> CreateAuthKeyRequest {
     CreateAuthKeyRequest {
         name: operation_id.into(),
-        host_id: "release-host".into(),
+        role: PrincipalRole::Host.into(),
         operation_id: operation_id.into(),
         key_digest: vec![7; 32],
         expires_in_ms: 60_000,
@@ -46,19 +46,20 @@ async fn exercise(url: &str) {
     ));
     store.create_auth_key(OP, &auth_key("key")).await.unwrap();
     let enrolled_key = CreateAuthKeyRequest {
-        host_id: "enrolled-host".into(),
+        role: PrincipalRole::Host.into(),
         key_digest: vec![9; 32],
         ..auth_key("enroll-key")
     };
     store.create_auth_key(OP, &enrolled_key).await.unwrap();
     store
-        .enroll_host(
-            &EnrollHostRequest {
-                host_id: enrolled_key.host_id,
+        .enroll(
+            &[9; 32],
+            &EnrollRequest {
+                role: PrincipalRole::Host.into(),
+                name: "enrolled-host".into(),
                 operation_id: "enroll".into(),
                 token_digest: vec![10; 32],
             },
-            &[9; 32],
         )
         .await
         .unwrap();
@@ -218,13 +219,14 @@ async fn exercise(url: &str) {
     );
     assert!(matches!(
         store
-            .enroll_host(
-                &EnrollHostRequest {
-                    host_id: "release-host".into(),
+            .enroll(
+                &[7; 32],
+                &EnrollRequest {
+                    role: PrincipalRole::Host.into(),
+                    name: "release-host".into(),
                     operation_id: "join".into(),
                     token_digest: vec![8; 32],
                 },
-                &[7; 32]
             )
             .await,
         Err(StoreError::PermissionDenied)
@@ -233,7 +235,10 @@ async fn exercise(url: &str) {
     let successor = store.put_tag_spec(tag("second", "Release")).await.unwrap();
     assert_eq!(successor.name, retired.name);
     assert_ne!(successor.tag_id, retired.tag_id);
-    let active = store.list_tags(&ListTagsRequest::default()).await.unwrap();
+    let active = store
+        .list_tags("operator:local", &ListTagsRequest::default())
+        .await
+        .unwrap();
     assert_eq!(
         active
             .tags
@@ -243,10 +248,13 @@ async fn exercise(url: &str) {
         ["peer", "second"]
     );
     let history = store
-        .list_tags(&ListTagsRequest {
-            include_retired: true,
-            ..Default::default()
-        })
+        .list_tags(
+            "operator:local",
+            &ListTagsRequest {
+                include_retired: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(history.tags.len(), 3);

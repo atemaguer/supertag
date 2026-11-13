@@ -73,7 +73,7 @@ async fn operator_access_contract(url: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(created.operator_id, "token:laptop-2");
+    assert_eq!(created.operator_id, "operator:token:laptop-2");
     assert_eq!(created.phase(), OperatorTokenPhase::Active);
     assert_eq!(created.created_by, "local");
     assert_eq!(created.secret_revision, 1);
@@ -151,7 +151,7 @@ async fn operator_access_contract(url: &str) {
             .authenticate_operator_token(&laptop_digest)
             .await
             .unwrap(),
-        OperatorAuthentication::Authenticated("token:laptop-2".into())
+        OperatorAuthentication::Authenticated("operator:token:laptop-2".into())
     );
     assert_eq!(
         store
@@ -252,7 +252,7 @@ async fn operator_access_contract(url: &str) {
             .authenticate_operator_token(&rotated_digest)
             .await
             .unwrap(),
-        OperatorAuthentication::Authenticated("token:laptop-2".into())
+        OperatorAuthentication::Authenticated("operator:token:laptop-2".into())
     );
     assert!(!rotated_secret.is_empty());
     // A late retry of a superseded rotation never restores its secret.
@@ -303,7 +303,7 @@ async fn operator_access_contract(url: &str) {
             .authenticate_operator_token(&later_digest)
             .await
             .unwrap(),
-        OperatorAuthentication::Authenticated("token:laptop-2".into())
+        OperatorAuthentication::Authenticated("operator:token:laptop-2".into())
     );
 
     // Expiry: the token is refused at its expiry time, and rotation renews it.
@@ -367,12 +367,22 @@ async fn operator_access_contract(url: &str) {
         .unwrap();
     clock.store(NOW + 10, Ordering::SeqCst);
     store
-        .record_audit_entry(&record("token:laptop-2", "tag.put", "Tag/reviewer", true))
+        .record_audit_entry(&record(
+            "operator:token:laptop-2",
+            "tag.put",
+            "Tag/reviewer",
+            true,
+        ))
         .await
         .unwrap();
     clock.store(NOW + 20, Ordering::SeqCst);
     store
-        .record_audit_entry(&record("token:laptop-2", "tag.retire", "Tag", false))
+        .record_audit_entry(&record(
+            "operator:token:laptop-2",
+            "tag.retire",
+            "Tag",
+            false,
+        ))
         .await
         .unwrap();
     // A target names a kind and up to two 256-byte IDs, so it may exceed one ID's limit.
@@ -410,14 +420,14 @@ async fn operator_access_contract(url: &str) {
             .collect::<Vec<_>>(),
         [
             (
-                "token:laptop-2",
+                "operator:token:laptop-2",
                 "tag.retire",
                 "Tag",
                 AuditOutcome::Failed,
                 "NOT_FOUND"
             ),
             (
-                "token:laptop-2",
+                "operator:token:laptop-2",
                 "tag.put",
                 "Tag/reviewer",
                 AuditOutcome::Succeeded,

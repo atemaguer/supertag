@@ -145,7 +145,7 @@ class WorkspaceVolumes:
 
 
 class AttemptWorkspaceMountsStub:
-    """The Control Plane and Gateway check the live Attempt before disclosing
+    """The Control Plane checks the live Attempt before disclosing
     file artifact Volume paths to its trusted Worker Host for alias rejection.
     """
 
@@ -163,7 +163,7 @@ class AttemptWorkspaceMountsStub:
 
 
 class AttemptWorkspaceMountsServicer:
-    """The Control Plane and Gateway check the live Attempt before disclosing
+    """The Control Plane checks the live Attempt before disclosing
     file artifact Volume paths to its trusted Worker Host for alias rejection.
     """
 
@@ -190,7 +190,7 @@ def add_AttemptWorkspaceMountsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AttemptWorkspaceMounts:
-    """The Control Plane and Gateway check the live Attempt before disclosing
+    """The Control Plane checks the live Attempt before disclosing
     file artifact Volume paths to its trusted Worker Host for alias rejection.
     """
 

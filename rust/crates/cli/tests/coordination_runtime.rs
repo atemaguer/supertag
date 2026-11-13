@@ -41,9 +41,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -52,7 +52,8 @@ impl Credentials {
         command
             .args(args)
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -64,7 +65,7 @@ impl Credentials {
     fn worker(&self, public: &str, state: &Path, source: Option<&Path>, modes: &[&str]) -> Command {
         let mut command = self.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             public,
             "--adapter",
             ADAPTER,
@@ -83,10 +84,10 @@ impl Credentials {
     }
 }
 
-/// A Control Plane and a Gateway, with optional extra Gateway arguments and environment.
+/// A Control Plane with optional extra arguments, and a Gateway when a scenario needs surfaces.
 struct Services {
     plane: Child,
-    gateway: Child,
+    gateway: Option<Child>,
     public: String,
     extra: Vec<String>,
 }
@@ -95,32 +96,48 @@ impl Services {
     async fn start(
         credentials: &Credentials,
         database: &str,
-        gateway: impl Fn(&mut Command),
-        lines: usize,
+        plane: impl Fn(&mut Command),
     ) -> Result<Self> {
-        let mut plane = credentials.command(&["control-plane"]);
-        plane.env("SUPERTAG_DATABASE_URL", database);
-        let (plane, private) = service(plane, 1).await?;
-        let mut command = credentials.command(&["gateway", "--control-plane", &private[0]]);
-        gateway(&mut command);
-        let (gateway, mut endpoints) = service(command, lines).await?;
-        let public = endpoints.remove(0);
+        let mut command = credentials.command(&["control-plane"]);
+        command.env("SUPERTAG_DATABASE_URL", database);
+        plane(&mut command);
+        let (plane, mut public) = service(command, 1).await?;
         Ok(Self {
             plane,
-            gateway,
-            public,
-            extra: endpoints,
+            gateway: None,
+            public: public.remove(0),
+            extra: Vec::new(),
         })
     }
 
+    /// Also starts a Gateway configured by `gateway`, and keeps the `lines - 1` listener
+    /// addresses it reports after its own.
+    async fn with_gateway(
+        credentials: &Credentials,
+        database: &str,
+        gateway: impl Fn(&mut Command),
+        lines: usize,
+    ) -> Result<Self> {
+        let mut services = Self::start(credentials, database, |_| {}).await?;
+        let mut command = credentials.command(&["gateway", "--control-plane", &services.public]);
+        gateway(&mut command);
+        let (gateway, mut endpoints) = service(command, lines).await?;
+        endpoints.remove(0);
+        services.gateway = Some(gateway);
+        services.extra = endpoints;
+        Ok(services)
+    }
+
     fn cli(&self, credentials: &Credentials, args: &[&str]) -> Command {
-        let mut command = credentials.command(&[args[0], "--gateway", &self.public]);
+        let mut command = credentials.command(&[args[0], "--control-plane", &self.public]);
         command.args(&args[1..]);
         command
     }
 
     async fn stop(mut self) -> Result<()> {
-        self.gateway.kill().await?;
+        if let Some(gateway) = &mut self.gateway {
+            gateway.kill().await?;
+        }
         self.plane.kill().await?;
         Ok(())
     }
@@ -220,15 +237,10 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let root = directory.path();
     let (source, base) = repository(root).await?;
     let credentials = Credentials::new();
-    let artifacts = root.join("gateway-artifacts");
-    let services = Services::start(
-        &credentials,
-        &database,
-        |gateway| {
-            gateway.arg("--checkpoint-directory").arg(&artifacts);
-        },
-        1,
-    )
+    let artifacts = root.join("transfers");
+    let services = Services::start(&credentials, &database, |plane| {
+        plane.arg("--transfer-directory").arg(&artifacts);
+    })
     .await?;
     let cli = |args: &[&str]| services.cli(&credentials, args);
     json(cli(&[
@@ -289,6 +301,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
         "auth-key",
         "create",
         "children",
+        "--role",
+        "host",
         "--reusable",
         "--all-tags",
     ]))
@@ -297,7 +311,7 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let mut hosts = Vec::new();
     for name in ["child-one", "child-two"] {
         let mut enroll =
-            credentials.command(&["host", "enroll", name, "--gateway", &services.public]);
+            credentials.command(&["host", "enroll", name, "--control-plane", &services.public]);
         enroll
             .arg("--state-directory")
             .arg(root.join(name))
@@ -400,7 +414,7 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     let provider = root.join("provider.log");
     let mode = format!("--effect-fixture={}", provider.display());
     let credentials = Credentials::new();
-    let services = Services::start(&credentials, &database, |_| {}, 1).await?;
+    let services = Services::start(&credentials, &database, |_| {}).await?;
     json(services.cli(
         &credentials,
         &["tag", "put", "integrator", "--instructions", "File tickets"],
@@ -429,7 +443,7 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     );
     // Receipts are durable in the Control Plane, not on the host that made them.
     services.stop().await?;
-    let services = Services::start(&credentials, &database, |_| {}, 1).await?;
+    let services = Services::start(&credentials, &database, |_| {}).await?;
     let retry = json(services.cli(
         &credentials,
         &[
@@ -582,7 +596,7 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let root = directory.path();
     let slack = MockSlack::start().await?;
     let credentials = Credentials::new();
-    let services = Services::start(
+    let services = Services::with_gateway(
         &credentials,
         &database,
         |gateway| {
@@ -616,7 +630,7 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let account = spec(
         root,
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
+        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     json(cli(&["surface-account", "put", &account])).await?;
     json(cli(&[

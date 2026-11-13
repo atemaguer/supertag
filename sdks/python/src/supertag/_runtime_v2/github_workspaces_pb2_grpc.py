@@ -230,7 +230,7 @@ class GithubWorkspaces:
 
 
 class GithubSourceResolverStub:
-    """Private Control Plane API used only by configured Gateway source readers.
+    """Internal Control Plane API used only by its configured GitHub source reader.
     """
 
     def __init__(self, channel):
@@ -252,7 +252,7 @@ class GithubSourceResolverStub:
 
 
 class GithubSourceResolverServicer:
-    """Private Control Plane API used only by configured Gateway source readers.
+    """Internal Control Plane API used only by its configured GitHub source reader.
     """
 
     def ListPending(self, request, context):
@@ -289,7 +289,7 @@ def add_GithubSourceResolverServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class GithubSourceResolver:
-    """Private Control Plane API used only by configured Gateway source readers.
+    """Internal Control Plane API used only by its configured GitHub source reader.
     """
 
     @staticmethod

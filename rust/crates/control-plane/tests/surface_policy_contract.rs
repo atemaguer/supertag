@@ -22,6 +22,7 @@ fn account(id: &str, team: &str) -> PutSurfaceAccountRequest {
                 )),
             }),
             enabled: true,
+            gateway: "local".into(),
             ..Default::default()
         }),
         ..Default::default()
@@ -442,6 +443,7 @@ async fn bind_provider(store: &Store, alias: &str, identity: Identity, scope: Sc
                 operation_id: format!("account-{id}"),
                 account: Some(SurfaceAccount {
                     account_id: id.clone(),
+                    gateway: "local".into(),
                     identity: Some(SurfaceAccountIdentity {
                         provider: Some(identity),
                     }),

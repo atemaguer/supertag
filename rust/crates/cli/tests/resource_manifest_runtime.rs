@@ -27,14 +27,15 @@ use tokio::{
 
 const CLI: &str = env!("CARGO_BIN_EXE_supertag");
 const OPERATOR: &str = "fixture-operator-token";
-const GATEWAY: &str = "fixture-private-gateway-token";
+const GATEWAY: &str = "stcr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn cli(args: &[&str]) -> Command {
     let mut command = Command::new(CLI);
     command
         .args(args)
         .env_clear()
-        .env("SUPERTAG_GATEWAY_TOKEN", GATEWAY)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", GATEWAY)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", GATEWAY)
         .env("SUPERTAG_OPERATOR_TOKEN", OPERATOR)
         .stdin(Stdio::null())
         .kill_on_drop(true);
@@ -54,7 +55,9 @@ async fn command(gateway: &str, args: &[&str], success: bool) -> Result<String> 
     let (first, rest) = args.split_first().context("missing command")?;
     let output = timeout(
         Duration::from_secs(12),
-        cli(&[first, "--gateway", gateway]).args(rest).output(),
+        cli(&[first, "--control-plane", gateway])
+            .args(rest)
+            .output(),
     )
     .await??;
     let stderr = String::from_utf8(output.stderr)?;
@@ -67,14 +70,12 @@ async fn command(gateway: &str, args: &[&str], success: bool) -> Result<String> 
 }
 
 async fn exercise(root: &Path, database_url: &str) -> Result<()> {
-    let (mut plane, private) = bind({
+    let (mut plane, gateway) = bind({
         let mut command = cli(&["control-plane"]);
         command.env("SUPERTAG_DATABASE_URL", database_url);
         command
     })
     .await?;
-    let (mut gateway_process, gateway) =
-        bind(cli(&["gateway", "--control-plane", &private])).await?;
     let input = root.join("organization");
     std::fs::create_dir(&input)?;
     let yaml = input.join("z-resources.yaml");
@@ -444,8 +445,6 @@ spec: {purpose: Observe releases.}
 
     prune_apply_set(root, &gateway).await?;
     resume_apply_set(root, &gateway).await?;
-
-    gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())
 }
@@ -453,7 +452,7 @@ spec: {purpose: Observe releases.}
 async fn volume_exists(gateway: &str, id: &str) -> Result<bool> {
     let output = timeout(
         Duration::from_secs(12),
-        cli(&["get", "--gateway", gateway, "volume", id]).output(),
+        cli(&["get", "--control-plane", gateway, "volume", id]).output(),
     )
     .await??;
     Ok(output.status.success())

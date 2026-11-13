@@ -6,11 +6,11 @@ import "supertag/runtime/v2/policy.proto";
 import "supertag/runtime/v2/github_workspaces.proto";
 import "supertag/runtime/v2/mcp.proto";
 
-// The Gateway exposes these services to operators and enrolled hosts. The
-// Control Plane serves the same messages on a private authenticated listener.
+// The Control Plane's public endpoint serves these services to operators,
+// clients and enrolled hosts. Its API tier authenticates every caller and calls
+// the state owner with the same messages.
 service Operator {
   rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
-  rpc RevokeHost(RevokeHostRequest) returns (HostRecord);
   rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
   rpc GetHost(GetHostRequest) returns (WorkerHostStatus);
   rpc SetHostDraining(SetHostDrainingRequest) returns (WorkerHostStatus);
@@ -287,11 +287,14 @@ message Approval {
   string action = 7;
   string arguments_digest = 8;
   string summary = 9;
+  // Who may decide: operators by operator ID, such as `local`, and clients by `client:NAME`.
+  // Empty means any operator and no client.
   repeated string operator_ids = 10;
   ApprovalState state = 11;
   ApprovalScope scope = 12;
   int64 requested_at_ms = 13;
   optional int64 decided_at_ms = 14;
+  // The principal that decided it, such as `operator:local` or `client:alice-laptop`.
   optional string decided_by = 15;
   optional string reason = 16;
   optional int64 valid_until_ms = 17;
@@ -752,19 +755,11 @@ service AttemptInputs {
   rpc SettleInput(SettleInputRequest) returns (LiveInput);
 }
 
-// A one-time Auth Key authorizes enrollment for one designated Worker Host.
-service HostEnrollment {
-  rpc EnrollHost(EnrollHostRequest) returns (HostRecord);
-}
-
-// Private Gateway-to-Control-Plane service for enrollment and authentication.
-service HostDirectory {
-  rpc Enroll(PrivateEnrollHostRequest) returns (HostRecord);
-  rpc Authenticate(AuthenticateHostRequest) returns (HostRecord);
-}
-
-// Private Gateway-to-Control-Plane operations. The authenticated connector
-// principal identifies the account. Provider request bodies cannot select it.
+// Gateway calls to the Control Plane. Each call names the connector account it
+// acts for in the `x-supertag-connector-account` metadata header, and the
+// Control Plane refuses an account that is not bound to the calling Gateway;
+// provider request bodies cannot select it. See
+// docs/reference/connector-contract.md.
 service Connector {
   rpc AcceptEvent(AcceptEventRequest) returns (Task);
   rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
@@ -795,14 +790,14 @@ service Transfers {
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }
 
-// Private authorization and commit for bytes stored by the Gateway.
+// Internal authorization and commit for bytes the API tier stores.
 service CheckpointDirectory {
   rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
   rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
   rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
 }
 
-// Private authorization and commit for work product stored by the Gateway.
+// Internal authorization and commit for work product the API tier stores.
 service WorkspaceDirectory {
   rpc GetSource(InspectAttemptRequest) returns (GithubWorkspace);
   rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
@@ -1168,27 +1163,37 @@ message SettleInputRequest {
 }
 
 message CreateAuthKeyRequest {
-  string host_id = 1;
+  reserved 1;
   string operation_id = 2;
   bytes key_digest = 3;
   // Zero means the fixed maximum lifetime: one hour for a one-time key and
   // 90 days for a reusable key. A shorter positive lifetime is allowed.
   uint64 expires_in_ms = 4;
+  // For a host key, the Tags its hosts may run; for a client key, the Tags its
+  // clients may talk to. Refused for a gateway key.
   repeated string allowed_tag_ids = 5;
+  // Every Tag. A gateway key takes this or nothing: it lets the Gateway serve
+  // connector accounts no Surface Account names, which admit work on any Tag,
+  // and deliver the admin operator's notifications.
   bool all_tags = 6;
-  // A reusable key leaves host_id empty and enrolls any number of hosts.
+  // A reusable key enrolls any number of principals; a one-time key enrolls one.
+  // Each enrollee chooses its own name.
   bool reusable = 1400;
-  // Hosts that join with an ephemeral key are removed once they go offline.
+  // Host keys only: hosts that join with an ephemeral key are removed once they
+  // go offline.
   bool ephemeral = 1401;
-  // Labels granted to every host that joins with the key.
+  // Host keys only: labels granted to every host that joins with the key.
   repeated string labels = 1402;
   // The operator's name for the key: 1 to 63 lowercase letters, digits,
   // hyphens or underscores, starting with a letter or digit. Never reused.
   string name = 3300;
+  // Required: the one role every enrollee of the key takes. HOST, GATEWAY or
+  // CLIENT; it never changes after creation.
+  PrincipalRole role = 4100;
 }
 
 message AuthKey {
-  string host_id = 1;
+  reserved 1;
   int64 expires_at_ms = 2;
   repeated string allowed_tag_ids = 3;
   bool all_tags = 4;
@@ -1200,12 +1205,20 @@ message AuthKey {
   bool revoked = 1404;
   string name = 3300;
   int64 created_at_ms = 3301;
-  // A one-time key enrolled its host, or a reusable key enrolled at least one.
+  // A one-time key enrolled its principal, or a reusable key enrolled at least one.
   bool used = 3302;
+  PrincipalRole role = 4100;
 }
 
-message RevokeHostRequest {
-  string host_id = 1;
+// Who a caller of the Control Plane is. Operators present the admin operator
+// token or an Operator Token; hosts, Gateways and clients present the
+// credential they enrolled with an Auth Key of their role.
+enum PrincipalRole {
+  PRINCIPAL_ROLE_UNSPECIFIED = 0;
+  PRINCIPAL_ROLE_OPERATOR = 1;
+  PRINCIPAL_ROLE_HOST = 2;
+  PRINCIPAL_ROLE_GATEWAY = 3;
+  PRINCIPAL_ROLE_CLIENT = 4;
 }
 
 message RegisterHostRequest {
@@ -1216,21 +1229,6 @@ message HostRecord {
   string host_id = 1;
   uint64 generation = 2;
   bool revoked = 3;
-}
-
-message EnrollHostRequest {
-  string host_id = 1;
-  string operation_id = 2;
-  bytes token_digest = 3;
-}
-
-message PrivateEnrollHostRequest {
-  EnrollHostRequest enrollment = 1;
-  bytes key_digest = 2;
-}
-
-message AuthenticateHostRequest {
-  bytes token_digest = 1;
 }
 
 enum TaskState {
@@ -2045,6 +2043,9 @@ message Objective {
   optional string completion_summary = 3800;
   optional int64 cancelled_at_ms = 3801;
   optional string cancellation_reason = 3802;
+  // The principal that created it, such as `operator:local` or
+  // `client:alice-laptop`. Empty for an Objective a surface thread started.
+  string created_by = 4100;
 }
 
 message Team {

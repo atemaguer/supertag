@@ -61,7 +61,7 @@ async fn surface_objective(store: &Store, thread: &str, outcome: &str) -> Object
 
 async fn all_objectives(store: &Store) -> Vec<Objective> {
     store
-        .list_objectives(&ListObjectivesRequest::default())
+        .list_objectives("operator:local", &ListObjectivesRequest::default())
         .await
         .unwrap()
 }
@@ -154,10 +154,13 @@ async fn home_replies(url: &str, needle: &str) -> Vec<String> {
 
 async fn overview(store: &Store, id: &str) -> ObjectiveOverview {
     store
-        .objective_overview(&GetObjectiveOverviewRequest {
-            objective_id: id.into(),
-            ..Default::default()
-        })
+        .objective_overview(
+            "operator:local",
+            &GetObjectiveOverviewRequest {
+                objective_id: id.into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap()
 }
@@ -179,7 +182,10 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
     let starting = claim(store, host, &shipped.starting_task_id).await;
     let summary = format!("Released 1.0. {}", "x".repeat(2000));
     finish(store, host, &starting, &summary, ObjectiveSignal::Completed).await;
-    let completed = store.get_objective(&shipped.objective_id).await.unwrap();
+    let completed = store
+        .get_objective("operator:local", &shipped.objective_id)
+        .await
+        .unwrap();
     assert_eq!(completed.status(), ObjectiveStatus::Completed);
     assert_eq!(
         completed.completion_summary.as_deref(),
@@ -251,7 +257,7 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
     ));
     assert_eq!(
         store
-            .get_objective(&reviewed.objective_id)
+            .get_objective("operator:local", &reviewed.objective_id)
             .await
             .unwrap()
             .status(),
@@ -316,7 +322,11 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
     )
     .await;
     assert_eq!(
-        store.get_objective("quiet").await.unwrap().status(),
+        store
+            .get_objective("operator:local", "quiet")
+            .await
+            .unwrap()
+            .status(),
         ObjectiveStatus::Completed
     );
     assert_eq!(home_replies(url, "").await.len(), before);
@@ -377,7 +387,11 @@ async fn operator_completion(store: &Store, host: &HostAuthority) {
     );
     // Get carries the summary; a list page leaves it out to stay bounded.
     assert_eq!(
-        store.get_objective(id).await.unwrap().completion_summary,
+        store
+            .get_objective("operator:local", id)
+            .await
+            .unwrap()
+            .completion_summary,
         completed.completion_summary
     );
     let listed = all_objectives(store).await;
@@ -634,11 +648,14 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     // Pages cover every Task of every Session while the totals stay whole.
     assert_eq!(view.total_tasks, 2);
     let first = store
-        .objective_overview(&GetObjectiveOverviewRequest {
-            objective_id: id.into(),
-            limit: 1,
-            offset: 0,
-        })
+        .objective_overview(
+            "operator:local",
+            &GetObjectiveOverviewRequest {
+                objective_id: id.into(),
+                limit: 1,
+                offset: 0,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -653,11 +670,14 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert_eq!(first.conversation.len(), 1);
     assert_eq!(first.sessions.len(), 2);
     let second = store
-        .objective_overview(&GetObjectiveOverviewRequest {
-            objective_id: id.into(),
-            limit: 1,
-            offset: 1,
-        })
+        .objective_overview(
+            "operator:local",
+            &GetObjectiveOverviewRequest {
+                objective_id: id.into(),
+                limit: 1,
+                offset: 1,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(second.tasks.len(), 1);
@@ -689,15 +709,29 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     );
 
     // The overview is a read: it never changes the Objective.
-    let revision = store.get_objective(id).await.unwrap().revision;
+    let revision = store
+        .get_objective("operator:local", id)
+        .await
+        .unwrap()
+        .revision;
     overview(store, id).await;
-    assert_eq!(store.get_objective(id).await.unwrap().revision, revision);
+    assert_eq!(
+        store
+            .get_objective("operator:local", id)
+            .await
+            .unwrap()
+            .revision,
+        revision
+    );
     assert!(matches!(
         store
-            .objective_overview(&GetObjectiveOverviewRequest {
-                objective_id: "missing".into(),
-                ..Default::default()
-            })
+            .objective_overview(
+                "operator:local",
+                &GetObjectiveOverviewRequest {
+                    objective_id: "missing".into(),
+                    ..Default::default()
+                }
+            )
             .await,
         Err(StoreError::NotFound(_))
     ));
@@ -865,7 +899,7 @@ async fn skipped_report(store: &Store, url: &str, host: &HostAuthority) {
     .await;
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),

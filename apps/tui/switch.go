@@ -61,11 +61,11 @@ type app struct {
 	choice    int
 	choiceErr string
 	// palette is the command palette while it shows.
-	palette       *palette
-	files         *taskFilesDialog
-	gatewayStore  *gatewayStore
-	savedGateways []client.Target
-	gatewayDialog *gatewayDialog
+	palette            *palette
+	files              *taskFilesDialog
+	controlPlaneStore  *controlPlaneStore
+	savedControlPlanes []client.Target
+	controlPlaneDialog *controlPlaneDialog
 
 	width, height int
 }
@@ -99,7 +99,7 @@ func (a *app) start(i int) error {
 		return err
 	}
 	a.closeTaskFiles()
-	a.closeGatewayDialog()
+	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.cancel()
 		a.inner.client.Close()
@@ -107,7 +107,7 @@ func (a *app) start(i int) error {
 	a.cancel, a.current, a.inner = cancel, i, inner
 	a.hasTarget = true
 	a.generation++
-	a.inner.switchable = len(a.contexts) > 1 || a.manageGateways()
+	a.inner.switchable = len(a.contexts) > 1 || a.manageControlPlanes()
 	if !inner.client.RuntimeV2() {
 		a.inner.defaultWorkspace = a.contexts[i].Workspace
 	}
@@ -121,7 +121,7 @@ func (a *app) start(i int) error {
 // stop ends the current model's streams and calls.
 func (a *app) stop() {
 	a.closeTaskFiles()
-	a.closeGatewayDialog()
+	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.cancel()
 		a.inner.client.Close()
@@ -144,9 +144,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forward(msg.msg)
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
-		if a.gatewayDialog != nil {
-			for i := range a.gatewayDialog.inputs {
-				a.gatewayDialog.inputs[i].SetWidth(max(a.width-6, 10))
+		if a.controlPlaneDialog != nil {
+			for i := range a.controlPlaneDialog.inputs {
+				a.controlPlaneDialog.inputs[i].SetWidth(max(a.width-6, 10))
 			}
 		}
 		if a.files != nil {
@@ -156,8 +156,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.palette.filter.SetWidth(max(a.width-6, 10))
 		}
 	case tea.KeyPressMsg:
-		if a.gatewayDialog != nil {
-			return a, a.gatewayKey(msg)
+		if a.controlPlaneDialog != nil {
+			return a, a.controlPlaneKey(msg)
 		}
 		if a.files != nil {
 			return a, a.taskFilesKey(msg)
@@ -172,7 +172,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.choosing = true
 			return a, a.chooseKey(msg)
 		}
-		if msg.String() == switchKey && (len(a.contexts) > 1 || a.manageGateways()) {
+		if msg.String() == switchKey && (len(a.contexts) > 1 || a.manageControlPlanes()) {
 			a.choosing, a.choice, a.choiceErr = true, a.current, ""
 			return a, nil
 		}
@@ -180,12 +180,13 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.openPalette(msg.String() == "/")
 		}
 	default:
-		if a.gatewayDialog != nil {
-			if _, ok := msg.(gatewayCheckedMsg); ok {
-				return a, a.gatewayMessage(msg)
+		if a.controlPlaneDialog != nil {
+			switch msg.(type) {
+			case controlPlaneCheckedMsg, enrolledMsg:
+				return a, a.controlPlaneMessage(msg)
 			}
 			var cmd tea.Cmd
-			d := a.gatewayDialog
+			d := a.controlPlaneDialog
 			d.inputs[d.field], cmd = d.inputs[d.field].Update(msg)
 			if _, paste := msg.(tea.PasteMsg); paste {
 				return a, cmd
@@ -214,8 +215,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
-	if _, ok := msg.(gatewayCheckedMsg); ok {
-		return a.gatewayMessage(msg)
+	switch msg.(type) {
+	case controlPlaneCheckedMsg, enrolledMsg:
+		return a.controlPlaneMessage(msg)
 	}
 	if !a.hasTarget {
 		return nil
@@ -240,28 +242,28 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "down", "j":
 		a.choice = max(min(a.choice+1, len(a.contexts)-1), 0)
 	case "a":
-		if a.manageGateways() {
-			return a.openGatewayDialog(false)
+		if a.manageControlPlanes() {
+			return a.openControlPlaneDialog(false)
 		}
 	case "s":
-		if a.manageGateways() {
-			return a.openGatewayDialog(a.hasTarget)
+		if a.manageControlPlanes() {
+			return a.openControlPlaneDialog(a.hasTarget)
 		}
 	case "e":
-		if a.manageGateways() && len(a.contexts) > 0 {
-			return a.editGateway(a.contexts[a.choice])
+		if a.manageControlPlanes() && len(a.contexts) > 0 {
+			return a.editControlPlane(a.contexts[a.choice])
 		}
 	case "d":
-		if a.manageGateways() && len(a.contexts) > 0 {
-			a.forgetGateway()
+		if a.manageControlPlanes() && len(a.contexts) > 0 {
+			a.forgetControlPlane()
 		}
 	case "enter":
 		if len(a.contexts) == 0 {
-			return a.openGatewayDialog(false)
+			return a.openControlPlaneDialog(false)
 		}
 		if a.choice == a.current {
 			a.choosing = false
-			a.rememberGateway()
+			a.rememberControlPlane()
 			return nil
 		}
 		if err := a.start(a.choice); err != nil {
@@ -269,9 +271,9 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		a.choosing = false
-		a.rememberGateway()
-		if a.manageGateways() {
-			a.refreshGateways(a.contexts[a.current])
+		a.rememberControlPlane()
+		if a.manageControlPlanes() {
+			a.refreshControlPlanes(a.contexts[a.current])
 		}
 		return a.scope(a.inner.Init())
 	}
@@ -323,7 +325,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.gatewayDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.controlPlaneDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -336,10 +338,10 @@ func (a *app) View() tea.View {
 	if a.files != nil {
 		shown = a.renderTaskFiles
 	}
-	if a.gatewayDialog != nil {
-		shown = a.renderGatewayDialog
+	if a.controlPlaneDialog != nil {
+		shown = a.renderControlPlaneDialog
 	}
-	status := "No Gateway selected"
+	status := "No Control Plane selected"
 	if a.hasTarget {
 		status = a.inner.renderStatus()
 	}
@@ -356,7 +358,7 @@ func (a *app) renderChoices() string {
 	rows := make([]string, 0, len(a.contexts))
 	for i, target := range a.contexts {
 		label := contextLabel(target)
-		if a.manageGateways() && a.isSavedGateway(target) {
+		if a.manageControlPlanes() && a.isSavedControlPlane(target) {
 			label += "  [saved]"
 		}
 		if i == a.current {
@@ -373,16 +375,16 @@ func (a *app) renderChoices() string {
 		footer = append(footer, errorStyle.Render(truncate(strings.Join(strings.Fields(a.choiceErr), " "), width)))
 	}
 	help, title := "enter switches · esc goes back", "Control Planes"
-	if a.manageGateways() {
+	if a.manageControlPlanes() {
 		help = "enter switches · a add · e edit · s save current · d forget · esc back"
-		title = "Gateways"
+		title = "Control Planes"
 	}
 	footer = append(footer, faint.Render(truncate(help, width)))
 	shown := max(height-2-len(footer), 1)
 	first := max(a.choice-shown+1, 0)
 	rows = rows[first:min(first+shown, len(rows))]
 	if len(a.contexts) == 0 {
-		rows = []string{"Add a Gateway to see its Tags and conversations.", "Press a or enter to connect."}
+		rows = []string{"Add a Control Plane to see its Tags and conversations.", "Press a or enter to connect."}
 	}
 	lines := append([]string{headerStyle.Render(truncate(title, width))}, rows...)
 	lines = append(append(lines, ""), footer...)

@@ -16,10 +16,7 @@ use std::{
 
 use crate::{
     lifecycle::{self, ServiceStatus},
-    local_config::{
-        Environment,
-        surfaces::{Provider, Surface},
-    },
+    local_config::{Environment, surfaces::Surface},
 };
 use std::collections::BTreeMap;
 use supertag_worker_host::LaneState;
@@ -37,14 +34,18 @@ const START_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const ENDPOINT: &str = "endpoint";
+/// The local Gateway's endpoint, present while one runs, for `supertag test notification`.
+const GATEWAY_ENDPOINT: &str = "gateway-endpoint";
 const CREDENTIALS: &str = "credentials.json";
 const STATE_LOCK: &str = ".lock";
+/// The Control Plane address an enrolled installation keeps across restarts.
+const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
 /// Non-secret variables every local service inherits from the supervisor.
 const BASE_ENVIRONMENT: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 ];
-/// Gateway-owned GitHub credentials, given only when a Host serves a Gateway Workspace.
-const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
+/// The GitHub account the Control Plane reads, given only when a Host serves a GitHub Workspace.
+const GITHUB_WORKSPACE_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_ACCOUNT_ID",
     "SUPERTAG_GITHUB_REPOSITORY_ID",
     "SUPERTAG_GITHUB_REPOSITORY",
@@ -53,7 +54,7 @@ const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_INSTALLATION_ID",
     "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
 ];
-/// The credential vault selection the Gateway's Surface connectors use.
+/// The credential vault selection the Gateway's Surface connectors and GitHub Workspaces use.
 pub(crate) const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
@@ -62,7 +63,7 @@ pub(crate) const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
     "SUPERTAG_VAULT_PATH_PREFIX",
     "VAULT_NAMESPACE",
 ];
-/// TLS files a Worker Host uses to reach a remote Gateway. The supervisor's own enrollment reads
+/// TLS files a Worker Host uses to reach a remote Control Plane. The supervisor's own enrollment reads
 /// the same process variables, so these never come from `env_file`.
 const HOST_TLS_ENVIRONMENT: [&str; 3] = [
     "SUPERTAG_SERVER_CA_FILE",
@@ -75,7 +76,7 @@ pub struct LocalOptions {
     pub state_directory: PathBuf,
     pub adapter: crate::AdapterOptions,
     pub skill_catalog: Option<PathBuf>,
-    pub gateway_listen: SocketAddr,
+    pub control_plane_listen: SocketAddr,
     /// Identifies these settings so a later `supertag up` can leave an unchanged supervisor alone.
     pub fingerprint: String,
 }
@@ -106,8 +107,8 @@ impl Logs {
 
 pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Result<()> {
     ensure!(
-        options.gateway_listen.ip().is_loopback(),
-        "local Gateway must listen on loopback"
+        options.control_plane_listen.ip().is_loopback(),
+        "local Control Plane must listen on loopback"
     );
     ensure!(
         options.adapter.is_selected(),
@@ -148,7 +149,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
             supertag_worker_host::WorkspaceSource::Local(path) => {
                 Some((mapping.workspace_id, path))
             }
-            supertag_worker_host::WorkspaceSource::Gateway => None,
+            supertag_worker_host::WorkspaceSource::ControlPlane => None,
         })
         .collect();
     let importer = match &start {
@@ -217,6 +218,15 @@ fn supervisor_log(line: &str) {
 
 /// Read the endpoint and operator credential for a local CLI invocation.
 pub fn connection(state_directory: &Path) -> Result<(String, String)> {
+    local_endpoint(state_directory, ENDPOINT)
+}
+
+/// Read the local Gateway's endpoint and the operator credential.
+pub fn gateway_connection(state_directory: &Path) -> Result<(String, String)> {
+    local_endpoint(state_directory, GATEWAY_ENDPOINT).context("no local Gateway is running")
+}
+
+fn local_endpoint(state_directory: &Path, file: &str) -> Result<(String, String)> {
     let directory = private_directory(state_directory)?;
     let lock = open_private_file(&directory.join(STATE_LOCK), false)
         .context("inspect local supervisor lock")?;
@@ -227,18 +237,18 @@ pub fn connection(state_directory: &Path) -> Result<(String, String)> {
             return Err(error).context("inspect local supervisor lock");
         }
     }
-    let endpoint = read_private(&directory.join(ENDPOINT))?;
+    let endpoint = read_private(&directory.join(file))?;
     let endpoint = endpoint.trim();
     let address = endpoint
         .strip_prefix("http://")
-        .context("invalid local Gateway endpoint")?;
+        .context("invalid local endpoint")?;
     loopback_address(address)?;
     Ok((endpoint.to_owned(), Credentials::load(&directory)?.operator))
 }
 
-/// What the local Gateway serves beyond its gRPC API.
-struct GatewayExtras<'a> {
-    /// Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
+/// What the local services run beyond the Control Plane's API.
+struct Extras<'a> {
+    /// Present only when a Host serves a GitHub Workspace: the Control Plane's GitHub source.
     workspace: Option<&'a Environment>,
     /// Configured Surface connectors and the environment their credential vault comes from.
     surfaces: Option<(&'a BTreeMap<String, Surface>, &'a Environment)>,
@@ -247,8 +257,9 @@ struct GatewayExtras<'a> {
 struct Children {
     logs: Logs,
     control_plane: Option<Service>,
-    control_plane_address: Option<String>,
+    /// The local Gateway runs only when it has surfaces to connect or notifications to send.
     gateway: Option<Service>,
+    gateway_address: Option<String>,
     worker_host: Option<Service>,
     /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
     notify: (Vec<String>, Vec<(String, String)>),
@@ -266,24 +277,26 @@ impl Children {
         Ok(Self {
             logs: Logs::new(directory)?,
             control_plane: None,
-            control_plane_address: None,
             gateway: None,
+            gateway_address: None,
             worker_host: None,
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
         })
     }
 
+    /// Starts the Control Plane on `listen`, then a Gateway when one is needed, and returns the
+    /// Control Plane's endpoint.
     async fn start_base(
         &mut self,
         executable: &Path,
         directory: &Path,
         credentials: &Credentials,
-        gateway_listen: SocketAddr,
-        extras: GatewayExtras<'_>,
+        listen: SocketAddr,
+        extras: Extras<'_>,
         bootstrap_host: bool,
     ) -> Result<String> {
-        let GatewayExtras {
-            workspace: gateway_workspace,
+        let Extras {
+            workspace,
             surfaces,
         } = extras;
         let database = directory.join("runtime.sqlite3");
@@ -291,11 +304,34 @@ impl Children {
         let database_url = sqlite_url(&database)?;
         let mut plane = command(executable, "control-plane");
         plane
-            .args(["--listen", "127.0.0.1:0"])
+            .args(["--listen", &listen.to_string()])
+            .arg("--transfer-directory")
+            .arg(directory.join("checkpoints"))
             .env("SUPERTAG_DATABASE_URL", database_url)
-            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
+            .env(
+                "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+                &credentials.gateway,
+            )
+            .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
+        }
+        if let Some(environment) = workspace {
+            plane
+                .arg("--github-workspace-directory")
+                .arg(directory.join("github-sources"))
+                .env("SUPERTAG_STATE_DIR", directory)
+                .envs(environment.selected(GITHUB_WORKSPACE_ENVIRONMENT))
+                .envs(environment.selected(CREDENTIAL_VAULT_ENVIRONMENT));
+            #[cfg(feature = "test-fixtures")]
+            for name in [
+                "SUPERTAG_TEST_GITHUB_API_URL",
+                "SUPERTAG_TEST_GITHUB_GIT_URL",
+            ] {
+                if let Some(value) = std::env::var_os(name) {
+                    plane.env(name, value);
+                }
+            }
         }
         let address = start_child(
             &mut self.control_plane,
@@ -305,21 +341,13 @@ impl Children {
             lifecycle::CONTROL_PLANE,
         )
         .await?;
-        let control_plane = format!("http://{}", loopback_address(&address)?);
-        self.control_plane_address = Some(control_plane.clone());
+        let endpoint = format!("http://{}", loopback_address(&address)?);
 
         let mut gateway = command(executable, "gateway");
         gateway
-            .args([
-                "--control-plane",
-                &control_plane,
-                "--listen",
-                &gateway_listen.to_string(),
-            ])
-            .arg("--checkpoint-directory")
-            .arg(directory.join("checkpoints"))
-            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+            .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
+        let mut needed = !self.notify.0.is_empty();
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
         }
@@ -333,32 +361,9 @@ impl Children {
                 gateway.env(name, value);
             }
         }
-        if let Some(environment) = gateway_workspace {
-            gateway
-                .arg("--github-workspace-directory")
-                .arg(directory.join("github-sources"));
-            gateway.envs(environment.selected(GATEWAY_GITHUB_ENVIRONMENT));
-            #[cfg(feature = "test-fixtures")]
-            for name in [
-                "SUPERTAG_TEST_GITHUB_API_URL",
-                "SUPERTAG_TEST_GITHUB_GIT_URL",
-            ] {
-                if let Some(value) = std::env::var_os(name) {
-                    gateway.env(name, value);
-                }
-            }
-        }
         // Configured Surface connectors read their secrets from the credential vault that
         // `supertag setup surface` wrote: this state directory's file, unless Vault is selected.
         if let Some((surfaces, environment)) = surfaces {
-            // Both read the same SUPERTAG_GITHUB_* variables in one Gateway process.
-            ensure!(
-                gateway_workspace.is_none()
-                    || !surfaces.values().any(|surface| {
-                        surface.provider == Provider::Github && surface.location.is_some()
-                    }),
-                "a GitHub surface location cannot share the local Gateway with a Gateway Workspace; remove the location with supertag tag update TAG --remove-location github"
-            );
             let mut connected = false;
             for (name, surface) in surfaces {
                 if let Some((args, variables)) = surface.gateway(name, directory)? {
@@ -367,6 +372,7 @@ impl Children {
                 }
             }
             if connected {
+                needed = true;
                 gateway
                     .env("SUPERTAG_STATE_DIR", directory)
                     .envs(environment.selected(CREDENTIAL_VAULT_ENVIRONMENT));
@@ -384,16 +390,19 @@ impl Children {
                 }
             }
         }
-        let address = start_child(
-            &mut self.gateway,
-            &mut gateway,
-            "Gateway",
-            &self.logs,
-            lifecycle::GATEWAY,
-        )
-        .await?;
-        let endpoint = format!("http://{}", loopback_address(&address)?);
-
+        if needed {
+            let address = start_child(
+                &mut self.gateway,
+                &mut gateway,
+                "Gateway",
+                &self.logs,
+                lifecycle::GATEWAY,
+            )
+            .await?;
+            let gateway_endpoint = format!("http://{}", loopback_address(&address)?);
+            write_private(directory, GATEWAY_ENDPOINT, gateway_endpoint.as_bytes())?;
+            self.gateway_address = Some(gateway_endpoint);
+        }
         Ok(endpoint)
     }
 
@@ -409,11 +418,11 @@ impl Children {
                 executable,
                 directory,
                 credentials,
-                options.gateway_listen,
-                GatewayExtras {
+                options.control_plane_listen,
+                Extras {
                     workspace: options
                         .adapter
-                        .uses_gateway_workspace()
+                        .uses_control_plane_workspace()
                         .then_some(&Environment::default()),
                     surfaces: None,
                 },
@@ -421,7 +430,7 @@ impl Children {
             )
             .await?;
         let mut host = command(executable, "worker-host");
-        host.args(["--gateway", &endpoint, "--state-directory"])
+        host.args(["--control-plane", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
             .arg("--wait-for-recovery")
             .args(options.adapter.worker_args())
@@ -453,7 +462,7 @@ impl Children {
                 name: lifecycle::CONTROL_PLANE.into(),
                 kind: lifecycle::CONTROL_PLANE.into(),
                 pid: service.process.id(),
-                address: self.control_plane_address.clone(),
+                address: Some(endpoint.to_owned()),
                 host_id: None,
                 remote: false,
             });
@@ -463,7 +472,7 @@ impl Children {
                 name: lifecycle::GATEWAY.into(),
                 kind: lifecycle::GATEWAY.into(),
                 pid: service.process.id(),
-                address: Some(endpoint.to_owned()),
+                address: self.gateway_address.clone(),
                 host_id: None,
                 remote: false,
             });
@@ -476,14 +485,19 @@ impl Children {
             .control_plane
             .as_mut()
             .context("Control Plane was not started")?;
-        let gateway = self.gateway.as_mut().context("Gateway was not started")?;
         let host = self
             .worker_host
             .as_mut()
             .context("Worker Host was not started")?;
+        let gateway = async {
+            match self.gateway.as_mut() {
+                Some(gateway) => gateway.process.wait().await,
+                None => std::future::pending().await,
+            }
+        };
         let (name, exit) = tokio::select! {
             status = plane.process.wait() => ("Control Plane", status),
-            status = gateway.process.wait() => ("Gateway", status),
+            status = gateway => ("Gateway", status),
             status = host.process.wait() => ("Worker Host", status),
         };
         bail!(
@@ -494,7 +508,7 @@ impl Children {
 
     async fn stop(&mut self) -> Result<()> {
         let mut failures = Vec::new();
-        // The Worker Host needs the Gateway and Control Plane while it stops execution.
+        // The Worker Host needs the Control Plane while it stops execution.
         for (name, child) in [
             ("Worker Host", self.worker_host.as_mut()),
             ("Gateway", self.gateway.as_mut()),
@@ -691,6 +705,8 @@ fn successful_exit(exit: ExitStatus) -> Result<()> {
     Ok(())
 }
 
+/// The local services' own credentials: the admin operator token, and the enrolled credentials
+/// of `gateway:local` and `host:local`, which the Control Plane seeds at startup.
 pub(crate) struct Credentials {
     gateway: String,
     pub(crate) operator: String,
@@ -703,20 +719,25 @@ impl Credentials {
         // Parsing errors stay generic because this file contains credentials.
         let value: Value = serde_json::from_str(&value)
             .map_err(|_| anyhow::anyhow!("invalid local credential bundle"))?;
-        let token = |key| {
+        let field = |key, valid: fn(&str) -> bool| {
             value
                 .get(key)
                 .and_then(Value::as_str)
-                .filter(|token| {
-                    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
-                })
+                .filter(|token| valid(token))
                 .map(str::to_owned)
-                .context("invalid local credential bundle")
+                .context(
+                    "invalid local credential bundle; remove it with the local services stopped to create a new one",
+                )
+        };
+        let hex =
+            |token: &str| token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let enrolled = |token: &str| {
+            supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, token)
         };
         let credentials = Self {
-            gateway: token("gateway_token")?,
-            operator: token("operator_token")?,
-            host: token("host_token")?,
+            gateway: field("gateway_credential", enrolled)?,
+            operator: field("operator_token", hex)?,
+            host: field("host_credential", enrolled)?,
         };
         ensure!(
             credentials.gateway != credentials.operator
@@ -732,16 +753,17 @@ impl Credentials {
         match fs::symlink_metadata(&path) {
             Ok(_) => Self::load(directory),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let token = || format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+                let enrolled =
+                    || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
                 let credentials = Self {
-                    gateway: token(),
-                    operator: token(),
-                    host: token(),
+                    gateway: enrolled(),
+                    operator: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+                    host: enrolled(),
                 };
                 let bytes = serde_json::to_vec(&json!({
-                    "gateway_token": credentials.gateway,
+                    "gateway_credential": credentials.gateway,
                     "operator_token": credentials.operator,
-                    "host_token": credentials.host,
+                    "host_credential": credentials.host,
                 }))?;
                 write_private(directory, CREDENTIALS, &bytes)?;
                 Ok(credentials)
@@ -762,11 +784,14 @@ fn announce(directory: &Path, endpoint: &str) -> Result<()> {
 }
 
 fn remove_endpoint(directory: &Path) -> Result<()> {
-    match fs::remove_file(directory.join(ENDPOINT)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).context("remove local Gateway endpoint"),
+    for name in [ENDPOINT, GATEWAY_ENDPOINT] {
+        match fs::remove_file(directory.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| format!("remove local {name}")),
+        }
     }
+    Ok(())
 }
 
 pub(crate) fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
@@ -1003,10 +1028,10 @@ impl ManagedHost {
 
     /// Register the Host once, report its aggregate presence, then start every lane.
     async fn start(&mut self, executable: &Path) -> Result<()> {
-        let gateway = crate::network::endpoint(self.endpoint.clone(), false).await?;
+        let control_plane = crate::network::endpoint(self.endpoint.clone()).await?;
         let stranded = self.stranded_journals()?;
         let shared = supertag_worker_host::SharedHost::register(
-            gateway,
+            control_plane,
             &self.directory,
             !stranded.is_empty(),
             &tokio_util::sync::CancellationToken::new(),
@@ -1031,7 +1056,7 @@ impl ManagedHost {
                 .into_iter()
                 .filter(|mapping| match &mapping.source {
                     supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
-                    supertag_worker_host::WorkspaceSource::Gateway => true,
+                    supertag_worker_host::WorkspaceSource::ControlPlane => true,
                 })
                 .map(|mapping| mapping.workspace_id)
                 .collect(),
@@ -1062,7 +1087,7 @@ impl ManagedHost {
         let lane = &mut self.lanes[index];
         let adapter = &self.definition.harnesses[lane.harness];
         let mut host = command(executable, "worker-host");
-        host.args(["--gateway", &self.endpoint, "--state-directory"])
+        host.args(["--control-plane", &self.endpoint, "--state-directory"])
             .arg(&lane.directory)
             .arg("--wait-for-recovery")
             .args(["--supervised-lane", incarnation])
@@ -1315,7 +1340,7 @@ pub async fn configured(
             .map(|_| Credentials::load_or_create(&directory))
             .transpose()?;
         let endpoint = if let Some(plane) = config.plane {
-            // An enrolled installation pins its Gateway origin. Reuse an initially selected
+            // An enrolled installation pins its Control Plane origin. Reuse an initially selected
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
             base.notify = plane.notify.resolve(&environment);
@@ -1325,11 +1350,11 @@ pub async fn configured(
                     &directory,
                     credentials.as_ref().expect("local credentials"),
                     listen,
-                    GatewayExtras {
+                    Extras {
                         workspace: config
                             .hosts
                             .iter()
-                            .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
+                            .any(|h| h.harnesses.iter().any(|a| a.uses_control_plane_workspace()))
                             .then_some(&*environment),
                         surfaces: Some((&config.surfaces, &*environment)),
                     },
@@ -1338,7 +1363,7 @@ pub async fn configured(
                 .await?;
             write_private(
                 &directory,
-                "gateway-address",
+                CONTROL_PLANE_ADDRESS,
                 endpoint
                     .strip_prefix("http://")
                     .expect("loopback origin")
@@ -1346,7 +1371,7 @@ pub async fn configured(
             )?;
             if !plane.provision.is_empty() {
                 let channel = crate::network::operator_channel(
-                    &crate::network::endpoint(endpoint.clone(), false).await?,
+                    &crate::network::endpoint(endpoint.clone()).await?,
                 )
                 .await?;
                 crate::manifests::provision(
@@ -1374,10 +1399,10 @@ pub async fn configured(
         }
         for (definition, notes) in config.hosts.into_iter().zip(host_notes) {
             let target = definition
-                .gateway
+                .control_plane
                 .clone()
                 .or_else(|| endpoint.clone())
-                .context("host Gateway is unavailable")?;
+                .context("host Control Plane is unavailable")?;
             for note in notes {
                 note_line(&logs, &definition.name, &note)?;
             }
@@ -1389,7 +1414,7 @@ pub async fn configured(
                 &host_directory,
                 credentials
                     .as_ref()
-                    .filter(|_| definition.gateway.is_none()),
+                    .filter(|_| definition.control_plane.is_none()),
             )
             .await?;
             let index = hosts.len();
@@ -1418,7 +1443,7 @@ pub async fn configured(
             announce(&directory, endpoint)?;
         } else {
             // Host-only machines hold no operator credential and cannot use --state-directory
-            // to impersonate an operator on the remote Gateway.
+            // to impersonate an operator on the remote Control Plane.
             // terminal-safe: a fixed readiness line for the parent.
             let mut stdout = io::stdout().lock();
             stdout.write_all(b"ready\n")?;
@@ -1445,7 +1470,7 @@ pub async fn configured(
                 }),
                 address: Some(host.endpoint.clone()),
                 host_id: Some(host.definition.name.clone()),
-                remote: host.definition.gateway.is_some(),
+                remote: host.definition.control_plane.is_some(),
             });
         }
         lifecycle::record(
@@ -1522,14 +1547,14 @@ pub async fn configured(
     result
 }
 fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr> {
-    let path = directory.join("gateway-address");
+    let path = directory.join(CONTROL_PLANE_ADDRESS);
     match fs::symlink_metadata(&path) {
         Ok(_) => {
             let address = loopback_address(read_private(&path)?.trim())?;
             ensure!(
                 address.ip() == configured.ip()
                     && (configured.port() == 0 || configured.port() == address.port()),
-                "stored local Gateway address differs from configured listener"
+                "stored local Control Plane address differs from configured listener"
             );
             Ok(address)
         }
@@ -1544,8 +1569,15 @@ async fn enroll_configured(
     state: &Path,
     local: Option<&Credentials>,
 ) -> Result<()> {
-    let gateway = crate::network::endpoint(endpoint.into(), false).await?;
-    match supertag_worker_host::enroll(gateway.clone(), state, definition.name.clone(), None).await
+    let control_plane = crate::network::endpoint(endpoint.into()).await?;
+    match supertag_worker_host::enroll(
+        control_plane.clone(),
+        state,
+        supertag_worker_host::EnrolledRole::Host,
+        definition.name.clone(),
+        None,
+    )
+    .await
     {
         Ok(_) => return Ok(()),
         // The enrollment helper checks any stored receipt before asking for an Auth Key.
@@ -1555,13 +1587,15 @@ async fn enroll_configured(
     }
     let key = if let Some(credentials) = local {
         use sha2::{Digest, Sha256};
-        use supertag_protocol::v2::{CreateAuthKeyRequest, operator_client::OperatorClient};
-        let key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        OperatorClient::new(crate::network::operator_channel(&gateway).await?)
+        use supertag_protocol::v2::{
+            CreateAuthKeyRequest, PrincipalRole, operator_client::OperatorClient,
+        };
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
+        OperatorClient::new(crate::network::operator_channel(&control_plane).await?)
             .create_auth_key(crate::request(
                 CreateAuthKeyRequest {
                     name: join_key_name(&definition.name),
-                    host_id: definition.name.clone(),
+                    role: PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600_000,
@@ -1580,7 +1614,14 @@ async fn enroll_configured(
             .context("remote Worker Host needs an Auth Key secret for its first enrollment")?
             .read(environment)?
     };
-    supertag_worker_host::enroll(gateway, state, definition.name.clone(), Some(&key)).await?;
+    supertag_worker_host::enroll(
+        control_plane,
+        state,
+        supertag_worker_host::EnrolledRole::Host,
+        definition.name.clone(),
+        Some(&key),
+    )
+    .await?;
     Ok(())
 }
 /// A fresh name for the one-time key that joins a configured host, since names are never reused.
@@ -1672,8 +1713,7 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
     }
     use supertag_protocol::v2::{SetHostDrainingRequest, operator_client::OperatorClient};
     let channel =
-        crate::network::operator_channel(&crate::network::endpoint(endpoint.into(), false).await?)
-            .await?;
+        crate::network::operator_channel(&crate::network::endpoint(endpoint.into()).await?).await?;
     let mut client = OperatorClient::new(channel);
     for host_id in hosts {
         match client
@@ -1700,16 +1740,16 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
 mod tests {
     use super::*;
     #[test]
-    fn enrolled_gateway_origin_cannot_be_retargeted_by_config() {
+    fn enrolled_control_plane_origin_cannot_be_retargeted_by_config() {
         let temp = tempfile::tempdir().unwrap();
-        write_private(temp.path(), "gateway-address", b"127.0.0.1:19876").unwrap();
+        write_private(temp.path(), CONTROL_PLANE_ADDRESS, b"127.0.0.1:19876").unwrap();
         assert_eq!(
             stable_listen(temp.path(), "127.0.0.1:0".parse().unwrap()).unwrap(),
             "127.0.0.1:19876".parse::<SocketAddr>().unwrap()
         );
         assert!(stable_listen(temp.path(), "127.0.0.1:19877".parse().unwrap()).is_err());
         assert_eq!(
-            read_private(&temp.path().join("gateway-address")).unwrap(),
+            read_private(&temp.path().join(CONTROL_PLANE_ADDRESS)).unwrap(),
             "127.0.0.1:19876"
         );
     }

@@ -2645,6 +2645,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "supertag-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "aws-credential-types",
+ "aws-sigv4",
+ "http 1.5.0",
+ "hyper-util",
+ "libc",
+ "prost",
+ "prost-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "supertag-protocol",
+ "supertag-workspaces",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "supertag-cli"
 version = "0.1.0"
 dependencies = [
@@ -2665,9 +2697,12 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "supertag-api",
  "supertag-codex-adapter",
  "supertag-control-plane",
+ "supertag-credential-vault",
  "supertag-gateway",
+ "supertag-github",
  "supertag-protocol",
  "supertag-shared-execution",
  "supertag-transport",
@@ -2736,13 +2771,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "supertag-credential-vault"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "supertag-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-stream",
- "aws-credential-types",
- "aws-sigv4",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -2759,16 +2806,37 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "subtle",
+ "supertag-credential-vault",
+ "supertag-github",
  "supertag-protocol",
- "supertag-workspaces",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
  "tonic",
- "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "supertag-github"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "libc",
+ "reqwest",
+ "ring",
+ "rustls-pki-types",
+ "serde_json",
+ "supertag-protocol",
+ "supertag-workspaces",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tonic",
  "uuid",
 ]
 

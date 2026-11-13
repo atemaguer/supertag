@@ -15,6 +15,25 @@ fn digest(secret: &str) -> Vec<u8> {
     Sha256::digest(secret).to_vec()
 }
 
+/// The host a presented credential resolves to, and its generation.
+async fn authenticated(store: &Store, token: &[u8]) -> Option<(String, u64)> {
+    store
+        .resolve_credential(token)
+        .await
+        .unwrap()
+        .filter(|resolved| resolved.role == PrincipalRole::Host as i32)
+        .map(|resolved| (resolved.name, resolved.generation))
+}
+
+fn join(name: &str, operation: &str, candidate: &str) -> EnrollRequest {
+    EnrollRequest {
+        role: PrincipalRole::Host.into(),
+        name: name.into(),
+        operation_id: operation.into(),
+        token_digest: digest(candidate),
+    }
+}
+
 async fn open(url: &str, clock: &Arc<AtomicI64>) -> Store {
     let clock = clock.clone();
     Store::open(url)
@@ -77,7 +96,7 @@ async fn host_enrollment_contract(url: &str) {
     }
     let key = CreateAuthKeyRequest {
         name: "review".into(),
-        host_id: "review-host".into(),
+        role: PrincipalRole::Host.into(),
         operation_id: "issue-join".into(),
         key_digest: digest("one-time-review-key"),
         expires_in_ms: 1_000,
@@ -103,7 +122,7 @@ async fn host_enrollment_contract(url: &str) {
 
     let expired = CreateAuthKeyRequest {
         name: "expired".into(),
-        host_id: "expired".into(),
+        role: PrincipalRole::Host.into(),
         operation_id: "issue-expired".into(),
         key_digest: digest("expired-key"),
         expires_in_ms: 1,
@@ -116,70 +135,69 @@ async fn host_enrollment_contract(url: &str) {
         .await
         .unwrap();
     clock.store(NOW + 1, Ordering::SeqCst);
-    let expired_join = EnrollHostRequest {
-        host_id: expired.host_id,
-        operation_id: "too-late".into(),
-        token_digest: digest("expired-candidate"),
-    };
+    let expired_join = join("expired", "too-late", "expired-candidate");
     assert!(matches!(
-        store.enroll_host(&expired_join, &expired.key_digest).await,
+        store.enroll(&expired.key_digest, &expired_join).await,
         Err(StoreError::PermissionDenied)
     ));
 
-    let join = EnrollHostRequest {
-        host_id: key.host_id.clone(),
-        operation_id: "join-first".into(),
-        token_digest: digest("first-private-candidate"),
-    };
-    let wrong_id = EnrollHostRequest {
-        host_id: "other-host".into(),
-        ..join.clone()
+    let join_first = join("review-host", "join-first", "first-private-candidate");
+    // The key's role is fixed: a request for another role is refused, not granted.
+    let wrong_role = EnrollRequest {
+        role: PrincipalRole::Gateway.into(),
+        ..join_first.clone()
     };
     assert!(matches!(
-        store.enroll_host(&wrong_id, &key.key_digest).await,
-        Err(StoreError::PermissionDenied)
+        store.enroll(&key.key_digest, &wrong_role).await,
+        Err(StoreError::FailedPrecondition(_))
     ));
-    let rival = EnrollHostRequest {
-        operation_id: "join-rival".into(),
-        token_digest: digest("second-private-candidate"),
-        ..join.clone()
+    // A one-time key admits a single enrollee, which chooses its own name.
+    let rival = EnrollRequest {
+        name: "rival-host".into(),
+        ..join("rival-host", "join-rival", "second-private-candidate")
     };
     let (first, second) = tokio::join!(
-        store.enroll_host(&join, &key.key_digest),
-        store.enroll_host(&rival, &key.key_digest),
+        store.enroll(&key.key_digest, &join_first),
+        store.enroll(&key.key_digest, &rival),
     );
     let (winner, loser, joined) = match (first, second) {
-        (Ok(record), Err(StoreError::PermissionDenied)) => (&join, &rival, record),
-        (Err(StoreError::PermissionDenied), Ok(record)) => (&rival, &join, record),
+        (Ok(record), Err(StoreError::PermissionDenied)) => (&join_first, &rival, record),
+        (Err(StoreError::PermissionDenied), Ok(record)) => (&rival, &join_first, record),
         outcome => panic!("one enrollment must succeed: {outcome:?}"),
     };
-    assert_eq!(joined.host_id, key.host_id);
-    assert_eq!(joined.generation, 0);
+    assert_eq!(joined.name, winner.name);
+    assert_eq!(joined.principal, format!("host:{}", winner.name));
+    assert_eq!(joined.auth_key_name, "review");
+    assert_eq!(joined.credential_revision, 1);
     assert_eq!(
-        store.authenticate_host(&winner.token_digest).await.unwrap(),
-        joined
+        authenticated(&store, &winner.token_digest).await,
+        Some((joined.name.clone(), 0))
     );
-    assert!(matches!(
-        store.authenticate_host(&loser.token_digest).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    assert!(matches!(
-        store.authenticate_host(&key.key_digest).await,
-        Err(StoreError::PermissionDenied)
-    ));
+    assert_eq!(authenticated(&store, &loser.token_digest).await, None);
+    assert_eq!(authenticated(&store, &key.key_digest).await, None);
     clock.store(issued.expires_at_ms, Ordering::SeqCst);
+    // A replay answers the same enrollment; only its use time moved.
     assert_eq!(
-        store.enroll_host(winner, &key.key_digest).await.unwrap(),
+        Enrollment {
+            last_used_at_ms: None,
+            ..store.enroll(&key.key_digest, winner).await.unwrap()
+        },
         joined
     );
-    let modified_join = EnrollHostRequest {
+    let modified_join = EnrollRequest {
         token_digest: loser.token_digest.clone(),
         ..winner.clone()
     };
     assert!(matches!(
-        store.enroll_host(&modified_join, &key.key_digest).await,
+        store.enroll(&key.key_digest, &modified_join).await,
         Err(StoreError::PermissionDenied)
     ));
+    struct Joined {
+        host_id: String,
+    }
+    let joined = Joined {
+        host_id: joined.name,
+    };
 
     let principal = format!("host:{}", joined.host_id);
     let unregistered = HostAuthority::new(&principal, 1).unwrap();
@@ -243,8 +261,8 @@ async fn host_enrollment_contract(url: &str) {
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(
-        store.authenticate_host(&winner.token_digest).await.unwrap(),
-        replacement
+        authenticated(&store, &winner.token_digest).await,
+        Some((joined.host_id.clone(), replacement.generation))
     );
     let current = HostAuthority::new(&principal, replacement.generation).unwrap();
     assert_eq!(
@@ -355,10 +373,7 @@ async fn host_enrollment_contract(url: &str) {
     assert!(revoked.revoked);
     assert_eq!(revoked.generation, replacement.generation + 1);
     assert_eq!(store.revoke_host(&joined.host_id).await.unwrap(), revoked);
-    assert!(matches!(
-        store.authenticate_host(&winner.token_digest).await,
-        Err(StoreError::PermissionDenied)
-    ));
+    assert_eq!(authenticated(&store, &winner.token_digest).await, None);
     assert!(matches!(
         store
             .register_host(&joined.host_id, "third-incarnation")

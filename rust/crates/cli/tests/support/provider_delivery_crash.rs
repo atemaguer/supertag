@@ -309,7 +309,10 @@ impl Provider {
 }
 
 fn connector_request<T>(message: T, token: &str, principal: &str) -> Result<Request<T>> {
-    let mut request = authenticated_request(message, token, Some(principal))?;
+    let account = principal
+        .strip_prefix("connector:")
+        .context("connector principal")?;
+    let mut request = supertag_protocol::connector_request(message, token, account)?;
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -582,9 +585,9 @@ pub(crate) async fn exercise_delivery(
         &mock,
         Some((&point, &marker)),
     )?;
-    let public = gateway.endpoints(case.provider.endpoints()).await?[0];
+    gateway.endpoints(case.provider.endpoints()).await?;
 
-    let mut operator = OperatorClient::new(protocol::dial(format!("http://{public}")).await?);
+    let mut operator = OperatorClient::new(protocol::dial(format!("http://{private}")).await?);
     operator
         .put_tag(credentials.request(PutTagRequest {
             tag_id: TAG_ID.into(),
@@ -597,9 +600,13 @@ pub(crate) async fn exercise_delivery(
 
     // The Task finishes on a host that the crash never touches.
     let mut host = credentials.command();
-    host.args(["worker-host", "--gateway", &format!("http://{public}")])
-        .args(["--adapter", ADAPTER, "--once", "--state-directory"])
-        .arg(directory.join("host"));
+    host.args([
+        "worker-host",
+        "--control-plane",
+        &format!("http://{private}"),
+    ])
+    .args(["--adapter", ADAPTER, "--once", "--state-directory"])
+    .arg(directory.join("host"));
     let status = Process::spawn(host, directory, "provider-host", false)?
         .exited()
         .await?;
@@ -623,8 +630,7 @@ pub(crate) async fn exercise_delivery(
     let mut gateway = case
         .provider
         .gateway(&credentials, directory, private, &mock, None)?;
-    let public = gateway.endpoints(case.provider.endpoints()).await?[0];
-    let mut operator = OperatorClient::new(protocol::dial(format!("http://{public}")).await?);
+    gateway.endpoints(case.provider.endpoints()).await?;
     let deadline = Instant::now() + WAIT;
     let reply = loop {
         let reply = operator

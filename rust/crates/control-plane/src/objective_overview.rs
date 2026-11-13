@@ -204,6 +204,7 @@ async fn session_status(
 impl Store {
     pub async fn objective_overview(
         &self,
+        principal: &str,
         input: &GetObjectiveOverviewRequest,
     ) -> Result<ObjectiveOverview> {
         name("Objective ID", &input.objective_id)?;
@@ -213,6 +214,8 @@ impl Store {
         };
         let now_ms = self.execution_now_ms();
         let mut tx = self.pool.begin().await?;
+        crate::objectives::ensure_objective_access_in(&mut tx, principal, &input.objective_id)
+            .await?;
         let (objective, model) =
             crate::objectives::objective_limits_in(&mut tx, &input.objective_id).await?;
         let id = objective.objective_id.clone();
@@ -478,9 +481,11 @@ impl objective_overviews_server::ObjectiveOverviews for ControlPlane {
         &self,
         request: Request<GetObjectiveOverviewRequest>,
     ) -> std::result::Result<Response<ObjectiveOverview>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
-            self.store.objective_overview(request.get_ref()).await?,
+            self.store
+                .objective_overview(&principal, request.get_ref())
+                .await?,
         ))
     }
 }

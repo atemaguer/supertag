@@ -10,7 +10,7 @@ pub fn validate_volume_source(source: &str) -> Result<(), Status> {
     }
 }
 
-/// S3 registration identifies only the bucket and prefix. The Gateway mapping
+/// S3 registration identifies only the bucket and prefix. The Control Plane mapping
 /// supplies the endpoint and credentials independently.
 pub fn s3_volume_source(source: &str) -> Result<(&str, &str), Status> {
     let invalid = || Status::invalid_argument("S3 Volume requires a canonical s3://bucket/prefix");

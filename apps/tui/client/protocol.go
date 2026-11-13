@@ -17,7 +17,7 @@ import (
 )
 
 // protocolHeader names, on every call, the protocol version this client negotiated with the
-// Gateway. The Gateway refuses a call without it.
+// Control Plane. The Control Plane refuses a call without it.
 const protocolHeader = "X-Supertag-Protocol"
 
 // protocolVersions are the SuperTag protocol versions this client speaks.
@@ -26,8 +26,8 @@ var protocolVersions = []uint32{2}
 // negotiationTimeout bounds one negotiation exchange.
 const negotiationTimeout = 5 * time.Second
 
-// protocolSession negotiates once with the Gateway, before the first call that needs it, and
-// again after the Gateway refuses the version it holds.
+// protocolSession negotiates once with the Control Plane, before the first call that needs it, and
+// again after the Control Plane refuses the version it holds.
 type protocolSession struct {
 	client  runtimev2connect.ProtocolNegotiationClient
 	build   string
@@ -45,7 +45,7 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 	defer cancel()
 	// The exchange carries no credentials.
 	res, err := p.client.Negotiate(ctx, connect.NewRequest(&v2.NegotiateProtocolRequest{
-		Role:             v2.ServiceRole_SERVICE_ROLE_OPERATOR,
+		Role:             v2.ServiceRole_SERVICE_ROLE_CLIENT,
 		ProtocolVersions: protocolVersions,
 		BuildVersion:     p.build,
 	}))
@@ -55,23 +55,23 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 			return 0, apiError(err)
 		}
 		if connectErr.Code() == connect.CodeUnimplemented {
-			return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Gateway does not offer SuperTag protocol negotiation"}
+			return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Control Plane does not offer SuperTag protocol negotiation"}
 		}
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "the SuperTag Gateway refused this operator client: " + connectErr.Message()}
+		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "the SuperTag Control Plane refused this operator client: " + connectErr.Message()}
 	}
 	selected := res.Msg.GetProtocolVersion()
-	if res.Msg.GetRole() != v2.ServiceRole_SERVICE_ROLE_GATEWAY {
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "this operator client expected a SuperTag Gateway but reached another service"}
+	if res.Msg.GetRole() != v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE {
+		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "this operator client expected a SuperTag Control Plane but reached another service"}
 	}
 	if !slices.Contains(protocolVersions, selected) || !slices.Contains(res.Msg.GetProtocolVersions(), selected) {
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Gateway selected protocol " +
-			strconv.FormatUint(uint64(selected), 10) + "; run the same SuperTag release on the Gateway and this client"}
+		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Control Plane selected protocol " +
+			strconv.FormatUint(uint64(selected), 10) + "; run the same SuperTag release on the Control Plane and this client"}
 	}
 	p.version = selected
 	return selected, nil
 }
 
-// forget drops a version the Gateway refused, so the next call negotiates again.
+// forget drops a version the Control Plane refused, so the next call negotiates again.
 func (p *protocolSession) forget(err error) {
 	var connectErr *connect.Error
 	if errors.As(err, &connectErr) && connectErr.Code() == connect.CodeFailedPrecondition &&
@@ -117,7 +117,7 @@ func (negotiatedCalls) WrapStreamingHandler(next connect.StreamingHandlerFunc) c
 	return next
 }
 
-// forgettingStream renegotiates after the Gateway refuses a stream's protocol version.
+// forgettingStream renegotiates after the Control Plane refuses a stream's protocol version.
 type forgettingStream struct {
 	connect.StreamingClientConn
 	session *protocolSession

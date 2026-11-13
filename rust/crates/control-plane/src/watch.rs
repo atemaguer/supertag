@@ -177,7 +177,9 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
     ) -> Result<Response<Self::WatchStream>, Status> {
         use watch_event::Update;
 
-        let principal = self.plane.principal(&request, "operator:")?;
+        let principal = self.plane.actor(&request)?;
+        // A client sees its own work, and the Tags its Auth Key allows and Teams as they change.
+        let client_tags = self.plane.store.client_tags(&principal).await?;
         let input = request.into_inner();
         let mask = kinds(&input.kinds)?;
         let cursor = Cursor::parse(&input.resume_token)?;
@@ -222,7 +224,12 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                         continue;
                     }
                     position = notice.position;
-                    if (notice.owner.is_empty() || notice.owner == principal)
+                    let shared = notice.owner.is_empty()
+                        && ((notice.change.kind == WatchKind::Team as i32
+                                && store.client_sees_team(client_tags.as_deref(), &notice.change.team_id).await.map_err(Status::from)?)
+                            || (notice.change.kind == WatchKind::Tag as i32
+                                && client_tags.as_ref().is_none_or(|tags| tags.contains(&notice.change.tag_id))));
+                    if (crate::store::sees_owner(&principal, &notice.owner) || shared)
                         && (mask == 0 || mask & (1 << notice.change.kind) != 0)
                     {
                         if shutdown.is_cancelled() {

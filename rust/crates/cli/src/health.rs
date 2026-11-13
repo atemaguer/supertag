@@ -10,7 +10,7 @@ use tonic_health::pb::{
 /// Read a gRPC service's declared health using the normal TLS trust configuration.
 #[derive(Args)]
 pub(crate) struct HealthArgs {
-    /// Public Gateway or private Control Plane endpoint.
+    /// Control Plane or Gateway endpoint.
     #[arg(long)]
     endpoint: String,
     /// Fully qualified gRPC service name; an empty string checks overall server status.
@@ -32,8 +32,8 @@ pub(crate) async fn run(args: HealthArgs) -> Result<()> {
     );
     let status = tokio::time::timeout(Duration::from_secs(args.timeout_seconds), async {
         // Health is a read-only standard gRPC service. TLS/mTLS trust is still
-        // required; no operator, host, or Gateway bearer credential is needed.
-        let channel = crate::network::endpoint(args.endpoint, false)
+        // required; no operator, host, or service bearer credential is needed.
+        let channel = crate::network::endpoint(args.endpoint)
             .await?
             .connect()
             .await?;

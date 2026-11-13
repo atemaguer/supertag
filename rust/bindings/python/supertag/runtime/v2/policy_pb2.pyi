@@ -87,16 +87,18 @@ class SurfaceAccountIdentity(_message.Message):
     def __init__(self, slack: _Optional[_Union[SlackSurfaceIdentity, _Mapping]] = ..., github: _Optional[_Union[GithubSurfaceIdentity, _Mapping]] = ..., linear: _Optional[_Union[LinearSurfaceIdentity, _Mapping]] = ..., lark: _Optional[_Union[LarkSurfaceIdentity, _Mapping]] = ..., microsoft_teams: _Optional[_Union[MicrosoftTeamsSurfaceIdentity, _Mapping]] = ...) -> None: ...
 
 class SurfaceAccount(_message.Message):
-    __slots__ = ("account_id", "identity", "enabled", "revision")
+    __slots__ = ("account_id", "identity", "enabled", "revision", "gateway")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     IDENTITY_FIELD_NUMBER: _ClassVar[int]
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
+    GATEWAY_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     identity: SurfaceAccountIdentity
     enabled: bool
     revision: int
-    def __init__(self, account_id: _Optional[str] = ..., identity: _Optional[_Union[SurfaceAccountIdentity, _Mapping]] = ..., enabled: _Optional[bool] = ..., revision: _Optional[int] = ...) -> None: ...
+    gateway: str
+    def __init__(self, account_id: _Optional[str] = ..., identity: _Optional[_Union[SurfaceAccountIdentity, _Mapping]] = ..., enabled: _Optional[bool] = ..., revision: _Optional[int] = ..., gateway: _Optional[str] = ...) -> None: ...
 
 class SlackSurfaceChannel(_message.Message):
     __slots__ = ("channel_id",)

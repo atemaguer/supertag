@@ -466,7 +466,7 @@ impl Store {
         let before =
             i64::try_from(input.before_order).map_err(|_| invalid("invalid copy cursor"))?;
         let mut tx = self.pool.begin().await?;
-        let rows=sqlx::query("SELECT c.payload,c.created_order FROM supertag_v2_artifact_volume_copies c JOIN supertag_v2_artifact_captures a ON a.artifact_id=c.artifact_id JOIN supertag_v2_task_audience audience ON audience.task_id=a.task_id WHERE c.principal=$1 AND (audience.owner='' OR audience.owner=$1) AND ($2='' OR c.volume_id=$2) AND ($3=0 OR c.created_order<$3) ORDER BY c.created_order DESC LIMIT $4").bind(principal).bind(&input.volume_id).bind(before).bind(cap+1).fetch_all(&mut *tx).await?;
+        let rows=sqlx::query(&format!("SELECT c.payload,c.created_order FROM supertag_v2_artifact_volume_copies c JOIN supertag_v2_artifact_captures a ON a.artifact_id=c.artifact_id JOIN supertag_v2_task_audience audience ON audience.task_id=a.task_id WHERE c.principal=$1 AND {} AND ($2='' OR c.volume_id=$2) AND ($3=0 OR c.created_order<$3) ORDER BY c.created_order DESC LIMIT $4", crate::store::sees_owner_sql("audience.owner", "$1"))).bind(principal).bind(&input.volume_id).bind(before).bind(cap+1).fetch_all(&mut *tx).await?;
         let mut copies = Vec::new();
         let mut bytes = 0usize;
         let mut last = 0u64;

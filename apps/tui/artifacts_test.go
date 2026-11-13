@@ -73,7 +73,7 @@ func taskFilesApp(t *testing.T) *app {
 	return a
 }
 
-// File actions return a bounded Gateway command. Deliver its result directly so
+// File actions return a bounded Control Plane command. Deliver its result directly so
 // the fixture never drops a completed RPC while simulating unrelated timers.
 func completeTaskFilesAction(t *testing.T, a *app) {
 	t.Helper()
@@ -135,9 +135,9 @@ func TestTaskFilesDialogScopesLateResultsAndCancelsOnSwitch(t *testing.T) {
 	if a.files != nil || ctx.Err() == nil {
 		t.Fatal("switch retained download authority")
 	}
-	a.Update(taskFileSavedMsg{dialog: current, path: "wrong Gateway"})
-	if strings.Contains(appScreen(a), "wrong Gateway") {
-		t.Fatal("late save leaked between Gateways")
+	a.Update(taskFileSavedMsg{dialog: current, path: "wrong Control Plane"})
+	if strings.Contains(appScreen(a), "wrong Control Plane") {
+		t.Fatal("late save leaked between Control Planes")
 	}
 }
 

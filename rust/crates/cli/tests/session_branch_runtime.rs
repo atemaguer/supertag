@@ -42,9 +42,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -53,7 +53,8 @@ impl Credentials {
         command
             .args(args)
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -64,7 +65,7 @@ impl Credentials {
 
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--gateway", public]);
+        command.args(["--control-plane", public]);
         command
     }
 
@@ -72,7 +73,7 @@ impl Credentials {
     fn worker(&self, public: &str, state: &Path, checkout: &Path) -> Command {
         let mut command = self.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             public,
             "--adapter",
             ADAPTER,
@@ -120,13 +121,13 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     fs::write(operator_repository.join("workspace.txt"), "operator edit\n")?;
 
     let credentials = Credentials::new();
+    let blobs = root.join("transfers");
     let mut plane = credentials.command(&["control-plane"]);
-    plane.env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane).await?;
-    let blobs = root.join("gateway-artifacts");
-    let mut gateway = credentials.command(&["gateway", "--control-plane", &private]);
-    gateway.arg("--checkpoint-directory").arg(&blobs);
-    let (mut gateway, public) = service(gateway).await?;
+    plane
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .arg("--transfer-directory")
+        .arg(&blobs);
+    let (mut plane, public) = service(plane).await?;
     json(credentials.operator(
         &[
             "tag",
@@ -335,7 +336,6 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("no Task or Session"));
 
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }

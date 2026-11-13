@@ -45,7 +45,7 @@ use tokio::{process::Command, time};
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
-use crate::{Gateway, operator_access::OperatorCredential};
+use crate::operator_auth::OperatorAuth;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -460,20 +460,19 @@ struct Notifier {
     senders: Senders,
     control_plane: OperatorNotificationsClient<ProtocolChannel>,
     gateway_token: String,
-    principal: String,
     last_test: tokio::sync::Mutex<Option<Instant>>,
 }
 
 impl OperatorNotifier {
-    /// `principal` is the operator whose Inbox is read: this Gateway's admin operator.
+    /// Delivers the admin operator's notifications as this Gateway, with its enrolled credential.
+    /// The Control Plane renders them; the Gateway never reads the Inbox.
     pub fn new(
         destinations: Vec<Destination>,
         senders: Senders,
         control_plane: ProtocolChannel,
         gateway_token: String,
-        principal: String,
     ) -> Result<Self> {
-        authenticated_request((), &gateway_token, Some(&principal))
+        authenticated_request((), &gateway_token, None)
             .context("invalid operator notification credential")?;
         Ok(Self(Arc::new(Notifier {
             destinations,
@@ -482,7 +481,6 @@ impl OperatorNotifier {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             gateway_token,
-            principal,
             last_test: tokio::sync::Mutex::new(None),
         })))
     }
@@ -525,8 +523,7 @@ impl OperatorNotifier {
     }
 
     fn request<T>(&self, message: T, timeout: Duration) -> Result<Request<T>> {
-        let mut request =
-            authenticated_request(message, &self.0.gateway_token, Some(&self.0.principal))?;
+        let mut request = authenticated_request(message, &self.0.gateway_token, None)?;
         request.set_timeout(timeout);
         Ok(request)
     }
@@ -596,10 +593,10 @@ impl OperatorNotifier {
     /// The public operator service that sends a sample through every destination.
     pub fn test_service(
         &self,
-        gateway: Gateway,
+        auth: OperatorAuth,
     ) -> OperatorNotificationTestServer<TestNotifications> {
         OperatorNotificationTestServer::new(TestNotifications {
-            gateway,
+            auth,
             notifier: self.clone(),
         })
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -608,7 +605,7 @@ impl OperatorNotifier {
 }
 
 pub struct TestNotifications {
-    gateway: Gateway,
+    auth: OperatorAuth,
     notifier: OperatorNotifier,
 }
 
@@ -619,13 +616,7 @@ impl OperatorNotificationTest for TestNotifications {
         request: Request<SendTestNotificationRequest>,
     ) -> Result<Response<SendTestNotificationResponse>, Status> {
         // Any authenticated operator may send the harmless sample.
-        if let OperatorCredential::Token(digest) =
-            self.gateway.credentials.presented_operator(&request)?
-        {
-            self.gateway
-                .authenticate_operator(digest, CALL_TIMEOUT)
-                .await?;
-        }
+        self.auth.authenticate(&request, CALL_TIMEOUT).await?;
         let objective = request.into_inner().objective_id.trim().to_owned();
         if objective.len() > 256 || objective.chars().any(char::is_control) {
             return Err(Status::invalid_argument(

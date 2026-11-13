@@ -9,13 +9,13 @@ import (
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
 
-// handleNegotiation answers protocol negotiation as a current Gateway. The TUI negotiates
-// before its first call to a Gateway.
+// handleNegotiation answers protocol negotiation as a current Control Plane. The TUI negotiates
+// before its first call to a Control Plane.
 func handleNegotiation(mux *http.ServeMux) {
 	mux.Handle(rpc.ProtocolNegotiationNegotiateProcedure, connect.NewUnaryHandler(rpc.ProtocolNegotiationNegotiateProcedure,
 		func(_ context.Context, _ *connect.Request[v2.NegotiateProtocolRequest]) (*connect.Response[v2.NegotiateProtocolResponse], error) {
 			return connect.NewResponse(&v2.NegotiateProtocolResponse{
-				Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: 2, ProtocolVersions: []uint32{2},
+				Role: v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE, ProtocolVersion: 2, ProtocolVersions: []uint32{2},
 			}), nil
 		}))
 }

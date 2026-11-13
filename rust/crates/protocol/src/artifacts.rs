@@ -13,8 +13,7 @@ use crate::{
 };
 
 pub const MAX_ARTIFACT_FILES: usize = 100;
-pub const ARTIFACT_SOURCE_UNAVAILABLE: &str =
-    "artifact bytes are absent from Gateway storage and no usable verified Volume copy was found";
+pub const ARTIFACT_SOURCE_UNAVAILABLE: &str = "artifact bytes are absent from Control Plane transfer storage and no usable verified Volume copy was found";
 
 pub const MAX_ARTIFACT_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;

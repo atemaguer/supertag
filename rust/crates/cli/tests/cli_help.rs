@@ -315,7 +315,7 @@ fn usage_errors_filter_what_was_typed() -> Result<()> {
     for args in [
         vec![hostile],
         vec!["get", "objectives", "--limit", hostile],
-        vec!["--gateway", hostile, "health"],
+        vec!["--control-plane", hostile, "health"],
     ] {
         let output = supertag(&args)?;
         assert!(!output.status.success());
@@ -329,7 +329,7 @@ fn usage_errors_filter_what_was_typed() -> Result<()> {
         }
         let stderr = String::from_utf8(output.stderr)?;
         assert!(
-            stderr.contains("hidden-title") || args[0] == "--gateway",
+            stderr.contains("hidden-title") || args[0] == "--control-plane",
             "{stderr:?}"
         );
     }

@@ -1,4 +1,4 @@
-import type { Conversation, Gateway, Message, Tag, TaskEvent } from "./gateway";
+import type { ControlPlane, Conversation, Message, Tag, TaskEvent } from "./control-plane";
 
 const tags: Tag[] = [
   {
@@ -76,7 +76,7 @@ function conversationsFor(tagId: string): Map<string, Message[]> {
   return threads;
 }
 
-export const previewGateway: Gateway = {
+export const previewControlPlane: ControlPlane = {
   async tags() {
     return tags;
   },
@@ -106,7 +106,7 @@ export const previewGateway: Gateway = {
         sessionId: name,
         prompt: text,
         state: "succeeded",
-        result: "This is a local preview. Connect a Gateway to run Tasks with your Tags.",
+        result: "This is a local preview. Connect a Control Plane to run Tasks with your Tags.",
       },
     };
     threads.set(name, [...entries, message]);

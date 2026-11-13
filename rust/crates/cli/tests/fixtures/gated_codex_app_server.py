@@ -13,7 +13,7 @@ if sys.argv[1:] == ["--version"]:
     sys.exit(0)
 assert sys.argv[1:4] == ["app-server", "--listen", "stdio://"]
 # A Codex lane gets Codex credentials only: never another harness's or a service's.
-for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_TOKEN", "ANTHROPIC_API_KEY"]:
+for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_CREDENTIAL", "ANTHROPIC_API_KEY"]:
     assert not os.environ.get(name), name
 THREAD = "gated-thread"
 TURN = "gated-turn"

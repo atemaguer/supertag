@@ -5,6 +5,7 @@
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
 mod authority;
+mod enrollments;
 mod execution;
 #[path = "github_events.rs"]
 mod github_events;
@@ -22,6 +23,8 @@ mod replica_tests;
 mod slack_threads;
 mod sqlite_files;
 pub(crate) use authority::lease_is_live;
+pub use enrollments::Role;
+pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub use hosts::HostAuthority;
 pub(crate) use readiness::status_in as host_status_in;
 
@@ -88,7 +91,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 69;
+        const SCHEMA_VERSION: i64 = 70;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -244,6 +247,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0067_coordination_safety.sql"),
                 include_str!("../migrations/sqlite/0068_operator_notifications.sql"),
                 include_str!("../migrations/sqlite/0069_maintenance_ticks.sql"),
+                include_str!("../migrations/sqlite/0070_enrollment_roles.sql"),
             ]
         } else {
             [
@@ -318,6 +322,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0067_coordination_safety.sql"),
                 include_str!("../migrations/postgresql/0068_operator_notifications.sql"),
                 include_str!("../migrations/postgresql/0069_maintenance_ticks.sql"),
+                include_str!("../migrations/postgresql/0070_enrollment_roles.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -2218,4 +2223,34 @@ pub(crate) fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {
         return Err(invalid(&format!("{kind} exceeds its size limit")));
     }
     Ok(())
+}
+
+/// An operator or a client: the principals that converse and own work.
+pub(crate) fn actor(principal: &str) -> Result<()> {
+    name("principal", principal)?;
+    if ["operator:", "client:"].iter().any(|prefix| {
+        principal
+            .strip_prefix(prefix)
+            .is_some_and(|id| !id.is_empty())
+    }) {
+        Ok(())
+    } else {
+        Err(StoreError::PermissionDenied)
+    }
+}
+
+/// Whether `principal` sees work owned by `owner`. Everyone sees their own work. Work with no
+/// owner (surface threads, submitted Tasks, operators' Objectives) and every client's work are
+/// visible to operators only; a client sees nothing but its own.
+pub(crate) fn sees_owner(principal: &str, owner: &str) -> bool {
+    owner == principal
+        || (principal.starts_with("operator:")
+            && (owner.is_empty() || owner.starts_with("client:")))
+}
+
+/// The SQL form of [`sees_owner`] for an owner column and the parameter holding the principal.
+pub(crate) fn sees_owner_sql(owner: &str, principal: &str) -> String {
+    format!(
+        "({owner}={principal} OR (substr(CAST({principal} AS TEXT),1,9)='operator:' AND ({owner}='' OR substr({owner},1,7)='client:')))"
+    )
 }

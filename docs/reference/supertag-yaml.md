@@ -224,7 +224,8 @@ A host in the same file as its Control Plane joins on its own. SuperTag enrolls 
 machine's local operator credential and stores the host's own Worker Host credential. The host
 joins under its service name, or `NAME-2` when that name is taken.
 
-A host of a shared Control Plane joins with its `auth-key` secret on its first `supertag up`.
+A host of a shared Control Plane joins with its `auth-key` secret, a host Auth Key, on its first
+`supertag up`.
 A missing or rejected key fails on the terminal. After the first join, the host uses its stored
 credential and ignores the key. Without `auth-key`, it uses `SUPERTAG_AUTH_KEY` from the
 environment.
@@ -782,7 +783,7 @@ above. It differs in these ways:
   symbolic link is an error, including the default `.env`. Together the files may hold at most
   1 MiB and 1,024 variables.
 - `env_file` supplies interpolation, `environment` secrets such as `auth-key`, harness provider
-  credentials, and the Gateway's `SUPERTAG_GITHUB_*` settings. It does not supply other
+  credentials, and the Control Plane's `SUPERTAG_GITHUB_*` settings. It does not supply other
   `SUPERTAG_*` overrides or the `SUPERTAG_SERVER_CA_FILE`, `SUPERTAG_CLIENT_CERT_FILE`, and
   `SUPERTAG_CLIENT_KEY_FILE` paths, and never `PATH`, `HOME`, `USER`, `LOGNAME`, `TMPDIR`, or the
   locale variables, which decide where a harness finds its sign-in. Set those in the process
@@ -796,8 +797,8 @@ Each service process starts with an empty environment. It gets `PATH`, `HOME`, `
 
 | Process | Also receives |
 | --- | --- |
-| Control Plane | Its database URL and its own service token |
-| Gateway | Its service token and the operator token. It gets `SUPERTAG_GITHUB_*` only when a host serves a Workspace from the Gateway. |
+| Control Plane | Its database URL, the service token, and the operator token. It gets `SUPERTAG_GITHUB_*` only when a host serves a GitHub Workspace from the Control Plane. |
+| Gateway | The service token, plus each connected surface's settings. It holds no operator token. It runs only when the file connects a surface or names a `notify` destination. |
 | Worker Host | The provider credentials for its harness only, such as `CODEX_API_KEY`, `OPENAI_API_KEY`, and `CODEX_HOME` for `codex`, or `CURSOR_API_KEY` for `cursor`. Every host also gets the TLS file paths set in the shell. |
 
 A Worker Host never receives a service token or another harness's credential. Its harness

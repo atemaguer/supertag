@@ -494,7 +494,7 @@ impl reply_progress_server::ReplyProgress for crate::ControlPlane {
         &self,
         request: tonic::Request<ClaimReplyProgressRequest>,
     ) -> std::result::Result<tonic::Response<ClaimReplyProgressResponse>, tonic::Status> {
-        let principal = self.principal(&request, "connector:")?;
+        let principal = self.connector(&request).await?;
         Ok(tonic::Response::new(
             self.store
                 .claim_reply_progress(&principal, &request.get_ref().operation_id)
@@ -506,7 +506,7 @@ impl reply_progress_server::ReplyProgress for crate::ControlPlane {
         &self,
         request: tonic::Request<SettleReplyProgressRequest>,
     ) -> std::result::Result<tonic::Response<ReplyProgressUpdate>, tonic::Status> {
-        let principal = self.principal(&request, "connector:")?;
+        let principal = self.connector(&request).await?;
         Ok(tonic::Response::new(
             self.store
                 .settle_reply_progress(&principal, request.get_ref())

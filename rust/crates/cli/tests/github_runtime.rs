@@ -50,7 +50,7 @@ const SIGNING: &str = "synthetic-github-webhook-secret";
 const TOKEN: &str = "synthetic-github-api-token";
 const APP_TOKEN: &str = "ghs_synthetic-github-installation-token";
 // An intentionally public test credential, never registered with a provider.
-const APP_KEY: &str = include_str!("../../gateway/src/github/auth/fixtures/app-test-key.pem");
+const APP_KEY: &str = include_str!("../../gateway/src/github/fixtures/app-test-key.pem");
 
 struct Credentials {
     gateway: String,
@@ -61,9 +61,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -72,7 +72,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -91,7 +92,11 @@ impl Credentials {
 }
 
 fn request<T>(input: T, token: &str, principal: Option<&str>) -> Result<Request<T>> {
-    let mut request = authenticated_request(input, token, principal)?;
+    // A Gateway names the connector account it acts for; nobody names a principal.
+    let mut request = match principal.and_then(|principal| principal.strip_prefix("connector:")) {
+        Some(account) => supertag_protocol::connector_request(input, token, account)?,
+        None => authenticated_request(input, token, None)?,
+    };
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -389,7 +394,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_GITHUB_API_URL", &mock.endpoint);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload() -> Value {
     json!({"action":"created","sender":{"id":42,"type":"User"},"repository":{"id":123,"full_name":REPOSITORY},"issue":{"number":7},"comment":{"id":456,"body":"@supertag inspect the repository"}})
@@ -468,7 +474,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -880,7 +886,7 @@ async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_tok
         "app-gateway",
     )?;
     let endpoints = gateway.endpoints(2).await?;
-    let public = &endpoints[0];
+    let public = &private;
     let http = &endpoints[1];
     put_tag(public, &credentials).await?;
     let mut input = payload();

@@ -91,6 +91,8 @@ pub(crate) struct AccountSpec {
     pub(crate) account_id: String,
     identity: IdentitySpec,
     enabled: bool,
+    /// The enrolled Gateway that serves the account, by the NAME of gateway:NAME.
+    gateway: String,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +151,7 @@ impl From<AccountSpec> for SurfaceAccount {
             }),
             enabled: value.enabled,
             revision: 0,
+            gateway: value.gateway,
         }
     }
 }
@@ -232,6 +235,7 @@ fn account_json(account: SurfaceAccount) -> Value {
     };
     json!({
         "account_id": account.account_id,
+        "gateway": account.gateway,
         "identity": identity,
         "enabled": account.enabled,
         "revision": account.revision,

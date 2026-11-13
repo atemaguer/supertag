@@ -24,11 +24,50 @@ pub mod v2 {
     tonic::include_proto!("supertag.runtime.v2");
 }
 
+/// The encoded `FileDescriptorSet` of every runtime proto, for checks that must cover each RPC.
+pub const FILE_DESCRIPTOR_SET: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/supertag_descriptors.bin"));
+
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;
 pub const HOST_GENERATION_HEADER: &str = "x-supertag-host-generation";
-pub const PRINCIPAL_HEADER: &str = "x-supertag-principal";
+/// The principal a call acts as, from the Control Plane's API tier to its state owner only. The
+/// state owner has no network listener, and the API tier never forwards this header from a caller.
+pub const INTERNAL_PRINCIPAL_HEADER: &str = "x-supertag-internal-principal";
+/// The connector account a Gateway call acts for. It selects, and never grants: the Control Plane
+/// refuses an account that is not bound to the calling Gateway.
+pub const CONNECTOR_ACCOUNT_HEADER: &str = "x-supertag-connector-account";
+/// Every Operator Token secret starts with this prefix.
+pub const OPERATOR_TOKEN_SECRET_PREFIX: &str = "stop_";
+/// Every Auth Key secret starts with this prefix.
+pub const AUTH_KEY_SECRET_PREFIX: &str = "stak_";
+/// Every enrolled credential (host, Gateway or client) starts with this prefix.
+pub const CREDENTIAL_SECRET_PREFIX: &str = "stcr_";
+
+/// True when the text is `prefix` and 64 lowercase hex digits.
+pub fn is_secret(prefix: &str, value: &str) -> bool {
+    value.strip_prefix(prefix).is_some_and(|rest| {
+        rest.len() == 64
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    })
+}
+
+/// True when the text has the shape of an Operator Token secret: `stop_` and 64 lowercase hex.
+pub fn is_operator_token_secret(value: &str) -> bool {
+    is_secret(OPERATOR_TOKEN_SECRET_PREFIX, value)
+}
+
+/// A new random secret: `prefix` and 64 lowercase hex digits.
+pub fn new_secret(prefix: &str) -> String {
+    format!(
+        "{prefix}{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
 
 pub fn host_generation<T>(request: &Request<T>) -> Result<u64, Status> {
     let mut values = request.metadata().get_all(HOST_GENERATION_HEADER).iter();
@@ -79,6 +118,8 @@ pub fn upstream_status(status: Status) -> Status {
     }
 }
 
+/// A request that presents `token` as its bearer credential. `principal` is set only on the
+/// Control Plane's internal hop from its API tier to its state owner.
 pub fn authenticated_request<T>(
     message: T,
     token: &str,
@@ -92,7 +133,7 @@ pub fn authenticated_request<T>(
     request.metadata_mut().insert("authorization", header);
     if let Some(principal) = principal {
         request.metadata_mut().insert(
-            PRINCIPAL_HEADER,
+            INTERNAL_PRINCIPAL_HEADER,
             principal
                 .parse()
                 .map_err(|_| Status::internal("invalid service principal configuration"))?,
@@ -101,16 +142,35 @@ pub fn authenticated_request<T>(
     Ok(request)
 }
 
-pub fn incoming_principal<'a, T>(
+/// A Gateway call for one connector account, with the Gateway's enrolled credential.
+pub fn connector_request<T>(
+    message: T,
+    credential: &str,
+    account: &str,
+) -> Result<Request<T>, Status> {
+    let mut request = authenticated_request(message, credential, None)?;
+    request.metadata_mut().insert(
+        CONNECTOR_ACCOUNT_HEADER,
+        account
+            .parse()
+            .map_err(|_| Status::internal("invalid connector account"))?,
+    );
+    Ok(request)
+}
+
+/// The principal named on the internal hop from the API tier, which presents `internal_token`.
+pub fn internal_principal<'a, T>(
     request: &'a Request<T>,
-    gateway_token: &str,
+    internal_token: &str,
 ) -> Result<&'a str, Status> {
-    if !matches_bearer(request, gateway_token) {
-        return Err(Status::unauthenticated("Gateway credential required"));
+    if !matches_bearer(request, internal_token) {
+        return Err(Status::unauthenticated(
+            "Control Plane API tier credential required",
+        ));
     }
     request
         .metadata()
-        .get(PRINCIPAL_HEADER)
+        .get(INTERNAL_PRINCIPAL_HEADER)
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| Status::permission_denied("authenticated caller identity required"))

@@ -54,7 +54,7 @@ impl SharedHost {
     /// Control Plane fences every Attempt held under the previous generation. A supervisor
     /// does this when Attempt journals exist that no configured lane will read.
     pub async fn register(
-        gateway: Target,
+        control_plane: Target,
         state_directory: &Path,
         replace: bool,
         shutdown: &CancellationToken,
@@ -63,22 +63,22 @@ impl SharedHost {
         // Lanes take no declared labels, so the Host reports its operating system and
         // architecture; the Control Plane derives harness and Workspace labels.
         let labels = host_labels(&[])?;
-        let token = enrollment::host_token(&journal, &gateway)?;
+        let token = enrollment::host_token(&journal, &control_plane)?;
         let incarnation_id = if replace {
             journal.replace_incarnation()?
         } else {
             journal.incarnation()?
         };
-        let channel = gateway.connect_lazy();
+        let channel = control_plane.connect_lazy();
         let (record, protocol) = loop {
             if shutdown.is_cancelled() {
                 return Ok(None);
             }
-            // Refuse an incompatible Gateway before registering the Host.
+            // Refuse an incompatible Control Plane before registering the Host.
             let protocol = match negotiation::negotiate(
                 channel.clone(),
                 ServiceRole::WorkerHost,
-                ServiceRole::Gateway,
+                ServiceRole::ControlPlane,
             )
             .await
             {

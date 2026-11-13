@@ -349,7 +349,7 @@ export const HarnessEffects: GenService<{
   serviceDesc(file_supertag_runtime_v2_effects, 0);
 
 /**
- * Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+ * Worker Host to Control Plane, with the Attempt's execution authority.
  *
  * @generated from service supertag.runtime.v2.AttemptEffects
  */

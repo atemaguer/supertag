@@ -244,10 +244,10 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     publication_approval_then_replacement_proves_lost_create_without_reposting;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    moving_ref_pins_session_before_execution_and_survives_gateway_restart;
+    moving_ref_pins_session_before_execution_and_survives_control_plane_restart;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-    github_workspace_output_references_are_verified_by_the_credentialed_gateway;
+    github_workspace_output_references_are_verified_by_the_credentialed_control_plane;
 }
 
 async fn source_and_continuation_cross_hosts_without_provider_credentials(
@@ -262,13 +262,13 @@ async fn publication_approval_then_replacement_proves_lost_create_without_repost
     scenario(&database, true, false, false).await
 }
 
-async fn moving_ref_pins_session_before_execution_and_survives_gateway_restart(
+async fn moving_ref_pins_session_before_execution_and_survives_control_plane_restart(
     database: String,
 ) -> Result<()> {
     scenario(&database, false, true, false).await
 }
 
-async fn github_workspace_output_references_are_verified_by_the_credentialed_gateway(
+async fn github_workspace_output_references_are_verified_by_the_credentialed_control_plane(
     database: String,
 ) -> Result<()> {
     if crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")?.is_none() {
@@ -339,9 +339,9 @@ async fn scenario(
     let _server = Server(tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     }));
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let command = |args: &[&str]| {
         let mut command = Command::new(BINARY);
         command
@@ -349,19 +349,19 @@ async fn scenario(
             .env_clear()
             .stdin(Stdio::null())
             .kill_on_drop(true)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_HOST_TOKEN", &host_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token);
         command
     };
-    let mut cp = command(&["control-plane"]);
-    cp.env("SUPERTAG_DATABASE_URL", database);
-    let (mut plane, private) = service(cp).await?;
-    let gateway_command = |listen: &str| {
-        let mut gateway = command(&["gateway", "--control-plane", &private, "--listen", listen]);
-        gateway
-            .arg("--checkpoint-directory")
+    // The Control Plane serves GitHub Workspace sources from its GitHub account.
+    let plane_command = |listen: &str| {
+        let mut plane = command(&["control-plane", "--listen", listen]);
+        plane
+            .env("SUPERTAG_DATABASE_URL", database)
+            .arg("--transfer-directory")
             .arg(root.join("artifacts"))
             .arg("--github-workspace-directory")
             .arg(root.join("sources"))
@@ -371,11 +371,11 @@ async fn scenario(
             .env("SUPERTAG_GITHUB_TOKEN", "fixture-source-token")
             .env("SUPERTAG_TEST_GITHUB_API_URL", &api)
             .env("SUPERTAG_TEST_GITHUB_GIT_URL", format!("{api}git/"));
-        gateway
+        plane
     };
-    let (mut gateway, public) = service(gateway_command("127.0.0.1:0")).await?;
+    let (mut plane, public) = service(plane_command("127.0.0.1:0")).await?;
     let cli = |args: &[&str]| {
-        let mut c = command(&[args[0], "--gateway", &public]);
+        let mut c = command(&[args[0], "--control-plane", &public]);
         c.args(&args[1..]);
         c
     };
@@ -386,7 +386,7 @@ async fn scenario(
     };
     let account = spec(
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
+        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     json(cli(&["surface-account", "put", &account])).await?;
     let mut create_source = cli(&[
@@ -477,8 +477,6 @@ async fn scenario(
             }),
         )?;
         verify_github_output(root, &cli, (&public, &host_token, &commit), &policy).await?;
-        gateway.kill().await?;
-        gateway.wait().await?;
         plane.kill().await?;
         plane.wait().await?;
         return Ok(());
@@ -487,13 +485,13 @@ async fn scenario(
     fs::write(
         &adapter,
         format!(
-            "#!/bin/sh\nset -eu\nfor name in SUPERTAG_GITHUB_TOKEN SUPERTAG_GATEWAY_TOKEN SUPERTAG_OPERATOR_TOKEN SUPERTAG_HOST_TOKEN GIT_CONFIG_VALUE_0; do\n eval 'test -z \"${{'\"$name\"'+x}}\"' || exit 22\ndone\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\nset -eu\nfor name in SUPERTAG_GITHUB_TOKEN SUPERTAG_GATEWAY_CREDENTIAL SUPERTAG_OPERATOR_TOKEN SUPERTAG_HOST_TOKEN GIT_CONFIG_VALUE_0; do\n eval 'test -z \"${{'\"$name\"'+x}}\"' || exit 22\ndone\nexec '{}' \"$@\"\n",
             ADAPTER
         ),
     )?;
     fs::set_permissions(&adapter, fs::Permissions::from_mode(0o700))?;
     let worker = |state: &str, mapped: bool| {
-        let mut host = command(&["worker-host", "--gateway", &public, "--once"]);
+        let mut host = command(&["worker-host", "--control-plane", &public, "--once"]);
         host.arg("--adapter")
             .arg(&adapter)
             .arg("--adapter-arg=--workspace-fixture")
@@ -502,7 +500,11 @@ async fn scenario(
         // A malicious ambient provider value is not part of the adapter profile.
         host.env("SUPERTAG_GITHUB_TOKEN", "ambient-must-not-reach-adapter");
         if mapped {
-            host.args(["--workspace-id", "project", "--workspace-from-gateway"]);
+            host.args([
+                "--workspace-id",
+                "project",
+                "--workspace-from-control-plane",
+            ]);
         }
         host
     };
@@ -570,9 +572,9 @@ async fn scenario(
     } else {
         None
     };
-    gateway.kill().await?;
-    gateway.wait().await?;
-    gateway = service(gateway_command(public.strip_prefix("http://").unwrap()))
+    plane.kill().await?;
+    plane.wait().await?;
+    plane = service(plane_command(public.strip_prefix("http://").unwrap()))
         .await?
         .0;
     if let Some(waiting) = first_publication {
@@ -688,8 +690,6 @@ async fn scenario(
     let bytes = fs::read(&patch)?;
     assert!(String::from_utf8_lossy(&bytes).contains("+second"));
     assert!(!String::from_utf8_lossy(&bytes).contains("fixture-source-token"));
-    gateway.kill().await?;
-    gateway.wait().await?;
     plane.kill().await?;
     plane.wait().await?;
     // The same explicit mapping works through the normal local supervisor.
@@ -699,7 +699,7 @@ async fn scenario(
         "--foreground",
         "--workspace-id",
         "project",
-        "--workspace-from-gateway",
+        "--workspace-from-control-plane",
     ]);
     up.arg("--state-directory")
         .arg(&local)
@@ -860,7 +860,7 @@ async fn verify_github_output(
         .kill_on_drop(true)
         .args([
             "worker-host",
-            "--gateway",
+            "--control-plane",
             public,
             "--once",
             "--harness",
@@ -869,7 +869,7 @@ async fn verify_github_output(
             "fixture-model",
             "--workspace-id",
             "project",
-            "--workspace-from-gateway",
+            "--workspace-from-control-plane",
             "--harness-runtime",
         ])
         .arg(node)

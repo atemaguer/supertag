@@ -55,13 +55,35 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
     Ok((child, format!("http://{address}")))
 }
 
-fn gateway(private: &str, secret: &str, token: &str, identity: &str) -> Command {
-    let mut command = command(&["gateway", "--control-plane", private]);
+/// A Control Plane whose admin operator token `token` acts as `identity`.
+fn control_plane(secret: &str, token: &str, identity: &str) -> Command {
+    let mut command = command(&["control-plane"]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", secret)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", secret)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", secret)
         .env("SUPERTAG_OPERATOR_TOKEN", token)
         .env("SUPERTAG_OPERATOR_PRINCIPAL", identity);
     command
+}
+
+/// Issues the Operator Token `name` with the admin `token`, for a second operator.
+async fn operator_token(endpoint: &str, token: &str, name: &str) -> Result<String> {
+    let mut create = command(&[
+        "operator-token",
+        "create",
+        name,
+        "--control-plane",
+        endpoint,
+    ]);
+    create.env("SUPERTAG_OPERATOR_TOKEN", token);
+    let output = timeout(WAIT, create.output()).await??;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout)?;
+    Ok(created["secret"].as_str().context("secret")?.to_owned())
 }
 
 async fn channel(address: &str) -> Result<ProtocolChannel> {
@@ -78,25 +100,21 @@ database_tests! {
     #[tokio::test]
     retirement_removes_tag_from_roster_and_preserves_identity;
     #[tokio::test]
-    conversation_scope_survives_gateway_forwards_and_task_reads;
+    conversation_scope_survives_api_forwards_and_task_reads;
     #[tokio::test]
     watch_replays_private_conversations_after_services_restart;
 }
 
 async fn retirement_removes_tag_from_roster_and_preserves_identity(database: String) -> Result<()> {
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
-    let mut control = command(&["control-plane"]);
-    control
-        .env("SUPERTAG_GATEWAY_TOKEN", &secret)
-        .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut control, private) = service(control).await?;
-    let (mut gateway, public) =
-        service(gateway(&private, &secret, &token, "operator:alice")).await?;
+    let mut control = control_plane(&secret, &token, "operator:alice");
+    control.env("SUPERTAG_DATABASE_URL", &database);
+    let (mut control, public) = service(control).await?;
     let run = |args: &[&str]| {
         let mut command = command(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &token);
         async move {
             let output = timeout(WAIT, command.output()).await??;
@@ -144,13 +162,13 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     assert_eq!(all["tags"][0], retired["tag"]);
     assert_eq!(all["tags"][1]["tag_id"], "review-2");
     assert_eq!(all["tags"][1]["name"], "Reviewer");
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata() -> Result<()> {
+async fn captured_artifact_bytes_survive_control_plane_restart_with_private_metadata() -> Result<()>
+{
     captured_artifact_round_trip(None).await
 }
 
@@ -169,25 +187,22 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
         .tempdir_in("/tmp")?;
     let database = directory.path().join("control.db");
     let blobs = directory.path().join("blobs");
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
-    let bob_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
-    let mut control = command(&["control-plane"]);
-    control
-        .env("SUPERTAG_GATEWAY_TOKEN", &secret)
-        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!("sqlite://{}?mode=rwc", database.display()),
-        );
-    let (mut control, private) = service(control).await?;
-    let create_gateway = |token: &str, principal: &str| {
-        let mut gateway = gateway(&private, &secret, token, principal);
-        gateway.arg("--checkpoint-directory").arg(&blobs);
-        gateway
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+    let create_control = || {
+        let mut control = control_plane(&secret, &token, "operator:alice");
+        control
+            .arg("--transfer-directory")
+            .arg(&blobs)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env(
+                "SUPERTAG_DATABASE_URL",
+                format!("sqlite://{}?mode=rwc", database.display()),
+            );
+        control
     };
-    let (mut public, endpoint) = service(create_gateway(&token, "operator:alice")).await?;
+    let (mut control, endpoint) = service(create_control()).await?;
     let alice = channel(&endpoint).await?;
     operator_client::OperatorClient::new(alice.clone())
         .put_tag(authenticated_request(
@@ -258,7 +273,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
     )?)
     .await?;
 
-    let bytes = b"artifact bytes kept by the Gateway, never the Control Plane";
+    let bytes = b"artifact bytes kept in transfer storage, never the Control Plane database";
     let digest = format!("{:x}", Sha256::digest(bytes));
     let capture = CommitArtifactCaptureRequest {
         attempt: Some(attempt.clone()),
@@ -340,9 +355,10 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
             .any(|window| window == bytes)
     );
 
-    public.kill().await?;
-    let (mut public, endpoint) = service(create_gateway(&token, "operator:alice")).await?;
-    let (mut bob, bob_endpoint) = service(create_gateway(&bob_token, "operator:bob")).await?;
+    control.kill().await?;
+    let (mut control, endpoint) = service(create_control()).await?;
+    let bob_token = operator_token(&endpoint, &token, "bob").await?;
+    let bob_endpoint = endpoint.clone();
     let mut alice_transfers =
         artifact_transfers_client::ArtifactTransfersClient::new(channel(&endpoint).await?);
     let mut bob_transfers =
@@ -415,8 +431,6 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
         .await?;
         tui_save_task_file(directory.path(), binary, &endpoint, &token, bytes).await?;
     }
-    bob.kill().await?;
-    public.kill().await?;
     control.kill().await?;
     Ok(())
 }
@@ -433,7 +447,7 @@ async fn tui_save_task_file(
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --gateway '{}' --binary {}\n",
+            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --control-plane '{}' --binary {}\n",
             token,
             shell_path(directory)?,
             shell_path(Path::new(BINARY))?,
@@ -504,24 +518,18 @@ fn artifact_host_request<T>(input: T, token: &str, generation: u64) -> Result<to
     Ok(request)
 }
 
-async fn conversation_scope_survives_gateway_forwards_and_task_reads(
-    database: String,
-) -> Result<()> {
+async fn conversation_scope_survives_api_forwards_and_task_reads(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
-    let bob_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
-    let mut control = command(&["control-plane"]);
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+    let mut control = control_plane(&secret, &alice_token, "operator:alice");
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &secret)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut control, private) = service(control).await?;
-    let (mut alice_gateway, alice_url) =
-        service(gateway(&private, &secret, &alice_token, "operator:alice")).await?;
-    let (mut bob_gateway, bob_url) =
-        service(gateway(&private, &secret, &bob_token, "operator:bob")).await?;
+    let (mut control, alice_url) = service(control).await?;
+    let bob_token = operator_token(&alice_url, &alice_token, "bob").await?;
+    let bob_url = alice_url.clone();
 
     let alice = channel(&alice_url).await?;
     let bob = channel(&bob_url).await?;
@@ -578,7 +586,7 @@ async fn conversation_scope_survives_gateway_forwards_and_task_reads(
     let mut host = command(&[
         "worker-host",
         "--once",
-        "--gateway",
+        "--control-plane",
         &alice_url,
         "--adapter",
         ADAPTER,
@@ -670,8 +678,6 @@ async fn conversation_scope_survives_gateway_forwards_and_task_reads(
         history.messages[0].task.as_ref().unwrap().task_id,
         received.task_id
     );
-    alice_gateway.kill().await?;
-    bob_gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }
@@ -682,7 +688,7 @@ fn fixture(path: &Path, version: &str) -> Result<()> {
         format!(
             r#"#!/bin/sh
 set -eu
-test -z "${{SUPERTAG_OPERATOR_TOKEN:-}}${{SUPERTAG_GATEWAY_TOKEN:-}}${{OPENAI_API_KEY:-}}"
+test -z "${{SUPERTAG_OPERATOR_TOKEN:-}}${{SUPERTAG_GATEWAY_CREDENTIAL:-}}${{OPENAI_API_KEY:-}}"
 if [ "${{1:-}}" = "--version" ]; then
   printf '%s\n' "{version}"
   exit 0
@@ -703,7 +709,7 @@ async fn tui_handover_uses_descriptor_three_and_version_match() -> Result<()> {
     let token = "fixture-operator-credential";
     let mut command = command(&[
         "tui",
-        "--gateway",
+        "--control-plane",
         "http://127.0.0.1:1",
         "--workspace",
         "example",
@@ -712,7 +718,8 @@ async fn tui_handover_uses_descriptor_three_and_version_match() -> Result<()> {
         .arg("--binary")
         .arg(&launcher)
         .env("SUPERTAG_OPERATOR_TOKEN", token)
-        .env("SUPERTAG_GATEWAY_TOKEN", "never-forward")
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", "never-forward")
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", "never-forward")
         .env("OPENAI_API_KEY", "never-forward");
     fixture(&launcher, env!("CARGO_PKG_VERSION"))?;
     let output = timeout(WAIT, command.output()).await??;
@@ -801,7 +808,7 @@ fn shell_path(path: &Path) -> Result<String> {
 
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
+async fn bare_launcher_saves_and_switches_control_plane_rosters() -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -825,17 +832,15 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
         ("second-tag", "second-fixture-token"),
     ] {
         let private_token = Uuid::new_v4().to_string();
-        let mut control = command(&["control-plane"]);
-        control.env("SUPERTAG_GATEWAY_TOKEN", &private_token).env(
+        let mut control = control_plane(&private_token, token, "operator:tui");
+        control.env(
             "SUPERTAG_DATABASE_URL",
             format!(
                 "sqlite://{}?mode=rwc",
                 directory.path().join(format!("{tag}.sqlite")).display()
             ),
         );
-        let (plane, private) = service(control).await?;
-        let (public, address) =
-            service(gateway(&private, &private_token, token, "operator:tui")).await?;
+        let (plane, address) = service(control).await?;
         operator_client::OperatorClient::new(channel(&address).await?)
             .put_tag(authenticated_request(
                 PutTagRequest {
@@ -847,7 +852,7 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
             )?)
             .await?;
         addresses.push((address, token));
-        services.extend([plane, public]);
+        services.push(plane);
     }
 
     tmux.run(&[
@@ -868,14 +873,14 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
         "on",
     ])
     .await?;
-    tmux.wait_for("Gateways").await?;
+    tmux.wait_for("Control Planes").await?;
     for (index, (address, token)) in addresses.iter().enumerate() {
         if index > 0 {
             tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
-            tmux.wait_for("Gateways").await?;
+            tmux.wait_for("Control Planes").await?;
         }
         tmux.run(&["send-keys", "-t", "runtime", "a"]).await?;
-        tmux.wait_for("Save a Gateway").await?;
+        tmux.wait_for("Save a Control Plane").await?;
         let name = if index == 0 { "First" } else { "Second" };
         for (field, value) in [name, address.as_str(), token].into_iter().enumerate() {
             if field > 0 {
@@ -885,7 +890,7 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
                 .await?;
         }
         let form = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
-        ensure!(!form.contains(token), "the Gateway token was visible");
+        ensure!(!form.contains(token), "the operator token was visible");
         tmux.run(&["send-keys", "-t", "runtime", "C-s"]).await?;
         let tag = if index == 0 {
             "first-tag"
@@ -897,18 +902,18 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
     let second = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
     ensure!(
         !second.contains("first-tag"),
-        "the previous Gateway roster was visible"
+        "the previous Control Plane roster was visible"
     );
 
     tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
-    tmux.wait_for("Gateways").await?;
+    tmux.wait_for("Control Planes").await?;
     tmux.run(&["send-keys", "-t", "runtime", "Up", "Enter"])
         .await?;
     tmux.wait_for("Say something to first-tag.").await?;
     let first = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
     ensure!(
         !first.contains("second-tag"),
-        "the other Gateway roster was visible"
+        "the other Control Plane roster was visible"
     );
 
     tmux.run(&["respawn-pane", "-k", "-t", "runtime", &shell])
@@ -1344,21 +1349,16 @@ async fn watch_replays_private_conversations_after_services_restart(
         Ok(())
     }
 
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
-    let bob_token = Uuid::new_v4().to_string();
     let control_command = || {
-        let mut control = command(&["control-plane"]);
-        control
-            .env("SUPERTAG_GATEWAY_TOKEN", &secret)
-            .env("SUPERTAG_DATABASE_URL", &database);
+        let mut control = control_plane(&secret, &alice_token, "operator:alice");
+        control.env("SUPERTAG_DATABASE_URL", &database);
         control
     };
-    let (mut plane, private) = service(control_command()).await?;
-    let (mut alice_gateway, alice_url) =
-        service(gateway(&private, &secret, &alice_token, "operator:alice")).await?;
-    let (mut bob_gateway, bob_url) =
-        service(gateway(&private, &secret, &bob_token, "operator:bob")).await?;
+    let (mut plane, alice_url) = service(control_command()).await?;
+    let bob_token = operator_token(&alice_url, &alice_token, "bob").await?;
+    let bob_url = alice_url.clone();
     assert_eq!(
         open(&bob_url, &bob_token, "broken-cursor".into())
             .await
@@ -1378,7 +1378,7 @@ async fn watch_replays_private_conversations_after_services_restart(
     assert!(matches!(alice_start.update, Some(Update::Heartbeat(_))));
     assert!(matches!(bob_start.update, Some(Update::Heartbeat(_))));
 
-    // Leave the streams idle beyond the Gateway's unary forwarding deadline.
+    // Leave the streams idle beyond the API tier's unary forwarding deadline.
     tokio::time::sleep(Duration::from_secs(11)).await;
 
     let alice = channel(&alice_url).await?;
@@ -1438,8 +1438,8 @@ async fn watch_replays_private_conversations_after_services_restart(
     check(until_tag(&mut alice_watch).await?, &private_a, &private_b);
     check(until_tag(&mut bob_watch).await?, &private_b, &private_a);
 
-    // Open streams must release both services during graceful shutdown.
-    stop(&mut alice_gateway).await?;
+    // Open streams must release the Control Plane during graceful shutdown.
+    stop(&mut plane).await?;
     assert_eq!(
         timeout(WAIT, alice_watch.message())
             .await?
@@ -1447,16 +1447,11 @@ async fn watch_replays_private_conversations_after_services_restart(
             .code(),
         Code::Unavailable
     );
-    stop(&mut plane).await?;
-    stop(&mut bob_gateway).await?;
 
-    let (mut plane, private) = service(control_command()).await?;
-    let (mut gateway, address) =
-        service(gateway(&private, &secret, &bob_token, "operator:bob")).await?;
+    let (mut plane, address) = service(control_command()).await?;
     let mut resumed = open(&address, &bob_token, bob_start.resume_token).await?;
     check(until_tag(&mut resumed).await?, &private_b, &private_a);
     stop(&mut plane).await?;
-    stop(&mut gateway).await?;
     Ok(())
 }
 

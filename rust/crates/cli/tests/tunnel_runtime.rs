@@ -3,10 +3,11 @@
 //! outer `wss://` TLS and forwards plain HTTP/1.1, while SuperTag's mutual TLS runs end to
 //! end inside the tunnel:
 //!
-//! - every Gateway call shape (unary, client-streaming Workspace upload, server-streaming
-//!   artifact download and Watch) and the Gateway's own Control Plane calls;
-//! - severing either tunnel mid-Attempt, after which the Worker Host and Gateway reconnect
-//!   and the Attempt completes once;
+//! - every Control Plane call shape (unary, client-streaming Workspace upload,
+//!   server-streaming artifact download and Watch), a Gateway's calls to the Control Plane,
+//!   and the operator's call to the Gateway;
+//! - severing either client's tunnel mid-Attempt, after which the Worker Host and Gateway
+//!   reconnect and the Attempt completes once;
 //! - refusal of clients without valid inner TLS;
 //! - with Docker, the same deployment behind a real HTTP/1.1-only nginx that forwards only
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
@@ -65,6 +66,8 @@ const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const STARTUP: Duration = Duration::from_secs(20);
 
 database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    every_role_is_held_to_its_table_row_natively_and_through_the_tunnel;
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     tunnel_carries_every_service_role_and_call_shape_with_mutual_tls;
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -432,7 +435,8 @@ struct Tokens {
 }
 
 /// A Control Plane and Gateway that both require client certificates and also accept
-/// WebSocket tunnels; the Gateway reaches the Control Plane only through its edge.
+/// WebSocket tunnels. Operators and Worker Hosts reach the Control Plane through its edge;
+/// the Gateway reaches it through an edge of its own.
 struct Deployment {
     root: PathBuf,
     tokens: Tokens,
@@ -441,17 +445,18 @@ struct Deployment {
     host_leaf: Leaf,
     edge_leaf: Leaf,
     control_plane: Service,
+    control_native: SocketAddr,
+    control_tunnel: SocketAddr,
     control_edge: Edge,
     gateway: Service,
-    gateway_native: SocketAddr,
-    gateway_tunnel: SocketAddr,
+    gateway_link: Edge,
     gateway_edge: Edge,
 }
 
 impl Deployment {
     async fn start(database: &str, root: &Path) -> Result<Self> {
         let tokens = Tokens {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
         };
         let pki = Pki::authority(root, "supertag-tunnel-ca").await?;
@@ -461,30 +466,38 @@ impl Deployment {
 
         let mut command = binary(&["control-plane", "--websocket-listen", "127.0.0.1:0"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+            .arg("--transfer-directory")
+            .arg(root.join("transfers"))
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
+            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
             .env("SUPERTAG_DATABASE_URL", database);
         server_tls(&mut command, &control_leaf, &pki.ca());
         let mut control_plane = Service::spawn(command, root, "control-plane")?;
-        control_plane.address().await?;
+        let control_native = control_plane.address().await?;
         let control_tunnel = control_plane.address().await?;
         let control_edge = Edge::start(control_tunnel, &edge_leaf).await?;
+        let gateway_link = Edge::start(control_tunnel, &edge_leaf).await?;
 
+        // The Gateway's notification outbox polls the Control Plane, so its link carries
+        // calls on its own.
         let mut command = binary(&[
             "gateway",
             "--control-plane",
-            &control_edge.url(),
+            &gateway_link.url(),
             "--websocket-listen",
             "127.0.0.1:0",
+            "--notify",
+            "desktop",
         ]);
         command
-            .arg("--checkpoint-directory")
-            .arg(root.join("gateway-artifacts"))
-            .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         server_tls(&mut command, &gateway_leaf, &pki.ca());
         client_tls(&mut command, &pki.ca(), Some(&gateway_leaf));
         let mut gateway = Service::spawn(command, root, "gateway")?;
-        let gateway_native = gateway.address().await?;
+        gateway.address().await?;
         let gateway_tunnel = gateway.address().await?;
         let gateway_edge = Edge::start(gateway_tunnel, &edge_leaf).await?;
         Ok(Self {
@@ -495,32 +508,34 @@ impl Deployment {
             edge_leaf,
             pki,
             control_plane,
+            control_native,
+            control_tunnel,
             control_edge,
             gateway,
-            gateway_native,
-            gateway_tunnel,
+            gateway_link,
             gateway_edge,
         })
     }
 
-    /// An operator command against `gateway` with the operator's client certificate.
-    fn operator_at(&self, gateway: &str, args: &[&str], leaf: Option<&Leaf>) -> Command {
+    /// An operator command against `url` with the operator's client certificate.
+    fn operator_at(&self, url: &str, args: &[&str], leaf: Option<&Leaf>) -> Command {
         let mut command = binary(args);
         command
-            .args(["--gateway", gateway])
+            .args(["--control-plane", url])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.tokens.operator);
         client_tls(&mut command, &self.pki.ca(), leaf);
         command
     }
 
     fn operator(&self, args: &[&str]) -> Command {
-        self.operator_at(&self.gateway_edge.url(), args, Some(&self.operator_leaf))
+        self.operator_at(&self.control_edge.url(), args, Some(&self.operator_leaf))
     }
 
-    /// An operator command on the Gateway's native listener, which no edge partition affects.
+    /// An operator command on the Control Plane's native listener, which no edge partition
+    /// affects.
     fn native_operator(&self, args: &[&str]) -> Command {
         self.operator_at(
-            &format!("https://{}", self.gateway_native),
+            &format!("https://{}", self.control_native),
             args,
             Some(&self.operator_leaf),
         )
@@ -547,16 +562,16 @@ impl Deployment {
         protocol::negotiated(self.operator_target(url)?.connect().await?).await
     }
 
-    /// Issues an Auth Key for `host`, enrolls it through `gateway`, and returns its state.
-    async fn enroll(&self, host: &str, tag: &str, gateway: &str) -> Result<PathBuf> {
+    /// Issues an Auth Key for `host`, enrolls it through `url`, and returns its state.
+    async fn enroll(&self, host: &str, tag: &str, url: &str) -> Result<PathBuf> {
         let issued =
-            run_json(self.operator(&["auth-key", "create", host, "--host", host, "--tag", tag]))
+            run_json(self.operator(&["auth-key", "create", host, "--role", "host", "--tag", tag]))
                 .await?;
         let key = self.root.join(format!("{host}.key"));
         std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
         let state = self.root.join(host);
-        let mut enroll = binary(&["host", "enroll", host, "--gateway", gateway]);
+        let mut enroll = binary(&["host", "enroll", host, "--control-plane", url]);
         enroll
             .arg("--state-directory")
             .arg(&state)
@@ -567,8 +582,8 @@ impl Deployment {
         Ok(state)
     }
 
-    fn worker_host(&self, gateway: &str, state: &Path, adapter: &Path) -> Command {
-        let mut command = binary(&["worker-host", "--gateway", gateway, "--adapter"]);
+    fn worker_host(&self, url: &str, state: &Path, adapter: &Path) -> Command {
+        let mut command = binary(&["worker-host", "--control-plane", url, "--adapter"]);
         command.arg(adapter).arg("--state-directory").arg(state);
         client_tls(&mut command, &self.pki.ca(), Some(&self.host_leaf));
         command
@@ -638,19 +653,925 @@ fn finished(task: &Value) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Roles
+
+mod roles {
+    use super::*;
+    use supertag_protocol::{
+        AUTH_KEY_SECRET_PREFIX, CREDENTIAL_SECRET_PREFIX, new_secret,
+        v2::{
+            AcceptEventRequest, ClaimConnectorRequest, ClaimOperatorNotificationRequest,
+            ClaimTaskRequest, CreateAuthKeyRequest, CreateObjectiveRequest,
+            CreateOperatorTokenRequest, EnrollRequest, GetObjectiveRequest, GetTagRequest,
+            GetTaskRequest, ListAuditEntriesRequest, ListAuthKeysRequest, ListConversationsRequest,
+            ListHostsRequest, ListInboxItemsRequest, ListObjectivesRequest,
+            ListOperatorTokensRequest, PrincipalRole, PutTagRequest, RegisterHostRequest,
+            RevokeAuthKeyRequest, RevokeEnrollmentRequest, RotateCredentialRequest,
+            SendMessageRequest, SubmitTaskRequest, WhoAmIRequest, auth_keys_client::AuthKeysClient,
+            connector_client::ConnectorClient, conversations_client::ConversationsClient,
+            enrollments_client::EnrollmentsClient, inbox_client::InboxClient,
+            objectives_client::ObjectivesClient, operator_access_client::OperatorAccessClient,
+            operator_notifications_client::OperatorNotificationsClient,
+            worker_host_client::WorkerHostClient,
+        },
+    };
+    use tonic::{Code, Request, Status};
+
+    fn call<T>(message: T, secret: &str) -> Result<Request<T>> {
+        let mut request = authenticated_request(message, secret, None)?;
+        request.set_timeout(Duration::from_secs(10));
+        Ok(request)
+    }
+
+    fn admitted<T>(result: std::result::Result<T, Status>) -> bool {
+        match result {
+            Ok(_) => true,
+            Err(status) => !matches!(
+                status.code(),
+                Code::PermissionDenied | Code::Unauthenticated
+            ),
+        }
+    }
+
+    fn denied<T: std::fmt::Debug>(result: std::result::Result<T, Status>) -> Result<Code> {
+        let status = result.err().context("the call was admitted")?;
+        ensure!(
+            matches!(
+                status.code(),
+                Code::PermissionDenied | Code::Unauthenticated | Code::NotFound
+            ),
+            "unexpected refusal: {status:?}"
+        );
+        Ok(status.code())
+    }
+
+    /// One representative RPC per row of the approved table, in this order: Operator Tokens,
+    /// enrollment admin, configuration, fleet, read Tags, converse, Inbox, execution, surfaces,
+    /// own identity.
+    const ROWS: [&str; 10] = [
+        "tokens",
+        "auth-keys",
+        "put-tag",
+        "hosts",
+        "tags",
+        "converse",
+        "inbox",
+        "execute",
+        "surfaces",
+        "whoami",
+    ];
+
+    async fn row(channel: &ProtocolChannel, secret: &str) -> Result<[bool; 10]> {
+        let ch = || channel.clone();
+        Ok([
+            admitted(
+                OperatorAccessClient::new(ch())
+                    .list_operator_tokens(call(ListOperatorTokensRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                AuthKeysClient::new(ch())
+                    .list_auth_keys(call(ListAuthKeysRequest::default(), secret)?)
+                    .await,
+            ),
+            // An empty Tag is invalid, so an admitted call changes nothing.
+            admitted(
+                OperatorClient::new(ch())
+                    .put_tag(call(PutTagRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                OperatorClient::new(ch())
+                    .list_hosts(call(ListHostsRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                OperatorClient::new(ch())
+                    .list_tags(call(ListTagsRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                ConversationsClient::new(ch())
+                    .list_conversations(call(
+                        ListConversationsRequest {
+                            tag_id: "open".into(),
+                            ..Default::default()
+                        },
+                        secret,
+                    )?)
+                    .await,
+            ),
+            admitted(
+                InboxClient::new(ch())
+                    .list_items(call(ListInboxItemsRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                WorkerHostClient::new(ch())
+                    .register_host(call(
+                        RegisterHostRequest {
+                            incarnation_id: "4e2f3c9a-6c1a-4a55-9b47-55ea2a3b9e10".into(),
+                        },
+                        secret,
+                    )?)
+                    .await,
+            ),
+            admitted(
+                OperatorNotificationsClient::new(ch())
+                    .claim(call(ClaimOperatorNotificationRequest::default(), secret)?)
+                    .await,
+            ),
+            admitted(
+                EnrollmentsClient::new(ch())
+                    .who_am_i(call(WhoAmIRequest {}, secret)?)
+                    .await,
+            ),
+        ])
+    }
+
+    async fn enroll(
+        channel: &ProtocolChannel,
+        key: &str,
+        role: PrincipalRole,
+        name: &str,
+    ) -> std::result::Result<String, Status> {
+        let credential = new_secret(CREDENTIAL_SECRET_PREFIX);
+        EnrollmentsClient::new(channel.clone())
+            .enroll(
+                call(
+                    EnrollRequest {
+                        role: role.into(),
+                        name: name.into(),
+                        operation_id: Uuid::new_v4().to_string(),
+                        token_digest: Sha256::digest(credential.as_bytes()).to_vec(),
+                    },
+                    key,
+                )
+                .map_err(|error| Status::internal(error.to_string()))?,
+            )
+            .await?;
+        Ok(credential)
+    }
+
+    async fn issue(
+        channel: &ProtocolChannel,
+        admin: &str,
+        name: &str,
+        role: PrincipalRole,
+        tags: &[&str],
+        reusable: bool,
+    ) -> Result<String> {
+        let key = new_secret(AUTH_KEY_SECRET_PREFIX);
+        OperatorClient::new(channel.clone())
+            .create_auth_key(call(
+                CreateAuthKeyRequest {
+                    name: name.into(),
+                    role: role.into(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    key_digest: Sha256::digest(key.as_bytes()).to_vec(),
+                    allowed_tag_ids: tags.iter().map(|tag| (*tag).into()).collect(),
+                    all_tags: tags.is_empty(),
+                    reusable,
+                    ..Default::default()
+                },
+                admin,
+            )?)
+            .await?;
+        Ok(key)
+    }
+
+    pub(super) async fn native_channel(deployment: &Deployment) -> Result<ProtocolChannel> {
+        let endpoint = Endpoint::from_shared(format!("https://{}", deployment.control_native))?
+            .connect_timeout(Duration::from_secs(5))
+            .tls_config(
+                ClientTlsConfig::new()
+                    .ca_certificate(Certificate::from_pem(std::fs::read(deployment.pki.ca())?))
+                    .identity(deployment.operator_leaf.identity()?),
+            )?;
+        protocol::negotiated(endpoint.connect().await?).await
+    }
+
+    /// The approved role matrix, over native gRPC and through the WebSocket tunnel, then the
+    /// escalation, credential and audit cases of contributing/auth-key-roles-design.md.
+    pub(super) async fn exercise(database: String) -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let deployment = Deployment::start(&database, directory.path()).await?;
+        let admin = deployment.tokens.operator.clone();
+        let native = native_channel(&deployment).await?;
+        let tunnel = deployment
+            .operator_channel(&deployment.control_edge.url())
+            .await?;
+        let operator = OperatorClient::new(native.clone());
+        for tag in ["open", "closed"] {
+            operator
+                .clone()
+                .put_tag(call(
+                    PutTagRequest {
+                        tag_id: tag.into(),
+                        instructions: "Help".into(),
+                        ..Default::default()
+                    },
+                    &admin,
+                )?)
+                .await?;
+        }
+
+        // Every enrollee joins with an Auth Key of its role.
+        let host_key = issue(
+            &native,
+            &admin,
+            "matrix-host",
+            PrincipalRole::Host,
+            &["open"],
+            false,
+        )
+        .await?;
+        let gateway_key = issue(
+            &native,
+            &admin,
+            "matrix-gateway",
+            PrincipalRole::Gateway,
+            &[],
+            false,
+        )
+        .await?;
+        let alice_key = issue(
+            &native,
+            &admin,
+            "alice-key",
+            PrincipalRole::Client,
+            &["open"],
+            false,
+        )
+        .await?;
+        let bob_key = issue(
+            &native,
+            &admin,
+            "bob-key",
+            PrincipalRole::Client,
+            &["open"],
+            true,
+        )
+        .await?;
+        let host = enroll(&tunnel, &host_key, PrincipalRole::Host, "matrix-host").await?;
+        let gateway = enroll(
+            &native,
+            &gateway_key,
+            PrincipalRole::Gateway,
+            "matrix-gateway",
+        )
+        .await?;
+        let alice = enroll(&tunnel, &alice_key, PrincipalRole::Client, "alice").await?;
+        let bob = enroll(&native, &bob_key, PrincipalRole::Client, "bob").await?;
+        let token = format!("stop_{}", &new_secret("")[..64]);
+        OperatorAccessClient::new(native.clone())
+            .create_operator_token(call(
+                CreateOperatorTokenRequest {
+                    name: "ops".into(),
+                    operation_id: "ops".into(),
+                    secret_digest: Sha256::digest(token.as_bytes()).to_vec(),
+                },
+                &admin,
+            )?)
+            .await?;
+
+        // The matrix: who is admitted to each row, on both transports.
+        let expected: [(&str, &str, [bool; 10]); 6] = [
+            (
+                "admin operator",
+                &admin,
+                [true, true, true, true, true, true, true, false, false, true],
+            ),
+            (
+                "Operator Token",
+                &token,
+                [
+                    false, true, true, true, true, true, true, false, false, true,
+                ],
+            ),
+            (
+                "host",
+                &host,
+                [
+                    false, false, false, false, false, false, false, true, false, true,
+                ],
+            ),
+            (
+                "gateway",
+                &gateway,
+                [
+                    false, false, false, false, false, false, false, false, true, true,
+                ],
+            ),
+            (
+                "client",
+                &alice,
+                [
+                    false, false, false, false, true, true, true, false, false, true,
+                ],
+            ),
+            ("Auth Key", &host_key, [false; 10]),
+        ];
+        for (transport, channel) in [("native", &native), ("tunnel", &tunnel)] {
+            for (who, secret, allowed) in &expected {
+                let got = row(channel, secret).await?;
+                for (index, name) in ROWS.iter().enumerate() {
+                    ensure!(
+                        got[index] == allowed[index],
+                        "{transport}: {who} on {name}: admitted {} but the table says {}",
+                        got[index],
+                        allowed[index]
+                    );
+                }
+            }
+        }
+
+        // Escalation: a client is no operator, host, or Gateway.
+        let client = |secret: &str| -> Result<(OperatorClient<ProtocolChannel>, String)> {
+            Ok((OperatorClient::new(native.clone()), secret.to_owned()))
+        };
+        let (mut as_alice, _) = client(&alice)?;
+        denied(
+            as_alice
+                .put_tag(call(
+                    PutTagRequest {
+                        tag_id: "open".into(),
+                        instructions: "Mine".into(),
+                        ..Default::default()
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            as_alice
+                .create_auth_key(call(
+                    CreateAuthKeyRequest {
+                        name: "escalate".into(),
+                        role: PrincipalRole::Client.into(),
+                        operation_id: "escalate".into(),
+                        key_digest: vec![1; 32],
+                        all_tags: true,
+                        ..Default::default()
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            as_alice
+                .submit_task(call(
+                    SubmitTaskRequest {
+                        tag_id: "open".into(),
+                        session_id: "s".into(),
+                        operation_id: "s".into(),
+                        prompt: "p".into(),
+                        ..Default::default()
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            OperatorAccessClient::new(native.clone())
+                .create_operator_token(call(
+                    CreateOperatorTokenRequest {
+                        name: "mine".into(),
+                        operation_id: "mine".into(),
+                        secret_digest: vec![2; 32],
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            WorkerHostClient::new(native.clone())
+                .claim_task(call(
+                    ClaimTaskRequest {
+                        operation_id: "steal".into(),
+                        ..Default::default()
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            ConnectorClient::new(native.clone())
+                .accept_event(supertag_protocol::connector_request(
+                    AcceptEventRequest::default(),
+                    &alice,
+                    "acme",
+                )?)
+                .await,
+        )?;
+        // A host converses with no one and sees no fleet.
+        denied(
+            ObjectivesClient::new(native.clone())
+                .create_objective(call(
+                    CreateObjectiveRequest {
+                        objective_id: "host-goal".into(),
+                        owner_tag_id: "open".into(),
+                        outcome: "x".into(),
+                        operation_id: "host-goal".into(),
+                        ..Default::default()
+                    },
+                    &host,
+                )?)
+                .await,
+        )?;
+        denied(
+            ConversationsClient::new(native.clone())
+                .send_message(call(
+                    SendMessageRequest {
+                        tag_id: "open".into(),
+                        conversation: "c".into(),
+                        text: "hi".into(),
+                        operation_id: "h".into(),
+                        ..Default::default()
+                    },
+                    &host,
+                )?)
+                .await,
+        )?;
+        denied(
+            operator
+                .clone()
+                .list_hosts(call(ListHostsRequest::default(), &host)?)
+                .await,
+        )?;
+        // A Gateway administers nothing, runs nothing, and serves only its own accounts.
+        denied(
+            operator
+                .clone()
+                .put_tag(call(
+                    PutTagRequest {
+                        tag_id: "open".into(),
+                        instructions: "x".into(),
+                        ..Default::default()
+                    },
+                    &gateway,
+                )?)
+                .await,
+        )?;
+        denied(
+            WorkerHostClient::new(native.clone())
+                .claim_task(call(ClaimTaskRequest::default(), &gateway)?)
+                .await,
+        )?;
+        denied(
+            operator
+                .clone()
+                .get_task(call(
+                    GetTaskRequest {
+                        task_id: "any".into(),
+                    },
+                    &gateway,
+                )?)
+                .await,
+        )?;
+        let claim = |secret: &str| -> Result<Request<ClaimConnectorRequest>> {
+            Ok(supertag_protocol::connector_request(
+                ClaimConnectorRequest {
+                    owner_id: "matrix".into(),
+                },
+                secret,
+                "matrix/acme",
+            )?)
+        };
+        ConnectorClient::new(native.clone())
+            .claim_connector(claim(&deployment.tokens.gateway)?)
+            .await?;
+        ensure!(
+            denied(
+                ConnectorClient::new(native.clone())
+                    .claim_connector(claim(&gateway)?)
+                    .await
+            )? == Code::PermissionDenied,
+            "a Gateway acted for an account another Gateway serves"
+        );
+        // An Operator Token is no admin.
+        denied(
+            OperatorAccessClient::new(native.clone())
+                .create_operator_token(call(
+                    CreateOperatorTokenRequest {
+                        name: "again".into(),
+                        operation_id: "again".into(),
+                        secret_digest: vec![3; 32],
+                    },
+                    &token,
+                )?)
+                .await,
+        )?;
+
+        // Clients see their own work only, within their key's Tags.
+        let conversations = ConversationsClient::new(tunnel.clone());
+        let sent = conversations
+            .clone()
+            .send_message(call(
+                SendMessageRequest {
+                    tag_id: "open".into(),
+                    conversation: "secret".into(),
+                    text: "Mine".into(),
+                    operation_id: "alice-1".into(),
+                    ..Default::default()
+                },
+                &alice,
+            )?)
+            .await?
+            .into_inner();
+        let alice_task = sent.task.context("message Task")?.task_id;
+        denied(
+            conversations
+                .clone()
+                .send_message(call(
+                    SendMessageRequest {
+                        tag_id: "closed".into(),
+                        conversation: "secret".into(),
+                        text: "Not mine".into(),
+                        operation_id: "alice-2".into(),
+                        ..Default::default()
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        denied(
+            operator
+                .clone()
+                .get_tag(call(
+                    GetTagRequest {
+                        tag_id: "closed".into(),
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        let tags = operator
+            .clone()
+            .list_tags(call(ListTagsRequest::default(), &alice)?)
+            .await?
+            .into_inner();
+        ensure!(
+            tags.tags
+                .iter()
+                .map(|tag| tag.tag_id.as_str())
+                .collect::<Vec<_>>()
+                == ["open"],
+            "a client listed Tags its key does not allow"
+        );
+        operator
+            .clone()
+            .get_task(call(
+                GetTaskRequest {
+                    task_id: alice_task.clone(),
+                },
+                &alice,
+            )?)
+            .await?;
+        operator
+            .clone()
+            .get_task(call(
+                GetTaskRequest {
+                    task_id: alice_task.clone(),
+                },
+                &admin,
+            )?)
+            .await?;
+        denied(
+            operator
+                .clone()
+                .get_task(call(
+                    GetTaskRequest {
+                        task_id: alice_task.clone(),
+                    },
+                    &bob,
+                )?)
+                .await,
+        )?;
+        let submitted = operator
+            .clone()
+            .submit_task(call(
+                SubmitTaskRequest {
+                    tag_id: "open".into(),
+                    session_id: "ops".into(),
+                    operation_id: "ops".into(),
+                    prompt: "Ownerless".into(),
+                    ..Default::default()
+                },
+                &admin,
+            )?)
+            .await?
+            .into_inner();
+        denied(
+            operator
+                .clone()
+                .get_task(call(
+                    GetTaskRequest {
+                        task_id: submitted.task_id,
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        let objectives = ObjectivesClient::new(native.clone());
+        let created = objectives
+            .clone()
+            .create_objective(call(
+                CreateObjectiveRequest {
+                    objective_id: "alice-goal".into(),
+                    owner_tag_id: "open".into(),
+                    outcome: "Ship it".into(),
+                    operation_id: "alice-goal".into(),
+                    ..Default::default()
+                },
+                &alice,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(created.created_by == "client:alice", "{created:?}");
+        objectives
+            .clone()
+            .create_objective(call(
+                CreateObjectiveRequest {
+                    objective_id: "ops-goal".into(),
+                    owner_tag_id: "open".into(),
+                    outcome: "Operate".into(),
+                    operation_id: "ops-goal".into(),
+                    ..Default::default()
+                },
+                &admin,
+            )?)
+            .await?;
+        denied(
+            objectives
+                .clone()
+                .get_objective(call(
+                    GetObjectiveRequest {
+                        objective_id: "alice-goal".into(),
+                    },
+                    &bob,
+                )?)
+                .await,
+        )?;
+        denied(
+            objectives
+                .clone()
+                .get_objective(call(
+                    GetObjectiveRequest {
+                        objective_id: "ops-goal".into(),
+                    },
+                    &alice,
+                )?)
+                .await,
+        )?;
+        let listed = objectives
+            .clone()
+            .list_objectives(call(ListObjectivesRequest::default(), &alice)?)
+            .await?
+            .into_inner();
+        ensure!(
+            listed
+                .objectives
+                .iter()
+                .map(|o| o.objective_id.as_str())
+                .collect::<Vec<_>>()
+                == ["alice-goal"]
+        );
+        objectives
+            .clone()
+            .get_objective(call(
+                GetObjectiveRequest {
+                    objective_id: "alice-goal".into(),
+                },
+                &admin,
+            )?)
+            .await?;
+
+        // Credentials: a revoked one ends an open stream within about a second; a rotated one
+        // stops at once; keys are single-use, role-bound, revocable and expire.
+        let mut stream = watch(tunnel.clone(), &alice).await?;
+        EnrollmentsClient::new(native.clone())
+            .revoke_enrollment(call(
+                RevokeEnrollmentRequest {
+                    role: PrincipalRole::Client.into(),
+                    name: "alice".into(),
+                },
+                &admin,
+            )?)
+            .await?;
+        let ended = timeout(Duration::from_secs(5), async {
+            loop {
+                match stream.message().await {
+                    Ok(Some(_)) => continue,
+                    Ok(None) => return Code::Ok,
+                    Err(status) => return status.code(),
+                }
+            }
+        })
+        .await
+        .context("a revoked client's Watch stayed open")?;
+        ensure!(ended == Code::Unauthenticated, "{ended:?}");
+        ensure!(
+            denied(
+                operator
+                    .clone()
+                    .list_tags(call(ListTagsRequest::default(), &alice)?)
+                    .await
+            )? == Code::Unauthenticated
+        );
+        let rotated = new_secret(CREDENTIAL_SECRET_PREFIX);
+        let rotation = EnrollmentsClient::new(tunnel.clone())
+            .rotate_credential(call(
+                RotateCredentialRequest {
+                    role: PrincipalRole::Client.into(),
+                    name: String::new(),
+                    expected_credential_revision: 0,
+                    token_digest: Sha256::digest(rotated.as_bytes()).to_vec(),
+                },
+                &bob,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(
+            rotation.principal == "client:bob" && rotation.credential_revision == 2,
+            "{rotation:?}"
+        );
+        ensure!(
+            denied(
+                operator
+                    .clone()
+                    .list_tags(call(ListTagsRequest::default(), &bob)?)
+                    .await
+            )? == Code::Unauthenticated
+        );
+        operator
+            .clone()
+            .list_tags(call(ListTagsRequest::default(), &rotated)?)
+            .await?;
+        // A client may not rotate another enrollee.
+        denied(
+            EnrollmentsClient::new(native.clone())
+                .rotate_credential(call(
+                    RotateCredentialRequest {
+                        role: PrincipalRole::Host.into(),
+                        name: "matrix-host".into(),
+                        expected_credential_revision: 1,
+                        token_digest: vec![4; 32],
+                    },
+                    &rotated,
+                )?)
+                .await,
+        )?;
+        ensure!(
+            enroll(&native, &alice_key, PrincipalRole::Client, "mallory")
+                .await
+                .unwrap_err()
+                .code()
+                == Code::PermissionDenied,
+            "a one-time key enrolled twice"
+        );
+        ensure!(
+            enroll(&native, &bob_key, PrincipalRole::Host, "mallory")
+                .await
+                .unwrap_err()
+                .code()
+                == Code::FailedPrecondition,
+            "a client key enrolled a host"
+        );
+        enroll(&tunnel, &bob_key, PrincipalRole::Client, "carol").await?;
+        AuthKeysClient::new(native.clone())
+            .revoke_auth_key(call(
+                RevokeAuthKeyRequest {
+                    name: "bob-key".into(),
+                },
+                &admin,
+            )?)
+            .await?;
+        ensure!(
+            enroll(&native, &bob_key, PrincipalRole::Client, "dave")
+                .await
+                .unwrap_err()
+                .code()
+                == Code::PermissionDenied,
+            "a revoked key enrolled"
+        );
+        ensure!(
+            enroll(&native, &rotated, PrincipalRole::Client, "erin")
+                .await
+                .unwrap_err()
+                .code()
+                == Code::Unauthenticated,
+            "an enrolled credential enrolled"
+        );
+        let brief = run_json(deployment.operator(&[
+            "auth-key",
+            "create",
+            "brief",
+            "--role",
+            "client",
+            "--all-tags",
+            "--expires-in-seconds",
+            "1",
+        ]))
+        .await?;
+        let brief = brief["auth_key"].as_str().context("auth_key")?.to_owned();
+        sleep(Duration::from_millis(1_200)).await;
+        ensure!(
+            enroll(&tunnel, &brief, PrincipalRole::Client, "frank")
+                .await
+                .unwrap_err()
+                .code()
+                == Code::PermissionDenied,
+            "an expired key enrolled"
+        );
+
+        // Audit: enrollment under the key, then actions under the full principal.
+        let audit = OperatorAccessClient::new(native.clone())
+            .list_audit_entries(call(
+                ListAuditEntriesRequest {
+                    limit: 500,
+                    ..Default::default()
+                },
+                &admin,
+            )?)
+            .await?
+            .into_inner()
+            .entries;
+        let has = |actor: &str, action: &str, target: &str, succeeded: bool| {
+            audit.iter().any(|entry| {
+                entry.actor == actor
+                    && entry.action == action
+                    && entry.target == target
+                    && (entry.outcome == supertag_protocol::v2::AuditOutcome::Succeeded as i32)
+                        == succeeded
+            })
+        };
+        for (actor, action, target, succeeded) in [
+            (
+                "auth-key:alice-key",
+                "enrollment.join",
+                "Client/alice",
+                true,
+            ),
+            (
+                "auth-key:matrix-gateway",
+                "enrollment.join",
+                "Gateway/matrix-gateway",
+                true,
+            ),
+            ("client:alice", "tag.message", "Tag/open", true),
+            (
+                "client:alice",
+                "objective.create",
+                "Objective/alice-goal",
+                true,
+            ),
+            (
+                "operator:local",
+                "objective.create",
+                "Objective/ops-goal",
+                true,
+            ),
+            ("operator:local", "enrollment.revoke", "Client/alice", true),
+            ("client:bob", "credential.rotate", "Client/bob", true),
+        ] {
+            ensure!(
+                has(actor, action, target, succeeded),
+                "missing audit entry {actor} {action} {target}: {audit:?}"
+            );
+        }
+        // Calls the authorization layer refuses change nothing and leave no entry.
+        ensure!(
+            !audit
+                .iter()
+                .any(|entry| entry.actor.starts_with("client:") && entry.action == "tag.put"),
+            "a refused client call was recorded"
+        );
+        Ok(())
+    }
+}
+
+async fn every_role_is_held_to_its_table_row_natively_and_through_the_tunnel(
+    database: String,
+) -> Result<()> {
+    roles::exercise(database).await
+}
+
+// ---------------------------------------------------------------------------
 // Call shapes
 
-/// The Gateway's whole public surface and its Control Plane link run through tunnels:
-/// unary operator and Worker Host calls, the client-streaming Workspace upload, the
-/// server-streaming artifact download, and a Watch stream. The native listener keeps
-/// working beside the tunnel, and clients without valid inner TLS are refused.
+/// The Control Plane's whole public surface runs through a tunnel: unary operator and Worker
+/// Host calls, the client-streaming Workspace upload, the server-streaming artifact download,
+/// and a Watch stream. A Gateway reaches the Control Plane, and an operator the Gateway,
+/// through tunnels too. The native listener keeps working beside the tunnel, and clients
+/// without valid inner TLS are refused.
 async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let mut deployment = Deployment::start(&database, root).await?;
-    let public = deployment.gateway_edge.url();
+    let public = deployment.control_edge.url();
 
     let source = root.join("source");
     std::fs::create_dir(&source)?;
@@ -731,7 +1652,7 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     );
     assert_eq!(receipt["sha256"], delivery["bundle"]["sha256"]);
 
-    // The native listener still answers on the same Gateway.
+    // The native listener still answers on the same Control Plane.
     let native = run_json(deployment.native_operator(&["get", "task", &task_id])).await?;
     assert_eq!(native["state"], "TASK_STATE_SUCCEEDED");
 
@@ -748,10 +1669,10 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
         let output = run(deployment.operator_at(&public, &["get", "tags"], leaf)).await?;
         ensure!(
             !output.status.success(),
-            "an operator with {case} reached the Gateway through the tunnel"
+            "an operator with {case} reached the Control Plane through the tunnel"
         );
     }
-    let accepted = deployment.gateway_edge.accepted();
+    let accepted = deployment.control_edge.accepted();
     let mut client = OperatorClient::new(deployment.operator_channel(&public).await?);
     let tags = client
         .list_tags(authenticated_request(
@@ -762,10 +1683,32 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
         .await?
         .into_inner();
     assert_eq!(tags.tags.len(), 1);
-    ensure!(deployment.gateway_edge.accepted() > accepted);
-    ensure!(deployment.control_edge.accepted() >= 1);
+    ensure!(deployment.control_edge.accepted() > accepted);
+    ensure!(deployment.gateway_link.accepted() >= 1);
 
-    // The Control Plane accepts only the Gateway's certificate inside its tunnel too.
+    // The Gateway's own listener takes the operator's test notification through its tunnel.
+    let mut test = binary(&[
+        "test",
+        "notification",
+        "--gateway",
+        &deployment.gateway_edge.url(),
+    ]);
+    test.env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
+    client_tls(
+        &mut test,
+        &deployment.pki.ca(),
+        Some(&deployment.operator_leaf),
+    );
+    let output = run(test).await?;
+    ensure!(
+        output.status.success() && String::from_utf8_lossy(&output.stdout).starts_with("desktop: "),
+        "test notification through the Gateway tunnel: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    ensure!(deployment.gateway_edge.accepted() >= 1);
+
+    // The Control Plane requires a client certificate inside its tunnel too.
     let anonymous = Endpoint::from_shared(
         tunneled_uri(&deployment.control_edge.url())
             .map_err(|error| anyhow!(error))?
@@ -817,9 +1760,9 @@ fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok((script, launches))
 }
 
-/// While an Attempt runs, the edge in front of the Gateway severs the Worker Host's
-/// tunnel and refuses reconnects, then the edge in front of the Control Plane severs
-/// the Gateway's tunnel. Both clients classify the dropped tunnel as a retryable
+/// While an Attempt runs, the edge in front of the Control Plane severs the Worker Host's
+/// tunnel and refuses reconnects, then the Gateway's edge to the Control Plane severs the
+/// Gateway's tunnel. Both clients classify the dropped tunnel as a retryable
 /// transport failure, reconnect once the edges recover, and the Attempt finishes
 /// exactly once with the adapter launched once.
 async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: String) -> Result<()> {
@@ -827,7 +1770,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     let root = directory.path();
     let mut deployment = Deployment::start(&database, root).await?;
     // The Worker Host has its own edge, so operator checks never cross the partition.
-    let host_edge = Edge::start(deployment.gateway_tunnel, &deployment.edge_leaf).await?;
+    let host_edge = Edge::start(deployment.control_tunnel, &deployment.edge_leaf).await?;
     run_json(deployment.operator(&["tag", "put", "steady", "--instructions", "Answer"])).await?;
     let state = deployment
         .enroll("steady-host", "steady", &host_edge.url())
@@ -890,11 +1833,11 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     }
 
     // Sever the Gateway's tunnel to the Control Plane; the Gateway reconnects on demand.
-    deployment.control_edge.partition();
+    deployment.gateway_link.partition();
     sleep(Duration::from_secs(3)).await;
-    let accepted = deployment.control_edge.accepted();
-    deployment.control_edge.restore();
-    sleep(Duration::from_secs(2)).await;
+    let accepted = deployment.gateway_link.accepted();
+    deployment.gateway_link.restore();
+    sleep(Duration::from_secs(4)).await;
 
     std::fs::write(&release, "")?;
     let task = wait_for_task(get, finished, || host.logs()).await?;
@@ -904,7 +1847,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     let launched = std::fs::read_to_string(&launches)?.lines().count();
     assert_eq!(launched, 1, "the adapter ran {launched} times");
     ensure!(
-        deployment.control_edge.accepted() > accepted,
+        deployment.gateway_link.accepted() > accepted,
         "the Gateway never reconnected to the Control Plane"
     );
     ensure!(host.running()? && deployment.running()?);
@@ -915,7 +1858,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
 // A real HTTP/1.1-only reverse proxy
 
 /// nginx in Docker, terminating TLS and forwarding only WebSocket upgrades over HTTP/1.1
-/// to the Gateway's tunnel listener. It closes a connection that carries nothing for 25
+/// to the Control Plane's tunnel listener. It closes a connection that carries nothing for 25
 /// seconds, as platform proxies do.
 struct Nginx {
     docker: std::ffi::OsString,
@@ -1061,7 +2004,7 @@ async fn tunnel_crosses_an_http1_only_nginx_and_outlives_its_idle_timeout() -> R
         docker,
         root,
         &deployment.edge_leaf,
-        deployment.gateway_tunnel,
+        deployment.control_tunnel,
     )
     .await?;
     let public = nginx.url();

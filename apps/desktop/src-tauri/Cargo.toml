@@ -32,6 +32,6 @@ libc = "0.2"
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 supertag-control-plane = { path = "../../../rust/crates/control-plane" }
-supertag-gateway = { path = "../../../rust/crates/gateway" }
+supertag-api = { path = "../../../rust/crates/api" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }

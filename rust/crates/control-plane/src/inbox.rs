@@ -8,7 +8,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError, objective_limits as limits,
-    objectives::{objective_admission_in, objective_link_task_in},
+    objectives::{ensure_objective_access_in, objective_admission_in, objective_link_task_in},
     store::{Result, insert_task, invalid, lease_is_live, name, owned, task_in},
 };
 
@@ -26,15 +26,6 @@ struct Cursor {
     upper_order: i64,
     at: i64,
     key: String,
-}
-fn operator(principal: &str) -> Result<()> {
-    if principal
-        .strip_prefix("operator:")
-        .is_none_or(str::is_empty)
-    {
-        return Err(StoreError::PermissionDenied);
-    }
-    name("operator principal", principal)
 }
 fn nonempty_text(value: &str, maximum: usize) -> Result<&str> {
     let value = value.trim();
@@ -170,10 +161,13 @@ impl Store {
     }
 
     pub async fn get_question(&self, principal: &str, task_id: &str) -> Result<ObjectiveQuestion> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("question Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
         let question = question_in(&mut tx, task_id, true).await?;
+        ensure_objective_access_in(&mut tx, principal, &question.objective_id)
+            .await
+            .map_err(|_| StoreError::NotFound("question was not found".into()))?;
         tx.commit().await?;
         Ok(question)
     }
@@ -183,7 +177,7 @@ impl Store {
         principal: &str,
         input: &AnswerQuestionRequest,
     ) -> Result<Task> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("question Task ID", &input.task_id)?;
         name("operation ID", &input.operation_id)?;
         let text = nonempty_text(&input.text, 65_536)?;
@@ -199,6 +193,9 @@ impl Store {
             return Ok(task);
         }
         let question = question_in(&mut tx, &input.task_id, true).await?;
+        ensure_objective_access_in(&mut tx, principal, &question.objective_id)
+            .await
+            .map_err(|_| StoreError::NotFound("question was not found".into()))?;
         if !task_waits_in(&mut tx, &input.task_id).await? {
             return Err(StoreError::FailedPrecondition(
                 "question no longer waits for an answer".into(),
@@ -250,12 +247,19 @@ pub(crate) async fn inbox_page_in(
     principal: &str,
     input: &ListInboxItemsRequest,
 ) -> Result<ListInboxItemsResponse> {
-    operator(principal)?;
+    crate::store::actor(principal)?;
     if !input.objective_id.is_empty() {
         name("Objective ID", &input.objective_id)?;
     }
     let kind = InboxItemKind::try_from(input.kind).map_err(|_| invalid("unknown Inbox kind"))?;
     let scope = format!("{:x}", Sha256::digest(principal.as_bytes()));
+    // A client sees the items of the Objectives it created. Execution recovery and MCP
+    // logins are Worker Host work, which only operators see and act on.
+    let creator = if principal.starts_with("client:") {
+        principal
+    } else {
+        ""
+    };
     let cursor = if input.cursor.is_empty() {
         Cursor {
             version: 1,
@@ -289,8 +293,8 @@ pub(crate) async fn inbox_page_in(
     let mut items = vec![];
     let mut truncated = vec![];
     if wants(&cursor, InboxItemKind::Question) {
-        let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
-            .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
+        let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND ($8='' OR o.created_by=$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
+            .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).bind(creator).fetch_all(&mut **tx).await?;
         if rows.len() > SCAN {
             truncated.push(InboxItemKind::Question as i32);
         }
@@ -320,8 +324,8 @@ pub(crate) async fn inbox_page_in(
     if wants(&cursor, InboxItemKind::ObjectiveBudget)
         || wants(&cursor, InboxItemKind::ObjectiveLimit)
     {
-        let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND EXISTS (SELECT 1 FROM supertag_v2_attempt_usage usage JOIN supertag_v2_objective_tasks ot ON ot.task_id=usage.task_id WHERE ot.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
-            .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(cursor.as_of_ms).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
+        let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND ($6='' OR created_by=$6) AND EXISTS (SELECT 1 FROM supertag_v2_attempt_usage usage JOIN supertag_v2_objective_tasks ot ON ot.task_id=usage.task_id WHERE ot.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
+            .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(cursor.as_of_ms).bind(&cursor.objective_id).bind((SCAN + 1) as i64).bind(creator).fetch_all(&mut **tx).await?;
         if rows.len() > SCAN {
             for kind in [
                 InboxItemKind::ObjectiveBudget,
@@ -378,7 +382,7 @@ pub(crate) async fn inbox_page_in(
             }
         }
     }
-    if wants(&cursor, InboxItemKind::TaskAttention) {
+    if creator.is_empty() && wants(&cursor, InboxItemKind::TaskAttention) {
         // Preserve the legacy Objective scope; personal conversation text and
         // another operator's private Sessions never enter this projection.
         let rows = sqlx::query("SELECT t.task_id,t.attempt_id,t.lease_expires_at_ms,t.host_principal,o.objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) AND t.lease_expires_at_ms<=$5 ORDER BY t.lease_expires_at_ms,t.task_id LIMIT $6")
@@ -408,7 +412,7 @@ pub(crate) async fn inbox_page_in(
         }
         items.extend(pending.into_iter().take(SCAN));
     }
-    if wants(&cursor, InboxItemKind::McpLogin) {
+    if creator.is_empty() && wants(&cursor, InboxItemKind::McpLogin) {
         let (logins, more) = mcp_logins_in(tx, &cursor).await?;
         if more {
             truncated.push(InboxItemKind::McpLogin as i32);
@@ -656,7 +660,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<ListInboxItemsRequest>,
     ) -> std::result::Result<Response<ListInboxItemsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_inbox_items(&principal, request.get_ref())
@@ -667,7 +671,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<GetQuestionRequest>,
     ) -> std::result::Result<Response<ObjectiveQuestion>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_question(&principal, &request.get_ref().task_id)
@@ -678,7 +682,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<AnswerQuestionRequest>,
     ) -> std::result::Result<Response<Task>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .answer_question(&principal, request.get_ref())
@@ -689,7 +693,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<GetApprovalRequest>,
     ) -> std::result::Result<Response<Approval>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_approval(&principal, &request.get_ref().approval_id)
@@ -700,7 +704,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<ListApprovalsRequest>,
     ) -> std::result::Result<Response<ListApprovalsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_approvals(&principal, request.get_ref())
@@ -711,7 +715,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<DecideApprovalRequest>,
     ) -> std::result::Result<Response<Approval>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .decide_approval(&principal, request.get_ref())

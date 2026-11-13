@@ -1,7 +1,7 @@
-//! Operator Tokens and the audit log through separate Control Plane and Gateway processes.
+//! Operator Tokens and the audit log through a separate Control Plane process.
 //!
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
-//! Gateway refuses the revoked token on new calls and ends a Watch stream and an artifact download
+//! Control Plane refuses the revoked token on new calls and ends a Watch stream and an artifact download
 //! it already opened. The audit log names every resource a call changed.
 #[path = "support/protocol.rs"]
 mod protocol;
@@ -39,9 +39,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             admin: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -60,7 +60,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.admin)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -145,10 +146,10 @@ fn cli(credentials: &Credentials, token: &str, gateway: &str, args: &[&str]) -> 
     Ok(String::from_utf8(output.stdout)?)
 }
 
-/// `supertag COMMAND --gateway URL ARGS...`: the connection belongs to the top-level command.
+/// `supertag COMMAND --control-plane URL ARGS...`: the connection belongs to the top-level command.
 fn command(credentials: &Credentials, gateway: &str, args: &[&str]) -> Command {
     let mut command = credentials.command(&args[..1]);
-    command.args(["--gateway", gateway]).args(&args[1..]);
+    command.args(["--control-plane", gateway]).args(&args[1..]);
     command
 }
 
@@ -180,18 +181,13 @@ fn put_tag(tag_id: &str) -> PutTagRequest {
     }
 }
 
-async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result<()> {
+async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let credentials = Credentials::new();
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", database);
     let mut control = Process::spawn(command, directory.path())?;
-    let private = control.address().await?;
-    let mut gateway = Process::spawn(
-        credentials.command(&["gateway", "--control-plane", &private]),
-        directory.path(),
-    )?;
-    let public = gateway.address().await?;
+    let public = control.address().await?;
     let channel =
         protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -210,9 +206,9 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         secret.starts_with("stop_") && secret.len() == 69,
         "{secret}"
     );
-    assert_eq!(created["operator_id"], "token:laptop-2");
+    assert_eq!(created["operator_id"], "operator:token:laptop-2");
     assert_eq!(created["phase"], "active");
-    assert_eq!(created["created_by"], "local");
+    assert_eq!(created["created_by"], "operator:local");
     let listed = cli(&credentials, &admin, &public, &["get", "operator-tokens"])?;
     assert!(!listed.contains(&secret));
     assert_eq!(json(&listed)?["operator_tokens"][0]["name"], "laptop-2");
@@ -243,17 +239,19 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         )?
         .contains("Only the admin operator token manages Operator Tokens")
     );
-    for forged in [
-        format!("stop_{}", "0".repeat(64)),
-        "stop_short".into(),
-        credentials.gateway.clone(),
-    ] {
+    for forged in [format!("stop_{}", "0".repeat(64)), "stop_short".into()] {
         let status = operator
             .list_tags(request(ListTagsRequest::default(), &forged)?)
             .await
             .unwrap_err();
         assert_eq!(status.code(), Code::Unauthenticated, "{forged}");
     }
+    // An enrolled Gateway is authenticated, and refused as a Gateway.
+    let status = operator
+        .list_tags(request(ListTagsRequest::default(), &credentials.gateway)?)
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), Code::PermissionDenied);
 
     // A Watch opened with the token is ended by revocation while it is open.
     let mut events = operator_events_client::OperatorEventsClient::new(channel.clone());
@@ -384,42 +382,46 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         })
         .collect();
     let expected = [
-        ("token:ci", "tag.retire", "Tag", "failed"),
-        ("token:ci", "tag.put", "Tag/builder", "succeeded"),
+        ("operator:token:ci", "tag.retire", "Tag", "failed"),
+        ("operator:token:ci", "tag.put", "Tag/builder", "succeeded"),
         (
-            "local",
+            "operator:local",
             "operator-token.rotate",
             "OperatorToken/ci",
             "succeeded",
         ),
         (
-            "local",
+            "operator:local",
             "operator-token.create",
             "OperatorToken/ci",
             "succeeded",
         ),
-        ("local", "operator-token.create", "OperatorToken", "failed"),
         (
-            "local",
-            "operator-token.revoke",
-            "OperatorToken/laptop-2",
-            "succeeded",
-        ),
-        (
-            "local",
-            "operator-token.revoke",
-            "OperatorToken/laptop-2",
-            "succeeded",
-        ),
-        (
-            "token:laptop-2",
+            "operator:local",
             "operator-token.create",
             "OperatorToken",
             "failed",
         ),
-        ("token:laptop-2", "tag.put", "Tag/reviewer", "succeeded"),
         (
-            "local",
+            "operator:local",
+            "operator-token.revoke",
+            "OperatorToken/laptop-2",
+            "succeeded",
+        ),
+        (
+            "operator:local",
+            "operator-token.revoke",
+            "OperatorToken/laptop-2",
+            "succeeded",
+        ),
+        (
+            "operator:token:laptop-2",
+            "tag.put",
+            "Tag/reviewer",
+            "succeeded",
+        ),
+        (
+            "operator:local",
             "operator-token.create",
             "OperatorToken/laptop-2",
             "succeeded",
@@ -433,13 +435,19 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         &credentials,
         &admin,
         &public,
-        &["audit", "--actor", "token:ci", "--since", "2020-01-01"],
+        &[
+            "audit",
+            "--actor",
+            "operator:token:ci",
+            "--since",
+            "2020-01-01",
+        ],
     )?;
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
     assert!(lines[0].starts_with("TIME"));
     assert!(
-        lines[1].contains("token:ci") && lines[1].ends_with("failed (NOT_FOUND)"),
+        lines[1].contains("operator:token:ci") && lines[1].ends_with("failed (NOT_FOUND)"),
         "{text}"
     );
     assert!(
@@ -461,32 +469,25 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
     Ok(())
 }
 
-/// A Control Plane and a Gateway with a blob directory, as separate processes.
+/// A Control Plane with a transfer directory, as a separate process.
 struct Services {
     _directory: tempfile::TempDir,
     _control: Process,
-    _gateway: Process,
-    private: String,
     public: String,
 }
 
 async fn services(credentials: &Credentials, database: &str) -> Result<Services> {
     let directory = tempfile::tempdir()?;
     let mut command = credentials.command(&["control-plane"]);
-    command.env("SUPERTAG_DATABASE_URL", database);
-    let mut control = Process::spawn(command, directory.path())?;
-    let private = control.address().await?;
-    let mut command = credentials.command(&["gateway", "--control-plane", &private]);
     command
-        .arg("--checkpoint-directory")
+        .env("SUPERTAG_DATABASE_URL", database)
+        .arg("--transfer-directory")
         .arg(directory.path().join("cas"));
-    let mut gateway = Process::spawn(command, directory.path())?;
-    let public = gateway.address().await?;
+    let mut control = Process::spawn(command, directory.path())?;
+    let public = control.address().await?;
     Ok(Services {
         _directory: directory,
         _control: control,
-        _gateway: gateway,
-        private,
         public,
     })
 }
@@ -538,7 +539,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
         manifest_relationships_client::ManifestRelationshipsClient::new(channel.clone());
     let mut teams = teams_client::TeamsClient::new(channel.clone());
     let secret = create_token(&credentials, &services.public, "auditor")?;
-    let actor = "token:auditor";
+    let actor = "operator:token:auditor";
 
     // IDs at the 256-byte limit still name their resource: the target is longer than any one ID.
     let long_tag = "t".repeat(253);
@@ -648,31 +649,28 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     assert_eq!(pruned.pruned.len(), 1);
     assert_eq!(pruned.pruned[0].action(), ApplySetPruneAction::Delete);
 
-    // A message larger than the Control Plane accepts is refused by tonic itself, and recorded with
-    // that refusal rather than as an empty request.
-    let private =
-        protocol::negotiated(Endpoint::from_shared(services.private.clone())?.connect_lazy())
+    // A message larger than the Control Plane accepts is refused by tonic in the API tier, before
+    // it reaches the state owner, so it changes and records nothing.
+    let public =
+        protocol::negotiated(Endpoint::from_shared(services.public.clone())?.connect_lazy())
             .await?;
-    let mut oversized = request(
+    let oversized = request(
         PutTagRequest {
             instructions: "x".repeat(MAX_MESSAGE_BYTES + 1024),
             ..put_tag("oversized")
         },
-        &credentials.gateway,
+        &credentials.admin,
     )?;
-    oversized
-        .metadata_mut()
-        .insert("x-supertag-principal", "operator:local".parse()?);
-    let refused = operator_client::OperatorClient::new(private)
+    let refused = operator_client::OperatorClient::new(public)
+        .max_encoding_message_size(2 * MAX_MESSAGE_BYTES)
         .put_tag(oversized)
         .await
         .unwrap_err();
     assert_ne!(refused.code(), Code::InvalidArgument, "{refused:?}");
-    let refused_code = format!("{:?}", refused.code());
 
     let entries = audit_entries(&credentials, &services.public)?;
     let mut expected = vec![entry(
-        "local",
+        "operator:local",
         "operator-token.create",
         "OperatorToken/auditor",
         "succeeded",
@@ -716,18 +714,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
             "OK",
         ),
     ]);
-    assert_eq!(entries[..expected.len()], expected[..]);
-    let last = entries.last().context("oversized entry")?;
-    assert_eq!(
-        last[..4],
-        entry("local", "tag.put", "Tag", "failed", "")[..4]
-    );
-    assert_eq!(
-        last[4].replace('_', "").to_lowercase(),
-        refused_code.to_lowercase(),
-        "{last:?}"
-    );
-    assert_eq!(entries.len(), expected.len() + 1);
+    assert_eq!(entries[..], expected[..]);
     Ok(())
 }
 
@@ -985,16 +972,16 @@ async fn postgres_revoked_token_ends_an_in_flight_download() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
+async fn sqlite_revoked_operator_token_is_refused_by_a_running_control_plane() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    revoked_token_is_refused_by_a_running_gateway(&sqlite_database(&directory)).await
+    revoked_token_is_refused_by_a_running_control_plane(&sqlite_database(&directory)).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_revoked_operator_token_is_refused_by_a_running_gateway() -> Result<()> {
-    postgres_database(
-        |url| async move { revoked_token_is_refused_by_a_running_gateway(&url).await },
-    )
+async fn postgres_revoked_operator_token_is_refused_by_a_running_control_plane() -> Result<()> {
+    postgres_database(|url| async move {
+        revoked_token_is_refused_by_a_running_control_plane(&url).await
+    })
     .await
 }

@@ -199,7 +199,7 @@ func (a *app) renderTaskFiles() string {
 		}
 	}
 	if d.busy {
-		lines = append(lines, "Reading from the Gateway…")
+		lines = append(lines, "Reading from the Control Plane…")
 		footer = "esc cancels"
 	}
 	if d.note != "" {

@@ -166,7 +166,10 @@ async fn contract(url: &str) {
     store.close().await;
 
     let store = open(url).await;
-    let tags = store.list_tags(&ListTagsRequest::default()).await.unwrap();
+    let tags = store
+        .list_tags("operator:local", &ListTagsRequest::default())
+        .await
+        .unwrap();
     assert_eq!(tags.tags, [updated]);
     assert_eq!(store.get_task(&first.task_id).await.unwrap(), first);
     assert_eq!(

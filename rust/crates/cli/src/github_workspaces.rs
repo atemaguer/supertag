@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum WorkspaceCommand {
-    /// Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway.
+    /// Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Control Plane.
     Put {
         workspace_id: String,
         /// Configured GitHub account that reads the repository.

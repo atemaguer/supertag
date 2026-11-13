@@ -2,7 +2,7 @@
 //! automatic import of each delivered Task of a Workspace one of its Worker Hosts maps.
 //!
 //! A Worker Host never writes the operator's repository. Its delivery is a verified bundle the
-//! Control Plane accepted; this machine downloads it through the Gateway, checks it against the
+//! Control Plane accepted; this machine downloads it from the Control Plane, checks it against the
 //! accepted receipt, and imports only the delivered commit as `supertag/session/<id>`.
 
 use std::{
@@ -241,7 +241,6 @@ pub async fn follow(
             let channel = crate::network::operator_channel(
                 &crate::network::endpoint_with_timeout(
                     endpoint.clone(),
-                    false,
                     Duration::from_secs(u32::MAX as u64),
                 )
                 .await?,

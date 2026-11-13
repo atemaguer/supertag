@@ -167,7 +167,7 @@ async fn account_namespace_and_journal_binding_cannot_overlap_slack() -> Result<
     let directory = tempfile::tempdir()?;
     let github = connector(directory.path())?;
     assert_eq!(github.0.config.account_id, "github/shared");
-    assert_eq!(github.0.principal, "connector:github/shared");
+    assert_eq!(github.0.account, "github/shared");
     let journal = &github.0.journal;
     journal.save(&crate::delivery_journal::Entry::Claim {
         operation_id: "one".into(),

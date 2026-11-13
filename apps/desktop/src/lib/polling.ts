@@ -20,5 +20,5 @@ export function usePolling(read: (signal: AbortSignal) => Promise<void>, interva
 
 export function describe(error: unknown): string {
   if (typeof error === "string") return error;
-  return error instanceof Error ? error.message : "The Gateway request failed.";
+  return error instanceof Error ? error.message : "The Control Plane request failed.";
 }

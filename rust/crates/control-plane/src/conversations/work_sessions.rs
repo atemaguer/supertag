@@ -59,9 +59,10 @@ async fn read_in(
     principal: Option<&str>,
     report_id: Option<&str>,
 ) -> Result<WorkSession> {
+    let owner2 = crate::store::sees_owner_sql("audience.owner", "$2");
     let row = sqlx::query(&format!(
         "{VIEW} WHERE ws.work_session_id=$1
-         AND (CAST($2 AS TEXT) IS NULL OR audience.owner IN ('',$2))
+         AND (CAST($2 AS TEXT) IS NULL OR {owner2})
          AND ((CAST($3 AS TEXT) IS NULL AND child.task_id=ws.latest_task_id) OR report.report_task_id=$3)"
     ))
     .bind(id)
@@ -105,7 +106,7 @@ impl Store {
         id: &str,
         report_id: Option<&str>,
     ) -> Result<WorkSession> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("Work Session ID", id)?;
         if let Some(report_id) = report_id {
             name("report Task ID", report_id)?;
@@ -121,7 +122,7 @@ impl Store {
         principal: &str,
         input: &ListWorkSessionsRequest,
     ) -> Result<ListWorkSessionsResponse> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("parent Tag ID", &input.parent_tag_id)?;
         name("parent Session ID", &input.parent_session_id)?;
         if let Some(id) = &input.starter_task_id {
@@ -129,11 +130,12 @@ impl Store {
         }
         let limit = page_size(input.limit);
         let cursor = order_cursor(&input.cursor)?;
+        let owner5 = crate::store::sees_owner_sql("audience.owner", "$5");
         let rows = sqlx::query(&format!(
             "{VIEW} WHERE ws.parent_tag_id=$1 AND ws.parent_session_id=$2
             AND ((CAST($3 AS TEXT) IS NULL AND child.task_id=ws.latest_task_id)
                 OR COALESCE(k.starter_task_id, ws.starter_task_id)=$3)
-            AND child.accepted_order<$4 AND audience.owner IN ('',$5)
+            AND child.accepted_order<$4 AND {owner5}
             ORDER BY child.accepted_order DESC LIMIT $6"
         ))
         .bind(&input.parent_tag_id)
@@ -174,7 +176,7 @@ impl work_sessions_server::WorkSessions for ControlPlane {
         &self,
         request: Request<GetWorkSessionRequest>,
     ) -> std::result::Result<Response<WorkSession>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         let input = request.into_inner();
         Ok(Response::new(
             self.store
@@ -191,7 +193,7 @@ impl work_sessions_server::WorkSessions for ControlPlane {
         &self,
         request: Request<ListWorkSessionsRequest>,
     ) -> std::result::Result<Response<ListWorkSessionsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_work_sessions(&principal, &request.into_inner())

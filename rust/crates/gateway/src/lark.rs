@@ -17,7 +17,7 @@ use std::{
 };
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_MESSAGE_BYTES, connector_request,
     v2::{AcceptLarkEventRequest, LarkDomain, connector_client::ConnectorClient},
 };
 use tokio::sync::Mutex;
@@ -43,7 +43,7 @@ struct Connector {
     config: LarkConfig,
     control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
-    principal: String,
+    account: String,
     http: reqwest::Client,
     origin: reqwest::Url,
     test_origin: bool,
@@ -83,8 +83,8 @@ impl Lark {
         }
         .parse()?;
         config.account_id = format!("lark/{}", config.account_id);
-        let principal = format!("connector:{}", config.account_id);
-        authenticated_request((), &gateway_token, Some(&principal))?;
+        let account = config.account_id.clone();
+        connector_request((), &gateway_token, &account)?;
         let journal = Journal::open(&config.state_directory, &config.account_id, "lark")?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
@@ -99,7 +99,7 @@ impl Lark {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             gateway_token,
-            principal,
+            account,
             http,
             origin,
             test_origin: false,
@@ -141,7 +141,7 @@ impl Lark {
 }
 impl Connector {
     fn request<T>(&self, input: T, timeout: Duration) -> Result<Request<T>> {
-        let mut request = authenticated_request(input, &self.gateway_token, Some(&self.principal))?;
+        let mut request = connector_request(input, &self.gateway_token, &self.account)?;
         request.set_timeout(timeout);
         Ok(request)
     }

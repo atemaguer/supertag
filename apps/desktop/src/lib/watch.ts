@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { nativeGateway, type WatchUpdate } from "../gateway";
+import { nativeControlPlane, type WatchUpdate } from "../control-plane";
 
 type Listener = (update: WatchUpdate) => void;
 type Stop = () => Promise<void>;
@@ -45,13 +45,13 @@ export function attachWatch(start: (receive: Listener) => Promise<Stop>, publish
 
 let nextWatchEpoch = 0;
 
-export function useGatewayWatch(connectionId?: string): WatchFeed | undefined {
+export function useControlPlaneWatch(connectionId?: string): WatchFeed | undefined {
   const feed = useMemo(() => (connectionId ? watchFeed() : undefined), [connectionId]);
   useEffect(() => {
     if (!connectionId || !feed) return;
     const epoch = ++nextWatchEpoch;
     return attachWatch(
-      (receive) => nativeGateway.watch(connectionId, epoch, receive),
+      (receive) => nativeControlPlane.watch(connectionId, epoch, receive),
       feed.publish,
     );
   }, [connectionId, feed]);

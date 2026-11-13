@@ -447,7 +447,11 @@ async fn pending_review_projection(store: &Store, pool: &sqlx::AnyPool, reviews:
         ..
     } = reviews;
     assert_eq!(
-        store.get_objective("goal").await.unwrap().status(),
+        store
+            .get_objective("operator:local", "goal")
+            .await
+            .unwrap()
+            .status(),
         ObjectiveStatus::Working
     );
     let idle: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE objective_id='goal' AND notice_key LIKE 'idle:%'").fetch_one(pool).await.unwrap();
@@ -456,30 +460,39 @@ async fn pending_review_projection(store: &Store, pool: &sqlx::AnyPool, reviews:
         "a pending commit review prevents premature finite-Objective idle continuation"
     );
     let page = store
-        .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-            objective_id: "goal".into(),
-            limit: 1,
-            before_order: 0,
-        })
+        .list_objective_commit_reviews(
+            "operator:local",
+            &ListObjectiveCommitReviewsRequest {
+                objective_id: "goal".into(),
+                limit: 1,
+                before_order: 0,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page.reviews[0].request_id, no_op_review.message_id);
     assert_ne!(page.next_before_order, 0);
     let page2 = store
-        .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-            objective_id: "goal".into(),
-            limit: 1,
-            before_order: page.next_before_order,
-        })
+        .list_objective_commit_reviews(
+            "operator:local",
+            &ListObjectiveCommitReviewsRequest {
+                objective_id: "goal".into(),
+                limit: 1,
+                before_order: page.next_before_order,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page2.reviews[0].request_id, second.message_id);
     let page3 = store
-        .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-            objective_id: "goal".into(),
-            limit: 1,
-            before_order: page2.next_before_order,
-        })
+        .list_objective_commit_reviews(
+            "operator:local",
+            &ListObjectiveCommitReviewsRequest {
+                objective_id: "goal".into(),
+                limit: 1,
+                before_order: page2.next_before_order,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page3.reviews[0].request_id, first.message_id);
@@ -676,10 +689,13 @@ async fn recover_notice(
     .unwrap();
     assert_eq!(notices, 1);
     let review = store
-        .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-            objective_id: "goal".into(),
-            ..Default::default()
-        })
+        .list_objective_commit_reviews(
+            "operator:local",
+            &ListObjectiveCommitReviewsRequest {
+                objective_id: "goal".into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap()
         .reviews
@@ -795,10 +811,13 @@ async fn approve_no_op_verdict(
     assert!(pending.review.is_none());
     let approval = pending.approval.unwrap();
     let stored = store
-        .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-            objective_id: "goal".into(),
-            ..Default::default()
-        })
+        .list_objective_commit_reviews(
+            "operator:local",
+            &ListObjectiveCommitReviewsRequest {
+                objective_id: "goal".into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap()
         .reviews;
@@ -956,11 +975,14 @@ async fn bounded_review_history(store: &Store, pool: &sqlx::AnyPool, first: &Tag
     let mut cursor = 0;
     loop {
         let page = store
-            .list_objective_commit_reviews(&ListObjectiveCommitReviewsRequest {
-                objective_id: "goal".into(),
-                limit: 100,
-                before_order: cursor,
-            })
+            .list_objective_commit_reviews(
+                "operator:local",
+                &ListObjectiveCommitReviewsRequest {
+                    objective_id: "goal".into(),
+                    limit: 100,
+                    before_order: cursor,
+                },
+            )
             .await
             .unwrap();
         assert!(page.encoded_len() <= supertag_protocol::MAX_MESSAGE_BYTES);

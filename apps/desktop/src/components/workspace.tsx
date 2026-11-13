@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { Gateway, Tag, WatchUpdate } from "../gateway";
+import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { describe } from "../lib/polling";
-import { useGatewayWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { ConversationPane, type Draft } from "./conversation";
 import { TagAvatar } from "./tag-avatar";
 
@@ -241,7 +241,7 @@ export function EmptyWorkspace({
     <div className="work-area">
       <div className="empty">
         {switching ? (
-          <p role="status">Connecting to Gateway…</p>
+          <p role="status">Connecting to Control Plane…</p>
         ) : connected ? (
           <>
             <h2>No Tags available</h2>
@@ -251,9 +251,9 @@ export function EmptyWorkspace({
           <>
             <img src={mascot} alt="" className="empty-mascot" />
             <h2>Your Tags, in one place</h2>
-            <p>Connect to a SuperTag Gateway to work with your persistent coding agents.</p>
+            <p>Connect to a SuperTag Control Plane to work with your persistent coding agents.</p>
             <Button className="primary" onClick={onSettings}>
-              Add Gateway
+              Add Control Plane
             </Button>
           </>
         )}
@@ -264,7 +264,7 @@ export function EmptyWorkspace({
 
 interface WorkspaceProps {
   connectionId?: string;
-  gateway: Gateway;
+  controlPlane: ControlPlane;
   initialTags: Tag[];
   selector: ReactNode;
   switching: boolean;
@@ -274,7 +274,7 @@ interface WorkspaceProps {
 
 export function Workspace({
   connectionId,
-  gateway,
+  controlPlane,
   initialTags,
   selector,
   switching,
@@ -285,13 +285,13 @@ export function Workspace({
   const [selectedTag, setSelectedTag] = useState(initialTags[0]?.tagId);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
-  const watch = useGatewayWatch(connectionId);
+  const watch = useControlPlaneWatch(connectionId);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
 
   const refreshTags = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const result = await gateway.tags();
+        const result = await controlPlane.tags();
         if (!signal.aborted) {
           setTags(result);
           setError("");
@@ -301,7 +301,7 @@ export function Workspace({
         return false;
       }
     },
-    [gateway],
+    [controlPlane],
   );
   useWatchRefresh(refreshTags, rosterInterval, watch, rosterChanged);
 
@@ -316,7 +316,7 @@ export function Workspace({
   return tag ? (
     <TagWorkspace
       key={tag.tagId}
-      gateway={gateway}
+      controlPlane={controlPlane}
       watch={watch}
       tag={tag}
       shell={shell}
@@ -334,7 +334,7 @@ export function Workspace({
 const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
 
 function TagWorkspace({
-  gateway,
+  controlPlane,
   watch,
   tag,
   shell,
@@ -342,7 +342,7 @@ function TagWorkspace({
   setDraft,
   onWriteChange,
 }: {
-  gateway: Gateway;
+  controlPlane: ControlPlane;
   watch?: WatchFeed;
   tag: Tag;
   shell: Omit<ShellProps, "children">;
@@ -357,7 +357,7 @@ function TagWorkspace({
   const refreshThreads = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const entries = await gateway.conversations(tagId);
+        const entries = await controlPlane.conversations(tagId);
         if (!signal.aborted) {
           setNames(entries.map(({ name }) => name));
           setConversation((prior) => prior ?? entries[0]?.name ?? "default");
@@ -368,7 +368,7 @@ function TagWorkspace({
         return false;
       }
     },
-    [gateway, tagId],
+    [controlPlane, tagId],
   );
   const threadsChanged = useCallback(
     (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
@@ -389,7 +389,7 @@ function TagWorkspace({
       {conversation ? (
         <ConversationPane
           key={key}
-          gateway={gateway}
+          controlPlane={controlPlane}
           watch={watch}
           tag={tag}
           name={conversation}

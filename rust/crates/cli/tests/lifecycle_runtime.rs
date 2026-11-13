@@ -296,7 +296,7 @@ fn background_up_runs_until_down_and_reports_through_ps_logs_status_and_version(
         "up",
         "--adapter",
         ADAPTER,
-        "--gateway-listen",
+        "--control-plane-listen",
         "127.0.0.1:0",
     ])?;
     assert!(restarted.contains("settings changed"), "{restarted}");
@@ -688,7 +688,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     Ok(())
 }
 
-/// Starts a separate Control Plane and Gateway on `database` and a fixture Worker Host.
+/// Starts a separate Control Plane on `database` and a fixture Worker Host.
 struct SplitServices {
     children: Vec<Child>,
     endpoint: String,
@@ -726,7 +726,9 @@ impl SplitServices {
     fn start(database: &str) -> Result<Self> {
         let temp = TempDir::new()?;
         let token = || format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let (gateway_token, operator, host) = (token(), token(), token());
+        let enrolled =
+            || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+        let (gateway_token, operator, host) = (enrolled(), token(), enrolled());
         let base = |args: &[&str]| {
             let mut command = Command::new(BIN);
             command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
@@ -735,19 +737,20 @@ impl SplitServices {
         let mut plane = base(&["control-plane"]);
         plane
             .env("SUPERTAG_DATABASE_URL", database)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host);
-        let (plane, private) = spawn_ready(plane, &temp.path().join("plane.log"))?;
+        let (plane, endpoint) = spawn_ready(plane, &temp.path().join("plane.log"))?;
         let mut children = vec![plane];
-        let private = format!("http://{private}");
-        let mut gateway = base(&["gateway", "--control-plane", &private]);
-        gateway
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator);
-        let (gateway, endpoint) = spawn_ready(gateway, &temp.path().join("gateway.log"))?;
         let endpoint = format!("http://{endpoint}");
-        children.push(gateway);
-        let mut worker = base(&["worker-host", "--gateway", &endpoint, "--adapter", ADAPTER]);
+        let mut worker = base(&[
+            "worker-host",
+            "--control-plane",
+            &endpoint,
+            "--adapter",
+            ADAPTER,
+        ]);
         worker
             .arg("--state-directory")
             .arg(temp.path().join("host"))
@@ -791,7 +794,7 @@ fn exercise_status(database: &str) -> Result<()> {
     )?;
     services.cli(&[
         "apply",
-        "--gateway",
+        "--control-plane",
         &gateway,
         "-f",
         manifest.to_str().unwrap(),
@@ -800,7 +803,7 @@ fn exercise_status(database: &str) -> Result<()> {
     let status = loop {
         let status: Value = serde_json::from_str(&services.cli(&[
             "status",
-            "--gateway",
+            "--control-plane",
             &gateway,
             "--output",
             "json",
@@ -820,16 +823,16 @@ fn exercise_status(database: &str) -> Result<()> {
     assert_eq!(status["objectives"][0]["id"], "ship-it", "{status}");
     assert_eq!(status["objectives"][0]["owner"], "owner", "{status}");
     assert_eq!(status["objectives"][0]["status"], "working", "{status}");
-    let text = services.cli(&["status", "--gateway", &gateway])?;
+    let text = services.cli(&["status", "--control-plane", &gateway])?;
     assert!(
         text.contains(
             "\nObjectives not finished\n  ship-it  working; owner owner; no budget; no deadline\n"
         ),
         "{text}"
     );
-    // Without a Gateway token, status fails without echoing anything secret.
+    // Without an operator token, status fails without echoing anything secret.
     let output = Command::new(BIN)
-        .args(["status", "--gateway", &gateway])
+        .args(["status", "--control-plane", &gateway])
         .env_clear()
         .output()?;
     assert!(!output.status.success());

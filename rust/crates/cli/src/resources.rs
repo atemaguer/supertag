@@ -12,15 +12,16 @@ use anyhow::{Result, bail};
 use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
-use supertag_protocol::v2::GetObjectiveOverviewRequest;
 use supertag_protocol::v2::objective_overviews_client::ObjectiveOverviewsClient;
+use supertag_protocol::v2::{GetObjectiveOverviewRequest, PrincipalRole};
 use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel};
 
 use crate::observe::{Output, describe_text};
 use crate::{
-    Connection, artifact_publications, artifacts, auth_keys, connect_operator, github_publications,
-    github_workspaces, host_status, inbox, inputs, mailbox, objectives, operator_access, policy,
-    replies, request, surface_policy, tags, tasks, teams, volumes, work_sessions, workspace_mounts,
+    Connection, artifact_publications, artifacts, auth_keys, connect_operator, enrollments,
+    github_publications, github_workspaces, host_status, inbox, inputs, mailbox, objectives,
+    operator_access, policy, replies, request, surface_policy, tags, tasks, teams, volumes,
+    work_sessions, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -36,6 +37,10 @@ pub enum Kind {
     Team,
     #[value(alias = "hosts")]
     Host,
+    #[value(alias = "gateways")]
+    Gateway,
+    #[value(alias = "clients")]
+    Client,
     #[value(alias = "sessions")]
     Session,
     #[value(alias = "roles")]
@@ -161,6 +166,8 @@ pub(crate) const KINDS: &[KindSpec] = &[
         [true, true, true, true],
     ),
     kind(Kind::Host, "host", "hosts", "Worker Host", LIST),
+    kind(Kind::Gateway, "gateway", "gateways", "Gateway", LIST),
+    kind(Kind::Client, "client", "clients", "Client", LIST),
     kind(Kind::Session, "session", "sessions", "Work Session", LIST),
     kind(Kind::Role, "role", "roles", "Role", LIST),
     kind(
@@ -326,6 +333,22 @@ pub enum GetCommand {
         id: Option<String>,
         #[command(flatten)]
         list: host_status::ListArgs,
+    },
+    /// Read one enrolled Gateway, or list them, revoked ones included.
+    #[command(visible_alias = "gateways")]
+    Gateway {
+        /// Gateway name. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: enrollments::ListArgs,
+    },
+    /// Read one enrolled client device, or list them, revoked ones included.
+    #[command(visible_alias = "clients")]
+    Client {
+        /// Client name. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: enrollments::ListArgs,
     },
     /// Read one Work Session, its latest Task, and its report, or list the Work Sessions started
     /// from a parent Session.
@@ -618,6 +641,14 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::Host { id: None, list } => {
             return print(host_status::list(connection, list)).await;
         }
+        GetCommand::Gateway { id: Some(id), .. } => (Kind::Gateway, id),
+        GetCommand::Gateway { id: None, list } => {
+            return print(enrollments::list(connection, PrincipalRole::Gateway, list)).await;
+        }
+        GetCommand::Client { id: Some(id), .. } => (Kind::Client, id),
+        GetCommand::Client { id: None, list } => {
+            return print(enrollments::list(connection, PrincipalRole::Client, list)).await;
+        }
         GetCommand::Session {
             id: Some(id),
             report_task,
@@ -727,6 +758,8 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::Objective => objectives::fetch(channel, token, id).await,
         Kind::Team => teams::fetch(channel, token, id).await,
         Kind::Host => host_status::fetch(channel, token, id).await,
+        Kind::Gateway => enrollments::fetch(channel, token, PrincipalRole::Gateway, id).await,
+        Kind::Client => enrollments::fetch(channel, token, PrincipalRole::Client, id).await,
         Kind::Session => work_sessions::fetch(channel, token, id, None).await,
         Kind::Role => policy::fetch(channel, token, policy::Kind::Role, id).await,
         Kind::PermissionSet => policy::fetch(channel, token, policy::Kind::PermissionSet, id).await,

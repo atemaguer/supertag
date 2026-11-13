@@ -207,9 +207,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -219,7 +219,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -236,7 +237,6 @@ impl Credentials {
 }
 
 struct Runtime<'a> {
-    gateway: Child,
     control: Child,
     endpoint: String,
     operator: OperatorClient<ProtocolChannel>,
@@ -247,13 +247,11 @@ struct Runtime<'a> {
 impl<'a> Runtime<'a> {
     async fn start(root: &Path, credentials: &'a Credentials, database: &str) -> Result<Self> {
         let mut control = credentials.command(&["control-plane"]);
-        control.env("SUPERTAG_DATABASE_URL", database);
-        let (control, private) = service(control).await?;
-        let mut gateway = credentials.command(&["gateway", "--control-plane", &private]);
-        gateway
-            .arg("--checkpoint-directory")
+        control
+            .env("SUPERTAG_DATABASE_URL", database)
+            .arg("--transfer-directory")
             .arg(root.join("blobs"));
-        let (gateway, endpoint) = service(gateway).await?;
+        let (control, endpoint) = service(control).await?;
         let channel = protocol::negotiated(
             Channel::from_shared(endpoint.clone())?
                 .connect_timeout(Duration::from_secs(5))
@@ -262,7 +260,6 @@ impl<'a> Runtime<'a> {
         )
         .await?;
         Ok(Self {
-            gateway,
             control,
             endpoint,
             operator: OperatorClient::new(channel),
@@ -272,7 +269,6 @@ impl<'a> Runtime<'a> {
     }
 
     async fn stop(mut self) -> Result<()> {
-        self.gateway.kill().await?;
         self.control.kill().await?;
         Ok(())
     }
@@ -315,12 +311,12 @@ impl<'a> Runtime<'a> {
         Ok(())
     }
 
-    /// Runs one operator CLI command against this runtime's Gateway.
+    /// Runs one operator CLI command against this runtime's Control Plane.
     async fn cli(&self, args: &[&str]) -> Result<Value> {
         let (subcommand, args) = args.split_first().context("operator subcommand required")?;
         let output = self
             .credentials
-            .command(&[subcommand, "--gateway", &self.endpoint])
+            .command(&[subcommand, "--control-plane", &self.endpoint])
             .args(args)
             .output()
             .await?;
@@ -434,7 +430,7 @@ impl<'a> Runtime<'a> {
     fn worker_command(&self, fixture: &Fixture, label: &str) -> Command {
         let mut command = self.credentials.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &self.endpoint,
             "--once",
             "--harness",

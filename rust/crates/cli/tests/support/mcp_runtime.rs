@@ -1,4 +1,4 @@
-//! Workspace MCP servers and OAuth MCP logins through a real Control Plane, Gateway, Worker
+//! Workspace MCP servers and OAuth MCP logins through a real Control Plane, Worker
 //! Host, and Claude Code adapter, on SQLite and PostgreSQL.
 //!
 //! TypeScript parity: `tests/workspace-mcp-snapshot.test.ts` (the base commit's server runs from

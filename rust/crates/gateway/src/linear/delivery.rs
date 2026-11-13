@@ -10,7 +10,7 @@ impl Connector {
         crate::ownership::Owner {
             control_plane: &self.control_plane,
             gateway_token: &self.gateway_token,
-            principal: &self.principal,
+            account: &self.account,
             journal: &self.journal,
         }
         .drive(shutdown, |owner| async move {
@@ -68,7 +68,7 @@ impl Connector {
                 let result = with_claim_lease(
                     self.control_plane.clone(),
                     &self.gateway_token,
-                    &self.principal,
+                    &self.account,
                     &target,
                     async {
                         // Persist the last pre-effect state. A restart in this state cannot prove

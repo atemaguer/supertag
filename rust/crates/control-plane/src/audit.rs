@@ -1,8 +1,8 @@
 //! Records the general audit log for administrative and authority-changing operator calls.
 //!
-//! The layer wraps the private gRPC router. For each audited unary method called by a
-//! Gateway-authenticated operator, it records who called, what the call did, its target, and the
-//! gRPC outcome. A later call therefore lists it. Calls refused as unauthenticated and previews are
+//! The layer wraps the private gRPC router. For each audited unary method called by a principal
+//! the API tier authenticated, it records who called (the full principal, such as `operator:local`,
+//! `client:NAME` or `gateway:NAME`), what the call did, its target, and the gRPC outcome. A later call therefore lists it. Calls refused as unauthenticated and previews are
 //! not recorded. A call that changes several resources records one entry per resource.
 //!
 //! Each entry is written in the transaction that makes the change it describes: every write
@@ -13,9 +13,8 @@
 //! ultimately failed are marked failed. A target the log refuses is recorded by kind; a storage
 //! failure while settling is reported on standard error and never fails the call.
 //!
-//! Callers other than operators are recorded too: a Worker Host joining with an Auth Key as
-//! `auth-key:NAME`, and a person directing an Objective from a surface thread as
-//! `<provider>:<user ID>`.
+//! An enrollment is recorded as the Auth Key that admitted it, `auth-key:NAME`, and a person
+//! directing an Objective from a surface thread as `<provider>:<user ID>`.
 
 use std::{
     pin::Pin,
@@ -37,7 +36,7 @@ use uuid::Uuid;
 
 use crate::{ControlPlane, Store, operator_access::AuditRecord};
 
-const PRINCIPAL: &str = "x-supertag-principal";
+const PRINCIPAL: &str = supertag_protocol::INTERNAL_PRINCIPAL_HEADER;
 
 /// What an audited call targets: `Kind/ID`, several of them, the kind alone, or nothing for a
 /// preview.
@@ -67,9 +66,9 @@ type Decode = fn(&[u8]) -> Option<Target>;
 /// Who an audited call acts as before its handler names a more specific actor.
 #[derive(Clone, Copy)]
 enum Caller {
-    /// A Gateway-authenticated operator, recorded by its operator ID.
-    Operator,
-    /// A Worker Host presenting an Auth Key through the Gateway. The handler names the key.
+    /// An authenticated principal, recorded in full: `operator:local`, `client:NAME`, and so on.
+    Principal,
+    /// A principal enrolling with an Auth Key through the API tier. The handler names the key.
     AuthKey,
 }
 
@@ -88,12 +87,27 @@ fn named(kind: &str, id: &str) -> Option<Target> {
     })
 }
 
+/// `WorkerHost/NAME`, `Gateway/NAME` or `Client/NAME`; the kind alone without a name.
+fn enrollment_target(role: i32, name: &str) -> Option<Target> {
+    let kind = enrollment_kind(role)?;
+    named(kind, name)
+}
+
+pub(crate) fn enrollment_kind(role: i32) -> Option<&'static str> {
+    match PrincipalRole::try_from(role).ok()? {
+        PrincipalRole::Host => Some("WorkerHost"),
+        PrincipalRole::Gateway => Some("Gateway"),
+        PrincipalRole::Client => Some("Client"),
+        _ => None,
+    }
+}
+
 macro_rules! rule {
     ($action:literal, $kind:literal, $message:ty, |$value:ident| $target:expr) => {
         Rule {
             action: $action,
             kind: $kind,
-            caller: Caller::Operator,
+            caller: Caller::Principal,
             decode: |bytes| {
                 let $value = <$message>::decode(bytes).ok()?;
                 $target
@@ -102,7 +116,7 @@ macro_rules! rule {
     };
 }
 
-/// The audited methods of the private Control Plane API.
+/// The audited methods of the state owner's API.
 fn rule(path: &str) -> Option<Rule> {
     let (service, method) = path
         .strip_prefix("/supertag.runtime.v2.")?
@@ -138,32 +152,23 @@ fn rule(path: &str) -> Option<Rule> {
             RevokeAuthKeyRequest,
             |value| named("AuthKey", &value.name)
         ),
-        ("HostCredentials", "RotateHostCredential") => rule!(
-            "worker-host.credential.rotate",
-            "WorkerHost",
-            RotateHostCredentialRequest,
-            |value| named("WorkerHost", &value.host_id)
+        ("Enrollments", "RotateCredential") => rule!(
+            "credential.rotate",
+            "Enrollment",
+            RotateCredentialRequest,
+            |value| enrollment_target(value.role, &value.name)
         ),
-        ("HostDirectory", "Enroll") => Rule {
+        ("Enrollments", "Enroll") => Rule {
             caller: Caller::AuthKey,
-            ..rule!(
-                "worker-host.join",
-                "WorkerHost",
-                PrivateEnrollHostRequest,
-                |value| named(
-                    "WorkerHost",
-                    value
-                        .enrollment
-                        .as_ref()
-                        .map_or("", |enrollment| enrollment.host_id.as_str())
-                )
-            )
+            ..rule!("enrollment.join", "Enrollment", EnrollRequest, |value| {
+                enrollment_target(value.role, &value.name)
+            })
         },
-        ("Operator", "RevokeHost") => rule!(
-            "worker-host.revoke",
-            "WorkerHost",
-            RevokeHostRequest,
-            |value| named("WorkerHost", &value.host_id)
+        ("Enrollments", "RevokeEnrollment") => rule!(
+            "enrollment.revoke",
+            "Enrollment",
+            RevokeEnrollmentRequest,
+            |value| enrollment_target(value.role, &value.name)
         ),
         ("Operator", "SetHostDraining") => {
             fn decode(bytes: &[u8]) -> Option<Target> {
@@ -175,7 +180,7 @@ fn rule(path: &str) -> Option<Rule> {
                 action: "worker-host.set-draining",
                 kind: "WorkerHost",
                 decode,
-                caller: Caller::Operator,
+                caller: Caller::Principal,
             }
         }
         ("Operator", "PutTag") => {
@@ -542,7 +547,7 @@ fn unary_message(body: &[u8]) -> Option<&[u8]> {
 }
 
 /// Whether the request carries the private Gateway credential, compared in constant time.
-fn gateway_bearer(headers: &http::HeaderMap, token: &str) -> bool {
+fn internal_bearer(headers: &http::HeaderMap, token: &str) -> bool {
     let mut values = headers.get_all("authorization").iter();
     let candidate = values
         .next()
@@ -790,14 +795,14 @@ impl http_body::Body for Recording {
 #[derive(Clone)]
 pub struct AuditLayer {
     store: Store,
-    gateway_token: Arc<String>,
+    internal_token: Arc<String>,
 }
 
 impl ControlPlane {
     pub fn audit_layer(&self) -> AuditLayer {
         AuditLayer {
             store: self.store.clone(),
-            gateway_token: self.gateway_token.clone(),
+            internal_token: self.internal_token.clone(),
         }
     }
 }
@@ -842,18 +847,22 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
         let rule = rule(request.uri().path());
         let actor = rule.as_ref().and_then(|rule| {
-            // Only Gateway-authenticated callers are recorded; the handler refuses the rest.
-            if !gateway_bearer(request.headers(), &self.layer.gateway_token) {
+            // Only callers the API tier authenticated are recorded; the handler refuses the rest.
+            if !internal_bearer(request.headers(), &self.layer.internal_token) {
                 return None;
             }
             let principal = request.headers().get(PRINCIPAL)?.to_str().ok()?;
             match rule.caller {
-                Caller::Operator => principal
-                    .strip_prefix("operator:")
-                    .filter(|id| !id.is_empty())
-                    .map(str::to_owned),
+                Caller::Principal => ["operator:", "client:", "gateway:", "host:"]
+                    .iter()
+                    .any(|prefix| {
+                        principal
+                            .strip_prefix(prefix)
+                            .is_some_and(|id| !id.is_empty())
+                    })
+                    .then(|| principal.to_owned()),
                 Caller::AuthKey => principal
-                    .starts_with("service:")
+                    .starts_with("auth-key-digest:")
                     .then(|| "auth-key".to_owned()),
             }
         });

@@ -33,7 +33,7 @@ func (c *runtimeClient) getObjectiveTask(ctx context.Context, tag, id string) (*
 		return nil, apiError(err)
 	}
 	if res.Msg.GetTaskId() != id || res.Msg.GetTagId() != tag {
-		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different Objective Task."}
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different Objective Task."}
 	}
 	return &v2.ConversationMessage{Task: res.Msg}, nil
 }
@@ -96,7 +96,7 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 			return err
 		}
 		if time.Since(lastOK) > f.ReconnectTimeout {
-			return fmt.Errorf("lost the Gateway while following task/%s: %w", id, err)
+			return fmt.Errorf("lost the Control Plane while following task/%s: %w", id, err)
 		}
 		pause(ctx, backoff)
 		backoff = min(backoff*2, time.Minute)
@@ -158,7 +158,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		}
 		if len(events) >= runtimeEventPage {
 			if state.after == previous {
-				return false, false, workSessionDataLoss("Gateway event cursor did not advance.")
+				return false, false, workSessionDataLoss("Control Plane event cursor did not advance.")
 			}
 			return false, true, nil
 		}
@@ -192,7 +192,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		}
 		if len(events) >= runtimeEventPage {
 			if after == state.children[id] {
-				return false, false, workSessionDataLoss("Gateway child event cursor did not advance.")
+				return false, false, workSessionDataLoss("Control Plane child event cursor did not advance.")
 			}
 			more, settled = true, false
 			continue

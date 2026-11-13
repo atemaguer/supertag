@@ -90,10 +90,11 @@ pub struct ServiceStatus {
     /// `control-plane`, `gateway` or `host`.
     pub kind: String,
     pub pid: Option<u32>,
-    /// Control Plane: its private listener. Gateway: its public endpoint. Host: its Gateway.
+    /// Control Plane: its public endpoint. Gateway: its test notification endpoint. Host: its
+    /// Control Plane.
     pub address: Option<String>,
     pub host_id: Option<String>,
-    /// A host connected to a Gateway this supervisor does not run.
+    /// A host connected to a Control Plane this supervisor does not run.
     pub remote: bool,
 }
 
@@ -406,7 +407,7 @@ pub async fn up(options: Background) -> Result<()> {
 
 fn summary(state: &Path, status: &SupervisorStatus) {
     if let Some(endpoint) = &status.endpoint {
-        outln!("Gateway: {endpoint}");
+        outln!("Control Plane: {endpoint}");
     }
     for service in status
         .services
@@ -416,7 +417,10 @@ fn summary(state: &Path, status: &SupervisorStatus) {
         outln!(
             "Worker Host {}: {}",
             service.name,
-            service.address.as_deref().unwrap_or("unknown Gateway")
+            service
+                .address
+                .as_deref()
+                .unwrap_or("unknown Control Plane")
         );
     }
     outln!("State: {}", state.display());
@@ -567,7 +571,7 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
     }
     let (endpoint, token) = local::connection(directory)?;
     let channel =
-        crate::network::operator_channel(&crate::network::endpoint(endpoint, false).await?).await?;
+        crate::network::operator_channel(&crate::network::endpoint(endpoint).await?).await?;
     let mut client = OperatorClient::new(channel);
     for host_id in &hosts {
         match client
@@ -905,7 +909,7 @@ async fn host_states(
     let Ok((endpoint, token)) = local::connection(state) else {
         return hosts;
     };
-    let Ok(endpoint) = crate::network::endpoint(endpoint, false).await else {
+    let Ok(endpoint) = crate::network::endpoint(endpoint).await else {
         return hosts;
     };
     let Ok(channel) = crate::network::operator_channel(&endpoint).await else {

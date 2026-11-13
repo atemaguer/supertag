@@ -103,7 +103,7 @@ func New(target Target, version string) (*Client, error) {
 // Target is the Control Plane this client calls.
 func (c *Client) Target() Target { return c.target }
 
-// RuntimeV2 reports whether the target uses the Gateway's Rust runtime API.
+// RuntimeV2 reports whether the target uses the Control Plane's Rust runtime API.
 func (c *Client) RuntimeV2() bool { return c != nil && c.runtime != nil }
 
 // Close releases idle connections when the TUI leaves this target.

@@ -1,4 +1,4 @@
-//! Actual idle presence expiry and restart through separate CP/Gateway/Host processes.
+//! Actual idle presence expiry and restart through separate Control Plane and Worker Host processes.
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -35,9 +35,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -46,7 +46,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -143,8 +144,13 @@ async fn wait_phase(
 }
 
 fn host_command(credentials: &Credentials, gateway: &str, state: &Path) -> Command {
-    let mut command =
-        credentials.command(&["worker-host", "--gateway", gateway, "--adapter", ADAPTER]);
+    let mut command = credentials.command(&[
+        "worker-host",
+        "--control-plane",
+        gateway,
+        "--adapter",
+        ADAPTER,
+    ]);
     command.arg("--state-directory").arg(state);
     command
 }
@@ -164,12 +170,7 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", &database);
     let mut control = Process::spawn(command, directory.path())?;
-    let private = control.address().await?;
-    let mut gateway = Process::spawn(
-        credentials.command(&["gateway", "--control-plane", &private]),
-        directory.path(),
-    )?;
-    let public = gateway.address().await?;
+    let public = control.address().await?;
     let mut operator = operator_client::OperatorClient::new(
         protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
     );
@@ -189,7 +190,7 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
     forged.set_timeout(Duration::from_secs(2));
     assert_eq!(
         operator.list_hosts(forged).await.unwrap_err().code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
 
     let state = directory.path().join("worker");
@@ -220,28 +221,16 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
             draining: true,
         })?)
         .await?;
-    gateway.kill()?;
     control.kill()?;
 
     let mut command = credentials.command(&[
         "control-plane",
         "--listen",
-        private.trim_start_matches("http://"),
+        public.trim_start_matches("http://"),
     ]);
     command.env("SUPERTAG_DATABASE_URL", &database);
     control = Process::spawn(command, directory.path())?;
-    assert_eq!(control.address().await?, private);
-    gateway = Process::spawn(
-        credentials.command(&[
-            "gateway",
-            "--control-plane",
-            &private,
-            "--listen",
-            public.trim_start_matches("http://"),
-        ]),
-        directory.path(),
-    )?;
-    assert_eq!(gateway.address().await?, public);
+    assert_eq!(control.address().await?, public);
     let restored = wait_phase(&mut operator, &credentials, HostPhase::Offline, WAIT).await?;
     assert!(restored.draining);
     assert_eq!(restored.last_seen_at_ms, offline.last_seen_at_ms);
@@ -268,7 +257,6 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
     assert_eq!(listed.hosts.len(), 1);
     assert_eq!(listed.hosts[0].host_id, "local");
     host.kill()?;
-    gateway.kill()?;
     control.kill()?;
     Ok(())
 }
@@ -281,12 +269,7 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", &database);
     let mut control = Process::spawn(command, directory.path())?;
-    let private = control.address().await?;
-    let mut gateway = Process::spawn(
-        credentials.command(&["gateway", "--control-plane", &private]),
-        directory.path(),
-    )?;
-    let public = gateway.address().await?;
+    let public = control.address().await?;
     let mut operator = operator_client::OperatorClient::new(
         protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
     );
@@ -357,7 +340,6 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
     assert_eq!(blocked.active_attempts, 1);
     assert_eq!(blocked.generation, busy.generation);
     host.kill()?;
-    gateway.kill()?;
     control.kill()?;
     Ok(())
 }
@@ -388,12 +370,7 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", &database);
     let mut control = Process::spawn(command, directory.path())?;
-    let private = control.address().await?;
-    let mut gateway = Process::spawn(
-        credentials.command(&["gateway", "--control-plane", &private]),
-        directory.path(),
-    )?;
-    let public = gateway.address().await?;
+    let public = control.address().await?;
     let mut operator = operator_client::OperatorClient::new(
         protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
     );
@@ -442,7 +419,7 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
     );
     assert!(!log.exists());
     let output = credentials
-        .command(&["get", "--gateway", &public, "host", "local"])
+        .command(&["get", "--control-plane", &public, "host", "local"])
         .output()?;
     ensure!(output.status.success(), "{output:?}");
     let shown: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -484,7 +461,6 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
     wait_phase(&mut operator, &credentials, HostPhase::Ready, WAIT).await?;
     wait_for_log(&log, &[arguments, "term".into()]).await?;
     host.kill()?;
-    gateway.kill()?;
     control.kill()?;
     Ok(())
 }

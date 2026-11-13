@@ -41,7 +41,7 @@ async fn postgres_watch_contract() -> anyhow::Result<()> {
 
 async fn contract(url: &str) -> anyhow::Result<()> {
     const SECRET: &str = "local-watch-test-secret";
-    let plane = ControlPlane::open(url, SECRET.into()).await?;
+    let plane = ControlPlane::open(url, SECRET.into(), "operator:local".into()).await?;
     let store = &plane.store;
     let initial = store.watch_page(0).await?;
     assert_eq!(initial.head, 0);
@@ -484,5 +484,122 @@ async fn private_work_sessions(
         )
         .await?;
     assert!(followup.live_input.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn sqlite_client_team_notices() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    client_team_notices(&format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("teams.db").display()
+    ))
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_client_team_notices() -> anyhow::Result<()> {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .ok_or_else(|| anyhow::anyhow!("set SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"))?;
+    let url = std::fs::read_to_string(path)?;
+    let mut admin = sqlx::PgConnection::connect(url.trim()).await?;
+    let database = format!(
+        "supertag_rust_watch_teams_{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    admin
+        .execute(format!("CREATE DATABASE {database}").as_str())
+        .await?;
+    let mut test_url = url::Url::parse(url.trim())?;
+    test_url.set_path(&database);
+    let result = tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(async move { client_team_notices(test_url.as_str()).await })
+                .await
+        })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())
+        .await?;
+    result?
+}
+
+/// A client watching Teams hears about a Team only when every member is a Tag its key allows.
+async fn client_team_notices(url: &str) -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
+    const SECRET: &str = "local-watch-test-secret";
+    let plane = ControlPlane::open(url, SECRET.into(), "operator:local".into()).await?;
+    let store = &plane.store;
+    for tag in ["owner", "other"] {
+        store.put_tag(tag, "Watch Teams", vec![]).await?;
+    }
+    let key = Sha256::digest(b"watching client key").to_vec();
+    store
+        .create_auth_key(
+            "operator:local",
+            &CreateAuthKeyRequest {
+                name: "watcher".into(),
+                role: PrincipalRole::Client.into(),
+                operation_id: "watcher-key".into(),
+                key_digest: key.clone(),
+                allowed_tag_ids: vec!["other".into()],
+                ..Default::default()
+            },
+        )
+        .await?;
+    store
+        .enroll(
+            &key,
+            &EnrollRequest {
+                role: PrincipalRole::Client.into(),
+                name: "watcher".into(),
+                operation_id: "watcher-enroll".into(),
+                token_digest: Sha256::digest(b"watching client credential").to_vec(),
+            },
+        )
+        .await?;
+    let start = store.watch_page(0).await?;
+    for (team, members) in [("mixed", vec!["other", "owner"]), ("solo", vec!["other"])] {
+        store
+            .create_team(
+                "operator:local",
+                &CreateTeamRequest {
+                    operation_id: format!("team-{team}"),
+                    team_id: team.into(),
+                    name: team.into(),
+                    member_tag_ids: members.into_iter().map(str::to_owned).collect(),
+                    max_concurrency: None,
+                },
+            )
+            .await?;
+    }
+    let watch = OperatorWatch {
+        plane: plane.clone(),
+        shutdown: CancellationToken::new(),
+    };
+    let teams = |principal: &str| {
+        authenticated_request(
+            WatchRequest {
+                kinds: vec![WatchKind::Team as i32],
+                resume_token: format!("v1.{}.{}", start.feed_id, start.head),
+            },
+            SECRET,
+            Some(principal),
+        )
+    };
+    let first_team = |mut stream: <OperatorWatch as OperatorEvents>::WatchStream| async move {
+        let event = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await?
+            .transpose()?;
+        match event.and_then(|event| event.update) {
+            Some(Update::Change(change)) => anyhow::Ok(change.team_id),
+            other => anyhow::bail!("expected a Team change, got {other:?}"),
+        }
+    };
+    let operator = watch.watch(teams("operator:bob")?).await?.into_inner();
+    assert_eq!(first_team(operator).await?, "mixed");
+    let client = watch.watch(teams("client:watcher")?).await?.into_inner();
+    assert_eq!(first_team(client).await?, "solo");
     Ok(())
 }

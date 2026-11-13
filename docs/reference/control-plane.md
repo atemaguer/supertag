@@ -15,11 +15,14 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Worklet API](glossary.md#worklet-api), [Worklet](glossary.md#worklet), and
 [Worker](glossary.md#worker).
 
-The API Server and Gateway are subsystems inside the Control Plane. The API Server is the
-authenticated management, resource, and Worklet API boundary. The Gateway connects collaboration
-surfaces to the Control Plane. The first deployment remains one process and listener, but these
-boundaries keep resource semantics and admission separate from collaboration transport and from
-reconciliation.
+The API Server is the Control Plane's public endpoint: the authenticated management, resource, and
+Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state
+apart from transfer files, and the API Server and the controllers run as one process. Running API
+Server replicas apart from the controllers is not supported yet: every Control Plane process also
+runs its own controllers, so run exactly one per database. The Gateway connects collaboration
+surfaces to the Control Plane. It runs as a separate, optional process and is an ordinary client
+of the API Server. These boundaries keep resource semantics and admission separate from
+collaboration transport and from reconciliation.
 
 ## System boundary
 
@@ -93,6 +96,40 @@ The local CLI configuration separates three concerns:
 The active connection is used automatically. Names remain optional for the first Control Plane and
 become useful when an operator manages several deployments. This concept is intentionally called a
 connection rather than a context; Context Sets already describe knowledge admitted to Tag work.
+
+## Callers and roles
+
+Every caller of the Control Plane authenticates with its own bearer credential. One
+default-deny table at the API Server maps every RPC to the roles allowed to call it; an RPC
+missing from the table is refused.
+
+| Principal | Credential | Obtained with |
+| --- | --- | --- |
+| `operator:local` (admin), `operator:token:NAME` | The admin operator token, or an Operator Token (`stop_…`) | Deployment configuration; `supertag operator-token create` |
+| `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
+| `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
+| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the terminal UI or desktop app |
+
+An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
+`supertag auth-key create NAME --role host|gateway|client`. It is accepted only to enroll. The
+enrollee generates its credential, and the Control Plane stores only its digest. An enrollee
+rotates its own credential, an operator rotates or revokes anyone's, and a revoked or replaced
+credential is refused on the next call and ends open streams within about a second.
+
+| Role | May call |
+| --- | --- |
+| Admin operator | Everything an operator may, plus Operator Tokens |
+| Operator | Configuration, fleet, recovery, audit, Auth Keys and enrollments, and all work |
+| Client | Tags its Auth Key allows, Teams made only of those Tags, its own conversations and Objectives, and their Inbox items |
+| Worker Host | Execution of the work it claims, for its current generation |
+| Gateway | Connector and reply progress calls for the Surface Accounts that name it. With `--all-tags` on its key, also accounts no Surface Account names and the admin operator's notifications |
+
+A client is a device. It sees only the work it started, never work without an owner, and never
+Worker Host status. Its Inbox lists the questions and limits of its own Objectives, never
+execution recovery or MCP logins, which are Worker Host work. It starts work only through conversations and Objectives. It decides an
+approval only when a Permission Set names it as `client:NAME`. The audit log records every
+caller by its full principal, and an enrollment by the Auth Key that admitted it,
+`auth-key:NAME`. Client certificates are an optional network filter in front of all of this.
 
 ## Resources
 

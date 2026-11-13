@@ -28,8 +28,9 @@ const (
 	ServiceRole_SERVICE_ROLE_CONTROL_PLANE ServiceRole = 1
 	ServiceRole_SERVICE_ROLE_GATEWAY       ServiceRole = 2
 	ServiceRole_SERVICE_ROLE_WORKER_HOST   ServiceRole = 3
-	// An operator client: the CLI, the TUI, the desktop app, or an SDK client.
-	ServiceRole_SERVICE_ROLE_OPERATOR ServiceRole = 4
+	// A client of the Control Plane's API: the CLI, the TUI, the desktop app, or
+	// an SDK client, acting for an operator or an enrolled client.
+	ServiceRole_SERVICE_ROLE_CLIENT ServiceRole = 4
 )
 
 // Enum value maps for ServiceRole.
@@ -39,14 +40,14 @@ var (
 		1: "SERVICE_ROLE_CONTROL_PLANE",
 		2: "SERVICE_ROLE_GATEWAY",
 		3: "SERVICE_ROLE_WORKER_HOST",
-		4: "SERVICE_ROLE_OPERATOR",
+		4: "SERVICE_ROLE_CLIENT",
 	}
 	ServiceRole_value = map[string]int32{
 		"SERVICE_ROLE_UNSPECIFIED":   0,
 		"SERVICE_ROLE_CONTROL_PLANE": 1,
 		"SERVICE_ROLE_GATEWAY":       2,
 		"SERVICE_ROLE_WORKER_HOST":   3,
-		"SERVICE_ROLE_OPERATOR":      4,
+		"SERVICE_ROLE_CLIENT":        4,
 	}
 )
 
@@ -224,13 +225,13 @@ const file_supertag_runtime_v2_negotiation_proto_rawDesc = "" +
 	"\x04role\x18\x01 \x01(\x0e2 .supertag.runtime.v2.ServiceRoleR\x04role\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12+\n" +
 	"\x11protocol_versions\x18\x03 \x03(\rR\x10protocolVersions\x12#\n" +
-	"\rbuild_version\x18\x04 \x01(\tR\fbuildVersion*\x9e\x01\n" +
+	"\rbuild_version\x18\x04 \x01(\tR\fbuildVersion*\x9c\x01\n" +
 	"\vServiceRole\x12\x1c\n" +
 	"\x18SERVICE_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aSERVICE_ROLE_CONTROL_PLANE\x10\x01\x12\x18\n" +
 	"\x14SERVICE_ROLE_GATEWAY\x10\x02\x12\x1c\n" +
-	"\x18SERVICE_ROLE_WORKER_HOST\x10\x03\x12\x19\n" +
-	"\x15SERVICE_ROLE_OPERATOR\x10\x042\x81\x01\n" +
+	"\x18SERVICE_ROLE_WORKER_HOST\x10\x03\x12\x17\n" +
+	"\x13SERVICE_ROLE_CLIENT\x10\x042\x81\x01\n" +
 	"\x13ProtocolNegotiation\x12j\n" +
 	"\tNegotiate\x12-.supertag.runtime.v2.NegotiateProtocolRequest\x1a..supertag.runtime.v2.NegotiateProtocolResponseb\x06proto3"
 

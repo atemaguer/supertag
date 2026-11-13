@@ -1,5 +1,5 @@
 //! Secrets in harness output never leave the Worker Host (`tests/worker-event-redaction.test.ts`,
-//! `tests/event-redaction-structure.test.ts`): a real Control Plane, Gateway, and Worker Host
+//! `tests/event-redaction-structure.test.ts`): a real Control Plane and Worker Host
 //! run the fixture adapter, whose event and result repeat a prompt carrying a credential the host
 //! holds, a URL password, and a Basic authorization value.
 #[path = "../../../test-support/prerequisites.rs"]
@@ -71,24 +71,21 @@ database_tests! {
 /// instead of failing the Attempt.
 async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (_control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (_gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_control, public) = service(control).await?;
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };
@@ -115,7 +112,7 @@ async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Resu
     let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
     let mut worker = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &public,
         "--adapter",
         ADAPTER,
@@ -157,24 +154,21 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (_control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (_gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_control, public) = service(control).await?;
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };
@@ -205,7 +199,7 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
     let state = directory.path().join("worker");
     let mut worker = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &public,
         "--adapter",
         ADAPTER,

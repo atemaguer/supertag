@@ -289,7 +289,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> 
         let file = state.join("hosts").join(name).join("enrollment.json");
         assert_eq!(fs::metadata(file)?.permissions().mode() & 0o777, 0o600);
     }
-    // Discover the default file from state, and reuse exactly the enrolled Gateway origin.
+    // Discover the default file from state, and reuse exactly the enrolled Control Plane origin.
     fs::copy(&file, state.join("supertag.yaml"))?;
     let mut restarted = Process::spawn(&state, None, &[])?;
     assert_eq!(restarted.ready()?, endpoint);
@@ -329,12 +329,12 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     let mut operator = client(&endpoint).await?;
     let mut keys = Vec::new();
     for name in ["env-host", "file-host"] {
-        let key = Uuid::new_v4().to_string();
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
                     name: name.into(),
-                    host_id: name.into(),
+                    role: supertag_protocol::v2::PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600000,
@@ -620,7 +620,7 @@ async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -
         assert!(!status.success());
         assert!(!state.join("hosts").exists());
         assert!(!state.join("endpoint").exists());
-        let address = fs::read_to_string(state.join("gateway-address"))?;
+        let address = fs::read_to_string(state.join("control-plane-address"))?;
         assert!(
             tokio::net::TcpStream::connect(address.trim())
                 .await
@@ -709,7 +709,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     let env_file = temp.path().join("services.env");
     fs::write(
         &env_file,
-        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_TOKEN=file-gateway-token\n",
+        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\n",
     )?;
     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
     let file = temp.path().join("supertag.yaml");
@@ -768,11 +768,16 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     };
     assert_eq!(
         names(&roles["control-plane"]),
-        expected(&["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"])
+        expected(&[
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+            "SUPERTAG_DATABASE_URL",
+            "SUPERTAG_OPERATOR_TOKEN"
+        ])
     );
+    // The Gateway holds no operator credential, only its own enrolled one.
     assert_eq!(
         names(&roles["gateway"]),
-        expected(&["SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_OPERATOR_TOKEN"])
+        expected(&["SUPERTAG_GATEWAY_CREDENTIAL"])
     );
     // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
     // Each lane presents its Host credential; the guardian never passes it to a harness.
@@ -886,7 +891,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     Ok(())
 }
 
-/// A Control Plane and Gateway outside the supervisor, so one Host test runs on either database.
+/// A Control Plane outside the supervisor, so one Host test runs on either database.
 struct Central {
     services: Vec<Child>,
     public: String,
@@ -896,7 +901,8 @@ struct Central {
 impl Central {
     fn start(database: &str) -> Result<Self> {
         let checkpoints = tempfile::tempdir()?;
-        let gateway_token = Uuid::new_v4().simple().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator = Uuid::new_v4().simple().to_string();
         let listen = |child: &mut Child| -> Result<String> {
             let mut line = String::new();
@@ -907,32 +913,18 @@ impl Central {
         };
         let mut plane = Command::new(BIN)
             .args(["control-plane", "--listen", "127.0.0.1:0"])
-            .env_clear()
-            .env("SUPERTAG_DATABASE_URL", database)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .spawn()?;
-        let private = listen(&mut plane)?;
-        let mut services = vec![plane];
-        let mut gateway = Command::new(BIN)
-            .args([
-                "gateway",
-                "--control-plane",
-                &private,
-                "--listen",
-                "127.0.0.1:0",
-            ])
-            .arg("--checkpoint-directory")
+            .arg("--transfer-directory")
             .arg(checkpoints.path().join("checkpoints"))
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_DATABASE_URL", database)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .spawn()?;
-        let public = listen(&mut gateway);
-        services.push(gateway);
+        let public = listen(&mut plane);
+        let services = vec![plane];
         let mut central = Self {
             services,
             public: String::new(),
@@ -1049,12 +1041,12 @@ impl SharedHost {
         )?;
         fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
         let mut operator = client(&central.public).await?;
-        let key = Uuid::new_v4().to_string();
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
                     name: "shared".into(),
-                    host_id: "shared".into(),
+                    role: supertag_protocol::v2::PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600000,

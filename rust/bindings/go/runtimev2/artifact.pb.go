@@ -2864,7 +2864,7 @@ func (x *ListArtifactVolumeCopiesResponse) GetNextBeforeOrder() uint64 {
 	return 0
 }
 
-// Private Gateway lookup. The target carries the original download authority.
+// Internal API tier lookup. The target carries the original download authority.
 type LocateArtifactVolumeCopiesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Target:

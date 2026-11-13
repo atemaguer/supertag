@@ -87,7 +87,7 @@ func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, erro
 	}
 	task := res.Msg
 	if taskID == "" || task.GetTaskId() != taskID || len(task.GetArtifacts()) > 100 {
-		return nil, artifactDataLoss("Gateway returned a different Task or invalid file selections.")
+		return nil, artifactDataLoss("Control Plane returned a different Task or invalid file selections.")
 	}
 	if task.GetState() != v2.TaskState_TASK_STATE_SUCCEEDED {
 		return nil, nil
@@ -97,7 +97,7 @@ func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, erro
 	for _, selection := range task.GetArtifacts() {
 		id := selection.GetArtifactId()
 		if id == "" || seen[id] || len(selection.GetPaths()) == 0 || len(selection.GetPaths()) > 100 {
-			return nil, artifactDataLoss("Gateway returned invalid Task file selections.")
+			return nil, artifactDataLoss("Control Plane returned invalid Task file selections.")
 		}
 		seen[id] = true
 		res, err := c.runtime.artifacts.Get(ctx, connect.NewRequest(&v2.GetCapturedArtifactRequest{ArtifactId: id}))
@@ -106,12 +106,12 @@ func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, erro
 		}
 		capture := res.Msg
 		if capture.GetSummary().GetArtifactId() != id || len(capture.GetFiles()) > 100 {
-			return nil, artifactDataLoss("Gateway returned a different artifact.")
+			return nil, artifactDataLoss("Control Plane returned a different artifact.")
 		}
 		files := map[string]*v2.ArtifactFile{}
 		for _, file := range capture.GetFiles() {
 			if !validArtifactPath(file.GetPath()) || !validArtifactBlob(file.GetBlob()) || files[file.GetPath()] != nil {
-				return nil, artifactDataLoss("Gateway returned an invalid artifact manifest.")
+				return nil, artifactDataLoss("Control Plane returned an invalid artifact manifest.")
 			}
 			files[file.GetPath()] = file
 		}
@@ -129,7 +129,7 @@ func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, erro
 	return result, nil
 }
 
-// DownloadTaskFile reauthorizes through the selected Gateway, verifies the exact
+// DownloadTaskFile reauthorizes through the selected Control Plane, verifies the exact
 // chosen receipt, and publishes with an exclusive link so no existing file is replaced.
 func (c *Client) DownloadTaskFile(ctx context.Context, selected TaskFile, output string) (string, error) {
 	if !c.RuntimeV2() {

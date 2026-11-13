@@ -129,15 +129,20 @@ struct Services {
 impl Services {
     async fn start() -> Result<Self> {
         let directory = tempfile::tempdir()?;
-        let gateway_token = Uuid::new_v4().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut command = Command::new(BINARY);
         command
             .arg("control-plane")
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", Uuid::new_v4().to_string())
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", Uuid::new_v4().to_string())
+            .env(
+                "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
+                supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            )
             .env(
                 "SUPERTAG_DATABASE_URL",
                 format!(
@@ -173,7 +178,8 @@ impl Services {
             )
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", Uuid::new_v4().to_string())
             .env("SUPERTAG_SLACK_ACCOUNT_ID", ACCOUNT)
             .env("SUPERTAG_SLACK_TEAM_ID", "TTEAM1")
@@ -327,7 +333,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
     let state_text = state.to_str().context("state path")?;
     let id = format!("surface/slack/{ACCOUNT}");
     let mut store = Command::new(BINARY)
-        .args(["gateway-credential", "store", &id])
+        .args(["gateway", "credential", "store", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)
         .stdin(Stdio::piped())
@@ -369,7 +375,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
     drop(gateway);
 
     let output = Command::new(BINARY)
-        .args(["gateway-credential", "delete", &id])
+        .args(["gateway", "credential", "delete", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)
         .stdin(Stdio::null())
@@ -385,7 +391,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
 
     // Malformed input is refused without echoing it.
     let mut store = Command::new(BINARY)
-        .args(["gateway-credential", "store", &id])
+        .args(["gateway", "credential", "store", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)
         .stdin(Stdio::piped())

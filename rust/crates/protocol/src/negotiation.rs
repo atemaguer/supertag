@@ -44,7 +44,7 @@ pub fn role_name(role: ServiceRole) -> &'static str {
         ServiceRole::ControlPlane => "Control Plane",
         ServiceRole::Gateway => "Gateway",
         ServiceRole::WorkerHost => "Worker Host",
-        ServiceRole::Operator => "operator client",
+        ServiceRole::Client => "operator client",
         ServiceRole::Unspecified => "unidentified service",
     }
 }

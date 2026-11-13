@@ -26,11 +26,11 @@ if _version_not_supported:
 
 
 class OperatorAccessStub:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -74,11 +74,11 @@ class OperatorAccessStub:
 
 
 class OperatorAccessServicer:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -168,11 +168,11 @@ def add_OperatorAccessServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class OperatorAccess:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -329,81 +329,6 @@ class OperatorAccess:
             '/supertag.runtime.v2.OperatorAccess/ListAuditEntries',
             supertag_dot_runtime_dot_v2_dot_access__pb2.ListAuditEntriesRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_access__pb2.ListAuditEntriesResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
-class OperatorDirectoryStub:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.Authenticate = channel.unary_unary(
-                '/supertag.runtime.v2.OperatorDirectory/Authenticate',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.FromString,
-                _registered_method=True)
-
-
-class OperatorDirectoryServicer:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
-    """
-
-    def Authenticate(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_OperatorDirectoryServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'Authenticate': grpc.unary_unary_rpc_method_handler(
-                    servicer.Authenticate,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.OperatorDirectory', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.OperatorDirectory', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class OperatorDirectory:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
-    """
-
-    @staticmethod
-    def Authenticate(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.OperatorDirectory/Authenticate',
-            supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.FromString,
             options,
             channel_credentials,
             insecure,

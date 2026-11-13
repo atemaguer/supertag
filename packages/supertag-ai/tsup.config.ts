@@ -38,7 +38,7 @@ export default defineConfig({
     cli: "src/cli.ts",
     core: "src/core.ts",
     coordination: "src/coordination.ts",
-    gateway: "src/gateway.ts",
+    "control-plane-client": "src/control-plane-client.ts",
     harness: "src/harness.ts",
     worker: "src/worker.ts",
     transport: "src/transport.ts",

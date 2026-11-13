@@ -10,10 +10,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import type { GatewayProfile } from "../gateway";
+import type { ControlPlaneProfile } from "../control-plane";
 
 interface ConnectionDialogProps {
-  profile?: GatewayProfile;
+  profile?: ControlPlaneProfile;
   busy: boolean;
   error: string;
   opener: RefObject<HTMLButtonElement | null>;
@@ -37,7 +37,7 @@ export function ConnectionDialog({
     event.preventDefault();
     const field = token.current;
     const data = new FormData(event.currentTarget);
-    const address = profile?.origin ?? data.get("gateway");
+    const address = profile?.origin ?? data.get("controlPlane");
     const name = data.get("name");
     if (busy || !field || typeof address !== "string" || typeof name !== "string") return;
     const secret = field.value.trim();
@@ -63,27 +63,27 @@ export function ConnectionDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{profile ? "Edit Gateway" : "Add Gateway"}</DialogTitle>
+          <DialogTitle>{profile ? "Edit Control Plane" : "Add Control Plane"}</DialogTitle>
           <DialogDescription>
             {profile
-              ? "Update the name or operator token for this connection."
-              : "Use the Gateway URL and operator token for your SuperTag workspace."}
+              ? "Update the name or credential for this connection."
+              : "Use the Control Plane URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save}>
-          <label htmlFor="gateway-name">Name (optional)</label>
+          <label htmlFor="control-plane-name">Name (optional)</label>
           <Input
-            id="gateway-name"
+            id="control-plane-name"
             name="name"
             defaultValue={profile?.name}
             placeholder="Engineering"
             maxLength={80}
             disabled={busy}
           />
-          <label htmlFor="gateway-url">Gateway URL</label>
+          <label htmlFor="control-plane-url">Control Plane URL</label>
           <Input
-            id="gateway-url"
-            name="gateway"
+            id="control-plane-url"
+            name="controlPlane"
             type="url"
             defaultValue={profile?.origin}
             placeholder="http://127.0.0.1:7001"
@@ -93,11 +93,11 @@ export function ConnectionDialog({
             readOnly={Boolean(profile)}
             disabled={busy}
           />
-          <label htmlFor="gateway-token">
-            {profile ? "New operator token (optional)" : "Operator token"}
+          <label htmlFor="control-plane-token">
+            {profile ? "New operator token or Auth Key (optional)" : "Operator token or Auth Key"}
           </label>
           <Input
-            id="gateway-token"
+            id="control-plane-token"
             ref={token}
             type="password"
             autoComplete="off"
@@ -118,7 +118,7 @@ export function ConnectionDialog({
                 disabled={busy}
                 onClick={() => onForget(profile.origin)}
               >
-                Forget Gateway
+                Forget Control Plane
               </Button>
             )}
             <Button type="submit" className="primary" disabled={busy}>

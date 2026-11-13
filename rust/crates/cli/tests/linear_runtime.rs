@@ -66,9 +66,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -77,7 +77,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -96,7 +97,11 @@ impl Credentials {
 }
 
 fn request<T>(input: T, token: &str, principal: Option<&str>) -> Result<Request<T>> {
-    let mut request = authenticated_request(input, token, principal)?;
+    // A Gateway names the connector account it acts for; nobody names a principal.
+    let mut request = match principal.and_then(|principal| principal.strip_prefix("connector:")) {
+        Some(account) => supertag_protocol::connector_request(input, token, account)?,
+        None => authenticated_request(input, token, None)?,
+    };
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -372,7 +377,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_LINEAR_API_URL", &mock.endpoint);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload() -> Value {
     let timestamp = std::time::SystemTime::now()
@@ -454,7 +460,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -771,7 +777,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "replies",
             "--account",
@@ -786,8 +792,11 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
     assert_eq!(list["deliveries"][0]["reply_id"], id);
     assert_eq!(list["deliveries"][0]["state"], "REPLY_STATE_UNCERTAIN");
     assert_eq!(list["next_before_order"], 0);
-    let inspected =
-        operator_cli(&credentials, &["get", "--gateway", &public, "reply", &id]).await?;
+    let inspected = operator_cli(
+        &credentials,
+        &["get", "--control-plane", &public, "reply", &id],
+    )
+    .await?;
     assert_eq!(inspected["audit"][0]["kind"], "claim-expired");
     mock.responses.add_permits(1);
     let decision = ResolveReplyRequest {
@@ -801,7 +810,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "reply",
-            "--gateway",
+            "--control-plane",
             &public,
             "resolve",
             &id,

@@ -168,6 +168,7 @@ impl Store {
             .ok_or_else(|| invalid("Surface Account is required"))?;
         name("Surface Account ID", &value.account_id)?;
         let (_, identity_key) = provider_identity(&value)?;
+        super::serving_gateway(&value)?;
         let prior = account_in(&mut tx, &value.account_id).await?;
         revision(input.expected_revision, prior.as_ref().map(|a| a.revision))?;
         if prior.as_ref().is_some_and(|a| a.identity != value.identity) {

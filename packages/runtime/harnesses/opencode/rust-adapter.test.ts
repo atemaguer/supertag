@@ -86,7 +86,7 @@ it("projects the admitted model, credentials and manager tools into a private na
       HOME: "/operator/home",
       OPENAI_API_KEY: "env-selected-secret",
       ANTHROPIC_API_KEY: "env-unselected-secret",
-      SUPERTAG_GATEWAY_TOKEN: "gateway-secret",
+      SUPERTAG_GATEWAY_CREDENTIAL: "gateway-secret",
       OPENCODE_CONFIG_CONTENT: '{"plugin":["outside-policy"]}',
     },
   });

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
     conversations::task_access_in,
-    policy::{decode, operator},
+    policy::decode,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
 };
 
@@ -217,7 +217,7 @@ impl Store {
         principal: &str,
         artifact_id: &str,
     ) -> Result<CapturedArtifact> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("artifact ID", artifact_id)?;
         let mut tx = self.pool.begin().await?;
         let missing = || StoreError::NotFound("artifact was not found".into());
@@ -244,7 +244,7 @@ impl Store {
         principal: &str,
         input: &ListCapturedArtifactsRequest,
     ) -> Result<ListCapturedArtifactsResponse> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("Task ID", &input.task_id)?;
         let before =
             i64::try_from(input.before_order).map_err(|_| invalid("invalid artifact cursor"))?;
@@ -584,7 +584,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<GetCapturedArtifactRequest>,
     ) -> std::result::Result<Response<CapturedArtifact>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_captured_artifact(&principal, &request.get_ref().artifact_id)
@@ -596,7 +596,7 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         &self,
         request: Request<ListCapturedArtifactsRequest>,
     ) -> std::result::Result<Response<ListCapturedArtifactsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_captured_artifacts(&principal, request.get_ref())

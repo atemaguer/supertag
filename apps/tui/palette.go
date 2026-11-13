@@ -68,12 +68,12 @@ func (a *app) commands() []paletteCommand {
 			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
 			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
-	if len(a.contexts) > 1 || a.manageGateways() {
+	if len(a.contexts) > 1 || a.manageControlPlanes() {
 		title := "Switch Control Plane"
-		if a.manageGateways() {
-			title = "Gateways · add or switch"
+		if a.manageControlPlanes() {
+			title = "Control Planes · add or switch"
 		}
-		about := "Add a Gateway"
+		about := "Add a Control Plane"
 		if a.hasTarget {
 			about = contextLabel(a.contexts[a.current])
 		}

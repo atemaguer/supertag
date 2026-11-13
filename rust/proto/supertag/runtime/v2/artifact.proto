@@ -10,8 +10,9 @@ service ArtifactCatalog {
   rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
 }
 
-// Only the Gateway serves bytes. The Control Plane verifies authority and
-// records provenance and metadata after the Gateway verifies durable storage.
+// Internal to the Control Plane. Only its API tier serves bytes; the state
+// owner verifies authority and records provenance and metadata after the API
+// tier verifies durable storage.
 service ArtifactDirectory {
   rpc ReserveCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
   rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
@@ -28,7 +29,7 @@ service ArtifactDirectory {
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
-// Gateway facade. Identity and generation come from the authenticated Worker Host.
+// Public Worker Host API. Identity and generation come from the authenticated Worker Host.
 service AttemptArtifacts {
   rpc Find(FindAttemptArtifactsRequest) returns (ListCapturedArtifactsResponse);
   rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
@@ -254,7 +255,8 @@ message ArtifactDownload {
 }
 
 // File Volumes are registered storage locations. Registration alone authorizes
-// no write: the Gateway must explicitly map the exact Volume and source.
+// no write: the Control Plane must explicitly map the exact Volume and source
+// (`--artifact-volume`).
 service ArtifactVolumes {
   rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
   rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
@@ -265,7 +267,8 @@ service ArtifactVolumes {
   rpc DownloadCopy(GetArtifactVolumeCopyRequest) returns (stream ArtifactDownload);
   rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
 }
-// Private metadata authority. Only the Gateway verifies and carries copy bytes.
+// Internal metadata authority. Only the Control Plane's API tier verifies and
+// carries copy bytes.
 service ArtifactVolumeDirectory {
   rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
   rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
@@ -322,7 +325,7 @@ message GetArtifactVolumeCopyRequest { string copy_id = 1; }
 message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
 message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
 
-// Private Gateway lookup. The target carries the original download authority.
+// Internal API tier lookup. The target carries the original download authority.
 message LocateArtifactVolumeCopiesRequest {
   oneof target {
     DownloadArtifactFileRequest operator = 1;
@@ -338,7 +341,7 @@ message LocateArtifactVolumeCopiesResponse {
   repeated ArtifactVolumeLocation locations = 1;
 }
 
-// Private peer listener. A bearer grant from the Gateway authorizes this read.
+// Private peer listener. A bearer grant from the Control Plane authorizes this read.
 service WorkerArtifactTransfers {
   rpc Download(WorkerArtifactDownloadRequest) returns (stream ArtifactDownload);
 }

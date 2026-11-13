@@ -45,13 +45,20 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
     Ok((child, format!("http://{address}")))
 }
 
-fn gateway(private: &str, service_token: &str, token: &str, principal: &str) -> Command {
-    let mut command = command(&["gateway", "--control-plane", private]);
-    command
-        .env("SUPERTAG_GATEWAY_TOKEN", service_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", token)
-        .env("SUPERTAG_OPERATOR_PRINCIPAL", principal);
-    command
+/// Issues the Operator Token `name` with the admin `token`, for a second operator.
+async fn operator_token(endpoint: &str, token: &str, name: &str) -> Result<String> {
+    let created = cli(
+        &[
+            "operator-token",
+            "create",
+            name,
+            "--control-plane",
+            endpoint,
+        ],
+        token,
+    )
+    .await?;
+    Ok(created["secret"].as_str().context("secret")?.to_owned())
 }
 
 async fn channel(address: &str) -> Result<ProtocolChannel> {
@@ -84,7 +91,7 @@ async fn run_host(public: &str, token: &str, state: &Path, mode: &str) -> Result
         WAIT,
         command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             public,
             "--state-directory",
             state.to_str().context("Host state path")?,
@@ -149,33 +156,23 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
-    let bob_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut command = command(&["control-plane"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &alice_token)
+            .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
         command
     };
-    let (mut plane, private) = service(plane_command()).await?;
-    let (mut alice_gateway, public) = service(gateway(
-        &private,
-        &service_token,
-        &alice_token,
-        "operator:alice",
-    ))
-    .await?;
-    let (mut bob_gateway, bob_public) = service(gateway(
-        &private,
-        &service_token,
-        &bob_token,
-        "operator:bob",
-    ))
-    .await?;
+    let (mut plane, public) = service(plane_command()).await?;
+    let bob_token = operator_token(&public, &alice_token, "bob").await?;
+    let bob_public = public.clone();
     let connected = channel(&public).await?;
     let mut operator = operator_client::OperatorClient::new(connected.clone());
     let mut conversations = conversations_client::ConversationsClient::new(connected.clone());
@@ -242,7 +239,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
         .await
         .unwrap_err()
         .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let page = work
         .list(authenticated_request(list.clone(), &alice_token, None)?)
@@ -338,19 +335,9 @@ async fn private_harness_work_session_reports_once_after_service_restart(
         .context("durable report Task")?;
     // Restart both services after the child settled but before its parent report
     // executes. Neither report delivery nor child execution may be duplicated.
-    bob_gateway.kill().await?;
-    alice_gateway.kill().await?;
     plane.kill().await?;
-    let (new_plane, private) = service(plane_command()).await?;
+    let (new_plane, public) = service(plane_command()).await?;
     plane = new_plane;
-    let (new_gateway, public) = service(gateway(
-        &private,
-        &service_token,
-        &alice_token,
-        "operator:alice",
-    ))
-    .await?;
-    alice_gateway = new_gateway;
     let connected = channel(&public).await?;
     work = work_sessions_client::WorkSessionsClient::new(connected.clone());
     conversations = conversations_client::ConversationsClient::new(connected.clone());
@@ -439,7 +426,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     let detail = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "session",
             &started.work_session_id,
@@ -452,7 +439,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     let listed = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "sessions",
             "--parent-tag",
@@ -476,7 +463,6 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     );
     assert_eq!(listed["work_sessions"][0], detail);
     assert_eq!(listed["next_cursor"], "");
-    alice_gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }
@@ -485,25 +471,21 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut command = command(&["control-plane"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
         command
     };
-    let (mut plane, private) = service(plane_command()).await?;
-    let (mut gateway_process, public) = service(gateway(
-        &private,
-        &service_token,
-        &operator_token,
-        "operator:alice",
-    ))
-    .await?;
+    let (mut plane, public) = service(plane_command()).await?;
     let connected = channel(&public).await?;
     let mut operator = operator_client::OperatorClient::new(connected.clone());
     let mut conversations = conversations_client::ConversationsClient::new(connected.clone());
@@ -523,7 +505,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
             .await
             .expect_err("operator credential used as a Host")
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     assert_eq!(
         attempts
@@ -540,7 +522,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
             .await
             .expect_err("operator credential used as a Host")
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let mut work = work_sessions_client::WorkSessionsClient::new(connected);
     operator
@@ -717,18 +699,9 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
         .context("second report")?;
     ensure!(second_report_id != first_report_id);
 
-    gateway_process.kill().await?;
     plane.kill().await?;
-    let (restarted, private) = service(plane_command()).await?;
+    let (restarted, public) = service(plane_command()).await?;
     plane = restarted;
-    let (restarted, public) = service(gateway(
-        &private,
-        &service_token,
-        &operator_token,
-        "operator:alice",
-    ))
-    .await?;
-    gateway_process = restarted;
     let connected = channel(&public).await?;
     work = work_sessions_client::WorkSessionsClient::new(connected.clone());
     conversations = conversations_client::ConversationsClient::new(connected.clone());
@@ -841,7 +814,6 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
     let mut expected = vec![first_report_id, second_report_id];
     expected.sort();
     ensure!(report_ids == expected, "reports were lost or duplicated");
-    gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())
 }
@@ -850,22 +822,18 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+        .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane).await?;
-    let (mut gateway_process, public) = service(gateway(
-        &private,
-        &service_token,
-        &operator_token,
-        "operator:alice",
-    ))
-    .await?;
+    let (mut plane, public) = service(plane).await?;
     let connected = channel(&public).await?;
     let mut operator = operator_client::OperatorClient::new(connected.clone());
     let mut objectives = objectives_client::ObjectivesClient::new(connected.clone());
@@ -890,7 +858,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     cli(
         &[
             "team",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "release-team",
@@ -905,7 +873,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let created = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "release",
@@ -1077,7 +1045,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     // The operator manages the ceiling with an exact revision and operation
     // receipt. Host credentials cannot use this management entry point.
     let current = cli(
-        &["get", "--gateway", &public, "objective", "release"],
+        &["get", "--control-plane", &public, "objective", "release"],
         &operator_token,
     )
     .await?;
@@ -1095,11 +1063,11 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
         )?)
         .await
         .expect_err("Host changed Objective ceiling");
-    assert_eq!(denied.code(), Code::Unauthenticated);
+    assert_eq!(denied.code(), Code::PermissionDenied);
     let revision_arg = revision.to_string();
     let clear = [
         "objective",
-        "--gateway",
+        "--control-plane",
         &public,
         "set-runtime-actions",
         "release",
@@ -1131,7 +1099,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     assert_eq!(stale.code(), Code::AlreadyExists);
     let mut update = command(&[
         "objective",
-        "--gateway",
+        "--control-plane",
         &public,
         "set-runtime-actions",
         "release",
@@ -1166,7 +1134,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let defaults = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "owner-defaults",
@@ -1185,7 +1153,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let empty = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "explicit-empty",
@@ -1199,7 +1167,6 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     )
     .await?;
     assert_eq!(empty["runtime_actions"], serde_json::json!([]));
-    gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())
 }
@@ -1208,27 +1175,23 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+        .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane).await?;
-    let (mut gateway_process, public) = service(gateway(
-        &private,
-        &service_token,
-        &operator_token,
-        "operator:alice",
-    ))
-    .await?;
+    let (mut plane, public) = service(plane).await?;
     cli(
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &public,
             "planner",
             "--instructions",
@@ -1240,7 +1203,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     let created = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "budgeted",
@@ -1264,7 +1227,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         .context("Objective starting Task ID")?;
     let list = [
         "get",
-        "--gateway",
+        "--control-plane",
         &public,
         "sessions",
         "--parent-tag",
@@ -1331,7 +1294,11 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
             20,
         ),
     ] {
-        let task = cli(&["get", "task", "--gateway", &public, id], &operator_token).await?;
+        let task = cli(
+            &["get", "task", "--control-plane", &public, id],
+            &operator_token,
+        )
+        .await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert_eq!(
             task["execution_limits"]["max_reported_cost"],
@@ -1342,7 +1309,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
                 .as_str()
                 .context("first child Attempt ID")?;
             let usage = cli(
-                &["task", "usage", "--gateway", &public, id, attempt],
+                &["task", "usage", "--control-plane", &public, id, attempt],
                 &operator_token,
             )
             .await?;
@@ -1354,7 +1321,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         }
     }
     let before = cli(
-        &["get", "--gateway", &public, "objective", "budgeted"],
+        &["get", "--control-plane", &public, "objective", "budgeted"],
         &operator_token,
     )
     .await?;
@@ -1362,7 +1329,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     let submit = [
         "task",
         "submit",
-        "--gateway",
+        "--control-plane",
         &public,
         "--tag",
         "planner",
@@ -1377,7 +1344,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "set-limits",
             "budgeted",
@@ -1398,7 +1365,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         &[
             "task",
             "submit",
-            "--gateway",
+            "--control-plane",
             &public,
             "--tag",
             "planner",
@@ -1417,7 +1384,6 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         smaller["execution_limits"]["max_reported_cost"],
         expected_cost(250)
     );
-    gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())
 }

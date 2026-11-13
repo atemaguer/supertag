@@ -46,7 +46,7 @@ message DeleteGithubWorkspaceRequest {
 }
 message DeleteGithubWorkspaceResponse {}
 
-// Private Control Plane API used only by configured Gateway source readers.
+// Internal Control Plane API used only by its configured GitHub source reader.
 service GithubSourceResolver {
   rpc ListPending(ListPendingGithubSourcesRequest) returns (ListPendingGithubSourcesResponse);
   rpc Pin(PinGithubSourceRequest) returns (GithubSourcePin);

@@ -592,7 +592,7 @@ export const GithubPublications: GenService<{
   serviceDesc(file_supertag_runtime_v2_github_publications, 0);
 
 /**
- * Private Gateway-to-Control-Plane service. The authenticated publisher is
+ * Internal to the Control Plane: its GitHub publisher calls the state owner. The publisher is
  * bound to a configured GitHub account. A claim is never permission to write.
  *
  * @generated from service supertag.runtime.v2.GithubPublisher

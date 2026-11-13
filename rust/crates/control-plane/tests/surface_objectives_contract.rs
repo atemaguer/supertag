@@ -44,7 +44,7 @@ async fn accept(store: &Store, input: AcceptSlackEventRequest) -> Task {
 
 async fn objectives(store: &Store) -> Vec<Objective> {
     store
-        .list_objectives(&ListObjectivesRequest::default())
+        .list_objectives("operator:local", &ListObjectivesRequest::default())
         .await
         .unwrap()
 }
@@ -282,7 +282,10 @@ async fn contract(url: String) {
         assert_eq!(colleague.session_id, starting.session_id, "{text}");
         assert_eq!(colleague.state(), TaskState::Queued, "{text}");
     }
-    let unchanged = store.get_objective(&objective.objective_id).await.unwrap();
+    let unchanged = store
+        .get_objective("operator:local", &objective.objective_id)
+        .await
+        .unwrap();
     assert_eq!(unchanged.status(), ObjectiveStatus::Working);
     assert!(unchanged.paused_at_ms.is_none());
 
@@ -362,7 +365,7 @@ async fn contract(url: String) {
     answered(&store, &url, &pause, "Paused.").await;
     assert!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .paused_at_ms
@@ -464,7 +467,7 @@ async fn contract(url: String) {
     );
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),
@@ -484,7 +487,7 @@ async fn contract(url: String) {
     answered(&store, &url, &approve, "Approved.").await;
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),
@@ -582,6 +585,7 @@ fn surface_account(step: &str, enabled: bool, revision: Option<u64>) -> PutSurfa
                 )),
             }),
             enabled,
+            gateway: "local".into(),
             ..Default::default()
         }),
     }
@@ -667,7 +671,10 @@ async fn refused(store: &Store, objective: &str, sequence: &mut u32, why: &str) 
             .await;
         assert_eq!(result.unwrap().task, None, "{why} {text}");
     }
-    let current = store.get_objective(objective).await.unwrap();
+    let current = store
+        .get_objective("operator:local", objective)
+        .await
+        .unwrap();
     assert_eq!(current.status(), ObjectiveStatus::ReadyForReview, "{why}");
     assert!(current.paused_at_ms.is_none(), "{why}");
 }
@@ -701,7 +708,11 @@ async fn gated(url: String) {
     .await;
     let id = objective.objective_id.as_str();
     assert_eq!(
-        store.get_objective(id).await.unwrap().status(),
+        store
+            .get_objective("operator:local", id)
+            .await
+            .unwrap()
+            .status(),
         ObjectiveStatus::ReadyForReview
     );
     let mut sequence = 0;
@@ -778,7 +789,11 @@ async fn gated(url: String) {
     .await;
     answered(&store, &url, &approve, "Approved.").await;
     assert_eq!(
-        store.get_objective(id).await.unwrap().status(),
+        store
+            .get_objective("operator:local", id)
+            .await
+            .unwrap()
+            .status(),
         ObjectiveStatus::Completed
     );
     store.close().await;
