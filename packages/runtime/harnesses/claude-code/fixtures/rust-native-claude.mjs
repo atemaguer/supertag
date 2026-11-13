@@ -688,6 +688,39 @@ async function turn(message) {
     return;
   }
   let result = resumed ? "fixture resumed turn" : "fixture first turn";
+  if (prompt === "task-progress") {
+    // Claude Code's own background task and API retry messages, as the CLI streams them.
+    const secret = process.env.ANTHROPIC_API_KEY;
+    send({
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 10,
+      retry_delay_ms: 500,
+      error_status: 529,
+      error: "overloaded",
+      session_id: sessionId,
+      uuid: randomUUID(),
+    });
+    send({
+      type: "system",
+      subtype: "task_started",
+      task_id: "lint",
+      description: `Run   the linter ${secret}`,
+      session_id: sessionId,
+      uuid: randomUUID(),
+    });
+    send({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "lint",
+      status: "completed",
+      summary: "Linted",
+      output_file: "",
+      session_id: sessionId,
+      uuid: randomUUID(),
+    });
+  }
   if (prompt.startsWith("objective-question"))
     result = await objectiveQuestion(prompt === "objective-question");
   if (prompt.startsWith("coordination-"))

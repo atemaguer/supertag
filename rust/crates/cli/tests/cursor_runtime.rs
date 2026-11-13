@@ -537,12 +537,16 @@ impl<'a> Runtime<'a> {
         );
         let result = task.result.as_deref().context("Cursor result missing")?;
         ensure!(result.contains(&format!("cursor-complete:{mode}")) && secret_free(result));
+        let events = self.events(id).await?;
         ensure!(
-            self.events(id)
-                .await?
-                .iter()
-                .all(|event| secret_free(&event.text)),
+            events.iter().all(|event| secret_free(&event.text)),
             "Cursor leaked provider credential bytes in durable events"
+        );
+        // Cursor SDK activity reaches the surface as a `progress.updated` Task event.
+        ensure!(
+            events.iter().any(|event| event.text
+                == r#"{"type":"progress.updated","progress":{"summary":"Cursor is reasoning"}}"#),
+            "Cursor activity was not reported as progress: {events:?}"
         );
         Ok(task)
     }

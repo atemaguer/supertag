@@ -1037,3 +1037,35 @@ it("uses the first accepted model and falls back to the host model without one",
   const fallback = await invoke({ prompt, model: "host-model" });
   expect(fallback.completions[0]?.result).toBe("fixture model host-model");
 }, 30000);
+
+it("reports Claude Code background tasks and API retries as progress events", async () => {
+  const run = await invoke({ prompt: "task-progress" });
+  expect(run.completions[0]?.result).toContain("fixture first turn");
+  const progress = run.events
+    .filter((text) => text.startsWith('{"type":"progress.updated"'))
+    .map((text) => JSON.parse(text));
+  expect(progress).toEqual([
+    {
+      type: "progress.updated",
+      progress: {
+        summary:
+          "Provider request failed (overloaded, HTTP 529); Claude Code is retrying request 1 of 10 after 500 ms.",
+      },
+    },
+    {
+      type: "progress.updated",
+      progress: {
+        summary: "Working through the plan",
+        items: [{ id: "lint", text: "Run the linter [REDACTED]", status: "active" }],
+      },
+    },
+    {
+      type: "progress.updated",
+      progress: {
+        summary: "Finishing up",
+        items: [{ id: "lint", text: "Run the linter [REDACTED]", status: "completed" }],
+      },
+    },
+  ]);
+  expect(run.events.join(" ")).not.toContain(providerSecret);
+}, 30000);
