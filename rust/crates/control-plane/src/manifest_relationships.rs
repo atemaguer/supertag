@@ -30,17 +30,13 @@ impl Kind {
     }
 }
 
-type Key = (Kind, String);
-
 pub(crate) async fn imperative_change(
     tx: &mut Transaction<'_, Any>,
     tag: &str,
     kind: &str,
     related: &str,
 ) -> Result<()> {
-    // Retain a tombstone for a previously managed relationship so a later
-    // declaration distinguishes an imperative removal from an untouched entry.
-    sqlx::query("UPDATE supertag_v2_manifest_relationships SET manager='cli',observed_version='' WHERE tag_id=$1 AND kind=$2 AND related_id=$3")
+    sqlx::query("DELETE FROM supertag_v2_manifest_relationships WHERE tag_id=$1 AND kind=$2 AND related_id=$3")
         .bind(tag).bind(kind).bind(related).execute(&mut **tx).await?;
     Ok(())
 }
@@ -276,7 +272,6 @@ impl Store {
             .cloned()
             .collect::<BTreeSet<_>>();
         let mut changes = Vec::new();
-        let mut conflicts = Vec::new();
         let mut effects = Vec::new();
         for key in keys {
             let (kind, related) = &key;
@@ -288,20 +283,8 @@ impl Store {
                 .map(|entry| entry.manager.as_str());
             let present = desired.contains(&key);
             let path = format!("spec.{}[{related}]", kind.field());
-            if present {
-                if !before.present && entry.is_some() && !input.force_conflicts {
-                    conflicts.push(ManifestRelationshipConflict {
-                        path,
-                        manager: previous_owner.unwrap_or("cli").into(),
-                    });
-                    continue;
-                }
-                if before.present && previous_owner == Some(owner) {
-                    continue;
-                }
-            } else if previous_owner != Some(owner) {
-                // An imperative change superseded the old receipt. Drop only the stale ownership.
-                effects.push((key, present, true));
+            let owned_and_present = before.present && previous_owner == Some(owner);
+            if (present && owned_and_present) || (!present && !owned_and_present) {
                 continue;
             }
             let ownership_only = before.present == present;
@@ -311,12 +294,6 @@ impl Store {
                 ownership_only,
             });
             effects.push((key, present, ownership_only));
-        }
-        if !conflicts.is_empty() && !input.preview {
-            return Err(StoreError::Conflict(format!(
-                "{} is owned by {}",
-                conflicts[0].path, conflicts[0].manager
-            )));
         }
         if !input.preview {
             let now = self.execution_now_ms();
@@ -336,8 +313,9 @@ impl Store {
                 }
             }
         }
-        Ok(ReconcileTagRelationshipsResponse { changes, conflicts })
+        Ok(ReconcileTagRelationshipsResponse { changes })
     }
+
     async fn provision_tags(&self, principal: &str, input: ProvisionTagsRequest) -> Result<()> {
         operator(principal)?;
         if input.tags.len() > MAX_RELATIONSHIPS {
@@ -404,6 +382,7 @@ impl manifest_relationships_server::ManifestRelationships for ControlPlane {
                 .await?,
         ))
     }
+
     async fn provision_tags(
         &self,
         request: Request<ProvisionTagsRequest>,

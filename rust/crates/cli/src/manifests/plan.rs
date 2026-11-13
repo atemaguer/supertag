@@ -27,7 +27,6 @@ pub(super) struct Catalog<'a> {
     objectives: objectives_client::ObjectivesClient<Channel>,
     relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
     manager: &'a str,
-    force_conflicts: bool,
     create_only: bool,
 }
 
@@ -119,7 +118,6 @@ impl<'a> Catalog<'a> {
         channel: Channel,
         token: &'a str,
         manager: &'a str,
-        force_conflicts: bool,
         create_only: bool,
     ) -> Result<Self> {
         macro_rules! client {
@@ -150,7 +148,6 @@ impl<'a> Catalog<'a> {
             objectives: client!(objectives_client, ObjectivesClient),
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
             manager,
-            force_conflicts,
             create_only,
         })
     }
@@ -719,7 +716,6 @@ impl<'a> Catalog<'a> {
             manager: self.manager.into(),
             role_ids: role_ids.keys().cloned().collect(),
             mailbox_senders: spec.accepts_messages_from,
-            force_conflicts: self.force_conflicts,
             preview: true,
         };
         if self.create_only {
@@ -739,21 +735,6 @@ impl<'a> Catalog<'a> {
                     .reconcile_tag(request(reconciliation.clone(), self.token)?)
                     .await?
                     .into_inner();
-                ensure!(
-                    response.conflicts.is_empty(),
-                    "{}",
-                    response
-                        .conflicts
-                        .iter()
-                        .map(|conflict| {
-                            format!(
-                                "{} is owned by {} (use --force-conflicts)",
-                                conflict.path, conflict.manager
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
                 response
                     .changes
                     .into_iter()

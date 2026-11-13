@@ -408,20 +408,18 @@ class ProvisionTagsResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class ReconcileTagRelationshipsRequest(_message.Message):
-    __slots__ = ("tag_id", "manager", "role_ids", "mailbox_senders", "force_conflicts", "preview")
+    __slots__ = ("tag_id", "manager", "role_ids", "mailbox_senders", "preview")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     MANAGER_FIELD_NUMBER: _ClassVar[int]
     ROLE_IDS_FIELD_NUMBER: _ClassVar[int]
     MAILBOX_SENDERS_FIELD_NUMBER: _ClassVar[int]
-    FORCE_CONFLICTS_FIELD_NUMBER: _ClassVar[int]
     PREVIEW_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     manager: str
     role_ids: _containers.RepeatedScalarFieldContainer[str]
     mailbox_senders: _containers.RepeatedScalarFieldContainer[str]
-    force_conflicts: bool
     preview: bool
-    def __init__(self, tag_id: _Optional[str] = ..., manager: _Optional[str] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ..., force_conflicts: _Optional[bool] = ..., preview: _Optional[bool] = ...) -> None: ...
+    def __init__(self, tag_id: _Optional[str] = ..., manager: _Optional[str] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ..., preview: _Optional[bool] = ...) -> None: ...
 
 class ManifestRelationshipChange(_message.Message):
     __slots__ = ("path", "present", "ownership_only")
@@ -434,20 +432,10 @@ class ManifestRelationshipChange(_message.Message):
     def __init__(self, path: _Optional[str] = ..., present: _Optional[bool] = ..., ownership_only: _Optional[bool] = ...) -> None: ...
 
 class ReconcileTagRelationshipsResponse(_message.Message):
-    __slots__ = ("changes", "conflicts")
+    __slots__ = ("changes",)
     CHANGES_FIELD_NUMBER: _ClassVar[int]
-    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
     changes: _containers.RepeatedCompositeFieldContainer[ManifestRelationshipChange]
-    conflicts: _containers.RepeatedCompositeFieldContainer[ManifestRelationshipConflict]
-    def __init__(self, changes: _Optional[_Iterable[_Union[ManifestRelationshipChange, _Mapping]]] = ..., conflicts: _Optional[_Iterable[_Union[ManifestRelationshipConflict, _Mapping]]] = ...) -> None: ...
-
-class ManifestRelationshipConflict(_message.Message):
-    __slots__ = ("path", "manager")
-    PATH_FIELD_NUMBER: _ClassVar[int]
-    MANAGER_FIELD_NUMBER: _ClassVar[int]
-    path: str
-    manager: str
-    def __init__(self, path: _Optional[str] = ..., manager: _Optional[str] = ...) -> None: ...
+    def __init__(self, changes: _Optional[_Iterable[_Union[ManifestRelationshipChange, _Mapping]]] = ...) -> None: ...
 
 class WatchRequest(_message.Message):
     __slots__ = ("resume_token", "kinds")

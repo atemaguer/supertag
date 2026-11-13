@@ -5,7 +5,11 @@ use serde_json::Value;
 use sqlx::{Connection, Executor};
 use supertag_protocol::{
     authenticated_request,
-    v2::{GetTagRequest, GetTaskRequest, PutTagRequest, operator_client::OperatorClient},
+    v2::{
+        GetTagRequest, GetTaskRequest, ProvisionTag, ProvisionTagsRequest, PutTagRequest,
+        manifest_relationships_client::ManifestRelationshipsClient,
+        operator_client::OperatorClient,
+    },
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -258,6 +262,163 @@ spec: {source: "file:///var/lib/supertag/archive"}
         .await?
         .into_inner();
     assert_eq!(before, after);
+
+    let external = root.join("external.yaml");
+    std::fs::write(
+        &external,
+        r#"
+apiVersion: supertag/v1
+kind: Tag
+metadata: {name: observer}
+spec: {}
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: {name: Observer}
+spec: {purpose: Observe releases.}
+"#,
+    )?;
+    command(&gateway, &["apply", "-f", external.to_str().unwrap()], true).await?;
+    command(
+        &gateway,
+        &["mailbox-grants", "allow", "observer", "builder"],
+        true,
+    )
+    .await?;
+    command(&gateway, &["policy", "assign", "Observer", "builder"], true).await?;
+
+    let empty = root.join("relationships.yaml");
+    std::fs::write(
+        &empty,
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: builder}\nspec: {}\n",
+    )?;
+    let empty = empty.to_str().unwrap();
+    assert_eq!(
+        command(&gateway, &["diff", "-f", empty, "--set", "other"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    let preview = command(&gateway, &["diff", "-f", empty], true).await?;
+    assert!(preview.contains("remove Role/"), "{preview}");
+    assert!(
+        preview.contains("revoke Mailbox access from Tag/reviewer to Tag/builder"),
+        "{preview}"
+    );
+    command(&gateway, &["apply", "-f", empty], true).await?;
+    assert_eq!(
+        command(&gateway, &["diff", "-f", empty], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    let assignments: Value = serde_json::from_str(
+        &command(
+            &gateway,
+            &["policy", "assignments", "--tag", "builder", "--active"],
+            true,
+        )
+        .await?,
+    )?;
+    assert_eq!(assignments["assignments"].as_array().unwrap().len(), 1);
+    let observer: Value = serde_json::from_str(
+        &command(&gateway, &["policy", "show", "role", "Observer"], true).await?,
+    )?;
+    assert_eq!(
+        assignments["assignments"][0]["role_id"],
+        observer["role_id"]
+    );
+    let grants: Value = serde_json::from_str(
+        &command(&gateway, &["mailbox-grants", "list", "builder"], true).await?,
+    )?;
+    assert_eq!(grants["grants"].as_array().unwrap().len(), 1);
+    assert_eq!(grants["grants"][0]["sender_tag_id"], "observer");
+
+    let managed = root.join("managed.yaml");
+    std::fs::write(
+        &managed,
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: builder}\nspec: {acceptsMessagesFrom: [reviewer]}\n",
+    )?;
+    let managed = managed.to_str().unwrap();
+    command(&gateway, &["apply", "-f", managed, "--set", "team-a"], true).await?;
+    let adoption = command(&gateway, &["diff", "-f", managed, "--set", "team-b"], true).await?;
+    assert!(
+        adoption.contains("manage Tag/builder spec.acceptsMessagesFrom[reviewer]"),
+        "{adoption}"
+    );
+    command(&gateway, &["apply", "-f", managed, "--set", "team-b"], true).await?;
+    assert_eq!(
+        command(&gateway, &["diff", "-f", empty, "--set", "team-a"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    command(
+        &gateway,
+        &["mailbox-grants", "revoke", "reviewer", "builder"],
+        true,
+    )
+    .await?;
+    command(
+        &gateway,
+        &["mailbox-grants", "allow", "reviewer", "builder"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        command(&gateway, &["diff", "-f", empty, "--set", "team-b"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+
+    let mut relationship_client = ManifestRelationshipsClient::connect(gateway.clone()).await?;
+    let tags = |sender: &str| {
+        vec![
+            ProvisionTag {
+                tag: Some(PutTagRequest {
+                    tag_id: "bootstrap-a".into(),
+                    ..Default::default()
+                }),
+                mailbox_senders: vec![sender.into()],
+                ..Default::default()
+            },
+            ProvisionTag {
+                tag: Some(PutTagRequest {
+                    tag_id: "bootstrap-b".into(),
+                    ..Default::default()
+                }),
+                mailbox_senders: vec!["bootstrap-a".into()],
+                ..Default::default()
+            },
+        ]
+    };
+    let rejected = relationship_client
+        .provision_tags(authenticated_request(
+            ProvisionTagsRequest {
+                tags: tags("missing"),
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await
+        .unwrap_err();
+    assert_eq!(rejected.code(), tonic::Code::NotFound);
+    command(&gateway, &["get-tag", "bootstrap-a"], false).await?;
+    command(&gateway, &["get-tag", "bootstrap-b"], false).await?;
+    relationship_client
+        .provision_tags(authenticated_request(
+            ProvisionTagsRequest {
+                tags: tags("bootstrap-b"),
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?;
+    let grants: Value = serde_json::from_str(
+        &command(&gateway, &["mailbox-grants", "list", "bootstrap-a"], true).await?,
+    )?;
+    assert_eq!(grants["grants"].as_array().unwrap().len(), 2);
 
     gateway_process.kill().await?;
     plane.kill().await?;

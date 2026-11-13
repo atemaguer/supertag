@@ -69,8 +69,7 @@ message ReconcileTagRelationshipsRequest {
   string manager = 2;
   repeated string role_ids = 3;
   repeated string mailbox_senders = 4;
-  bool force_conflicts = 5;
-  bool preview = 6;
+  bool preview = 5;
 }
 
 message ManifestRelationshipChange {
@@ -82,12 +81,6 @@ message ManifestRelationshipChange {
 
 message ReconcileTagRelationshipsResponse {
   repeated ManifestRelationshipChange changes = 1;
-  repeated ManifestRelationshipConflict conflicts = 2;
-}
-
-message ManifestRelationshipConflict {
-  string path = 1;
-  string manager = 2;
 }
 
 enum WatchKind {

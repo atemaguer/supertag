@@ -35,9 +35,6 @@ pub struct ManifestArgs {
     /// Name the manager that owns the manifest's Tag relationships.
     #[arg(long = "set")]
     manager: Option<String>,
-    /// Reapply relationships removed by another writer.
-    #[arg(long)]
-    force_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -425,7 +422,7 @@ pub(crate) async fn provision(
         return Ok(());
     }
     let manifests = load(sources, true)?;
-    let mut catalog = plan::Catalog::new(channel, token, "provision", false, true)?;
+    let mut catalog = plan::Catalog::new(channel, token, "provision", true)?;
     let changes = catalog.plan(manifests).await?;
     for change in changes {
         catalog.apply(change, false).await?;
@@ -444,7 +441,6 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         channel,
         &token,
         args.manager.as_deref().unwrap_or_default(),
-        args.force_conflicts,
         false,
     )?;
     let changes = catalog.plan(manifests).await?;
