@@ -25,6 +25,7 @@ mod mcp_effects;
 pub mod objective_limits;
 mod objectives;
 mod operator_access;
+pub mod operator_notifications;
 mod placement;
 mod policy;
 mod replies;
