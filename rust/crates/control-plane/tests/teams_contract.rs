@@ -378,6 +378,120 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert_eq!(remainder.posts, [second_post]);
 
+    // tests/workstream-post-store.test.ts: text, addressees, and read options are validated.
+    let invalid_post =
+        |operation: &str, body: String, to: Vec<String>| PostAttemptWorkstreamRequest {
+            attempt: Some(one.clone()),
+            operation_id: operation.into(),
+            body,
+            to_tag_ids: to,
+        };
+    for request in [
+        invalid_post("blank", "  \n ".into(), vec![]),
+        invalid_post("nul", "a\0b".into(), vec![]),
+        invalid_post("long", "é".repeat(16_385), vec![]),
+        invalid_post(
+            "crowded",
+            "Too many".into(),
+            (0..21).map(|index| format!("tag-{index}")).collect(),
+        ),
+        invalid_post("empty-recipient", "Hello".into(), vec![String::new()]),
+    ] {
+        let operation = request.operation_id.clone();
+        assert!(
+            matches!(
+                store.post_attempt_workstream(&host, &request).await,
+                Err(StoreError::InvalidArgument(_))
+            ),
+            "{operation}"
+        );
+    }
+    assert!(
+        store
+            .post_attempt_workstream(&host, &invalid_post("longest", "é".repeat(16_384), vec![]))
+            .await
+            .unwrap()
+            .post
+            .is_some()
+    );
+    for read in [
+        ListWorkstreamPostsRequest {
+            team: "release".into(),
+            cursor: "not-a-cursor".into(),
+            ..Default::default()
+        },
+        ListWorkstreamPostsRequest {
+            team: "release".into(),
+            after_sequence: Some(u64::MAX),
+            ..Default::default()
+        },
+    ] {
+        assert!(matches!(
+            store.list_workstream_posts(OPERATOR, &read).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+
+    // Concurrent posts, each sent twice at once, take one gap-free sequence each, and
+    // incremental reads return every post once in order.
+    const AUTHORS: usize = 24;
+    let mut posts = tokio::task::JoinSet::new();
+    for index in 0..AUTHORS {
+        for _ in 0..2 {
+            let (store, host) = (store.clone(), host.clone());
+            let request = invalid_post(
+                &format!("concurrent-{index}"),
+                format!("Finding {index}"),
+                vec![],
+            );
+            posts.spawn(
+                async move { (index, store.post_attempt_workstream(&host, &request).await) },
+            );
+        }
+    }
+    let mut answers = std::collections::BTreeMap::<usize, Vec<WorkstreamPost>>::new();
+    while let Some(joined) = posts.join_next().await {
+        let (index, answer) = joined.unwrap();
+        answers
+            .entry(index)
+            .or_default()
+            .push(answer.unwrap().post.unwrap());
+    }
+    let mut sequences = Vec::new();
+    for (index, pair) in &answers {
+        assert_eq!(pair.len(), 2);
+        assert_eq!(pair[0], pair[1], "a retry returns the same post");
+        assert_eq!(pair[0].body, format!("Finding {index}"));
+        sequences.push(pair[0].sequence);
+    }
+    sequences.sort_unstable();
+    let first = sequences[0];
+    assert_eq!(
+        sequences,
+        (first..first + AUTHORS as u64).collect::<Vec<_>>()
+    );
+    let mut read = Vec::new();
+    let mut page = ListWorkstreamPostsRequest {
+        team: "release".into(),
+        after_sequence: Some(first - 1),
+        limit: 5,
+        ..Default::default()
+    };
+    loop {
+        let answer = store.list_workstream_posts(OPERATOR, &page).await.unwrap();
+        read.extend(answer.posts.into_iter().map(|post| post.sequence));
+        if answer.next_cursor.is_empty() {
+            break;
+        }
+        page = ListWorkstreamPostsRequest {
+            team: "release".into(),
+            cursor: answer.next_cursor,
+            limit: 5,
+            ..Default::default()
+        };
+    }
+    assert_eq!(read, sequences);
+
     let delete = DeleteTeamRequest {
         operation_id: "delete-release".into(),
         team: "release".into(),
