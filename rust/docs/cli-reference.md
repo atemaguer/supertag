@@ -2145,9 +2145,9 @@ Options:
           Private host allowlist of Skill packages
 
       --attempt-timeout-seconds <ATTEMPT_TIMEOUT_SECONDS>
-          Seconds a Task Attempt may run before this host stops it
+          Seconds a Task Attempt may run before this host stops it, from 1 through 86400
           
-          [default: 120]
+          [default: 3600]
 
       --once
           Exit after running one Task Attempt

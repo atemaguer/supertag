@@ -570,7 +570,9 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     separate_processes_preserve_work_and_cancel_execution;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning;
+    killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    attempt_time_limit_stops_the_adapter_and_fails_the_task;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -754,7 +756,71 @@ impl Drop for DescendantCleanup {
     }
 }
 
-async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning(
+async fn attempt_time_limit_stops_the_adapter_and_fails_the_task(database: String) -> Result<()> {
+    let directory = TempDir::new()?;
+    let credentials = Credentials::new();
+    let services = Services::start(&database, directory.path(), &credentials).await?;
+    let mut client = services.client().await?;
+    client
+        .put_tag(credentials.request(PutTagRequest {
+            name: None,
+            expected_revision: None,
+            approval_rules: vec![],
+            harness_kind: 0,
+            workspace: None,
+            tag_id: "engineer".into(),
+            instructions: "Run past the time limit".into(),
+            execution: None,
+            allowed_actions: vec!["files:read".into()],
+        })?)
+        .await?;
+    let accepted = client
+        .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: "engineer".into(),
+            session_id: "slow".into(),
+            operation_id: "time-limit".into(),
+            prompt: "wait longer than allowed".into(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    let (adapter, launches) = recording_adapter(directory.path())?;
+    let mut command = credentials.command();
+    command
+        .args([
+            "worker-host",
+            "--gateway",
+            &services.endpoint,
+            "--once",
+            "--attempt-timeout-seconds",
+            "2",
+            "--state-directory",
+        ])
+        .arg(directory.path().join("host"))
+        .arg("--adapter")
+        .arg(&adapter)
+        .arg("--adapter-arg=--wait-for-cancel");
+    let started = Instant::now();
+    let mut host = Process::spawn(command, directory.path(), "time-limited-host", false)?;
+    assert!(host.exited().await?.success(), "{}", host.logs());
+    let failed = task(&mut client, &credentials, &accepted.task_id).await?;
+    assert_eq!(failed.state(), TaskState::Failed);
+    assert_eq!(
+        failed.result.as_deref(),
+        Some("Harness execution timed out")
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the adapter waits 60 seconds; the 2-second limit stopped it"
+    );
+    let pid = std::fs::read_to_string(&launches)?.trim().parse::<u32>()?;
+    assert!(!process_exists(pid)?, "the timed-out adapter was reaped");
+    Ok(())
+}
+
+async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning(
     database: String,
 ) -> Result<()> {
     use std::os::unix::process::ExitStatusExt;

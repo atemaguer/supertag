@@ -89,6 +89,8 @@ enum Service {
         depends_on: Vec<String>,
         #[serde(default)]
         concurrency: Option<u32>,
+        #[serde(default, rename = "attempt-timeout-seconds")]
+        attempt_timeout_seconds: Option<u64>,
     },
 }
 #[derive(Deserialize)]
@@ -216,6 +218,8 @@ pub struct Host {
     pub harnesses: Vec<AdapterOptions>,
     /// Attempts each harness runs at once; each is a separate execution lane.
     pub concurrency: u32,
+    /// Seconds each Task Attempt may run before the host stops it.
+    pub attempt_timeout_seconds: u64,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
     /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
@@ -225,6 +229,12 @@ pub struct Host {
 }
 /// The largest per-harness concurrency a Worker Host may declare.
 const MAX_CONCURRENCY: u32 = 16;
+/// A Task Attempt may run for 60 minutes unless its host service says otherwise, as in
+/// TypeScript's `DEFAULT_ATTEMPT_TIMEOUT_MS`.
+pub const DEFAULT_ATTEMPT_TIMEOUT_SECONDS: u64 = 60 * 60;
+/// The longest Attempt time limit a host service may declare: one day, the longest lease a
+/// shared execution provider grants.
+pub const MAX_ATTEMPT_TIMEOUT_SECONDS: u64 = 24 * 60 * 60;
 /// Distinct built-in harnesses one named Host may serve.
 const MAX_HARNESSES: usize = 5;
 #[derive(Parser)]
@@ -491,6 +501,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             depends_on,
             concurrency,
+            attempt_timeout_seconds,
         } = service
         else {
             continue;
@@ -518,6 +529,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             // Plane polling even when idle. More than one Attempt per harness is opt-in.
             None => 1,
         };
+        let attempt_timeout_seconds =
+            attempt_timeout_seconds.unwrap_or(DEFAULT_ATTEMPT_TIMEOUT_SECONDS);
+        ensure!(
+            (1..=MAX_ATTEMPT_TIMEOUT_SECONDS).contains(&attempt_timeout_seconds),
+            "attempt-timeout-seconds must be a whole number from 1 through {MAX_ATTEMPT_TIMEOUT_SECONDS}"
+        );
         let target = gateway
             .as_deref()
             .or(plane_name.as_deref())
@@ -647,6 +664,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             key,
             harnesses: selected,
             concurrency,
+            attempt_timeout_seconds,
             skills,
             restart,
             session_branches,
@@ -1106,6 +1124,7 @@ secrets:
     type: host
     harnesses: [codex, cursor, openai-agents]
     concurrency: 3
+    attempt-timeout-seconds: 5400
     models: {codex: [model-a], cursor: cursor-model}
     allow-unsandboxed-commands: [cursor]
     workspaces: {repo: ./source}
@@ -1147,9 +1166,11 @@ secrets:
                 .iter()
                 .all(|h| h.worker_args().iter().any(|v| v == "/trusted/./source"))
         );
-        // An unset concurrency runs one Attempt per harness.
+        // An unset concurrency runs one Attempt per harness, each for up to 60 minutes.
         let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
         assert_eq!(default.concurrency, 1);
+        assert_eq!(default.attempt_timeout_seconds, 3600);
+        assert_eq!(shared.attempt_timeout_seconds, 5400);
         assert_eq!(default.harnesses.len(), 1);
     }
     #[test]
@@ -1337,6 +1358,8 @@ secrets:
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, codex]}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 0}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 17}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 0}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 86401}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], models: {cursor: [m]}}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, cursor], allow-unsandboxed-commands: [codex]}}",
             "services: {control-plane: {type: control-plane, ports: ['0.0.0.0:3434']}}",

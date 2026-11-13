@@ -522,8 +522,8 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
-        /// Seconds a Task Attempt may run before this host stops it.
-        #[arg(long, default_value_t = 120)]
+        /// Seconds a Task Attempt may run before this host stops it, from 1 through 86400.
+        #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]
         attempt_timeout_seconds: u64,
         /// Exit after running one Task Attempt.
         #[arg(long)]
