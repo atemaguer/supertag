@@ -74,8 +74,9 @@ source dependencies, and unpacked staging are removed before the smoke tests ext
 archive; only the exact fixture equipment is retained. Keep temporary paths below a private or sticky
 parent; the installer intentionally refuses shared writable non-sticky ancestors.
 
-The manual `native-release-check.yml` workflow has a fast `contracts` mode and a full
-four-platform `package` mode. Its explicit host labels follow the
+The `native-release-check.yml` workflow has a fast `contracts` mode and a full
+four-platform `package` mode. Run it manually, or add the `release-check` label to a pull request
+to run the full `package` mode on its head commit. Its explicit host labels follow the
 [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). It uses read-only repository permissions and has no upload,
 registry, release, signing, or notarization step. The existing TypeScript release, npm,
 and installer-channel workflows remain separate until an explicit cutover.
