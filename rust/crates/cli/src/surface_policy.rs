@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
@@ -15,7 +16,6 @@ use supertag_protocol::{
         surface_policy_catalog_client::SurfacePolicyCatalogClient, *,
     },
 };
-use tonic::transport::Channel;
 use uuid::Uuid;
 
 use crate::request;
@@ -266,7 +266,7 @@ fn operation_id(id: Option<String>) -> String {
 }
 
 pub async fn run(
-    mut client: SurfacePolicyCatalogClient<Channel>,
+    mut client: SurfacePolicyCatalogClient<ProtocolChannel>,
     token: &str,
     args: SurfacePolicyArgs,
 ) -> Result<()> {

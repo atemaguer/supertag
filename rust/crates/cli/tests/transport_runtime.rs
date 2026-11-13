@@ -5,6 +5,8 @@
 //!
 //! Ports `tests/worklet-transport-adoption-gates.test.ts` (16 hosts, partition,
 //! reconnect, no repeated accepted work) to the Rust services.
+#[path = "support/protocol.rs"]
+mod protocol;
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
@@ -18,6 +20,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
@@ -214,11 +217,17 @@ impl Services {
         })
     }
 
-    async fn channel(&self) -> Result<Channel> {
+    async fn channel(&self) -> Result<ProtocolChannel> {
+        protocol::negotiated(connect(self.gateway_address).await?).await
+    }
+
+    /// A Gateway channel that has not negotiated.
+    async fn raw_channel(&self) -> Result<Channel> {
         connect(self.gateway_address).await
     }
 
-    async fn control_plane_channel(&self) -> Result<Channel> {
+    /// A Control Plane channel that has not negotiated.
+    async fn raw_control_plane_channel(&self) -> Result<Channel> {
         connect(self.control_plane_address).await
     }
 }
@@ -478,7 +487,7 @@ fn recording_adapter(directory: &Path, host: &str) -> Result<(PathBuf, PathBuf)>
 }
 
 async fn start_host(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     gateway: SocketAddr,
     directory: &Path,
@@ -541,7 +550,7 @@ async fn start_host(
 }
 
 async fn task_state(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     id: &str,
 ) -> Result<supertag_protocol::v2::Task> {
@@ -561,7 +570,7 @@ static SLOWEST_READ_MS: AtomicU64 = AtomicU64::new(0);
 /// Polls until every Task reaches `expected`, recording each Task's queue latency
 /// when it first leaves the queue.
 async fn wait_for_all(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     tasks: &mut [Submitted],
     expected: TaskState,
@@ -696,7 +705,7 @@ async fn partition_round(
 }
 
 async fn submit_wave(
-    operator: &mut OperatorClient<Channel>,
+    operator: &mut OperatorClient<ProtocolChannel>,
     tokens: &Tokens,
     workload: &Workload,
     wave: usize,
@@ -1001,11 +1010,14 @@ async fn stalled_watch_client(
     gateway: SocketAddr,
     tokens: &Tokens,
 ) -> Result<tonic::Streaming<WatchEvent>> {
-    let channel = Endpoint::from_shared(format!("http://{gateway}"))?
-        .initial_stream_window_size(16 * 1024)
-        .initial_connection_window_size(16 * 1024)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Endpoint::from_shared(format!("http://{gateway}"))?
+            .initial_stream_window_size(16 * 1024)
+            .initial_connection_window_size(16 * 1024)
+            .connect()
+            .await?,
+    )
+    .await?;
     let request = authenticated_request(
         WatchRequest {
             resume_token: String::new(),
@@ -1335,9 +1347,12 @@ async fn stalled_watch_consumer_keeps_gateway_memory_and_upstream_reads_bounded(
     );
 
     // Other callers are unaffected while the stream is stalled.
-    let health = Endpoint::from_shared(format!("http://{address}"))?
-        .connect()
-        .await?;
+    let health = protocol::negotiated(
+        Endpoint::from_shared(format!("http://{address}"))?
+            .connect()
+            .await?,
+    )
+    .await?;
     let serving = tonic_health::pb::health_client::HealthClient::new(health)
         .check(tonic_health::pb::HealthCheckRequest {
             service: String::new(),
@@ -1807,7 +1822,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
 
     // The real services refuse old peers and peers in the wrong role.
     let services = Services::start(&sqlite(root), root, &tokens).await?;
-    let gateway = services.channel().await?;
+    let gateway = services.raw_channel().await?;
     assert_eq!(
         negotiate(
             gateway.clone(),
@@ -1841,7 +1856,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         wrong_role,
         "the SuperTag Gateway refused this Gateway: a Gateway cannot connect directly to the SuperTag Gateway"
     );
-    let private = services.control_plane_channel().await?;
+    let private = services.raw_control_plane_channel().await?;
     let old_gateway = negotiate_versions(
         private.clone(),
         ServiceRole::Gateway,
@@ -1869,4 +1884,130 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         "Gateway stopped after refusing peers"
     );
     Ok(())
+}
+
+/// The Gateway and Control Plane refuse every call that does not name a
+/// negotiated protocol version, so a peer that skipped `Negotiate` reaches only
+/// negotiation and health. Operator clients negotiate: the CLI works against
+/// the real Gateway and refuses one from another protocol epoch.
+async fn exercise_protocol_fence(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let skipped = |status: Status, service: &str| {
+        status.code() == tonic::Code::FailedPrecondition
+            && status.message().starts_with(&format!(
+                "this SuperTag {service} refuses a call that did not negotiate a protocol version"
+            ))
+    };
+
+    // A Gateway caller that skipped negotiation is refused before any handler runs.
+    let raw = services.raw_channel().await?;
+    let refused = OperatorClient::new(raw.clone())
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    let refused = supertag_protocol::v2::worker_host_client::WorkerHostClient::new(raw.clone())
+        .register_host(authenticated_request(
+            supertag_protocol::v2::RegisterHostRequest {
+                incarnation_id: Uuid::new_v4().to_string(),
+            },
+            "unenrolled-host-token",
+            None,
+        )?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    // A version from another epoch is refused as incompatible.
+    let refused = OperatorClient::new(supertag_protocol::negotiation::bind(raw.clone(), 1))
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(
+        refused.code() == tonic::Code::FailedPrecondition
+            && refused.message().starts_with(
+                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+            ),
+        "{refused:?}"
+    );
+    // Health stays open to probes that cannot negotiate.
+    let health = tonic_health::pb::health_client::HealthClient::new(raw)
+        .check(tonic_health::pb::HealthCheckRequest {
+            service: String::new(),
+        })
+        .await?
+        .into_inner();
+    ensure!(
+        health.status == tonic_health::pb::health_check_response::ServingStatus::Serving as i32
+    );
+    // A negotiated caller reaches the handler.
+    let missing = OperatorClient::new(services.channel().await?)
+        .get_task(tokens.request(GetTaskRequest {
+            task_id: "absent".into(),
+        })?)
+        .await
+        .unwrap_err();
+    ensure!(missing.code() == tonic::Code::NotFound, "{missing:?}");
+
+    // The Control Plane fences its private callers the same way.
+    let refused = OperatorClient::new(services.raw_control_plane_channel().await?)
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: "absent".into(),
+            },
+            &tokens.gateway,
+            Some("operator:local"),
+        )?)
+        .await
+        .unwrap_err();
+    ensure!(skipped(refused.clone(), "Control Plane"), "{refused:?}");
+
+    // The CLI negotiates as an operator client.
+    let gateway = format!("http://{}", services.gateway_address);
+    let mut list = binary(&["list-tags", "--gateway", &gateway]);
+    list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    let listed = run(list).await?;
+    ensure!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    // ...and refuses a Gateway from another protocol epoch before any call.
+    let (old_gateway, old_server) = serve_fake(
+        Server::builder().add_service(
+            Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Operator])
+                .with_versions(OLD_EPOCH)
+                .service(),
+        ),
+    )
+    .await?;
+    let mut list = binary(&["list-tags", "--gateway", &format!("http://{old_gateway}")]);
+    list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    let refused = run(list).await?;
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    ensure!(
+        !refused.status.success()
+            && stderr.contains("the SuperTag Gateway refused this operator client: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag 0.1.0) offered [2]"),
+        "unclear operator failure: {stderr}"
+    );
+    old_server.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_protocol_fence(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
+    with_postgres("protocol_fence", exercise_protocol_fence).await
 }

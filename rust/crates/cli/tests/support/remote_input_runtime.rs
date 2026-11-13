@@ -47,7 +47,8 @@ async fn contract(provider: RemoteWorkspace, name: &str, database: &str) -> Resu
             &["files:read", "files:write"],
         )
         .await?;
-    let mut objectives = ObjectivesClient::connect(runtime.endpoint.clone()).await?;
+    let mut objectives =
+        ObjectivesClient::new(crate::protocol::dial(runtime.endpoint.clone()).await?);
     let objective = objectives
         .create_objective(credentials.request(CreateObjectiveRequest {
             operation_id: "artifact-objective".into(),

@@ -1,3 +1,4 @@
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
@@ -8,7 +9,7 @@ use supertag_protocol::{
         *,
     },
 };
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 
 use crate::Gateway;
 
@@ -88,13 +89,13 @@ impl AttemptInputs for Gateway {
     }
 }
 
-fn live_client(channel: Channel) -> LiveInputsClient<Channel> {
+fn live_client(channel: ProtocolChannel) -> LiveInputsClient<ProtocolChannel> {
     LiveInputsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn attempt_client(channel: Channel) -> AttemptInputsClient<Channel> {
+fn attempt_client(channel: ProtocolChannel) -> AttemptInputsClient<ProtocolChannel> {
     AttemptInputsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

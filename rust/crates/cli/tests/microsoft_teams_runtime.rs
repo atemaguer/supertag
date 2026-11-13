@@ -2,6 +2,8 @@
 //! Every provider interaction terminates at this test's loopback HTTP server.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -223,8 +225,7 @@ async fn control(
     Ok((process, endpoint))
 }
 async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
-    OperatorClient::connect(public.to_owned())
-        .await?
+    OperatorClient::new(protocol::dial(public.to_owned()).await?)
         .put_tag(credentials.operator(PutTagRequest {
             name: None,
             expected_revision: None,
@@ -258,8 +259,7 @@ async fn execute(
     Process::spawn(command, directory, "host")?
         .success()
         .await?;
-    let completed = OperatorClient::connect(public.to_owned())
-        .await?
+    let completed = OperatorClient::new(protocol::dial(public.to_owned()).await?)
         .get_task(credentials.operator(GetTaskRequest {
             task_id: task.task_id.clone(),
         })?)
@@ -482,8 +482,7 @@ async fn send(endpoint: &str, body: &Value, token: &str) -> Result<reqwest::Stat
         .status())
 }
 async fn receipt(private: &str, credentials: &Credentials, id: &str) -> Result<Task> {
-    ConnectorClient::connect(private.to_owned())
-        .await?
+    ConnectorClient::new(protocol::dial(private.to_owned()).await?)
         .accept_microsoft_teams_activity(credentials.connector(
             AcceptMicrosoftTeamsActivityRequest {
                 account_id: format!("teams/{ACCOUNT}"),

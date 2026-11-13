@@ -2,9 +2,16 @@ syntax = "proto3";
 
 package supertag.runtime.v2;
 
-// Each service connection begins with this exchange. A peer that shares no
-// protocol version, or that connects in the wrong role, is refused before it
-// can register, claim, or forward work. The exchange carries no credentials.
+// Each service and operator connection begins with this exchange. A peer that
+// shares no protocol version, or that connects in the wrong role, is refused
+// before it can register, claim, forward work, or make an operator call. The
+// exchange carries no credentials.
+//
+// After negotiating, the client sends the selected version in the
+// `x-supertag-protocol` metadata header on every other call. The Gateway and
+// Control Plane refuse a call without it, or naming a version they do not
+// speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
+// health service are exempt.
 service ProtocolNegotiation {
   rpc Negotiate(NegotiateProtocolRequest) returns (NegotiateProtocolResponse);
 }
@@ -14,6 +21,8 @@ enum ServiceRole {
   SERVICE_ROLE_CONTROL_PLANE = 1;
   SERVICE_ROLE_GATEWAY = 2;
   SERVICE_ROLE_WORKER_HOST = 3;
+  // An operator client: the CLI, the TUI, the desktop app, or an SDK client.
+  SERVICE_ROLE_OPERATOR = 4;
 }
 
 message NegotiateProtocolRequest {

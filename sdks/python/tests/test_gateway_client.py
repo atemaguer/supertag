@@ -11,7 +11,14 @@ from uuid import uuid4
 import grpc
 import pytest
 
-from supertag.gateway import GatewayClient, GatewayClientSync, artifacts, runtime
+from supertag._runtime_v2 import negotiation_pb2, negotiation_pb2_grpc
+from supertag.gateway import (
+    GatewayClient,
+    GatewayClientSync,
+    GatewayProtocolError,
+    artifacts,
+    runtime,
+)
 
 TOKEN = "fixture-operator-token"
 HOST_TOKEN = "fixture-worker-host-credential-12345"
@@ -33,6 +40,53 @@ HOST_TOKEN = "fixture-worker-host-credential-12345"
 def test_gateway_rejects_invalid_connection_options(url, token, error):
     with pytest.raises(ValueError, match=error):
         GatewayClientSync(url, token)
+
+
+class _OldGateway(negotiation_pb2_grpc.ProtocolNegotiationServicer):
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def Negotiate(self, request, context):  # noqa: N802
+        self.calls.append(dict(context.invocation_metadata()).get("authorization", ""))
+        assert request.role == negotiation_pb2.SERVICE_ROLE_OPERATOR
+        assert list(request.protocol_versions) == [2]
+        context.abort(
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol "
+            "versions [1], but the connecting operator client (SuperTag supertag-python) "
+            "offered [2]",
+        )
+
+
+@contextmanager
+def old_gateway():
+    from concurrent import futures
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+    handler = _OldGateway()
+    negotiation_pb2_grpc.add_ProtocolNegotiationServicer_to_server(handler, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    try:
+        yield f"http://127.0.0.1:{port}", handler
+    finally:
+        server.stop(None)
+
+
+def test_sync_client_refuses_a_gateway_from_another_protocol_epoch():
+    with old_gateway() as (url, handler), GatewayClientSync(url, TOKEN) as client:
+        with pytest.raises(GatewayProtocolError, match="refused this operator client"):
+            client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
+        # Negotiation carries no credential, and no operator call was sent.
+        assert handler.calls == [""]
+
+
+async def test_async_client_refuses_a_gateway_from_another_protocol_epoch():
+    with old_gateway() as (url, handler):
+        async with GatewayClient(url, TOKEN) as client:
+            with pytest.raises(GatewayProtocolError, match="offered \\[2\\]"):
+                await client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
+        assert handler.calls == [""]
 
 
 @contextmanager

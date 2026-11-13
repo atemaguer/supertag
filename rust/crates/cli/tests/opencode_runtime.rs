@@ -1,6 +1,8 @@
 //! Real Control Plane, Gateway and Worker Host processes with a provider-shaped OpenCode CLI.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -19,6 +21,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -170,7 +173,7 @@ struct Runtime {
     // Drop the public service before its private dependency.
     _gateway: Process,
     _control: Process,
-    operator: OperatorClient<Channel>,
+    operator: OperatorClient<ProtocolChannel>,
     endpoint: String,
     credentials: Credentials,
     database: String,
@@ -212,11 +215,14 @@ impl Runtime {
         gateway.args(["gateway", "--control-plane", &private]);
         let mut gateway = Process::spawn(gateway, directory, "gateway", true)?;
         let endpoint = gateway.endpoint().await?;
-        let channel = Channel::from_shared(endpoint.clone())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
-            .connect()
-            .await?;
+        let channel = protocol::negotiated(
+            Channel::from_shared(endpoint.clone())?
+                .connect_timeout(Duration::from_secs(3))
+                .timeout(Duration::from_secs(3))
+                .connect()
+                .await?,
+        )
+        .await?;
         Ok(Self {
             _gateway: gateway,
             _control: control,
@@ -780,11 +786,14 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
         .await?;
     let default_model = "openai/host-default";
     let mut policy = PolicyCatalogClient::new(
-        Channel::from_shared(runtime.endpoint.clone())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
-            .connect()
-            .await?,
+        protocol::negotiated(
+            Channel::from_shared(runtime.endpoint.clone())?
+                .connect_timeout(Duration::from_secs(3))
+                .timeout(Duration::from_secs(3))
+                .connect()
+                .await?,
+        )
+        .await?,
     );
     let role = policy
         .put_role(runtime.credentials.request(PutRoleRequest {

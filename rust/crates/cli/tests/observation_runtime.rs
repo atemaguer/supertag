@@ -2,6 +2,8 @@
 //! `watch` across a Gateway restart, `describe`, and `spend`.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -583,10 +585,13 @@ async fn exercise(database_url: &str) -> Result<()> {
         .as_str()
         .context("starting Task")?
         .to_owned();
-    let channel = Channel::from_shared(public.clone())?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel);
     let host_token = services.host_token.clone();
     let host = worker
@@ -1000,10 +1005,13 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
     let session = attempt_work_sessions_client::AttemptWorkSessionsClient::new(
-        Channel::from_shared(public.clone())?
-            .timeout(WAIT)
-            .connect()
-            .await?,
+        protocol::negotiated(
+            Channel::from_shared(public.clone())?
+                .timeout(WAIT)
+                .connect()
+                .await?,
+        )
+        .await?,
     )
     .start(host_request(
         StartWorkSessionRequest {

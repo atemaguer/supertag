@@ -1,5 +1,7 @@
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -528,10 +530,13 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     )
     .await?;
     assert_eq!(assignment["status"], "active");
-    let channel = Channel::from_shared(public.clone())?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut catalog = policy_catalog_client::PolicyCatalogClient::new(channel.clone());
     let mut operator = operator_client::OperatorClient::new(channel);
     assert_eq!(
@@ -745,10 +750,13 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     assert_eq!(detail["action"], "workstream:post");
     assert_eq!(detail["state"], "pending");
 
-    let channel = Channel::from_shared(public.clone())?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
     let mut workstreams =
         attempt_workstreams_client::AttemptWorkstreamsClient::new(channel.clone());
@@ -971,10 +979,13 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     .await?;
     assert_eq!(objective["team_id"], "release");
 
-    let channel = Channel::from_shared(public.clone())?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
     let mut attempts = attempt_workstreams_client::AttemptWorkstreamsClient::new(channel.clone());
     let mut teams = teams_client::TeamsClient::new(channel.clone());
@@ -1287,10 +1298,13 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
         &operator_token,
     )
     .await?;
-    let channel = Channel::from_shared(public.clone())?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
     let mut inbox = inbox_client::InboxClient::new(channel);
     let host = worker
@@ -1434,10 +1448,13 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
             .context("Inbox items")?
             .is_empty()
     );
-    let channel = Channel::from_shared(public)?
-        .timeout(WAIT)
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(public)?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel);
     let next = worker
         .claim_task(host_request(

@@ -9,8 +9,9 @@ use supertag_control_plane::{
     normalize_tag_execution, validate_manifest_account, validate_manifest_location,
     validate_manifest_objective, validate_manifest_workspace,
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Code, Response, Status, transport::Channel};
+use tonic::{Code, Response, Status};
 use uuid::Uuid;
 
 use super::{Kind, MAX_REFERENCES, Manifest, Resource, valid_name};
@@ -18,15 +19,15 @@ use crate::request;
 
 pub(super) struct Catalog<'a> {
     token: &'a str,
-    operator: operator_client::OperatorClient<Channel>,
-    policy: policy_catalog_client::PolicyCatalogClient<Channel>,
-    surfaces: surface_policy_catalog_client::SurfacePolicyCatalogClient<Channel>,
-    volumes: artifact_volumes_client::ArtifactVolumesClient<Channel>,
-    workspaces: github_workspaces_client::GithubWorkspacesClient<Channel>,
-    teams: teams_client::TeamsClient<Channel>,
-    objectives: objectives_client::ObjectivesClient<Channel>,
-    relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
-    placement: placement_client::PlacementClient<Channel>,
+    operator: operator_client::OperatorClient<ProtocolChannel>,
+    policy: policy_catalog_client::PolicyCatalogClient<ProtocolChannel>,
+    surfaces: surface_policy_catalog_client::SurfacePolicyCatalogClient<ProtocolChannel>,
+    volumes: artifact_volumes_client::ArtifactVolumesClient<ProtocolChannel>,
+    workspaces: github_workspaces_client::GithubWorkspacesClient<ProtocolChannel>,
+    teams: teams_client::TeamsClient<ProtocolChannel>,
+    objectives: objectives_client::ObjectivesClient<ProtocolChannel>,
+    relationships: manifest_relationships_client::ManifestRelationshipsClient<ProtocolChannel>,
+    placement: placement_client::PlacementClient<ProtocolChannel>,
     manager: &'a str,
     create_only: bool,
     /// The revision the current resource was planned against, if it exists.
@@ -135,7 +136,7 @@ fn id() -> String {
 
 impl<'a> Catalog<'a> {
     pub(super) fn new(
-        channel: Channel,
+        channel: ProtocolChannel,
         token: &'a str,
         manager: &'a str,
         create_only: bool,

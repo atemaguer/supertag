@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
@@ -19,7 +20,6 @@ use supertag_protocol::{
 use tonic::{
     Code, Request, Response, Status,
     metadata::{Ascii, MetadataValue},
-    transport::Channel,
 };
 
 use crate::{AUTHORIZATION, Credentials, Gateway, Principal, request_budget};
@@ -179,7 +179,7 @@ impl Gateway {
     }
 }
 
-fn access(channel: Channel) -> OperatorAccessClient<Channel> {
+fn access(channel: ProtocolChannel) -> OperatorAccessClient<ProtocolChannel> {
     OperatorAccessClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

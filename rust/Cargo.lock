@@ -2769,6 +2769,7 @@ dependencies = [
 name = "supertag-protocol"
 version = "0.1.0"
 dependencies = [
+ "http 1.5.0",
  "icu_properties",
  "libc",
  "prost",
@@ -2781,6 +2782,8 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tower-layer",
+ "tower-service",
  "unicode-normalization",
  "url",
  "uuid",

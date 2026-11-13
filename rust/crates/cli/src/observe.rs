@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
@@ -19,7 +20,7 @@ use supertag_protocol::{
         workspace_volumes_client::WorkspaceVolumesClient,
     },
 };
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 
 use crate::{Connection, connect_operator, request, resolve_target};
 
@@ -294,7 +295,7 @@ macro_rules! client {
 }
 
 async fn fetch(
-    channel: Channel,
+    channel: ProtocolChannel,
     token: &str,
     kind: DescribeKind,
     id: String,
@@ -589,11 +590,12 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
     loop {
         let result = async {
             // Streams are long lived: no per-request deadline applies.
-            let channel = target
-                .endpoint(Duration::from_secs(u32::MAX as u64))
-                .await?
-                .connect()
-                .await?;
+            let channel = crate::network::operator_channel(
+                &target
+                    .endpoint(Duration::from_secs(u32::MAX as u64))
+                    .await?,
+            )
+            .await?;
             let mut stream = client!(OperatorEventsClient, channel)
                 .watch(authenticated_request(
                     WatchRequest {
@@ -624,6 +626,12 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
             Ok(false) => None,
             Err(error) => {
                 // Errors a retry cannot fix end the command at once.
+                if matches!(
+                    error.downcast_ref::<supertag_protocol::negotiation::NegotiationError>(),
+                    Some(supertag_protocol::negotiation::NegotiationError::Incompatible(_))
+                ) {
+                    return Err(error);
+                }
                 if let Some(status) = error.downcast_ref::<tonic::Status>()
                     && matches!(
                         status.code(),

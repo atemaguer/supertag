@@ -1,5 +1,6 @@
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 
 use crate::Gateway;
 
@@ -114,13 +115,15 @@ impl attempt_workstreams_server::AttemptWorkstreams for Gateway {
     }
 }
 
-fn teams(channel: Channel) -> teams_client::TeamsClient<Channel> {
+fn teams(channel: ProtocolChannel) -> teams_client::TeamsClient<ProtocolChannel> {
     teams_client::TeamsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn attempts(channel: Channel) -> attempt_workstreams_client::AttemptWorkstreamsClient<Channel> {
+fn attempts(
+    channel: ProtocolChannel,
+) -> attempt_workstreams_client::AttemptWorkstreamsClient<ProtocolChannel> {
     attempt_workstreams_client::AttemptWorkstreamsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

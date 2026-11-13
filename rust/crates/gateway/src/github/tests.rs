@@ -19,7 +19,9 @@ fn config(directory: &Path) -> GithubConfig {
 pub(super) fn connector(directory: &Path) -> Result<Github> {
     Github::new(
         config(directory),
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        supertag_protocol::negotiation::bind_current(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         "fixture-private-token".into(),
     )
 }

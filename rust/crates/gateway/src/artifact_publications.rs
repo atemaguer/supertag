@@ -1,6 +1,7 @@
 use crate::Gateway;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 impl Gateway {
     pub fn artifact_publications_service(
         &self,
@@ -10,7 +11,9 @@ impl Gateway {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 }
-fn client(channel: Channel) -> artifact_publications_client::ArtifactPublicationsClient<Channel> {
+fn client(
+    channel: ProtocolChannel,
+) -> artifact_publications_client::ArtifactPublicationsClient<ProtocolChannel> {
     artifact_publications_client::ArtifactPublicationsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

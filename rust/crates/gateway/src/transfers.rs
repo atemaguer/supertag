@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, host_generation,
     v2::{
@@ -26,7 +27,7 @@ use tokio::{
     time::timeout,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status, Streaming, transport::Channel};
+use tonic::{Request, Response, Status, Streaming};
 
 use crate::Gateway;
 
@@ -820,13 +821,13 @@ async fn open_optional_blob(path: &Path) -> Result<Option<tokio::fs::File>, Stat
     .map_err(|_| Status::internal("blob file open failed"))?
 }
 
-fn checkpoint_client(channel: Channel) -> CheckpointDirectoryClient<Channel> {
+fn checkpoint_client(channel: ProtocolChannel) -> CheckpointDirectoryClient<ProtocolChannel> {
     CheckpointDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn workspace_client(channel: Channel) -> WorkspaceDirectoryClient<Channel> {
+fn workspace_client(channel: ProtocolChannel) -> WorkspaceDirectoryClient<ProtocolChannel> {
     WorkspaceDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

@@ -68,9 +68,8 @@ pub async fn enroll(
     // Preserve the operation and candidate credential before contacting the Gateway,
     // so that a consumed key can replay the enrollment after a lost response.
     save(&journal, &state)?;
-    let channel = gateway.connect_lazy();
-    supertag_protocol::negotiation::negotiate(
-        channel.clone(),
+    let channel = supertag_protocol::negotiation::connect(
+        gateway.connect_lazy(),
         ServiceRole::WorkerHost,
         ServiceRole::Gateway,
     )

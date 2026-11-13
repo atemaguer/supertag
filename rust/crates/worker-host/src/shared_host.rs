@@ -10,9 +10,10 @@ use std::path::Path;
 use anyhow::{Result, ensure};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
+    negotiation::{self, NegotiationError},
     v2::{
         HarnessExecutionProfile, HarnessKind, HostHarnessCapacity, HostReadiness,
-        HostReadinessReason, RegisterHostRequest, ReportHostRequest, WorkerHostStatus,
+        HostReadinessReason, RegisterHostRequest, ReportHostRequest, ServiceRole, WorkerHostStatus,
         worker_host_client::WorkerHostClient,
     },
 };
@@ -68,14 +69,28 @@ impl SharedHost {
             journal.incarnation()?
         };
         let channel = gateway.connect_lazy();
-        let mut registration = WorkerHostClient::new(channel.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES);
-        let record = loop {
+        let (record, protocol) = loop {
             if shutdown.is_cancelled() {
                 return Ok(None);
             }
-            let response = registration
+            // Refuse an incompatible Gateway before registering the Host.
+            let protocol = match negotiation::negotiate(
+                channel.clone(),
+                ServiceRole::WorkerHost,
+                ServiceRole::Gateway,
+            )
+            .await
+            {
+                Ok(version) => version,
+                Err(NegotiationError::Unavailable(_)) => {
+                    wait_for_work(shutdown).await;
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let response = WorkerHostClient::new(negotiation::bind(channel.clone(), protocol))
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
                 .register_host(request(
                     RegisterHostRequest {
                         incarnation_id: incarnation_id.clone(),
@@ -84,7 +99,7 @@ impl SharedHost {
                 )?)
                 .await;
             match response {
-                Ok(response) => break response.into_inner(),
+                Ok(response) => break (response.into_inner(), protocol),
                 Err(error) if retryable(&error) => wait_for_work(shutdown).await,
                 Err(error) => return Err(error.into()),
             }
@@ -95,7 +110,7 @@ impl SharedHost {
         );
         let client = WorkerHostClient::with_interceptor(
             channel,
-            HostHeaders(record.generation.to_string().parse()?),
+            HostHeaders::new(record.generation, protocol),
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);

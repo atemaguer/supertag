@@ -47,7 +47,12 @@ func taskFilesApp(t *testing.T) *app {
 			}
 			return stream.Send(&v2.ArtifactDownload{Part: &v2.ArtifactDownload_Chunk{Chunk: data}})
 		}))
+	handleNegotiation(mux)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
+			mux.ServeHTTP(w, r)
+			return
+		}
 		if r.ProtoMajor != 2 || r.Header.Get("Authorization") != "Bearer fixture-token" {
 			t.Errorf("missing scoped gRPC authority")
 		}

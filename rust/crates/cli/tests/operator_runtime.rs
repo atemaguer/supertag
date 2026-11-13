@@ -1,5 +1,7 @@
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -7,6 +9,7 @@ mod database;
 use std::{
     net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -61,11 +64,14 @@ fn gateway(private: &str, secret: &str, token: &str, identity: &str) -> Command 
     command
 }
 
-async fn channel(address: &str) -> Result<Channel> {
-    Ok(Channel::from_shared(address.to_owned())?
-        .timeout(WAIT)
-        .connect()
-        .await?)
+async fn channel(address: &str) -> Result<ProtocolChannel> {
+    protocol::negotiated(
+        Channel::from_shared(address.to_owned())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .await
 }
 
 database_tests! {

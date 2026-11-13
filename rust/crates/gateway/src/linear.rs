@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use std::{path::PathBuf, sync::Arc, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
@@ -28,7 +29,7 @@ use supertag_protocol::{
 };
 use tokio::{net::TcpListener, time};
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 use uuid::Uuid;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -52,7 +53,7 @@ pub struct Linear(Arc<Connector>);
 
 struct Connector {
     config: LinearConfig,
-    control_plane: ConnectorClient<Channel>,
+    control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
     principal: String,
     http: reqwest::Client,
@@ -63,7 +64,7 @@ struct Connector {
 impl Linear {
     pub fn new(
         mut config: LinearConfig,
-        private_channel: Channel,
+        private_channel: ProtocolChannel,
         gateway_token: String,
     ) -> Result<Self> {
         ensure!(

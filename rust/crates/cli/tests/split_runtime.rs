@@ -2,6 +2,8 @@
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -16,6 +18,7 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use hmac::{Hmac, Mac};
@@ -274,11 +277,13 @@ impl Services {
         Ok(())
     }
 
-    async fn client(&self) -> Result<OperatorClient<Channel>> {
+    async fn client(&self) -> Result<OperatorClient<ProtocolChannel>> {
         let endpoint = Channel::from_shared(self.endpoint.clone())?
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(3));
-        Ok(OperatorClient::new(endpoint.connect().await?))
+        Ok(OperatorClient::new(
+            protocol::negotiated(endpoint.connect().await?).await?,
+        ))
     }
 }
 
@@ -315,7 +320,7 @@ fn worker(
 }
 
 async fn task(
-    client: &mut OperatorClient<Channel>,
+    client: &mut OperatorClient<ProtocolChannel>,
     credentials: &Credentials,
     id: &str,
 ) -> Result<Task> {
@@ -326,7 +331,7 @@ async fn task(
 }
 
 async fn events(
-    client: &mut OperatorClient<Channel>,
+    client: &mut OperatorClient<ProtocolChannel>,
     credentials: &Credentials,
     id: &str,
     after: u64,
@@ -343,7 +348,7 @@ async fn events(
 }
 
 async fn wait_for_state(
-    client: &mut OperatorClient<Channel>,
+    client: &mut OperatorClient<ProtocolChannel>,
     credentials: &Credentials,
     id: &str,
     expected: TaskState,
@@ -648,7 +653,7 @@ async fn local_up(
     state: &Path,
     adapter: &Path,
     waiting: bool,
-) -> Result<(Process, OperatorClient<Channel>)> {
+) -> Result<(Process, OperatorClient<ProtocolChannel>)> {
     let mut command = local_command();
     command
         .args(["up", "--foreground"])
@@ -661,11 +666,14 @@ async fn local_up(
     }
     let mut supervisor = Process::spawn(command, directory, "up", true)?;
     let endpoint = supervisor.endpoint().await?;
-    let channel = Channel::from_shared(endpoint)?
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(3))
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(endpoint)?
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(3))
+            .connect()
+            .await?,
+    )
+    .await?;
     Ok((supervisor, OperatorClient::new(channel)))
 }
 
@@ -1492,7 +1500,8 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
-    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    let mut policy =
+        SurfacePolicyCatalogClient::new(protocol::dial(services.endpoint.clone()).await?);
     policy
         .put_surface_account(credentials.request(PutSurfaceAccountRequest {
             operation_id: "account-fixture".into(),
@@ -1548,7 +1557,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         signed_slack_event(&http, "different intent").await?,
         reqwest::StatusCode::CONFLICT
     );
-    let mut connector = ConnectorClient::connect(private_endpoint.clone()).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private_endpoint.clone()).await?);
     let accepted_input = AcceptSlackEventRequest {
         account_id: SLACK_ACCOUNT.into(),
         event_id: SLACK_EVENT.into(),
@@ -1671,7 +1680,8 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         );
         sleep(Duration::from_millis(10)).await;
     }
-    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    let mut policy =
+        SurfacePolicyCatalogClient::new(protocol::dial(services.endpoint.clone()).await?);
     policy
         .delete_surface_location(credentials.request(DeleteSurfaceLocationRequest {
             operation_id: "retire-location".into(),
@@ -1683,7 +1693,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         signed_slack_event(&http, prompt).await?,
         reqwest::StatusCode::OK
     );
-    let mut connector = ConnectorClient::connect(private_endpoint).await?;
+    let mut connector = ConnectorClient::new(protocol::dial(private_endpoint).await?);
     let replayed = connector
         .accept_slack_event(connector_request(&credentials, accepted_input)?)
         .await?
@@ -1832,7 +1842,8 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
-    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    let mut policy =
+        SurfacePolicyCatalogClient::new(protocol::dial(services.endpoint.clone()).await?);
     policy
         .put_surface_account(credentials.request(PutSurfaceAccountRequest {
             operation_id: "account-fixture".into(),
@@ -2078,11 +2089,14 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     };
     let mut supervisor = start()?;
     let endpoint = supervisor.endpoint().await?;
-    let channel = Channel::from_shared(endpoint)?
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(3))
-        .connect()
-        .await?;
+    let channel = protocol::negotiated(
+        Channel::from_shared(endpoint)?
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(3))
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut operator = OperatorClient::new(channel);
     let credentials = local_credentials(&state)?;
     let local = state
@@ -2185,9 +2199,12 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     supervisor.successful_exit().await?;
     let mut supervisor = start()?;
     let endpoint = supervisor.endpoint().await?;
-    let mut inputs =
-        LiveInputsClient::new(Channel::from_shared(endpoint.clone())?.connect().await?);
-    let mut operator = OperatorClient::new(Channel::from_shared(endpoint)?.connect().await?);
+    let mut inputs = LiveInputsClient::new(
+        protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?,
+    );
+    let mut operator = OperatorClient::new(
+        protocol::negotiated(Channel::from_shared(endpoint)?.connect().await?).await?,
+    );
     let session_id = stored["session_id"]
         .as_str()
         .context("missing Session ID")?;
@@ -2469,11 +2486,14 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let partitioned_at = Instant::now();
     services.gateway.crash()?;
     drop(operator);
-    let private_channel = Channel::from_shared(private_endpoint.clone())?
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(3))
-        .connect()
-        .await?;
+    let private_channel = protocol::negotiated(
+        Channel::from_shared(private_endpoint.clone())?
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(3))
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut private_operator = OperatorClient::new(private_channel);
     let deadline = partitioned_at + Duration::from_secs(45);
     let mut last_state = running.state();
@@ -2568,11 +2588,14 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         events(&mut operator, &credentials, &accepted.task_id, 0).await?,
         original_events
     );
-    let host_channel = Channel::from_shared(public_endpoint.clone())?
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(3))
-        .connect()
-        .await?;
+    let host_channel = protocol::negotiated(
+        Channel::from_shared(public_endpoint.clone())?
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(3))
+            .connect()
+            .await?,
+    )
+    .await?;
     let mut host_client = WorkerHostClient::new(host_channel);
     let receipt = host_client
         .get_attempt_resolution(credentials.host_request(old_attempt.clone())?)

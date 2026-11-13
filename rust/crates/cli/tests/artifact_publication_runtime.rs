@@ -1,6 +1,8 @@
 //! Operator publication and consumption approvals through real split services.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -109,7 +111,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     let credentials = Credentials::new();
     let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
-    let channel = Channel::from_shared(public.clone())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     operator
@@ -383,7 +386,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     assert_eq!(approved, replay);
-    let channel = Channel::from_shared(public.clone())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     let assignment = host
         .claim_task(credentials.host(

@@ -1,12 +1,27 @@
 //! Explicit protocol version negotiation between SuperTag services.
 //!
 //! The Rust release is an incompatible protocol epoch (design §4): there is no
-//! translation for older peers. Every service connection negotiates before it
-//! registers, claims, or forwards work, and both sides refuse a peer that shares
-//! no version or connects in the wrong role.
-use std::time::Duration;
+//! translation for older peers. Every service and operator connection
+//! negotiates before it registers, claims, forwards work, or makes an operator
+//! call, and both sides refuse a peer that shares no version or connects in the
+//! wrong role.
+//!
+//! A negotiated client names its selected version in [`PROTOCOL_HEADER`] on
+//! every later call. [`fence`] refuses a call without it, so a peer that skipped
+//! negotiation cannot reach any service other than negotiation and health.
+use std::{
+    task::{Context, Poll},
+    time::Duration,
+};
 
-use tonic::{Code, Request, Response, Status, transport::Channel};
+use tonic::{
+    Code, Request, Response, Status,
+    metadata::{Ascii, MetadataValue},
+    service::{Interceptor, interceptor::InterceptedService},
+    transport::Channel,
+};
+use tower_layer::Layer;
+use tower_service::Service;
 
 use crate::v2::{
     NegotiateProtocolRequest, NegotiateProtocolResponse, ServiceRole,
@@ -29,6 +44,7 @@ pub fn role_name(role: ServiceRole) -> &'static str {
         ServiceRole::ControlPlane => "Control Plane",
         ServiceRole::Gateway => "Gateway",
         ServiceRole::WorkerHost => "Worker Host",
+        ServiceRole::Operator => "operator client",
         ServiceRole::Unspecified => "unidentified service",
     }
 }
@@ -246,6 +262,160 @@ pub async fn negotiate_versions(
     Ok(response.protocol_version)
 }
 
+/// The metadata header that carries a negotiated protocol version on each call.
+pub const PROTOCOL_HEADER: &str = "x-supertag-protocol";
+const NEGOTIATION_PATH: &str = "/supertag.runtime.v2.ProtocolNegotiation/";
+const HEALTH_PATH: &str = "/grpc.health.v1.Health/";
+
+/// Adds the negotiated protocol version to every call on a channel.
+#[derive(Clone, Debug)]
+pub struct ProtocolVersion(MetadataValue<Ascii>);
+
+impl ProtocolVersion {
+    pub fn new(version: u32) -> Self {
+        Self(MetadataValue::from(version))
+    }
+}
+
+impl Interceptor for ProtocolVersion {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        request
+            .metadata_mut()
+            .insert(PROTOCOL_HEADER, self.0.clone());
+        Ok(request)
+    }
+}
+
+/// A channel whose calls carry a negotiated protocol version.
+pub type ProtocolChannel = InterceptedService<Channel, ProtocolVersion>;
+
+/// Marks every call on `channel` with a version a negotiation selected.
+pub fn bind(channel: Channel, version: u32) -> ProtocolChannel {
+    InterceptedService::new(channel, ProtocolVersion::new(version))
+}
+
+/// Only for in-process tests whose fake peer does not serve negotiation.
+#[doc(hidden)]
+pub fn bind_current(channel: Channel) -> ProtocolChannel {
+    bind(
+        channel,
+        *PROTOCOL_VERSIONS
+            .last()
+            .expect("a supported protocol version"),
+    )
+}
+
+/// Negotiates as `role` with a peer that must answer as `expected`, then
+/// returns the channel bound to the selected version.
+pub async fn connect(
+    channel: Channel,
+    role: ServiceRole,
+    expected: ServiceRole,
+) -> Result<ProtocolChannel, NegotiationError> {
+    let version = negotiate(channel.clone(), role, expected).await?;
+    Ok(bind(channel, version))
+}
+
+/// Refuses every call that does not name a protocol version this service
+/// speaks, except negotiation itself and the standard health service. Apply it
+/// to a whole server with `Server::builder().layer(fence(..))`.
+pub fn fence(role: ServiceRole) -> ProtocolFence {
+    ProtocolFence {
+        role,
+        versions: PROTOCOL_VERSIONS,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ProtocolFence {
+    role: ServiceRole,
+    versions: &'static [u32],
+}
+
+impl ProtocolFence {
+    /// Only for tests that need a service from another protocol epoch.
+    #[doc(hidden)]
+    pub fn with_versions(mut self, versions: &'static [u32]) -> Self {
+        self.versions = versions;
+        self
+    }
+
+    /// Why a call with these path and headers is refused, if it is.
+    pub fn refusal(&self, path: &str, headers: &http::HeaderMap) -> Option<Status> {
+        if path.starts_with(NEGOTIATION_PATH) || path.starts_with(HEALTH_PATH) {
+            return None;
+        }
+        let local = role_name(self.role);
+        let mut values = headers.get_all(PROTOCOL_HEADER).iter();
+        let Some(value) = values.next() else {
+            return Some(Status::failed_precondition(format!(
+                "this SuperTag {local} refuses a call that did not negotiate a protocol version: call ProtocolNegotiation.Negotiate first and send the selected version in {PROTOCOL_HEADER} on every call"
+            )));
+        };
+        let version = value
+            .to_str()
+            .ok()
+            .filter(|text| !text.starts_with('0') || *text == "0")
+            .and_then(|text| text.parse::<u32>().ok())
+            .filter(|_| values.next().is_none());
+        match version {
+            Some(version) if self.versions.contains(&version) => None,
+            Some(version) => Some(Status::failed_precondition(format!(
+                "incompatible SuperTag protocol: this {local} (SuperTag {}) speaks protocol versions {}, but the call names protocol {version}; negotiate again",
+                build_version(),
+                versions(self.versions),
+            ))),
+            None => Some(Status::failed_precondition(format!(
+                "this SuperTag {local} refuses a call with an invalid {PROTOCOL_HEADER} header"
+            ))),
+        }
+    }
+}
+
+impl<S> Layer<S> for ProtocolFence {
+    type Service = FencedService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        FencedService {
+            inner,
+            fence: *self,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FencedService<S> {
+    inner: S,
+    fence: ProtocolFence,
+}
+
+type FencedFuture<R, E> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<R, E>> + Send>>;
+
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for FencedService<S>
+where
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    S::Future: Send + 'static,
+    ResBody: Default + Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = FencedFuture<S::Response, S::Error>;
+
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, request: http::Request<ReqBody>) -> Self::Future {
+        match self.fence.refusal(request.uri().path(), request.headers()) {
+            Some(status) => {
+                let response = status.into_http();
+                Box::pin(async move { Ok(response) })
+            }
+            None => Box::pin(self.inner.call(request)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +461,56 @@ mod tests {
                 .code(),
             Code::InvalidArgument
         );
+    }
+
+    #[test]
+    fn fence_admits_negotiation_health_and_negotiated_calls_only() {
+        let fence = fence(ServiceRole::Gateway);
+        let headers = |value: Option<&str>| {
+            let mut headers = http::HeaderMap::new();
+            if let Some(value) = value {
+                headers.insert(PROTOCOL_HEADER, value.parse().unwrap());
+            }
+            headers
+        };
+        let operator = "/supertag.runtime.v2.Operator/GetTask";
+        assert!(
+            fence
+                .refusal(
+                    "/supertag.runtime.v2.ProtocolNegotiation/Negotiate",
+                    &headers(None)
+                )
+                .is_none()
+        );
+        assert!(
+            fence
+                .refusal("/grpc.health.v1.Health/Check", &headers(None))
+                .is_none()
+        );
+        assert!(fence.refusal(operator, &headers(Some("2"))).is_none());
+        let skipped = fence.refusal(operator, &headers(None)).unwrap();
+        assert_eq!(skipped.code(), Code::FailedPrecondition);
+        assert!(
+            skipped
+                .message()
+                .contains("did not negotiate a protocol version"),
+            "{}",
+            skipped.message()
+        );
+        let old = fence.refusal(operator, &headers(Some("1"))).unwrap();
+        assert!(
+            old.message().starts_with(
+                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+            ),
+            "{}",
+            old.message()
+        );
+        for invalid in ["02", "two", "", "4294967296"] {
+            let refused = fence.refusal(operator, &headers(Some(invalid))).unwrap();
+            assert!(refused.message().contains("invalid"), "{invalid}");
+        }
+        let mut repeated = headers(Some("2"));
+        repeated.append(PROTOCOL_HEADER, "2".parse().unwrap());
+        assert!(fence.refusal(operator, &repeated).is_some());
     }
 }

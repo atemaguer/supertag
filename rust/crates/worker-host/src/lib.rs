@@ -109,14 +109,28 @@ pub struct Lane {
 }
 
 #[derive(Clone)]
-pub(crate) struct HostHeaders(MetadataValue<Ascii>);
+pub(crate) struct HostHeaders {
+    generation: MetadataValue<Ascii>,
+    protocol: negotiation::ProtocolVersion,
+}
+
+impl HostHeaders {
+    /// Names a registered generation and the protocol version this host
+    /// negotiated with its Gateway on every call.
+    pub(crate) fn new(generation: u64, protocol: u32) -> Self {
+        Self {
+            generation: MetadataValue::from(generation),
+            protocol: negotiation::ProtocolVersion::new(protocol),
+        }
+    }
+}
 
 impl Interceptor for HostHeaders {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
         request
             .metadata_mut()
-            .insert(HOST_GENERATION_HEADER, self.0.clone());
-        Ok(request)
+            .insert(HOST_GENERATION_HEADER, self.generation.clone());
+        self.protocol.call(request)
     }
 }
 
@@ -323,29 +337,28 @@ pub async fn run(
         None => journal.incarnation()?,
     };
     let channel = options.gateway.clone().connect_lazy();
-    let mut registration = WorkerHostClient::new(channel.clone())
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let registration = loop {
+    let (registration, protocol) = loop {
         if shutdown.is_cancelled() {
             return Ok(());
         }
         // Refuse an incompatible Gateway before registering for work.
-        match negotiation::negotiate(
+        let protocol = match negotiation::negotiate(
             channel.clone(),
             ServiceRole::WorkerHost,
             ServiceRole::Gateway,
         )
         .await
         {
-            Ok(_) => {}
+            Ok(version) => version,
             Err(NegotiationError::Unavailable(_)) => {
                 wait_for_work(&shutdown).await;
                 continue;
             }
             Err(error) => return Err(error.into()),
-        }
-        let response = registration
+        };
+        let response = WorkerHostClient::new(negotiation::bind(channel.clone(), protocol))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
             .register_host(request(
                 RegisterHostRequest {
                     incarnation_id: incarnation_id.clone(),
@@ -360,13 +373,13 @@ pub async fn run(
                     !host.revoked && host.generation > 0,
                     "Worker Host registration is inactive"
                 );
-                break host;
+                break (host, protocol);
             }
             Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
             Err(error) => return Err(error.into()),
         }
     };
-    let headers = HostHeaders(registration.generation.to_string().parse()?);
+    let headers = HostHeaders::new(registration.generation, protocol);
     let inputs = AttemptInputsClient::with_interceptor(
         options.gateway.clone().connect_lazy(),
         headers.clone(),

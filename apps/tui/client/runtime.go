@@ -33,7 +33,8 @@ type runtimeClient struct {
 	artifactFiles runtimev2connect.ArtifactTransfersClient
 }
 
-// NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2.
+// NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2. The first call
+// negotiates the SuperTag protocol version, which every call then names.
 func NewRuntimeV2(target Target, version string) (*Client, error) {
 	base, err := url.Parse(strings.TrimSpace(target.URL))
 	if err != nil || base.Hostname() == "" || base.User != nil ||
@@ -75,9 +76,14 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 	}
 	origin := base.Scheme + "://" + base.Host
 	c := &Client{target: target, origin: origin, version: version, http: httpClient}
+	session := &protocolSession{
+		client: runtimev2connect.NewProtocolNegotiationClient(httpClient, origin,
+			connect.WithGRPC(), connect.WithReadMaxBytes(4096), connect.WithSendMaxBytes(4096)),
+		build: version,
+	}
 	options := []connect.ClientOption{
 		connect.WithGRPC(),
-		connect.WithInterceptors(headers{c}),
+		connect.WithInterceptors(headers{c}, negotiatedCalls{session}),
 		connect.WithReadMaxBytes(1024 * 1024),
 		connect.WithSendMaxBytes(1024 * 1024),
 	}

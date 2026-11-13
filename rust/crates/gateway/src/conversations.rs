@@ -1,5 +1,6 @@
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
-use tonic::{Request, Response, Status, transport::Channel};
+use tonic::{Request, Response, Status};
 
 use crate::Gateway;
 
@@ -74,7 +75,7 @@ impl conversations_server::Conversations for Gateway {
     }
 }
 
-fn client(channel: Channel) -> conversations_client::ConversationsClient<Channel> {
+fn client(channel: ProtocolChannel) -> conversations_client::ConversationsClient<ProtocolChannel> {
     conversations_client::ConversationsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

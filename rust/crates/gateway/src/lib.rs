@@ -41,6 +41,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 use anyhow::{Context, ensure};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::v2::{
     host_directory_client::HostDirectoryClient,
     host_enrollment_server::{HostEnrollment, HostEnrollmentServer},
@@ -56,7 +57,6 @@ use supertag_protocol::{HOST_GENERATION_HEADER, host_generation};
 use tonic::{
     Code, Request, Response, Status,
     metadata::{Ascii, MetadataValue},
-    transport::Channel,
 };
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -67,7 +67,7 @@ const TIMEOUT: &str = "grpc-timeout";
 
 #[derive(Clone)]
 pub struct Gateway {
-    control_plane: Channel,
+    control_plane: ProtocolChannel,
     credentials: Arc<Credentials>,
 }
 
@@ -85,7 +85,7 @@ impl Gateway {
     /// The operator and private service tokens come from process configuration.
     /// The Control Plane authenticates enrolled Worker Host credentials.
     pub fn new(
-        control_plane: Channel,
+        control_plane: ProtocolChannel,
         gateway_token: String,
         operator_token: String,
         operator_principal: String,
@@ -120,7 +120,9 @@ impl Gateway {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    /// Worker Hosts negotiate their protocol version here before enrolling or registering.
+    /// Worker Hosts and operator clients negotiate their protocol version here
+    /// before any other call; [`supertag_protocol::negotiation::fence`] refuses
+    /// a call that did not.
     pub fn negotiation_service(
         &self,
     ) -> protocol_negotiation_server::ProtocolNegotiationServer<
@@ -128,7 +130,7 @@ impl Gateway {
     > {
         supertag_protocol::negotiation::Negotiator::new(
             ServiceRole::Gateway,
-            &[ServiceRole::WorkerHost],
+            &[ServiceRole::WorkerHost, ServiceRole::Operator],
         )
         .service()
     }
@@ -149,7 +151,7 @@ impl Gateway {
         &self,
         request: Request<T>,
         principal: &Principal,
-        call: impl FnOnce(Channel, Request<T>) -> F,
+        call: impl FnOnce(ProtocolChannel, Request<T>) -> F,
     ) -> Result<Response<R>, Status>
     where
         F: Future<Output = Result<Response<R>, Status>>,
@@ -184,7 +186,7 @@ impl Gateway {
         &self,
         request: Request<T>,
         registered: bool,
-        call: impl FnOnce(Channel, Request<T>) -> F,
+        call: impl FnOnce(ProtocolChannel, Request<T>) -> F,
     ) -> Result<Response<R>, Status>
     where
         F: Future<Output = Result<Response<R>, Status>>,
@@ -409,25 +411,25 @@ fn client_timeout<T>(request: &Request<T>) -> Result<Duration, Status> {
     }
 }
 
-fn operator_client(channel: Channel) -> OperatorClient<Channel> {
+fn operator_client(channel: ProtocolChannel) -> OperatorClient<ProtocolChannel> {
     OperatorClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn worker_host_client(channel: Channel) -> WorkerHostClient<Channel> {
+fn worker_host_client(channel: ProtocolChannel) -> WorkerHostClient<ProtocolChannel> {
     WorkerHostClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn host_directory_client(channel: Channel) -> HostDirectoryClient<Channel> {
+fn host_directory_client(channel: ProtocolChannel) -> HostDirectoryClient<ProtocolChannel> {
     HostDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn objectives_client(channel: Channel) -> ObjectivesClient<Channel> {
+fn objectives_client(channel: ProtocolChannel) -> ObjectivesClient<ProtocolChannel> {
     ObjectivesClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

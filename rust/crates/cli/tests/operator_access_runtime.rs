@@ -3,6 +3,8 @@
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
 //! Gateway refuses the revoked token on new calls and ends a Watch stream and an artifact download
 //! it already opened. The audit log names every resource a call changed.
+#[path = "support/protocol.rs"]
+mod protocol;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -12,6 +14,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -189,7 +192,8 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         directory.path(),
     )?;
     let public = gateway.address().await?;
-    let channel = Endpoint::from_shared(public.clone())?.connect_lazy();
+    let channel =
+        protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut access = operator_access_client::OperatorAccessClient::new(channel.clone());
     let admin = credentials.admin.clone();
@@ -525,7 +529,9 @@ fn entry(actor: &str, action: &str, target: &str, outcome: &str, code: &str) -> 
 async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     let credentials = Credentials::new();
     let services = services(&credentials, database).await?;
-    let channel = Endpoint::from_shared(services.public.clone())?.connect_lazy();
+    let channel =
+        protocol::negotiated(Endpoint::from_shared(services.public.clone())?.connect_lazy())
+            .await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut mailbox = mailbox_client::MailboxClient::new(channel.clone());
     let mut manifests =
@@ -623,7 +629,9 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
 
     // A message larger than the Control Plane accepts is refused by tonic itself, and recorded with
     // that refusal rather than as an empty request.
-    let private = Endpoint::from_shared(services.private.clone())?.connect_lazy();
+    let private =
+        protocol::negotiated(Endpoint::from_shared(services.private.clone())?.connect_lazy())
+            .await?;
     let mut oversized = request(
         PutTagRequest {
             instructions: "x".repeat(MAX_MESSAGE_BYTES + 1024),
@@ -698,7 +706,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
 /// Captures one artifact file of `bytes` from a Task the Operator Token submitted.
 async fn capture_artifact(
     credentials: &Credentials,
-    channel: tonic::transport::Channel,
+    channel: ProtocolChannel,
     secret: &str,
     bytes: &[u8],
 ) -> Result<String> {
@@ -816,7 +824,9 @@ async fn capture_artifact(
 async fn revoked_token_ends_an_in_flight_download(database: &str) -> Result<()> {
     let credentials = Credentials::new();
     let services = services(&credentials, database).await?;
-    let channel = Endpoint::from_shared(services.public.clone())?.connect_lazy();
+    let channel =
+        protocol::negotiated(Endpoint::from_shared(services.public.clone())?.connect_lazy())
+            .await?;
     let secret = create_token(&credentials, &services.public, "reader")?;
     // Far more than the HTTP/2 windows and stream buffers hold, so the download is still in
     // flight when the token is revoked.

@@ -1,4 +1,6 @@
 //! The ordinary native `up -f` entry point owns every service and its private enrollment.
+#[path = "support/protocol.rs"]
+mod protocol;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -11,6 +13,7 @@ use std::{
     sync::mpsc,
     time::Duration,
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{authenticated_request, v2::*};
 use tokio::time::{sleep, timeout};
 use tonic::transport::Channel;
@@ -97,11 +100,13 @@ fn token(state: &Path) -> Result<String> {
         .context("operator token missing")?
         .into())
 }
-async fn client(endpoint: &str) -> Result<operator_client::OperatorClient<Channel>> {
-    Ok(operator_client::OperatorClient::connect(endpoint.to_owned()).await?)
+async fn client(endpoint: &str) -> Result<operator_client::OperatorClient<ProtocolChannel>> {
+    Ok(operator_client::OperatorClient::new(
+        protocol::dial(endpoint.to_owned()).await?,
+    ))
 }
 async fn host(
-    client: &mut operator_client::OperatorClient<Channel>,
+    client: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     name: &str,
 ) -> Result<WorkerHostStatus> {
@@ -149,7 +154,7 @@ async fn gone(pids: &[i32]) -> Result<()> {
     Ok(())
 }
 async fn run_work(
-    client: &mut operator_client::OperatorClient<Channel>,
+    client: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     session: &str,
 ) -> Result<()> {
@@ -405,7 +410,8 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
     let endpoint = supervisor.ready()?;
     let credential = token(&state)?;
-    let channel = Channel::from_shared(endpoint.clone())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut objectives = objectives_client::ObjectivesClient::new(channel.clone());
     let mut policy = policy_catalog_client::PolicyCatalogClient::new(channel);
@@ -513,7 +519,7 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     yaml(&file, &config)?;
     let mut restarted = Process::spawn(&state, Some(&file), &[])?;
     assert_eq!(restarted.ready()?, endpoint);
-    let channel = Channel::from_shared(endpoint)?.connect().await?;
+    let channel = protocol::negotiated(Channel::from_shared(endpoint)?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let current = operator
         .get_tag(authenticated_request(
@@ -1200,7 +1206,7 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<String> {
 }
 
 async fn tag(
-    operator: &mut operator_client::OperatorClient<Channel>,
+    operator: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     id: &str,
     harness: HarnessKind,
@@ -1222,7 +1228,7 @@ async fn tag(
 }
 
 async fn submit(
-    operator: &mut operator_client::OperatorClient<Channel>,
+    operator: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     tag: &str,
     marker: &str,
@@ -1245,7 +1251,7 @@ async fn submit(
 }
 
 async fn task(
-    operator: &mut operator_client::OperatorClient<Channel>,
+    operator: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     id: &str,
 ) -> Result<Task> {
@@ -1260,7 +1266,7 @@ async fn task(
 }
 
 async fn settled(
-    operator: &mut operator_client::OperatorClient<Channel>,
+    operator: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     id: &str,
     wanted: TaskState,
@@ -1288,7 +1294,7 @@ async fn settled(
 }
 
 async fn host_until(
-    operator: &mut operator_client::OperatorClient<Channel>,
+    operator: &mut operator_client::OperatorClient<ProtocolChannel>,
     token: &str,
     ready: impl Fn(&WorkerHostStatus) -> bool,
 ) -> Result<WorkerHostStatus> {
@@ -1515,17 +1521,17 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
         shared.state.join("hosts/shared/enrollment.json"),
     )?)?;
     let credential = enrollment["token"].as_str().context("host token")?;
-    let replaced = worker_host_client::WorkerHostClient::connect(central.public.clone())
-        .await?
-        .register_host(authenticated_request(
-            RegisterHostRequest {
-                incarnation_id: Uuid::new_v4().to_string(),
-            },
-            credential,
-            None,
-        )?)
-        .await?
-        .into_inner();
+    let replaced =
+        worker_host_client::WorkerHostClient::new(protocol::dial(central.public.clone()).await?)
+            .register_host(authenticated_request(
+                RegisterHostRequest {
+                    incarnation_id: Uuid::new_v4().to_string(),
+                },
+                credential,
+                None,
+            )?)
+            .await?
+            .into_inner();
     // Let the stale lanes' harnesses finish now, so the lanes try to complete their Attempts
     // under the replaced generation before anything stops them.
     fs::write(shared.gate.join("release"), "")?;

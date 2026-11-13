@@ -5,11 +5,12 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_gateway::OPERATOR_TOKEN_SECRET_PREFIX;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{operator_access_client::OperatorAccessClient, *},
 };
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 use uuid::Uuid;
 
 use crate::{Connection, connect_operator, request};
@@ -65,7 +66,7 @@ pub struct AuditArgs {
     output: AuditOutput,
 }
 
-fn client(channel: Channel) -> OperatorAccessClient<Channel> {
+fn client(channel: ProtocolChannel) -> OperatorAccessClient<ProtocolChannel> {
     OperatorAccessClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

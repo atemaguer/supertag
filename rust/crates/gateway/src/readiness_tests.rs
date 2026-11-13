@@ -3,7 +3,9 @@ use tonic::Code;
 
 fn gateway() -> Gateway {
     Gateway::new(
-        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        supertag_protocol::negotiation::bind_current(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         "private-gateway".into(),
         "public-operator".into(),
         "operator:alice".into(),

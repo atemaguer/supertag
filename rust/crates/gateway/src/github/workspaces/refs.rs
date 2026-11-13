@@ -1,7 +1,8 @@
 //! Read-only moving-ref resolution. The Control Plane chooses the first durable pin.
 use super::*;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, authenticated_request, v2::*};
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 
 impl GithubWorkspaceSources {
     pub(super) async fn resolve_selector(
@@ -74,7 +75,7 @@ impl GithubWorkspaceSources {
     }
     pub async fn run_resolver(
         &self,
-        channel: Channel,
+        channel: ProtocolChannel,
         token: String,
         shutdown: CancellationToken,
     ) -> Result<()> {

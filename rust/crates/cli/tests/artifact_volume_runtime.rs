@@ -1,6 +1,8 @@
 //! Actual split processes preserve consent and verified-copy recovery across restart.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -103,7 +105,8 @@ async fn capture(
     credentials: &Credentials,
     public: &str,
 ) -> Result<(String, Vec<u8>, BlobReference)> {
-    let channel = Channel::from_shared(public.to_owned())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     operator
@@ -241,7 +244,8 @@ async fn read_dynamic(
     artifact_id: &str,
     expected: &[u8],
 ) -> Result<()> {
-    let channel = Channel::from_shared(public.to_owned())?.connect().await?;
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let task = operator
         .submit_task(authenticated_request(

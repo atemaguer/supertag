@@ -154,6 +154,7 @@ func gatewayFixture(t *testing.T, name, token string) (client.Target, *atomic.In
 		}
 		return connect.NewResponse(&v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: name, Name: name}}}), nil
 	}))
+	handleNegotiation(mux)
 	server := httptest.NewUnstartedServer(mux)
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
@@ -291,12 +292,15 @@ func TestGatewayRefusalDoesNotSaveOrEchoCredential(t *testing.T) {
 
 func TestGatewaySwitchCancelsInflightRuntimeRequest(t *testing.T) {
 	started, stopped := make(chan struct{}), make(chan struct{})
-	server := httptest.NewUnstartedServer(connect.NewUnaryHandler(rpc.OperatorListTagsProcedure, func(ctx context.Context, _ *connect.Request[v2.ListTagsRequest]) (*connect.Response[v2.ListTagsResponse], error) {
+	mux := http.NewServeMux()
+	handleNegotiation(mux)
+	mux.Handle(rpc.OperatorListTagsProcedure, connect.NewUnaryHandler(rpc.OperatorListTagsProcedure, func(ctx context.Context, _ *connect.Request[v2.ListTagsRequest]) (*connect.Response[v2.ListTagsResponse], error) {
 		close(started)
 		<-ctx.Done()
 		close(stopped)
 		return nil, ctx.Err()
 	}))
+	server := httptest.NewUnstartedServer(mux)
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()

@@ -146,9 +146,9 @@ fn request(review_id: &str, token: &str, generation: u64) -> Request<GetReviewAr
 }
 
 async fn gateway(
-    channel: Channel,
+    channel: ProtocolChannel,
     directory: &Path,
-) -> anyhow::Result<(ServerTask, TransfersClient<Channel>)> {
+) -> anyhow::Result<(ServerTask, TransfersClient<tonic::transport::Channel>)> {
     let gateway = Gateway::new(
         channel,
         "private-token".into(),
@@ -205,7 +205,11 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
         .await?;
 
     for _ in 0..2 {
-        let (_server, mut client) = gateway(channel.clone(), directory.path()).await?;
+        let (_server, mut client) = gateway(
+            supertag_protocol::negotiation::bind_current(channel.clone()),
+            directory.path(),
+        )
+        .await?;
         for (token, generation, review, expected) in [
             ("operator-token", 7, "review", Code::Unauthenticated),
             ("host-token", 6, "review", Code::PermissionDenied),
@@ -239,7 +243,11 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     }
     assert!(state.reads.load(Ordering::SeqCst) >= 4);
 
-    let (_server, mut client) = gateway(channel, directory.path()).await?;
+    let (_server, mut client) = gateway(
+        supertag_protocol::negotiation::bind_current(channel),
+        directory.path(),
+    )
+    .await?;
     state.reads.store(0, Ordering::SeqCst);
     state.deny_after.store(1, Ordering::SeqCst);
     let mut stream = client

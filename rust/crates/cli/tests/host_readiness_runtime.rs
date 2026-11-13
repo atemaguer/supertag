@@ -2,6 +2,8 @@
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
+#[path = "support/protocol.rs"]
+mod protocol;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
@@ -117,7 +119,7 @@ impl Drop for Process {
 }
 
 async fn wait_phase(
-    client: &mut operator_client::OperatorClient<tonic::transport::Channel>,
+    client: &mut operator_client::OperatorClient<supertag_protocol::negotiation::ProtocolChannel>,
     credentials: &Credentials,
     phase: HostPhase,
     timeout: Duration,
@@ -168,8 +170,9 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
         directory.path(),
     )?;
     let public = gateway.address().await?;
-    let mut operator =
-        operator_client::OperatorClient::new(Endpoint::from_shared(public.clone())?.connect_lazy());
+    let mut operator = operator_client::OperatorClient::new(
+        protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
+    );
     let initial = operator
         .get_host(credentials.request(GetHostRequest {
             host_id: "local".into(),
@@ -284,8 +287,9 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
         directory.path(),
     )?;
     let public = gateway.address().await?;
-    let mut operator =
-        operator_client::OperatorClient::new(Endpoint::from_shared(public.clone())?.connect_lazy());
+    let mut operator = operator_client::OperatorClient::new(
+        protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
+    );
     operator
         .put_tag(credentials.request(PutTagRequest {
             tag_id: "reviewer".into(),
@@ -390,8 +394,9 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
         directory.path(),
     )?;
     let public = gateway.address().await?;
-    let mut operator =
-        operator_client::OperatorClient::new(Endpoint::from_shared(public.clone())?.connect_lazy());
+    let mut operator = operator_client::OperatorClient::new(
+        protocol::negotiated(Endpoint::from_shared(public.clone())?.connect_lazy()).await?,
+    );
     operator
         .put_tag(credentials.request(PutTagRequest {
             tag_id: "reviewer".into(),

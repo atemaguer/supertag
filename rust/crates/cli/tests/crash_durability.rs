@@ -24,6 +24,8 @@
 //! server with `fsync`, `synchronous_commit`, and `full_page_writes` on, and sets
 //! `SUPERTAG_RUST_TEST_REQUIRE_DURABLE_POSTGRES=1` so each case refuses a server
 //! with test durability settings.
+#[path = "support/protocol.rs"]
+mod protocol;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -35,6 +37,7 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use hmac::{Hmac, Mac};
@@ -498,12 +501,15 @@ impl<'a> System<'a> {
         })
     }
 
-    async fn operator(&self) -> Result<OperatorClient<Channel>> {
-        let channel = Channel::from_shared(format!("http://{}", self.public))?
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(3))
-            .connect()
-            .await?;
+    async fn operator(&self) -> Result<OperatorClient<ProtocolChannel>> {
+        let channel = protocol::negotiated(
+            Channel::from_shared(format!("http://{}", self.public))?
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(3))
+                .connect()
+                .await?,
+        )
+        .await?;
         Ok(OperatorClient::new(channel))
     }
 
@@ -522,8 +528,9 @@ impl<'a> System<'a> {
                 allowed_actions: vec!["files:read".into()],
             })?)
             .await?;
-        let mut policy =
-            SurfacePolicyCatalogClient::connect(format!("http://{}", self.public)).await?;
+        let mut policy = SurfacePolicyCatalogClient::new(
+            protocol::dial(format!("http://{}", self.public)).await?,
+        );
         policy
             .put_surface_account(self.credentials.request(PutSurfaceAccountRequest {
                 operation_id: "account-fixture".into(),

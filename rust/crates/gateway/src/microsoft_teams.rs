@@ -19,13 +19,14 @@ use axum::{
 };
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{AcceptMicrosoftTeamsActivityRequest, connector_client::ConnectorClient},
 };
 use tokio::{net::TcpListener, sync::Mutex, time};
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 use uuid::Uuid;
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -44,7 +45,7 @@ pub struct MicrosoftTeamsConfig {
 pub struct MicrosoftTeams(Arc<Connector>);
 struct Connector {
     config: MicrosoftTeamsConfig,
-    control_plane: ConnectorClient<Channel>,
+    control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
     principal: String,
     http: reqwest::Client,
@@ -58,7 +59,7 @@ struct Connector {
 impl MicrosoftTeams {
     pub fn new(
         mut config: MicrosoftTeamsConfig,
-        channel: Channel,
+        channel: ProtocolChannel,
         gateway_token: String,
     ) -> Result<Self> {
         ensure!(

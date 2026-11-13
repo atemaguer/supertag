@@ -6,15 +6,16 @@ use super::workspaces::GithubWorkspaceAccount;
 use anyhow::{Context, Result, ensure};
 use provider::{Provider, receipt, target};
 use std::{path::Path, time::Duration};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, authenticated_request, v2::*};
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
-use tonic::{Code, Request, Status, transport::Channel};
+use tonic::{Code, Request, Status};
 use uuid::Uuid;
 
 pub struct GithubPublisher {
     provider: Provider,
-    client: github_publisher_client::GithubPublisherClient<Channel>,
+    client: github_publisher_client::GithubPublisherClient<ProtocolChannel>,
     token: String,
     principal: String,
 }
@@ -23,7 +24,7 @@ impl GithubPublisher {
         config: GithubWorkspaceAccount,
         directory: &Path,
         blobs: &Path,
-        channel: Channel,
+        channel: ProtocolChannel,
         token: String,
     ) -> Result<Self> {
         let provider = Provider::new(config, directory, blobs)?;

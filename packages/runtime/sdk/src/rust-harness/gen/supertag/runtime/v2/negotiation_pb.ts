@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/negotiation.proto.
  */
 export const file_supertag_runtime_v2_negotiation: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdXBlcnRhZy9ydW50aW1lL3YyL25lZ290aWF0aW9uLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyInwKGE5lZ290aWF0ZVByb3RvY29sUmVxdWVzdBIuCgRyb2xlGAEgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5TZXJ2aWNlUm9sZRIZChFwcm90b2NvbF92ZXJzaW9ucxgCIAMoDRIVCg1idWlsZF92ZXJzaW9uGAMgASgJIpcBChlOZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlEi4KBHJvbGUYASABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLlNlcnZpY2VSb2xlEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SGQoRcHJvdG9jb2xfdmVyc2lvbnMYAyADKA0SFQoNYnVpbGRfdmVyc2lvbhgEIAEoCSqDAQoLU2VydmljZVJvbGUSHAoYU0VSVklDRV9ST0xFX1VOU1BFQ0lGSUVEEAASHgoaU0VSVklDRV9ST0xFX0NPTlRST0xfUExBTkUQARIYChRTRVJWSUNFX1JPTEVfR0FURVdBWRACEhwKGFNFUlZJQ0VfUk9MRV9XT1JLRVJfSE9TVBADMoEBChNQcm90b2NvbE5lZ290aWF0aW9uEmoKCU5lZ290aWF0ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuTmVnb3RpYXRlUHJvdG9jb2xSZXF1ZXN0Gi4uc3VwZXJ0YWcucnVudGltZS52Mi5OZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("CiVzdXBlcnRhZy9ydW50aW1lL3YyL25lZ290aWF0aW9uLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyInwKGE5lZ290aWF0ZVByb3RvY29sUmVxdWVzdBIuCgRyb2xlGAEgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5TZXJ2aWNlUm9sZRIZChFwcm90b2NvbF92ZXJzaW9ucxgCIAMoDRIVCg1idWlsZF92ZXJzaW9uGAMgASgJIpcBChlOZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlEi4KBHJvbGUYASABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLlNlcnZpY2VSb2xlEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SGQoRcHJvdG9jb2xfdmVyc2lvbnMYAyADKA0SFQoNYnVpbGRfdmVyc2lvbhgEIAEoCSqeAQoLU2VydmljZVJvbGUSHAoYU0VSVklDRV9ST0xFX1VOU1BFQ0lGSUVEEAASHgoaU0VSVklDRV9ST0xFX0NPTlRST0xfUExBTkUQARIYChRTRVJWSUNFX1JPTEVfR0FURVdBWRACEhwKGFNFUlZJQ0VfUk9MRV9XT1JLRVJfSE9TVBADEhkKFVNFUlZJQ0VfUk9MRV9PUEVSQVRPUhAEMoEBChNQcm90b2NvbE5lZ290aWF0aW9uEmoKCU5lZ290aWF0ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuTmVnb3RpYXRlUHJvdG9jb2xSZXF1ZXN0Gi4uc3VwZXJ0YWcucnVudGltZS52Mi5OZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message supertag.runtime.v2.NegotiateProtocolRequest
@@ -106,6 +106,13 @@ export enum ServiceRole {
    * @generated from enum value: SERVICE_ROLE_WORKER_HOST = 3;
    */
   WORKER_HOST = 3,
+
+  /**
+   * An operator client: the CLI, the TUI, the desktop app, or an SDK client.
+   *
+   * @generated from enum value: SERVICE_ROLE_OPERATOR = 4;
+   */
+  OPERATOR = 4,
 }
 
 /**
@@ -115,9 +122,16 @@ export const ServiceRoleSchema: GenEnum<ServiceRole> = /*@__PURE__*/
   enumDesc(file_supertag_runtime_v2_negotiation, 0);
 
 /**
- * Each service connection begins with this exchange. A peer that shares no
- * protocol version, or that connects in the wrong role, is refused before it
- * can register, claim, or forward work. The exchange carries no credentials.
+ * Each service and operator connection begins with this exchange. A peer that
+ * shares no protocol version, or that connects in the wrong role, is refused
+ * before it can register, claim, forward work, or make an operator call. The
+ * exchange carries no credentials.
+ *
+ * After negotiating, the client sends the selected version in the
+ * `x-supertag-protocol` metadata header on every other call. The Gateway and
+ * Control Plane refuse a call without it, or naming a version they do not
+ * speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
+ * health service are exempt.
  *
  * @generated from service supertag.runtime.v2.ProtocolNegotiation
  */

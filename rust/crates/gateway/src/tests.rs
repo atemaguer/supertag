@@ -8,7 +8,9 @@ use tonic::{
 
 fn gateway() -> Gateway {
     Gateway::new(
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        supertag_protocol::negotiation::bind_current(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
         "gateway-test-token".into(),
         "operator-test-token".into(),
         "operator:alice".into(),
@@ -216,7 +218,7 @@ async fn routes_only_authenticated_worker_generations_and_hashes_enrollment_keys
     );
     let channel = Endpoint::from_shared(format!("http://{address}"))?.connect_lazy();
     let gateway = Gateway::new(
-        channel,
+        supertag_protocol::negotiation::bind_current(channel),
         "gateway-test-token".into(),
         "operator-test-token".into(),
         "operator:alice".into(),
@@ -307,7 +309,9 @@ async fn classifies_operator_credentials_without_contacting_the_control_plane() 
     }
     assert!(
         Gateway::new(
-            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            supertag_protocol::negotiation::bind_current(
+                Endpoint::from_static("http://127.0.0.1:1").connect_lazy()
+            ),
             "gateway-test-token".into(),
             "operator-test-token".into(),
             "operator:token:alice".into(),

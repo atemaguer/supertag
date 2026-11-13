@@ -185,6 +185,7 @@ func TestRuntimeHistoryReplaysPagesToTheLastAuthoritativeMessage(t *testing.T) {
 		func(_ context.Context, _ *connect.Request[v2.ListWorkSessionsRequest]) (*connect.Response[v2.ListWorkSessionsResponse], error) {
 			return connect.NewResponse(&v2.ListWorkSessionsResponse{}), nil
 		}))
+	handleNegotiation(mux)
 	server := httptest.NewUnstartedServer(mux)
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
