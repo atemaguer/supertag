@@ -107,16 +107,20 @@ enum Ingress {
 /// The single acceptable recovered outcome for a case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Expect {
-    /// The Task succeeds and its reply is delivered exactly once with the receipt.
+    /// The Task succeeds and its reply is delivered exactly once with the receipt. A Slack
+    /// acknowledgement may precede it, at most once, and the reply then replaces it in place.
     Delivered,
     /// The Task succeeds and has no reply (operator ingress).
     Succeeded,
-    /// The Task succeeds and its reply is settled uncertain after this many provider requests.
+    /// The Task succeeds and its reply is settled uncertain after this many provider requests
+    /// carrying the result, besides at most one acknowledgement.
     ReplyUncertain { provider_requests: usize },
-    /// The Task fails with this durable event count and no reply.
+    /// The Task fails with this durable event count. Its only reply is the failure text,
+    /// delivered once, besides at most one acknowledgement.
     Failed { events: usize },
     /// The restarted host refuses to claim work: execution is uncertain and needs an
-    /// operator decision. The Task stays running, nothing is rerun, and no reply exists.
+    /// operator decision. The Task stays running, nothing is rerun, no reply exists, and the
+    /// acknowledgement, if posted, is kept.
     ExecutionUncertain { launches: usize, events: usize },
 }
 
@@ -796,7 +800,16 @@ impl<'a> System<'a> {
                     })
             }
             Expect::Succeeded => exit.is_some() && task.state() == TaskState::Succeeded,
-            Expect::Failed { .. } => exit.is_some() && task.state() == TaskState::Failed,
+            Expect::Failed { .. } => {
+                exit.is_some()
+                    && task.state() == TaskState::Failed
+                    && (self.case.ingress != Ingress::Slack
+                        || self.replies().await.is_ok_and(|replies| {
+                            replies
+                                .iter()
+                                .any(|reply| reply.state() == ReplyState::Delivered)
+                        }))
+            }
             Expect::ExecutionUncertain { .. } => {
                 if self.crashed
                     && let Some(status) = exit
@@ -887,7 +900,11 @@ impl<'a> System<'a> {
             .map(|event| event.sequence)
             .collect::<Vec<_>>();
         let replies = self.replies().await?;
-        let provider_requests = self.mock.count().await;
+        let posts = self.mock.requests.lock().await.clone();
+        let provider_requests = posts.len();
+        // Provider posts carrying the Task's result, as opposed to its acknowledgement or
+        // failure text.
+        let result_posts = posts.iter().filter(|body| body["text"] == RESULT).count();
         let launches = self.launches()?;
         match case.expect {
             Expect::Delivered | Expect::ReplyUncertain { .. } | Expect::Succeeded => {
@@ -909,11 +926,22 @@ impl<'a> System<'a> {
                     sequences == (1..=events as u64).collect::<Vec<_>>(),
                     "events {sequences:?}"
                 );
-                ensure!(
-                    replies.is_empty(),
-                    "failed Task enqueued replies {replies:?}"
-                );
-                ensure!(provider_requests == 0);
+                ensure!(result_posts == 0, "failed Task posted its result");
+                if case.ingress == Ingress::Slack {
+                    ensure!(replies.len() == 1, "replies {replies:?}");
+                    ensure!(replies[0].state() == ReplyState::Delivered);
+                    ensure!(replies[0].task_id == id);
+                    let failure_posts = posts
+                        .iter()
+                        .filter(|body| body["text"] == replies[0].text.as_str())
+                        .count();
+                    ensure!(
+                        failure_posts == 1 && provider_requests <= 2,
+                        "provider received {provider_requests} posts, {failure_posts} with the failure"
+                    );
+                } else {
+                    ensure!(replies.is_empty() && provider_requests == 0);
+                }
             }
             Expect::ExecutionUncertain {
                 launches: expected,
@@ -937,7 +965,11 @@ impl<'a> System<'a> {
                     sequences == (1..=events as u64).collect::<Vec<_>>(),
                     "events {sequences:?}"
                 );
-                ensure!(replies.is_empty() && provider_requests == 0);
+                ensure!(replies.is_empty() && result_posts == 0);
+                ensure!(
+                    provider_requests <= 1,
+                    "provider received {provider_requests} posts"
+                );
             }
         }
         match (case.ingress, case.expect) {
@@ -947,11 +979,17 @@ impl<'a> System<'a> {
                 ensure!(replies[0].provider_receipt.as_deref() == Some(SLACK_RECEIPT));
                 ensure!(replies[0].task_id == id);
                 ensure!(
-                    provider_requests == 1,
-                    "provider received {provider_requests} posts"
+                    result_posts == 1 && provider_requests <= 2,
+                    "provider received {provider_requests} posts, {result_posts} with the result"
                 );
-                let body = &self.mock.requests.lock().await[0];
-                ensure!(body["text"] == RESULT && body["thread_ts"] == SLACK_THREAD);
+                // The result is the last post: a new thread reply, or an in-place update of
+                // the acknowledgement.
+                let body = posts.last().context("no provider post")?;
+                ensure!(
+                    body["text"] == RESULT
+                        && (body["thread_ts"] == SLACK_THREAD || body["ts"] == SLACK_RECEIPT),
+                    "unexpected final post {body}"
+                );
             }
             (
                 Ingress::Slack,
@@ -963,8 +1001,8 @@ impl<'a> System<'a> {
                 ensure!(replies[0].state() == ReplyState::Uncertain);
                 ensure!(replies[0].provider_receipt.is_none());
                 ensure!(
-                    provider_requests == expected,
-                    "provider received {provider_requests} posts, expected {expected}"
+                    result_posts == expected && provider_requests <= expected + 1,
+                    "provider received {provider_requests} posts, {result_posts} with the result, expected {expected}"
                 );
             }
             (Ingress::Operator, Expect::Succeeded) => {
@@ -1173,15 +1211,16 @@ crash_matrix! {
     adapter_attached =>
         case(Adapter, "adapter.attached", Slack, Failed { events: 0 });
 
-    // Event append.
+    // Event append. The Worker Host repeats an append whose outcome the transport lost, and
+    // the Control Plane deduplicates it by sequence and content, so the Task still succeeds.
     control_plane_event_before_commit =>
-        case(ControlPlane, "control-plane.append-event.before-commit", Slack, Failed { events: 0 });
+        case(ControlPlane, "control-plane.append-event.before-commit", Slack, Delivered);
     control_plane_event_after_commit =>
-        case(ControlPlane, "control-plane.append-event.after-commit", Slack, Failed { events: 1 });
+        case(ControlPlane, "control-plane.append-event.after-commit", Slack, Delivered);
     gateway_event_before_forward =>
-        case(Gateway, "gateway.append-event.before-forward", Slack, Failed { events: 0 });
+        case(Gateway, "gateway.append-event.before-forward", Slack, Delivered);
     gateway_event_after_forward =>
-        case(Gateway, "gateway.append-event.after-forward", Slack, Failed { events: 1 });
+        case(Gateway, "gateway.append-event.after-forward", Slack, Delivered);
     worker_host_event_answered =>
         case(WorkerHost, "worker-host.append-event.answered", Slack,
             ExecutionUncertain { launches: 1, events: 1 });
