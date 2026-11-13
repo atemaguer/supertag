@@ -10,6 +10,8 @@ CREATE TABLE supertag_v2_reply_progress (
     sent_revision BIGINT NOT NULL DEFAULT 0,
     provider_receipt TEXT,
     stopped BIGINT NOT NULL DEFAULT 0 CHECK (stopped IN (0,1)),
+    -- 1 once a final reply for the Task was claimed or enqueued here.
+    closed BIGINT NOT NULL DEFAULT 0 CHECK (closed IN (0,1)),
     lease_token TEXT,
     lease_revision BIGINT,
     lease_expires_at_ms BIGINT,
@@ -17,6 +19,7 @@ CREATE TABLE supertag_v2_reply_progress (
     ready_order BIGINT NOT NULL UNIQUE
 );
 CREATE INDEX supertag_v2_reply_progress_ready ON supertag_v2_reply_progress(account_id, stopped, ready_order);
+CREATE INDEX supertag_v2_reply_progress_open ON supertag_v2_reply_progress(account_id, closed, ready_order);
 CREATE TABLE supertag_v2_reply_progress_claims (
     account_id TEXT NOT NULL,
     operation_id TEXT NOT NULL,

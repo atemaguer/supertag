@@ -88,6 +88,10 @@ impl Run {
     }
 
     async fn finish(self, store: &Store, host: &HostAuthority, result: &str) {
+        self.end(store, host, result, true).await;
+    }
+
+    async fn end(self, store: &Store, host: &HostAuthority, result: &str, succeeded: bool) {
         store
             .finish_task(
                 host,
@@ -96,7 +100,7 @@ impl Run {
                     attempt_id: self.attempt_id,
                     lease_token: self.lease_token,
                     result: result.into(),
-                    succeeded: true,
+                    succeeded,
                     ..Default::default()
                 },
             )
@@ -380,8 +384,162 @@ async fn contract(url: String) {
         .await
         .unwrap()
         .with_execution_clock(move || now.load(Ordering::SeqCst));
-    assert_eq!(claim(&store, "p1").await, first);
+    // The first claim was settled, so replaying it repeats no write.
+    assert_eq!(claim(&store, "p1").await.update, None);
     assert_eq!(claim(&store, "after-restart").await.update, None);
+
+    // A Gateway that lost an update claim's response replays it only while its lease holds.
+    // After the lease expired and the final reply replaced the message, the replay is empty,
+    // so stale progress can never overwrite the final answer.
+    let task = store
+        .accept_slack_event(PRINCIPAL, &mention("EvFIVE", "1794470000.000005"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let ack = "1794470009.000005";
+    let lease = claim(&store, "u1").await.lease_token;
+    settle(
+        &store,
+        &task.task_id,
+        &lease,
+        ReplyState::Delivered,
+        Some(ack),
+    )
+    .await
+    .unwrap();
+    let mut run = Run::start(&store, &host, "run-five").await;
+    run.event(&store, &host, &progress("Fixing tests", "Patch"))
+        .await;
+    clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
+    let lost = claim(&store, "u2").await;
+    assert_eq!(
+        lost.update.as_ref().unwrap().text,
+        "Fixing tests\n\n• Patch"
+    );
+    assert_eq!(claim(&store, "u2").await, lost, "a live lease replays");
+    run.finish(&store, &host, "Five").await;
+    assert_eq!(
+        store.claim_reply(PRINCIPAL, "u3").await.unwrap().reply,
+        None,
+        "the final waits for the in-flight update"
+    );
+    clock.fetch_add(30_001, Ordering::SeqCst);
+    let reply = store
+        .claim_reply(PRINCIPAL, "u4")
+        .await
+        .unwrap()
+        .reply
+        .unwrap();
+    assert_eq!(
+        (
+            reply.text.as_str(),
+            reply.replace_provider_receipt.as_deref()
+        ),
+        ("Five", Some(ack))
+    );
+    settle_final(&store, &reply.reply_id, "u4").await;
+    assert_eq!(claim(&store, "u2").await.update, None);
+
+    // The same holds for an acknowledgement whose claim expired before the final posted.
+    let task = store
+        .accept_slack_event(PRINCIPAL, &mention("EvSIX", "1794470000.000006"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let lost = claim(&store, "v1").await;
+    assert_eq!(lost.update.as_ref().unwrap().task_id, task.task_id);
+    clock.fetch_add(30_001, Ordering::SeqCst);
+    Run::start(&store, &host, "run-six")
+        .await
+        .finish(&store, &host, "Six")
+        .await;
+    let reply = store
+        .claim_reply(PRINCIPAL, "v2")
+        .await
+        .unwrap()
+        .reply
+        .unwrap();
+    assert_eq!(reply.replace_provider_receipt, None);
+    settle_final(&store, &reply.reply_id, "v2").await;
+    assert_eq!(claim(&store, "v1").await.update, None);
+
+    // A failed Task replaces its acknowledgement with the error, as TypeScript `failureText`.
+    let task = store
+        .accept_slack_event(PRINCIPAL, &mention("EvSEVEN", "1794470000.000007"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let ack = "1794470009.000007";
+    let lease = claim(&store, "w1").await.lease_token;
+    settle(
+        &store,
+        &task.task_id,
+        &lease,
+        ReplyState::Delivered,
+        Some(ack),
+    )
+    .await
+    .unwrap();
+    clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
+    Run::start(&store, &host, "run-seven")
+        .await
+        .end(&store, &host, "Harness exited\n   with code 2", false)
+        .await;
+    let failed = store.claim_reply(PRINCIPAL, "w2").await.unwrap();
+    let reply = failed.reply.clone().unwrap();
+    assert_eq!(reply.task_id, task.task_id);
+    assert_eq!(
+        reply.text,
+        "I ran into a problem while working on this: Harness exited with code 2"
+    );
+    assert_eq!(reply.replace_provider_receipt.as_deref(), Some(ack));
+    assert_eq!(store.claim_reply(PRINCIPAL, "w2").await.unwrap(), failed);
+    settle_final(&store, &reply.reply_id, "w2").await;
+    assert_eq!(
+        store.claim_reply(PRINCIPAL, "w3").await.unwrap().reply,
+        None
+    );
+
+    // A cancelled Task says that it stopped, also in place of its acknowledgement.
+    let task = store
+        .accept_slack_event(PRINCIPAL, &mention("EvEIGHT", "1794470000.000008"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let ack = "1794470009.000008";
+    let lease = claim(&store, "x1").await.lease_token;
+    settle(
+        &store,
+        &task.task_id,
+        &lease,
+        ReplyState::Delivered,
+        Some(ack),
+    )
+    .await
+    .unwrap();
+    clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
+    store.cancel_task(&task.task_id).await.unwrap();
+    let reply = store
+        .claim_reply(PRINCIPAL, "x2")
+        .await
+        .unwrap()
+        .reply
+        .unwrap();
+    assert_eq!(
+        (
+            reply.text.as_str(),
+            reply.replace_provider_receipt.as_deref()
+        ),
+        (
+            "I stopped working on this because it was cancelled.",
+            Some(ack)
+        )
+    );
+    assert_eq!(claim(&store, "x3").await.update, None);
     store.close().await;
 }
 

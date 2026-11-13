@@ -1946,7 +1946,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     wait_for_reply_journal(&progress_journal, "sending").await?;
     services.gateway.crash()?;
     mock.responses.add_permits(1);
-    let (gateway, endpoint, _http) =
+    let (gateway, endpoint, http) =
         slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
     services.gateway = gateway;
     services.endpoint = endpoint;
@@ -1976,6 +1976,50 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
             ("thread_ts", second_thread),
             "Respond carefully: check the restart [files:read]"
         )
+    );
+
+    // A third conversation fails. Its acknowledgement does not keep promising work: the
+    // error replaces it in place, as TypeScript `failureText` does.
+    let third_thread = "1794470300.000001";
+    assert_eq!(
+        signed_slack_mention(&http, "EvSTREAM3", third_thread, "break the fixture").await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(6).await?;
+    mock.responses.add_permits(1);
+    let mut command = credentials.command();
+    command
+        .args([
+            "worker-host",
+            "--gateway",
+            &services.endpoint,
+            "--adapter",
+            ADAPTER,
+            "--once",
+            "--adapter-arg=--fail-result=Fixture harness\n  exited with code 2",
+        ])
+        .arg("--state-directory")
+        .arg(directory.join("failing-host"));
+    let mut host = Process::spawn(command, directory, "worker-host", false)?;
+    mock.wait_for_requests(7).await?;
+    mock.responses.add_permits(1);
+    host.successful_exit().await?;
+    sleep(Duration::from_millis(2_500)).await;
+    let requests = observed(&mock.requests.lock().await);
+    assert_eq!(
+        requests[5..],
+        [
+            body(
+                "/chat.postMessage",
+                ("thread_ts", third_thread),
+                "Got it. I’m looking into this now."
+            ),
+            body(
+                "/chat.update",
+                ("ts", SLACK_RECEIPT),
+                "I ran into a problem while working on this: Fixture harness exited with code 2"
+            ),
+        ]
     );
     Ok(())
 }

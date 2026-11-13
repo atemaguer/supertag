@@ -121,6 +121,66 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<
 /// recently written progress message, so it always lands last and stays within the pace.
 pub(crate) const FINAL_READY: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NOT NULL AND (p.lease_token IS NOT NULL OR p.next_at_ms>$3)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NULL AND p.lease_token IS NOT NULL)";
 
+/// Failed and cancelled Tasks have no result reply, so their acknowledgement would keep
+/// promising work. TypeScript parity: a failed surface Task's final outbound reply is
+/// `failureText` (`packages/control-plane/src/index.ts`), which replaces the acknowledgement.
+/// Deliberate difference: TypeScript leaves a queued Task's acknowledgement when an operator
+/// cancels it; Rust says that it stopped.
+pub(crate) async fn enqueue_unsuccessful_in(
+    tx: &mut Transaction<'_, Any>,
+    account: &str,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT p.task_id,p.conversation_id,p.thread_id,t.state,t.result FROM supertag_v2_reply_progress p JOIN supertag_v2_tasks t ON t.task_id=p.task_id
+         WHERE p.account_id=$1 AND p.closed=0 AND t.state IN ($2,$3)
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_replies r WHERE r.task_id=p.task_id)
+         ORDER BY p.ready_order LIMIT 32",
+    )
+    .bind(account)
+    .bind(TaskState::Failed as i64)
+    .bind(TaskState::Cancelled as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let task_id: String = row.try_get("task_id")?;
+        let text = unsuccessful_text(
+            row.try_get::<i64, _>("state")? == TaskState::Cancelled as i64,
+            row.try_get::<Option<String>, _>("result")?.as_deref(),
+        );
+        let order = next_order(tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_replies (reply_id,task_id,account_id,conversation_id,thread_id,text,state,ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(task_id) DO NOTHING")
+            .bind(Uuid::new_v4().to_string()).bind(&task_id).bind(account)
+            .bind(row.try_get::<String, _>("conversation_id")?).bind(row.try_get::<String, _>("thread_id")?)
+            .bind(text).bind(ReplyState::Pending as i64).bind(order)
+            .execute(&mut **tx).await?;
+        sqlx::query("UPDATE supertag_v2_reply_progress SET closed=1 WHERE task_id=$1")
+            .bind(&task_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// TypeScript `failureText`: the error on one line, at most 500 characters.
+pub(crate) fn unsuccessful_text(cancelled: bool, error: Option<&str>) -> String {
+    if cancelled {
+        return "I stopped working on this because it was cancelled.".into();
+    }
+    let error = error
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(500)
+        .collect::<String>();
+    if error.is_empty() {
+        "I ran into a problem while working on this.".into()
+    } else {
+        format!("I ran into a problem while working on this: {error}")
+    }
+}
+
 /// Adds the in-place replacement target and the result card to a claimed final reply, and
 /// stops further progress for its Task.
 pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply) -> Result<()> {
@@ -133,7 +193,7 @@ pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply)
     .await?
     {
         reply.replace_provider_receipt = row.try_get("provider_receipt")?;
-        sqlx::query("UPDATE supertag_v2_reply_progress SET stopped=1 WHERE task_id=$1")
+        sqlx::query("UPDATE supertag_v2_reply_progress SET stopped=1,closed=1 WHERE task_id=$1")
             .bind(&reply.task_id)
             .execute(&mut **tx)
             .await?;
@@ -177,10 +237,11 @@ pub(crate) async fn result_card_in(
         return Ok(None);
     };
     let publication: GithubPublication = policy::decode(&payload)?;
+    let published = publication.state() == GithubPublicationState::Published;
     let pull_request_url = publication
         .pull_request
         .as_ref()
-        .filter(|_| publication.state() == GithubPublicationState::Published)
+        .filter(|_| published)
         .filter(|receipt| {
             receipt.number > 0
                 && receipt.url.eq_ignore_ascii_case(&format!(
@@ -190,7 +251,10 @@ pub(crate) async fn result_card_in(
                 && github_pull_request_url(&receipt.url)
         })
         .map(|receipt| receipt.url.clone());
-    let branch = Some(publication.head_branch).filter(|branch| !branch.is_empty());
+    // Only a published branch exists on GitHub; an unfinished or failed publication names none.
+    let branch = Some(publication.head_branch)
+        .filter(|branch| !branch.is_empty())
+        .filter(|_| published);
     Ok(
         (branch.is_some() || pull_request_url.is_some()).then_some(ReplyResultCard {
             branch,
@@ -241,8 +305,28 @@ impl Store {
         if let Some(prior) = sqlx::query_scalar::<_, Vec<u8>>("SELECT response FROM supertag_v2_reply_progress_claims WHERE account_id=$1 AND operation_id=$2")
             .bind(account).bind(operation_id).fetch_optional(&mut *tx).await?
         {
+            // A replay may only repeat a write its lease still covers. Once the lease expired,
+            // was settled, or the row stopped, the final reply may already be visible, and
+            // resending this older text would overwrite or follow it.
+            let prior: ClaimReplyProgressResponse = policy::decode(&prior)?;
+            let live = match &prior.update {
+                Some(update) => sqlx::query_scalar::<_, String>(
+                    "SELECT task_id FROM supertag_v2_reply_progress WHERE task_id=$1 AND account_id=$2 AND stopped=0 AND closed=0 AND lease_token=$3",
+                )
+                .bind(&update.task_id)
+                .bind(account)
+                .bind(&prior.lease_token)
+                .fetch_optional(&mut *tx)
+                .await?
+                .is_some(),
+                None => true,
+            };
             tx.commit().await?;
-            return policy::decode(&prior);
+            return Ok(if live {
+                prior
+            } else {
+                ClaimReplyProgressResponse::default()
+            });
         }
         // Only a running Task without a final reply shows progress. A final reply replaces it.
         let row = sqlx::query(
@@ -510,11 +594,22 @@ mod tests {
         sqlx::query("INSERT INTO supertag_v2_github_publications(publication_id,task_id,tag_id,session_id,account_id,created_order,state,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
             .bind(&publication.publication_id).bind(&child.task_id).bind("builder").bind(&child.session_id).bind("github-app").bind(900003_i64).bind(publication.state as i64).bind(publication.encode_to_vec())
             .execute(&store.pool).await.unwrap();
+        // A branch that is still being published, or failed to publish, is not shown.
+        for state in [
+            GithubPublicationState::Sending,
+            GithubPublicationState::Uncertain,
+            GithubPublicationState::Held,
+        ] {
+            sqlx::query("UPDATE supertag_v2_github_publications SET state=$1,payload=$2 WHERE publication_id='publication'")
+                .bind(state as i64)
+                .bind(GithubPublication { state: state as i32, ..publication.clone() }.encode_to_vec())
+                .execute(&store.pool).await.unwrap();
+            assert_eq!(card(&store, &report.task_id).await, None, "{state:?}");
+        }
         let branch_only = Some(ReplyResultCard {
             branch: Some("supertag/session/<!channel>".into()),
             pull_request_url: None,
         });
-        assert_eq!(card(&store, &report.task_id).await, branch_only);
 
         let save = |publication: GithubPublication| {
             let pool = store.pool.clone();
@@ -616,6 +711,29 @@ mod tests {
             .await
             .unwrap();
         outcome.unwrap();
+    }
+
+    #[test]
+    fn unsuccessful_text_is_one_bounded_line() {
+        assert_eq!(
+            unsuccessful_text(false, Some("  a\n\tb  ")),
+            "I ran into a problem while working on this: a b"
+        );
+        assert_eq!(
+            unsuccessful_text(false, Some(" ")),
+            "I ran into a problem while working on this."
+        );
+        assert_eq!(
+            unsuccessful_text(false, Some(&"é".repeat(600))),
+            format!(
+                "I ran into a problem while working on this: {}",
+                "é".repeat(500)
+            )
+        );
+        assert_eq!(
+            unsuccessful_text(true, Some("ignored")),
+            "I stopped working on this because it was cancelled."
+        );
     }
 
     #[test]

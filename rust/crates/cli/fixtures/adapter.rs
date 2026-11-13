@@ -695,11 +695,18 @@ async fn main() -> Result<()> {
             None,
         )?)
         .await?;
+    // `--fail-result=<error>` reports a failed turn with that error as its result.
+    let failure =
+        std::env::args().find_map(|arg| arg.strip_prefix("--fail-result=").map(str::to_owned));
+    let succeeded = failure.is_none();
+    if let Some(failure) = failure {
+        result = failure;
+    }
     harness
         .complete(authenticated_request(
             HarnessCompleteRequest {
                 result,
-                succeeded: true,
+                succeeded,
                 objective_signal: 0,
                 checkpoint: None,
                 waiting_approval_ids,

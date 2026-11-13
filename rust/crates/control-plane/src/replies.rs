@@ -32,6 +32,7 @@ impl Store {
             return Ok(result);
         }
         crate::reply_progress::sweep_in(&mut tx, now).await?;
+        crate::reply_progress::enqueue_unsuccessful_in(&mut tx, account).await?;
         let id: Option<String> = sqlx::query_scalar(&format!("SELECT reply_id FROM supertag_v2_replies WHERE account_id=$1 AND state=$2 AND {} ORDER BY ready_order LIMIT 1", crate::reply_progress::FINAL_READY)).bind(account).bind(ReplyState::Pending as i64).bind(now).fetch_optional(&mut *tx).await?;
         let Some(id) = id else {
             tx.commit().await?;
