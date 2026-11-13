@@ -1731,6 +1731,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.github_source_resolver_service())
         .add_service(plane.github_publications_service())
         .add_service(plane.github_publisher_service())
+        .add_service(plane.reply_progress_service())
         .add_service(
             ArtifactPublicationsServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)

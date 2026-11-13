@@ -183,7 +183,7 @@ impl Drop for Process {
 
 struct MockSlack {
     endpoint: String,
-    requests: Arc<Mutex<Vec<Value>>>,
+    requests: Arc<Mutex<Vec<(String, Value)>>>,
     server: tokio::task::JoinHandle<Result<()>>,
 }
 
@@ -200,8 +200,13 @@ impl MockSlack {
                     tokio::time::timeout(Duration::from_secs(5), mock_request(&mut connection))
                         .await??;
                 let mut requests = observed.lock().await;
+                // An update answers with the message it replaced; a post with a new message.
+                let ts = match request.0.as_str() {
+                    "/chat.update" => request.1["ts"].as_str().unwrap_or_default().to_owned(),
+                    _ => format!("1794470100.{:06}", requests.len() + 1),
+                };
                 requests.push(request);
-                let body = json!({"ok":true,"channel":CHANNEL,"ts":format!("1794470100.{:06}",requests.len())}).to_string();
+                let body = json!({"ok":true,"channel":CHANNEL,"ts":ts}).to_string();
                 drop(requests);
                 connection.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await?;
                 connection.shutdown().await?;
@@ -221,7 +226,7 @@ impl Drop for MockSlack {
     }
 }
 
-async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
+async fn mock_request(stream: &mut TcpStream) -> Result<(String, Value)> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let end = loop {
@@ -234,7 +239,15 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         bytes.extend_from_slice(&buffer[..count]);
     };
     let headers = std::str::from_utf8(&bytes[..end])?;
-    ensure!(headers.starts_with("POST /chat.postMessage HTTP/1.1\r\n"));
+    let path = headers
+        .strip_prefix("POST ")
+        .and_then(|line| line.split_once(" HTTP/1.1\r\n"))
+        .map(|(path, _)| path.to_owned())
+        .context("unexpected fixture HTTP request")?;
+    ensure!(matches!(
+        path.as_str(),
+        "/chat.postMessage" | "/chat.update"
+    ));
     let header = |name: &str| {
         headers
             .lines()
@@ -252,7 +265,34 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         ensure!(count > 0, "fixture HTTP body ended early");
         bytes.extend_from_slice(&buffer[..count]);
     }
-    Ok(serde_json::from_slice(&bytes[end..end + length])?)
+    Ok((path, serde_json::from_slice(&bytes[end..end + length])?))
+}
+
+const ACKNOWLEDGEMENT: &str = "Got it. I’m looking into this now.";
+
+/// Waits until the fixture Slack received `count` final replies; returns the last one's index.
+async fn delivered_final(mock: &MockSlack, count: usize) -> Result<usize> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let finals: Vec<usize> = mock
+            .requests
+            .lock()
+            .await
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, body))| body["text"] != ACKNOWLEDGEMENT)
+            .map(|(index, _)| index)
+            .collect();
+        if finals.len() >= count {
+            ensure!(finals.len() == count, "unexpected extra final reply");
+            return Ok(finals[count - 1]);
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "final reply {count} was not delivered"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 async fn gateway(
@@ -464,6 +504,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let one = delivered_final(&mock, 1).await?;
     first.stop().await?;
     let (mut restarted, public, http) = gateway(
         &credentials,
@@ -535,6 +576,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let two = delivered_final(&mock, 2).await?;
     let next = payload("EvMENTION2", "1794470002.100000", true, "Verify the result");
     assert_eq!(signed(&http, &next).await?, reqwest::StatusCode::OK);
     let next = receipt(&mut connector, &credentials, &next).await?;
@@ -548,6 +590,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let three = delivered_final(&mock, 3).await?;
     assert_eq!(signed(&second_http, &reply).await?, reqwest::StatusCode::OK);
     assert_eq!(task_count(&database).await?, 3);
     restarted.stop().await?;
@@ -556,18 +599,42 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     let requests = mock.requests.lock().await;
     assert_eq!(
         requests.len(),
-        3,
-        "one provider response per accepted logical message"
+        three + 1,
+        "nothing is sent after the last final reply"
     );
-    for request in requests.iter() {
+    // Each logical message is one segment: at most one acknowledgement, even when both
+    // Gateways received it, then exactly one final answer. Whether the acknowledgement is
+    // sent races the fixture Task finishing; when it is, the final replaces it in place.
+    for (start, end) in [(0, one), (one + 1, two), (two + 1, three)] {
+        let acknowledgements: Vec<_> = (start..end)
+            .filter(|index| requests[*index].1["text"] == ACKNOWLEDGEMENT)
+            .collect();
+        assert_eq!(
+            end - start,
+            acknowledgements.len(),
+            "only acknowledgements precede a final reply"
+        );
+        assert!(acknowledgements.len() <= 1, "duplicate acknowledgement");
+        let (path, request) = &requests[end];
         assert_eq!(request["channel"], CHANNEL);
-        assert_eq!(request["thread_ts"], THREAD);
         assert!(
             request["text"]
                 .as_str()
                 .unwrap()
                 .starts_with("Original Tag:")
         );
+        match acknowledgements.first() {
+            Some(index) => {
+                assert_eq!(requests[*index].0, "/chat.postMessage");
+                assert_eq!(requests[*index].1["thread_ts"], THREAD);
+                assert_eq!(path, "/chat.update");
+                assert_eq!(request["ts"], format!("1794470100.{:06}", index + 1));
+            }
+            None => {
+                assert_eq!(path, "/chat.postMessage");
+                assert_eq!(request["thread_ts"], THREAD);
+            }
+        }
     }
     Ok(())
 }

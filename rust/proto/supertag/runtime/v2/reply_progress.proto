@@ -1,0 +1,38 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+
+// Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+// acknowledgement, then progress updated in place, until the final Reply replaces it.
+// The Control Plane keeps only the newest revision and paces updates per message.
+service ReplyProgress {
+  rpc Claim(ClaimReplyProgressRequest) returns (ClaimReplyProgressResponse);
+  rpc Settle(SettleReplyProgressRequest) returns (ReplyProgressUpdate);
+}
+
+message ReplyProgressUpdate {
+  string task_id = 1;
+  string account_id = 2;
+  ReplyDestination destination = 3;
+  string text = 4;
+  uint64 revision = 5;
+  // Absent: post the acknowledgement. Present: update that delivered message in place.
+  optional string provider_receipt = 6;
+}
+
+message ClaimReplyProgressRequest {
+  string operation_id = 1;
+}
+
+message ClaimReplyProgressResponse {
+  ReplyProgressUpdate update = 1;
+  string lease_token = 2;
+}
+
+// DELIVERED requires the provider receipt. An unconfirmed first post is never repeated.
+message SettleReplyProgressRequest {
+  string task_id = 1;
+  string lease_token = 2;
+  ReplyState state = 3;
+  optional string provider_receipt = 4;
+}

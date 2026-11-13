@@ -3295,7 +3295,7 @@ class MicrosoftTeamsReplyRoute(_message.Message):
     def __init__(self, service_url: _Optional[str] = ..., conversation_id: _Optional[str] = ..., root_activity_id: _Optional[str] = ..., app_id: _Optional[str] = ..., tenant_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ...) -> None: ...
 
 class Reply(_message.Message):
-    __slots__ = ("reply_id", "task_id", "account_id", "destination", "text", "state", "provider_receipt")
+    __slots__ = ("reply_id", "task_id", "account_id", "destination", "text", "state", "provider_receipt", "result_card", "replace_provider_receipt")
     REPLY_ID_FIELD_NUMBER: _ClassVar[int]
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3303,6 +3303,8 @@ class Reply(_message.Message):
     TEXT_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_RECEIPT_FIELD_NUMBER: _ClassVar[int]
+    RESULT_CARD_FIELD_NUMBER: _ClassVar[int]
+    REPLACE_PROVIDER_RECEIPT_FIELD_NUMBER: _ClassVar[int]
     reply_id: str
     task_id: str
     account_id: str
@@ -3310,7 +3312,17 @@ class Reply(_message.Message):
     text: str
     state: ReplyState
     provider_receipt: str
-    def __init__(self, reply_id: _Optional[str] = ..., task_id: _Optional[str] = ..., account_id: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ..., text: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ...) -> None: ...
+    result_card: ReplyResultCard
+    replace_provider_receipt: str
+    def __init__(self, reply_id: _Optional[str] = ..., task_id: _Optional[str] = ..., account_id: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ..., text: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ..., result_card: _Optional[_Union[ReplyResultCard, _Mapping]] = ..., replace_provider_receipt: _Optional[str] = ...) -> None: ...
+
+class ReplyResultCard(_message.Message):
+    __slots__ = ("branch", "pull_request_url")
+    BRANCH_FIELD_NUMBER: _ClassVar[int]
+    PULL_REQUEST_URL_FIELD_NUMBER: _ClassVar[int]
+    branch: str
+    pull_request_url: str
+    def __init__(self, branch: _Optional[str] = ..., pull_request_url: _Optional[str] = ...) -> None: ...
 
 class ClaimReplyRequest(_message.Message):
     __slots__ = ("operation_id",)

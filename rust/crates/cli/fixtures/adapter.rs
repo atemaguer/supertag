@@ -680,21 +680,61 @@ async fn main() -> Result<()> {
         result.push_str("\nLive input: ");
         result.push_str(&input.text);
     }
+    let mut sequence = 2;
+    if std::env::args().any(|arg| arg == "--progress-fixture") {
+        // A structured plan update, then hold the turn open until the test has observed it.
+        harness
+            .publish(authenticated_request(
+                HarnessPublishRequest {
+                    sequence,
+                    text: serde_json::json!({
+                        "type": "progress.updated",
+                        "progress": {
+                            "summary": "Inspecting",
+                            "items": [{"text": "Read the fixture", "status": "active"}],
+                        },
+                    })
+                    .to_string(),
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await?;
+        sequence += 1;
+        let release = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--progress-release=").map(str::to_owned))
+            .context("progress fixture requires a release file")?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !std::path::Path::new(&release).exists() {
+            ensure!(
+                std::time::Instant::now() < deadline,
+                "progress fixture was not released"
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
     harness
         .publish(authenticated_request(
             HarnessPublishRequest {
-                sequence: 2,
+                sequence,
                 text: result.clone(),
             },
             &bootstrap.token,
             None,
         )?)
         .await?;
+    // `--fail-result=<error>` reports a failed turn with that error as its result.
+    let failure =
+        std::env::args().find_map(|arg| arg.strip_prefix("--fail-result=").map(str::to_owned));
+    let succeeded = failure.is_none();
+    if let Some(failure) = failure {
+        result = failure;
+    }
     harness
         .complete(authenticated_request(
             HarnessCompleteRequest {
                 result,
-                succeeded: true,
+                succeeded,
                 objective_signal: 0,
                 checkpoint: None,
                 waiting_approval_ids,

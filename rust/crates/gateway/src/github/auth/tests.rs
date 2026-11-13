@@ -311,6 +311,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
         text: "Review ready".into(),
         state: ReplyState::Claimed.into(),
         provider_receipt: None,
+        ..Default::default()
     };
     let target = Claim {
         reply_id: "reply".into(),
