@@ -235,6 +235,73 @@ pub(super) async fn accepting_in(transaction: &mut Transaction<'_, Any>, id: &st
     Ok(draining == 0)
 }
 
+/// Attempts listed per host; the total counts every one.
+const UNCERTAIN_ATTEMPTS_LISTED: i64 = 20;
+
+/// The host's Attempts that need an operator's recovery decision: exactly those
+/// `ResolveAttempt` accepts. Each still holds a slot until it is resolved.
+async fn uncertain_attempts_in(
+    transaction: &mut Transaction<'_, Any>,
+    id: &str,
+    now: i64,
+) -> Result<(Vec<HostUncertainAttempt>, u32)> {
+    const WHERE: &str = "FROM supertag_v2_tasks WHERE host_principal=$1 AND attempt_id IS NOT NULL
+        AND (state=$2 OR (state IN ($3,$4) AND cleanup_pending=1
+          AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms<=$5)))";
+    let count = format!("SELECT COUNT(*) {WHERE}");
+    let total: i64 = sqlx::query_scalar(&count)
+        .bind(format!("host:{id}"))
+        .bind(TaskState::Uncertain as i64)
+        .bind(TaskState::Running as i64)
+        .bind(TaskState::Cancelled as i64)
+        .bind(now)
+        .fetch_one(&mut **transaction)
+        .await?;
+    if total == 0 {
+        return Ok((vec![], 0));
+    }
+    let list = format!(
+        "SELECT task_id,attempt_id,harness_kind,state,lease_expires_at_ms,cleanup_observed {WHERE} \
+         ORDER BY lease_expires_at_ms,task_id LIMIT {UNCERTAIN_ATTEMPTS_LISTED}"
+    );
+    let rows = sqlx::query(&list)
+        .bind(format!("host:{id}"))
+        .bind(TaskState::Uncertain as i64)
+        .bind(TaskState::Running as i64)
+        .bind(TaskState::Cancelled as i64)
+        .bind(now)
+        .fetch_all(&mut **transaction)
+        .await?;
+    let mut attempts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let state = TaskState::try_from(row.try_get::<i64, _>("state")? as i32).unwrap_or_default();
+        let cleanup_observed = row.try_get::<i64, _>("cleanup_observed")? == 1;
+        let reason = match (state, cleanup_observed) {
+            (TaskState::Cancelled, _) => {
+                "cancelled, but the host did not confirm its execution stopped before its lease lapsed"
+            }
+            (_, true) => {
+                "its lease lapsed before it finished; the host confirmed its execution stopped"
+            }
+            _ => {
+                "its lease lapsed before it finished, and the host has not confirmed its execution stopped"
+            }
+        };
+        attempts.push(HostUncertainAttempt {
+            task_id: row.try_get("task_id")?,
+            attempt_id: row.try_get("attempt_id")?,
+            harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
+            reason: reason.into(),
+            since_ms: row
+                .try_get::<Option<i64>, _>("lease_expires_at_ms")?
+                .unwrap_or_default(),
+            cleanup_observed,
+            cancelled: state == TaskState::Cancelled,
+        });
+    }
+    Ok((attempts, u32::try_from(total).unwrap_or(u32::MAX)))
+}
+
 pub(crate) async fn status_in(
     transaction: &mut Transaction<'_, Any>,
     id: &str,
@@ -257,6 +324,8 @@ pub(crate) async fn status_in(
     let occupied_by_harness: Vec<(i64, i64)> = sqlx::query_as("SELECT harness_kind,COUNT(*) FROM supertag_v2_tasks WHERE host_principal=$1 AND (state IN (2,6) OR ((state=7 OR cleanup_pending=1) AND cleanup_observed=0)) GROUP BY harness_kind")
         .bind(format!("host:{id}")).fetch_all(&mut **transaction).await?;
     let occupied: i64 = occupied_by_harness.iter().map(|(_, count)| count).sum();
+    let (uncertain_attempts, total_uncertain_attempts) =
+        uncertain_attempts_in(transaction, id, now).await?;
     let mut view = WorkerHostStatus {
         host_id: id.into(),
         generation: generation as u64,
@@ -268,6 +337,8 @@ pub(crate) async fn status_in(
         granted_labels: serde_json::from_str(&host.try_get::<String, _>("granted_labels")?)?,
         removed_at_ms: host.try_get("removed_at_ms")?,
         credential_revision: host.try_get::<i64, _>("credential_revision")? as u64,
+        uncertain_attempts,
+        total_uncertain_attempts,
         ..Default::default()
     };
     let mut labels: std::collections::BTreeSet<String> =

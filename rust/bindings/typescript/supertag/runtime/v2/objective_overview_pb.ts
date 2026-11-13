@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Objective, TaskState } from "./runtime_pb.js";
+import type { HarnessKind, Objective, TaskState } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/objective_overview.proto.
  */
 export const file_supertag_runtime_v2_objective_overview: GenFile = /*@__PURE__*/
-  fileDesc("CixzdXBlcnRhZy9ydW50aW1lL3YyL29iamVjdGl2ZV9vdmVydmlldy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiJSChtHZXRPYmplY3RpdmVPdmVydmlld1JlcXVlc3QSFAoMb2JqZWN0aXZlX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEg4KBm9mZnNldBgDIAEoDSLTBQoRT2JqZWN0aXZlT3ZlcnZpZXcSMQoJb2JqZWN0aXZlGAEgASgLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmUSEAoIYXNfb2ZfbXMYAiABKAMSOAoEdGVhbRgDIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlT3ZlcnZpZXdUZWFtEjYKBHBvb2wYBCABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUJ1ZGdldFBvb2wSPAoIZGVhZGxpbmUYBSABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZURlYWRsaW5lVmlldxI6CglhdHRlbnRpb24YBiADKAsyJy5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUF0dGVudGlvbhI7CghzZXNzaW9ucxgHIAMoCzIpLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlU2Vzc2lvblZpZXcSOAoMY29udmVyc2F0aW9uGAggAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVUdXJuEjUKBXBvc3RzGAkgAygLMiYuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVUZWFtUG9zdBIxCgV0YXNrcxgKIAMoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlVHVybhITCgt0b3RhbF90YXNrcxgLIAEoDRIYCgtuZXh0X29mZnNldBgMIAEoDUgAiAEBEjoKB25vdGljZXMYDSADKAsyKS5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUxpbWl0Tm90aWNlEhkKEXBlbmRpbmdfYXBwcm92YWxzGA4gASgNEhYKDnRvdGFsX3Nlc3Npb25zGA8gASgNQg4KDF9uZXh0X29mZnNldCKXAQoVT2JqZWN0aXZlT3ZlcnZpZXdUZWFtEg8KB3RlYW1faWQYASABKAkSDAoEbmFtZRgCIAEoCRIWCg5tZW1iZXJfdGFnX2lkcxgDIAMoCRIcCg9tYXhfY29uY3VycmVuY3kYBCABKA1IAIgBARIVCg1ydW5uaW5nX3R1cm5zGAUgASgNQhIKEF9tYXhfY29uY3VycmVuY3ki5wIKE09iamVjdGl2ZUJ1ZGdldFBvb2wSPAoHbWVhc3VyZRgBIAEoDjIrLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlQnVkZ2V0TWVhc3VyZRIVCghjdXJyZW5jeRgCIAEoCUgAiAEBEhgKC2xpbWl0X21pbm9yGAMgASgESAGIAQESGAoLc3BlbnRfbWlub3IYBCABKARIAogBARIcCg9hdmFpbGFibGVfbWlub3IYBSABKANIA4gBARIVCg1vdmVycnVuX21pbm9yGAYgASgEEhEKCWV4aGF1c3RlZBgHIAEoCBIdChV1bmtub3duX2Nvc3RfYXR0ZW1wdHMYCCABKA0SHwoXZXN0aW1hdGVkX2Nvc3RfYXR0ZW1wdHMYCSABKA1CCwoJX2N1cnJlbmN5Qg4KDF9saW1pdF9taW5vckIOCgxfc3BlbnRfbWlub3JCEgoQX2F2YWlsYWJsZV9taW5vciJjChVPYmplY3RpdmVEZWFkbGluZVZpZXcSDQoFYXRfbXMYASABKAMSDgoGcGFzc2VkGAIgASgIEhgKEGdyYWNlX2VuZHNfYXRfbXMYAyABKAMSEQoJcmVtYWluaW5nGAQgASgJIlEKFE9iamVjdGl2ZUxpbWl0Tm90aWNlEgsKA2tleRgBIAEoCRIMCgRraW5kGAIgASgJEg0KBWF0X21zGAMgASgDEg8KB21lc3NhZ2UYBCABKAkilwEKEk9iamVjdGl2ZUF0dGVudGlvbhI5CgRraW5kGAEgASgOMisuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVBdHRlbnRpb25LaW5kEg8KB21lc3NhZ2UYAiABKAkSFAoMbmV4dF9hY3Rpb25zGAMgAygJEg8KB3Rhc2tfaWQYBCABKAkSDgoGdGFnX2lkGAUgASgJIu4BChRPYmplY3RpdmVTZXNzaW9uVmlldxISCgpzZXNzaW9uX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRINCgVvd25lchgDIAEoCBINCgV0aXRsZRgEIAEoCRIZChFwYXJlbnRfc2Vzc2lvbl9pZBgFIAEoCRI7CgZzdGF0dXMYBiABKA4yKy5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZVNlc3Npb25TdGF0dXMSEAoIcXVlc3Rpb24YByABKAkSEgoKdGFza19jb3VudBgIIAEoDRIWCg5sYXRlc3RfdGFza19pZBgJIAEoCSLTAQoNT2JqZWN0aXZlVHVybhIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEi0KBXN0YXRlGAQgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrU3RhdGUSDAoEa2luZBgFIAEoCRIOCgZwcm9tcHQYBiABKAkSDgoGcmVzdWx0GAcgASgJEhwKD2NvbXBsZXRlZF9hdF9tcxgIIAEoA0gAiAEBQhIKEF9jb21wbGV0ZWRfYXRfbXMidQoRT2JqZWN0aXZlVGVhbVBvc3QSEAoIc2VxdWVuY2UYASABKAQSFQoNYXV0aG9yX3RhZ19pZBgCIAEoCRISCgp0b190YWdfaWRzGAMgAygJEgwKBGJvZHkYBCABKAkSFQoNY3JlYXRlZF9hdF9tcxgFIAEoAyrIAQoWT2JqZWN0aXZlQnVkZ2V0TWVhc3VyZRIoCiRPQkpFQ1RJVkVfQlVER0VUX01FQVNVUkVfVU5TUEVDSUZJRUQQABImCiJPQkpFQ1RJVkVfQlVER0VUX01FQVNVUkVfVU5MSU1JVEVEEAESJwojT0JKRUNUSVZFX0JVREdFVF9NRUFTVVJFX1VOTUVBU1VSRUQQAhIzCi9PQkpFQ1RJVkVfQlVER0VUX01FQVNVUkVfUFJPVklERVJfUkVQT1JURURfQ09TVBADKs8CChZPYmplY3RpdmVBdHRlbnRpb25LaW5kEigKJE9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9VTlNQRUNJRklFRBAAEiUKIU9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9RVUVTVElPThABEiMKH09CSkVDVElWRV9BVFRFTlRJT05fS0lORF9SRVZJRVcQAhIkCiBPQkpFQ1RJVkVfQVRURU5USU9OX0tJTkRfTElNSVRFRBADEiMKH09CSkVDVElWRV9BVFRFTlRJT05fS0lORF9QQVVTRUQQBBIkCiBPQkpFQ1RJVkVfQVRURU5USU9OX0tJTkRfQkxPQ0tFRBAFEiYKIk9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9BUFBST1ZBTFMQBhImCiJPQkpFQ1RJVkVfQVRURU5USU9OX0tJTkRfQ0FOQ0VMTEVEEAcq+gIKFk9iamVjdGl2ZVNlc3Npb25TdGF0dXMSKAokT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASKAokT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX05PVF9TVEFSVEVEEAESIwofT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX1FVRVVFRBACEiQKIE9CSkVDVElWRV9TRVNTSU9OX1NUQVRVU19SVU5OSU5HEAMSJAogT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX1dBSVRJTkcQBBImCiJPQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfU1VDQ0VFREVEEAUSIwofT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX0ZBSUxFRBAGEiYKIk9CSkVDVElWRV9TRVNTSU9OX1NUQVRVU19DQU5DRUxMRUQQBxImCiJPQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfVU5DRVJUQUlOEAgyhgEKEk9iamVjdGl2ZU92ZXJ2aWV3cxJwChRHZXRPYmplY3RpdmVPdmVydmlldxIwLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0T2JqZWN0aXZlT3ZlcnZpZXdSZXF1ZXN0GiYuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVPdmVydmlld2IGcHJvdG8z", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CixzdXBlcnRhZy9ydW50aW1lL3YyL29iamVjdGl2ZV9vdmVydmlldy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiJSChtHZXRPYmplY3RpdmVPdmVydmlld1JlcXVlc3QSFAoMb2JqZWN0aXZlX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEg4KBm9mZnNldBgDIAEoDSKXBgoRT2JqZWN0aXZlT3ZlcnZpZXcSMQoJb2JqZWN0aXZlGAEgASgLMh4uc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmUSEAoIYXNfb2ZfbXMYAiABKAMSOAoEdGVhbRgDIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlT3ZlcnZpZXdUZWFtEjYKBHBvb2wYBCABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUJ1ZGdldFBvb2wSPAoIZGVhZGxpbmUYBSABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZURlYWRsaW5lVmlldxI6CglhdHRlbnRpb24YBiADKAsyJy5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUF0dGVudGlvbhI7CghzZXNzaW9ucxgHIAMoCzIpLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlU2Vzc2lvblZpZXcSOAoMY29udmVyc2F0aW9uGAggAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVUdXJuEjUKBXBvc3RzGAkgAygLMiYuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVUZWFtUG9zdBIxCgV0YXNrcxgKIAMoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlVHVybhITCgt0b3RhbF90YXNrcxgLIAEoDRIYCgtuZXh0X29mZnNldBgMIAEoDUgAiAEBEjoKB25vdGljZXMYDSADKAsyKS5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUxpbWl0Tm90aWNlEhkKEXBlbmRpbmdfYXBwcm92YWxzGA4gASgNEhYKDnRvdGFsX3Nlc3Npb25zGA8gASgNEiAKF29iamVjdGl2ZV9jcmVhdGVkX2F0X21zGJgqIAEoAxIgChdvYmplY3RpdmVfdXBkYXRlZF9hdF9tcxiZKiABKANCDgoMX25leHRfb2Zmc2V0IpcBChVPYmplY3RpdmVPdmVydmlld1RlYW0SDwoHdGVhbV9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhYKDm1lbWJlcl90YWdfaWRzGAMgAygJEhwKD21heF9jb25jdXJyZW5jeRgEIAEoDUgAiAEBEhUKDXJ1bm5pbmdfdHVybnMYBSABKA1CEgoQX21heF9jb25jdXJyZW5jeSLnAgoTT2JqZWN0aXZlQnVkZ2V0UG9vbBI8CgdtZWFzdXJlGAEgASgOMisuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVCdWRnZXRNZWFzdXJlEhUKCGN1cnJlbmN5GAIgASgJSACIAQESGAoLbGltaXRfbWlub3IYAyABKARIAYgBARIYCgtzcGVudF9taW5vchgEIAEoBEgCiAEBEhwKD2F2YWlsYWJsZV9taW5vchgFIAEoA0gDiAEBEhUKDW92ZXJydW5fbWlub3IYBiABKAQSEQoJZXhoYXVzdGVkGAcgASgIEh0KFXVua25vd25fY29zdF9hdHRlbXB0cxgIIAEoDRIfChdlc3RpbWF0ZWRfY29zdF9hdHRlbXB0cxgJIAEoDUILCglfY3VycmVuY3lCDgoMX2xpbWl0X21pbm9yQg4KDF9zcGVudF9taW5vckISChBfYXZhaWxhYmxlX21pbm9yImMKFU9iamVjdGl2ZURlYWRsaW5lVmlldxINCgVhdF9tcxgBIAEoAxIOCgZwYXNzZWQYAiABKAgSGAoQZ3JhY2VfZW5kc19hdF9tcxgDIAEoAxIRCglyZW1haW5pbmcYBCABKAkiUQoUT2JqZWN0aXZlTGltaXROb3RpY2USCwoDa2V5GAEgASgJEgwKBGtpbmQYAiABKAkSDQoFYXRfbXMYAyABKAMSDwoHbWVzc2FnZRgEIAEoCSKXAQoST2JqZWN0aXZlQXR0ZW50aW9uEjkKBGtpbmQYASABKA4yKy5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZUF0dGVudGlvbktpbmQSDwoHbWVzc2FnZRgCIAEoCRIUCgxuZXh0X2FjdGlvbnMYAyADKAkSDwoHdGFza19pZBgEIAEoCRIOCgZ0YWdfaWQYBSABKAkisQMKFE9iamVjdGl2ZVNlc3Npb25WaWV3EhIKCnNlc3Npb25faWQYASABKAkSDgoGdGFnX2lkGAIgASgJEg0KBW93bmVyGAMgASgIEg0KBXRpdGxlGAQgASgJEhkKEXBhcmVudF9zZXNzaW9uX2lkGAUgASgJEjsKBnN0YXR1cxgGIAEoDjIrLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlU2Vzc2lvblN0YXR1cxIQCghxdWVzdGlvbhgHIAEoCRISCgp0YXNrX2NvdW50GAggASgNEhYKDmxhdGVzdF90YXNrX2lkGAkgASgJEkAKCGRlbGl2ZXJ5GJgqIAEoCzItLnN1cGVydGFnLnJ1bnRpbWUudjIuT2JqZWN0aXZlU2Vzc2lvbkRlbGl2ZXJ5Ej4KB2ZhaWx1cmUYmSogASgLMiwuc3VwZXJ0YWcucnVudGltZS52Mi5PYmplY3RpdmVTZXNzaW9uRmFpbHVyZRIkChZsYXRlc3RfY29tcGxldGVkX2F0X21zGJoqIAEoA0gAiAEBQhkKF19sYXRlc3RfY29tcGxldGVkX2F0X21zIqQBChhPYmplY3RpdmVTZXNzaW9uRGVsaXZlcnkSDwoHdGFza19pZBgBIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAiABKAkSEwoLYmFzZV9jb21taXQYAyABKAkSEwoLaGVhZF9jb21taXQYBCABKAkSEQoJY29tbWl0dGVkGAUgASgIEhUKDWNoYW5nZWRfZmlsZXMYBiABKAQSDQoFcGF0Y2gYByABKAgiuAEKF09iamVjdGl2ZVNlc3Npb25GYWlsdXJlEg8KB3Rhc2tfaWQYASABKAkSLQoFc3RhdGUYAiABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tTdGF0ZRI2CgxoYXJuZXNzX2tpbmQYAyABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NLaW5kEg8KB21lc3NhZ2UYBCABKAkSFAoMbmV4dF9hY3Rpb25zGAUgAygJItMBCg1PYmplY3RpdmVUdXJuEg8KB3Rhc2tfaWQYASABKAkSDgoGdGFnX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSLQoFc3RhdGUYBCABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tTdGF0ZRIMCgRraW5kGAUgASgJEg4KBnByb21wdBgGIAEoCRIOCgZyZXN1bHQYByABKAkSHAoPY29tcGxldGVkX2F0X21zGAggASgDSACIAQFCEgoQX2NvbXBsZXRlZF9hdF9tcyJ1ChFPYmplY3RpdmVUZWFtUG9zdBIQCghzZXF1ZW5jZRgBIAEoBBIVCg1hdXRob3JfdGFnX2lkGAIgASgJEhIKCnRvX3RhZ19pZHMYAyADKAkSDAoEYm9keRgEIAEoCRIVCg1jcmVhdGVkX2F0X21zGAUgASgDKsgBChZPYmplY3RpdmVCdWRnZXRNZWFzdXJlEigKJE9CSkVDVElWRV9CVURHRVRfTUVBU1VSRV9VTlNQRUNJRklFRBAAEiYKIk9CSkVDVElWRV9CVURHRVRfTUVBU1VSRV9VTkxJTUlURUQQARInCiNPQkpFQ1RJVkVfQlVER0VUX01FQVNVUkVfVU5NRUFTVVJFRBACEjMKL09CSkVDVElWRV9CVURHRVRfTUVBU1VSRV9QUk9WSURFUl9SRVBPUlRFRF9DT1NUEAMqzwIKFk9iamVjdGl2ZUF0dGVudGlvbktpbmQSKAokT0JKRUNUSVZFX0FUVEVOVElPTl9LSU5EX1VOU1BFQ0lGSUVEEAASJQohT0JKRUNUSVZFX0FUVEVOVElPTl9LSU5EX1FVRVNUSU9OEAESIwofT0JKRUNUSVZFX0FUVEVOVElPTl9LSU5EX1JFVklFVxACEiQKIE9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9MSU1JVEVEEAMSIwofT0JKRUNUSVZFX0FUVEVOVElPTl9LSU5EX1BBVVNFRBAEEiQKIE9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9CTE9DS0VEEAUSJgoiT0JKRUNUSVZFX0FUVEVOVElPTl9LSU5EX0FQUFJPVkFMUxAGEiYKIk9CSkVDVElWRV9BVFRFTlRJT05fS0lORF9DQU5DRUxMRUQQByr6AgoWT2JqZWN0aXZlU2Vzc2lvblN0YXR1cxIoCiRPQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIoCiRPQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfTk9UX1NUQVJURUQQARIjCh9PQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfUVVFVUVEEAISJAogT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX1JVTk5JTkcQAxIkCiBPQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfV0FJVElORxAEEiYKIk9CSkVDVElWRV9TRVNTSU9OX1NUQVRVU19TVUNDRUVERUQQBRIjCh9PQkpFQ1RJVkVfU0VTU0lPTl9TVEFUVVNfRkFJTEVEEAYSJgoiT0JKRUNUSVZFX1NFU1NJT05fU1RBVFVTX0NBTkNFTExFRBAHEiYKIk9CSkVDVElWRV9TRVNTSU9OX1NUQVRVU19VTkNFUlRBSU4QCDKGAQoST2JqZWN0aXZlT3ZlcnZpZXdzEnAKFEdldE9iamVjdGl2ZU92ZXJ2aWV3EjAuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRPYmplY3RpdmVPdmVydmlld1JlcXVlc3QaJi5zdXBlcnRhZy5ydW50aW1lLnYyLk9iamVjdGl2ZU92ZXJ2aWV3YgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.GetObjectiveOverviewRequest
@@ -139,6 +139,18 @@ export type ObjectiveOverview = Message<"supertag.runtime.v2.ObjectiveOverview">
    * @generated from field: uint32 total_sessions = 15;
    */
   totalSessions: number;
+
+  /**
+   * @generated from field: int64 objective_created_at_ms = 5400;
+   */
+  objectiveCreatedAtMs: bigint;
+
+  /**
+   * When the Objective's status, limits or summary last changed.
+   *
+   * @generated from field: int64 objective_updated_at_ms = 5401;
+   */
+  objectiveUpdatedAtMs: bigint;
 };
 
 /**
@@ -414,6 +426,27 @@ export type ObjectiveSessionView = Message<"supertag.runtime.v2.ObjectiveSession
    * @generated from field: string latest_task_id = 9;
    */
   latestTaskId: string;
+
+  /**
+   * The Session's latest Workspace delivery. Absent when none was recorded.
+   *
+   * @generated from field: supertag.runtime.v2.ObjectiveSessionDelivery delivery = 5400;
+   */
+  delivery?: ObjectiveSessionDelivery | undefined;
+
+  /**
+   * Why the latest turn did not succeed. Absent unless it failed or is uncertain.
+   *
+   * @generated from field: supertag.runtime.v2.ObjectiveSessionFailure failure = 5401;
+   */
+  failure?: ObjectiveSessionFailure | undefined;
+
+  /**
+   * When the latest turn finished. Absent while it runs or when not recorded.
+   *
+   * @generated from field: optional int64 latest_completed_at_ms = 5402;
+   */
+  latestCompletedAtMs?: bigint | undefined;
 };
 
 /**
@@ -422,6 +455,96 @@ export type ObjectiveSessionView = Message<"supertag.runtime.v2.ObjectiveSession
  */
 export const ObjectiveSessionViewSchema: GenMessage<ObjectiveSessionView> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_objective_overview, 7);
+
+/**
+ * @generated from message supertag.runtime.v2.ObjectiveSessionDelivery
+ */
+export type ObjectiveSessionDelivery = Message<"supertag.runtime.v2.ObjectiveSessionDelivery"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string workspace_id = 2;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: string base_commit = 3;
+   */
+  baseCommit: string;
+
+  /**
+   * @generated from field: string head_commit = 4;
+   */
+  headCommit: string;
+
+  /**
+   * @generated from field: bool committed = 5;
+   */
+  committed: boolean;
+
+  /**
+   * @generated from field: uint64 changed_files = 6;
+   */
+  changedFiles: bigint;
+
+  /**
+   * Whether a patch is published for `supertag task download --kind patch`.
+   *
+   * @generated from field: bool patch = 7;
+   */
+  patch: boolean;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ObjectiveSessionDelivery.
+ * Use `create(ObjectiveSessionDeliverySchema)` to create a new message.
+ */
+export const ObjectiveSessionDeliverySchema: GenMessage<ObjectiveSessionDelivery> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_objective_overview, 8);
+
+/**
+ * @generated from message supertag.runtime.v2.ObjectiveSessionFailure
+ */
+export type ObjectiveSessionFailure = Message<"supertag.runtime.v2.ObjectiveSessionFailure"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.TaskState state = 2;
+   */
+  state: TaskState;
+
+  /**
+   * @generated from field: supertag.runtime.v2.HarnessKind harness_kind = 3;
+   */
+  harnessKind: HarnessKind;
+
+  /**
+   * The Attempt's own failure text, bounded; empty when the host recorded none.
+   *
+   * @generated from field: string message = 4;
+   */
+  message: string;
+
+  /**
+   * Commands that act on it, each a complete `supertag ...` line.
+   *
+   * @generated from field: repeated string next_actions = 5;
+   */
+  nextActions: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ObjectiveSessionFailure.
+ * Use `create(ObjectiveSessionFailureSchema)` to create a new message.
+ */
+export const ObjectiveSessionFailureSchema: GenMessage<ObjectiveSessionFailure> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_objective_overview, 9);
 
 /**
  * @generated from message supertag.runtime.v2.ObjectiveTurn
@@ -477,7 +600,7 @@ export type ObjectiveTurn = Message<"supertag.runtime.v2.ObjectiveTurn"> & {
  * Use `create(ObjectiveTurnSchema)` to create a new message.
  */
 export const ObjectiveTurnSchema: GenMessage<ObjectiveTurn> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_objective_overview, 8);
+  messageDesc(file_supertag_runtime_v2_objective_overview, 10);
 
 /**
  * @generated from message supertag.runtime.v2.ObjectiveTeamPost
@@ -514,7 +637,7 @@ export type ObjectiveTeamPost = Message<"supertag.runtime.v2.ObjectiveTeamPost">
  * Use `create(ObjectiveTeamPostSchema)` to create a new message.
  */
 export const ObjectiveTeamPostSchema: GenMessage<ObjectiveTeamPost> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_objective_overview, 9);
+  messageDesc(file_supertag_runtime_v2_objective_overview, 11);
 
 /**
  * @generated from enum supertag.runtime.v2.ObjectiveBudgetMeasure

@@ -778,6 +778,49 @@ struct Row {
     attempts: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capacity: Option<u32>,
+    /// Attempts that may have executed and keep a slot until an operator resolves them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    uncertain_attempts: Vec<UncertainAttempt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uncertain_total: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct UncertainAttempt {
+    task_id: String,
+    attempt_id: String,
+    reason: String,
+    since: Option<String>,
+    cancelled: bool,
+    cleanup_observed: bool,
+    /// The command that records the operator's decision once execution is known to have stopped.
+    recover: String,
+}
+
+impl UncertainAttempt {
+    fn from(attempt: &supertag_protocol::v2::HostUncertainAttempt) -> Self {
+        // A cancelled Task can only be marked failed; the host's own report of stopped
+        // execution stands in for the operator's confirmation.
+        let decision = if attempt.cancelled { "failed" } else { "retry" };
+        let confirm = if attempt.cleanup_observed {
+            ""
+        } else {
+            " --confirmed-stopped"
+        };
+        Self {
+            recover: format!(
+                "supertag task resolve-attempt {} {} --decision {decision} --evidence TEXT{confirm}",
+                attempt.task_id, attempt.attempt_id
+            ),
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            reason: attempt.reason.clone(),
+            since: (attempt.since_ms > 0)
+                .then(|| timestamp(UNIX_EPOCH + Duration::from_millis(attempt.since_ms as u64))),
+            cancelled: attempt.cancelled,
+            cleanup_observed: attempt.cleanup_observed,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -849,6 +892,17 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                     draining: host.map(|host| host.draining),
                     attempts: host.map(|host| host.active_attempts),
                     capacity: host.map(|host| host.capacity),
+                    uncertain_attempts: host
+                        .map(|host| {
+                            host.uncertain_attempts
+                                .iter()
+                                .map(UncertainAttempt::from)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    uncertain_total: host
+                        .map(|host| host.total_uncertain_attempts)
+                        .filter(|total| *total > 0),
                 });
             }
         }
@@ -891,6 +945,8 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         draining: None,
         attempts: None,
         capacity: None,
+        uncertain_attempts: Vec::new(),
+        uncertain_total: None,
     }
 }
 
@@ -978,6 +1034,9 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
             if let (Some(attempts), Some(capacity)) = (row.attempts, row.capacity) {
                 detail.push(format!("{attempts}/{capacity} Task Attempts"));
             }
+            if let Some(total) = row.uncertain_total {
+                detail.push(format!("{total} uncertain"));
+            }
             [
                 text(&row.service),
                 text(&row.kind),
@@ -1020,6 +1079,36 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
     out.push_str(&line(header));
     for row in &rows {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
+    }
+    // A slot held by an uncertain Attempt counts as occupied, so a host can look full while
+    // nothing runs. Each one is named with the command that frees it.
+    for row in &report.services {
+        for attempt in &row.uncertain_attempts {
+            out.push_str(&format!(
+                "{}: Task {} Attempt {} may have executed and keeps a slot ({}{}).\n",
+                text(&row.service),
+                text(&attempt.task_id),
+                text(&attempt.attempt_id),
+                text(&attempt.reason),
+                attempt
+                    .since
+                    .as_deref()
+                    .map_or_else(String::new, |since| format!(", since {since}")),
+            ));
+            out.push_str(&format!(
+                "  Once you confirm its execution stopped: {}\n",
+                text(&attempt.recover)
+            ));
+        }
+        if let Some(total) = row.uncertain_total
+            && total as usize > row.uncertain_attempts.len()
+        {
+            out.push_str(&format!(
+                "{}: {} more uncertain Task Attempts; list them with supertag get tasks.\n",
+                text(&row.service),
+                total as usize - row.uncertain_attempts.len()
+            ));
+        }
     }
     out
 }
@@ -1196,6 +1285,8 @@ mod tests {
             draining: None,
             attempts: None,
             capacity: None,
+            uncertain_attempts: Vec::new(),
+            uncertain_total: None,
         };
         let report = PsReport {
             state_directory: format!("/tmp/{hostile}"),
@@ -1215,6 +1306,106 @@ mod tests {
         );
         assert!(!text.contains('\x1b'), "{text}");
         assert!(text.contains("x fake line [2J"), "{text}");
+    }
+
+    #[test]
+    fn ps_lists_uncertain_attempts_with_the_command_that_frees_their_slot() {
+        use supertag_protocol::v2::HostUncertainAttempt;
+        let uncertain = |task: &str, cancelled: bool, cleanup_observed: bool| {
+            UncertainAttempt::from(&HostUncertainAttempt {
+                task_id: task.into(),
+                attempt_id: format!("{task}-attempt"),
+                reason: "its lease lapsed".into(),
+                since_ms: 1_791_000_000_000,
+                cancelled,
+                cleanup_observed,
+                ..Default::default()
+            })
+        };
+        let host = Row {
+            service: "laptop".into(),
+            kind: HOST.into(),
+            state: "running",
+            address: None,
+            pid: Some(42),
+            worker_host_id: Some("laptop".into()),
+            connected: Some(true),
+            draining: Some(false),
+            attempts: Some(2),
+            capacity: Some(2),
+            uncertain_attempts: vec![
+                uncertain("task-1", false, false),
+                uncertain("task-2", true, true),
+            ],
+            uncertain_total: Some(3),
+        };
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![host],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        // A full host with nothing running names what holds its slots.
+        assert!(text.contains("2/2 Task Attempts, 3 uncertain"), "{text}");
+        assert!(
+            text.contains(
+                "laptop: Task task-1 Attempt task-1-attempt may have executed and keeps a slot (its lease lapsed, since 2026-10-03T"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "  Once you confirm its execution stopped: supertag task resolve-attempt task-1 task-1-attempt --decision retry --evidence TEXT --confirmed-stopped\n"
+            ),
+            "{text}"
+        );
+        // A cancelled Task is only marked failed, and the host's report confirms it stopped.
+        assert!(
+            text.contains(
+                "supertag task resolve-attempt task-2 task-2-attempt --decision failed --evidence TEXT\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "laptop: 1 more uncertain Task Attempts; list them with supertag get tasks."
+            ),
+            "{text}"
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["services"][0]["uncertain_attempts"][0]["recover"],
+            "supertag task resolve-attempt task-1 task-1-attempt --decision retry --evidence TEXT --confirmed-stopped"
+        );
+    }
+
+    #[test]
+    fn host_without_uncertain_attempts_shows_nothing_extra() {
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![Row {
+                service: "laptop".into(),
+                kind: HOST.into(),
+                state: "running",
+                address: None,
+                pid: Some(42),
+                worker_host_id: Some("laptop".into()),
+                connected: Some(true),
+                draining: Some(false),
+                attempts: Some(0),
+                capacity: Some(2),
+                uncertain_attempts: Vec::new(),
+                uncertain_total: None,
+            }],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(!text.contains("ncertain"), "{text}");
+        assert!(
+            serde_json::to_value(&report).unwrap()["services"][0]
+                .get("uncertain_attempts")
+                .is_none()
+        );
     }
 
     #[test]

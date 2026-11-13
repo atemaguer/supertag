@@ -295,9 +295,12 @@ type ObjectiveOverview struct {
 	Notices          []*ObjectiveLimitNotice `protobuf:"bytes,13,rep,name=notices,proto3" json:"notices,omitempty"`
 	PendingApprovals uint32                  `protobuf:"varint,14,opt,name=pending_approvals,json=pendingApprovals,proto3" json:"pending_approvals,omitempty"`
 	// Every Session of the Objective; at most 100 are listed.
-	TotalSessions uint32 `protobuf:"varint,15,opt,name=total_sessions,json=totalSessions,proto3" json:"total_sessions,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TotalSessions        uint32 `protobuf:"varint,15,opt,name=total_sessions,json=totalSessions,proto3" json:"total_sessions,omitempty"`
+	ObjectiveCreatedAtMs int64  `protobuf:"varint,5400,opt,name=objective_created_at_ms,json=objectiveCreatedAtMs,proto3" json:"objective_created_at_ms,omitempty"`
+	// When the Objective's status, limits or summary last changed.
+	ObjectiveUpdatedAtMs int64 `protobuf:"varint,5401,opt,name=objective_updated_at_ms,json=objectiveUpdatedAtMs,proto3" json:"objective_updated_at_ms,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ObjectiveOverview) Reset() {
@@ -431,6 +434,20 @@ func (x *ObjectiveOverview) GetPendingApprovals() uint32 {
 func (x *ObjectiveOverview) GetTotalSessions() uint32 {
 	if x != nil {
 		return x.TotalSessions
+	}
+	return 0
+}
+
+func (x *ObjectiveOverview) GetObjectiveCreatedAtMs() int64 {
+	if x != nil {
+		return x.ObjectiveCreatedAtMs
+	}
+	return 0
+}
+
+func (x *ObjectiveOverview) GetObjectiveUpdatedAtMs() int64 {
+	if x != nil {
+		return x.ObjectiveUpdatedAtMs
 	}
 	return 0
 }
@@ -851,11 +868,17 @@ type ObjectiveSessionView struct {
 	ParentSessionId string                 `protobuf:"bytes,5,opt,name=parent_session_id,json=parentSessionId,proto3" json:"parent_session_id,omitempty"`
 	Status          ObjectiveSessionStatus `protobuf:"varint,6,opt,name=status,proto3,enum=supertag.runtime.v2.ObjectiveSessionStatus" json:"status,omitempty"`
 	// The question the latest turn waits on.
-	Question      string `protobuf:"bytes,7,opt,name=question,proto3" json:"question,omitempty"`
-	TaskCount     uint32 `protobuf:"varint,8,opt,name=task_count,json=taskCount,proto3" json:"task_count,omitempty"`
-	LatestTaskId  string `protobuf:"bytes,9,opt,name=latest_task_id,json=latestTaskId,proto3" json:"latest_task_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Question     string `protobuf:"bytes,7,opt,name=question,proto3" json:"question,omitempty"`
+	TaskCount    uint32 `protobuf:"varint,8,opt,name=task_count,json=taskCount,proto3" json:"task_count,omitempty"`
+	LatestTaskId string `protobuf:"bytes,9,opt,name=latest_task_id,json=latestTaskId,proto3" json:"latest_task_id,omitempty"`
+	// The Session's latest Workspace delivery. Absent when none was recorded.
+	Delivery *ObjectiveSessionDelivery `protobuf:"bytes,5400,opt,name=delivery,proto3" json:"delivery,omitempty"`
+	// Why the latest turn did not succeed. Absent unless it failed or is uncertain.
+	Failure *ObjectiveSessionFailure `protobuf:"bytes,5401,opt,name=failure,proto3" json:"failure,omitempty"`
+	// When the latest turn finished. Absent while it runs or when not recorded.
+	LatestCompletedAtMs *int64 `protobuf:"varint,5402,opt,name=latest_completed_at_ms,json=latestCompletedAtMs,proto3,oneof" json:"latest_completed_at_ms,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ObjectiveSessionView) Reset() {
@@ -951,6 +974,198 @@ func (x *ObjectiveSessionView) GetLatestTaskId() string {
 	return ""
 }
 
+func (x *ObjectiveSessionView) GetDelivery() *ObjectiveSessionDelivery {
+	if x != nil {
+		return x.Delivery
+	}
+	return nil
+}
+
+func (x *ObjectiveSessionView) GetFailure() *ObjectiveSessionFailure {
+	if x != nil {
+		return x.Failure
+	}
+	return nil
+}
+
+func (x *ObjectiveSessionView) GetLatestCompletedAtMs() int64 {
+	if x != nil && x.LatestCompletedAtMs != nil {
+		return *x.LatestCompletedAtMs
+	}
+	return 0
+}
+
+type ObjectiveSessionDelivery struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	TaskId       string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	WorkspaceId  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	BaseCommit   string                 `protobuf:"bytes,3,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
+	HeadCommit   string                 `protobuf:"bytes,4,opt,name=head_commit,json=headCommit,proto3" json:"head_commit,omitempty"`
+	Committed    bool                   `protobuf:"varint,5,opt,name=committed,proto3" json:"committed,omitempty"`
+	ChangedFiles uint64                 `protobuf:"varint,6,opt,name=changed_files,json=changedFiles,proto3" json:"changed_files,omitempty"`
+	// Whether a patch is published for `supertag task download --kind patch`.
+	Patch         bool `protobuf:"varint,7,opt,name=patch,proto3" json:"patch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveSessionDelivery) Reset() {
+	*x = ObjectiveSessionDelivery{}
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveSessionDelivery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveSessionDelivery) ProtoMessage() {}
+
+func (x *ObjectiveSessionDelivery) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveSessionDelivery.ProtoReflect.Descriptor instead.
+func (*ObjectiveSessionDelivery) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ObjectiveSessionDelivery) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionDelivery) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionDelivery) GetBaseCommit() string {
+	if x != nil {
+		return x.BaseCommit
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionDelivery) GetHeadCommit() string {
+	if x != nil {
+		return x.HeadCommit
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionDelivery) GetCommitted() bool {
+	if x != nil {
+		return x.Committed
+	}
+	return false
+}
+
+func (x *ObjectiveSessionDelivery) GetChangedFiles() uint64 {
+	if x != nil {
+		return x.ChangedFiles
+	}
+	return 0
+}
+
+func (x *ObjectiveSessionDelivery) GetPatch() bool {
+	if x != nil {
+		return x.Patch
+	}
+	return false
+}
+
+type ObjectiveSessionFailure struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	TaskId      string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	State       TaskState              `protobuf:"varint,2,opt,name=state,proto3,enum=supertag.runtime.v2.TaskState" json:"state,omitempty"`
+	HarnessKind HarnessKind            `protobuf:"varint,3,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
+	// The Attempt's own failure text, bounded; empty when the host recorded none.
+	Message string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	// Commands that act on it, each a complete `supertag ...` line.
+	NextActions   []string `protobuf:"bytes,5,rep,name=next_actions,json=nextActions,proto3" json:"next_actions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveSessionFailure) Reset() {
+	*x = ObjectiveSessionFailure{}
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveSessionFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveSessionFailure) ProtoMessage() {}
+
+func (x *ObjectiveSessionFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveSessionFailure.ProtoReflect.Descriptor instead.
+func (*ObjectiveSessionFailure) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ObjectiveSessionFailure) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionFailure) GetState() TaskState {
+	if x != nil {
+		return x.State
+	}
+	return TaskState_TASK_STATE_UNSPECIFIED
+}
+
+func (x *ObjectiveSessionFailure) GetHarnessKind() HarnessKind {
+	if x != nil {
+		return x.HarnessKind
+	}
+	return HarnessKind_HARNESS_KIND_UNSPECIFIED
+}
+
+func (x *ObjectiveSessionFailure) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ObjectiveSessionFailure) GetNextActions() []string {
+	if x != nil {
+		return x.NextActions
+	}
+	return nil
+}
+
 type ObjectiveTurn struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	TaskId    string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -969,7 +1184,7 @@ type ObjectiveTurn struct {
 
 func (x *ObjectiveTurn) Reset() {
 	*x = ObjectiveTurn{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1196,7 @@ func (x *ObjectiveTurn) String() string {
 func (*ObjectiveTurn) ProtoMessage() {}
 
 func (x *ObjectiveTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1209,7 @@ func (x *ObjectiveTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTurn.ProtoReflect.Descriptor instead.
 func (*ObjectiveTurn) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ObjectiveTurn) GetTaskId() string {
@@ -1066,7 +1281,7 @@ type ObjectiveTeamPost struct {
 
 func (x *ObjectiveTeamPost) Reset() {
 	*x = ObjectiveTeamPost{}
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1078,7 +1293,7 @@ func (x *ObjectiveTeamPost) String() string {
 func (*ObjectiveTeamPost) ProtoMessage() {}
 
 func (x *ObjectiveTeamPost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_objective_overview_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1091,7 +1306,7 @@ func (x *ObjectiveTeamPost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTeamPost.ProtoReflect.Descriptor instead.
 func (*ObjectiveTeamPost) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ObjectiveTeamPost) GetSequence() uint64 {
@@ -1137,7 +1352,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x1bGetObjectiveOverviewRequest\x12!\n" +
 	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\rR\x06offset\"\xef\x06\n" +
+	"\x06offset\x18\x03 \x01(\rR\x06offset\"\xdf\a\n" +
 	"\x11ObjectiveOverview\x12<\n" +
 	"\tobjective\x18\x01 \x01(\v2\x1e.supertag.runtime.v2.ObjectiveR\tobjective\x12\x18\n" +
 	"\bas_of_ms\x18\x02 \x01(\x03R\x06asOfMs\x12>\n" +
@@ -1156,7 +1371,9 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"nextOffset\x88\x01\x01\x12C\n" +
 	"\anotices\x18\r \x03(\v2).supertag.runtime.v2.ObjectiveLimitNoticeR\anotices\x12+\n" +
 	"\x11pending_approvals\x18\x0e \x01(\rR\x10pendingApprovals\x12%\n" +
-	"\x0etotal_sessions\x18\x0f \x01(\rR\rtotalSessionsB\x0e\n" +
+	"\x0etotal_sessions\x18\x0f \x01(\rR\rtotalSessions\x126\n" +
+	"\x17objective_created_at_ms\x18\x98* \x01(\x03R\x14objectiveCreatedAtMs\x126\n" +
+	"\x17objective_updated_at_ms\x18\x99* \x01(\x03R\x14objectiveUpdatedAtMsB\x0e\n" +
 	"\f_next_offset\"\xd1\x01\n" +
 	"\x15ObjectiveOverviewTeam\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1196,7 +1413,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12!\n" +
 	"\fnext_actions\x18\x03 \x03(\tR\vnextActions\x12\x17\n" +
 	"\atask_id\x18\x04 \x01(\tR\x06taskId\x12\x15\n" +
-	"\x06tag_id\x18\x05 \x01(\tR\x05tagId\"\xca\x02\n" +
+	"\x06tag_id\x18\x05 \x01(\tR\x05tagId\"\xb5\x04\n" +
 	"\x14ObjectiveSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x15\n" +
@@ -1208,7 +1425,27 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\bquestion\x18\a \x01(\tR\bquestion\x12\x1d\n" +
 	"\n" +
 	"task_count\x18\b \x01(\rR\ttaskCount\x12$\n" +
-	"\x0elatest_task_id\x18\t \x01(\tR\flatestTaskId\"\x99\x02\n" +
+	"\x0elatest_task_id\x18\t \x01(\tR\flatestTaskId\x12J\n" +
+	"\bdelivery\x18\x98* \x01(\v2-.supertag.runtime.v2.ObjectiveSessionDeliveryR\bdelivery\x12G\n" +
+	"\afailure\x18\x99* \x01(\v2,.supertag.runtime.v2.ObjectiveSessionFailureR\afailure\x129\n" +
+	"\x16latest_completed_at_ms\x18\x9a* \x01(\x03H\x00R\x13latestCompletedAtMs\x88\x01\x01B\x19\n" +
+	"\x17_latest_completed_at_ms\"\xf1\x01\n" +
+	"\x18ObjectiveSessionDelivery\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
+	"\vbase_commit\x18\x03 \x01(\tR\n" +
+	"baseCommit\x12\x1f\n" +
+	"\vhead_commit\x18\x04 \x01(\tR\n" +
+	"headCommit\x12\x1c\n" +
+	"\tcommitted\x18\x05 \x01(\bR\tcommitted\x12#\n" +
+	"\rchanged_files\x18\x06 \x01(\x04R\fchangedFiles\x12\x14\n" +
+	"\x05patch\x18\a \x01(\bR\x05patch\"\xea\x01\n" +
+	"\x17ObjectiveSessionFailure\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x124\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x1e.supertag.runtime.v2.TaskStateR\x05state\x12C\n" +
+	"\fharness_kind\x18\x03 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x12!\n" +
+	"\fnext_actions\x18\x05 \x03(\tR\vnextActions\"\x99\x02\n" +
 	"\rObjectiveTurn\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
@@ -1267,7 +1504,7 @@ func file_supertag_runtime_v2_objective_overview_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_objective_overview_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_objective_overview_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_supertag_runtime_v2_objective_overview_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_supertag_runtime_v2_objective_overview_proto_goTypes = []any{
 	(ObjectiveBudgetMeasure)(0),         // 0: supertag.runtime.v2.ObjectiveBudgetMeasure
 	(ObjectiveAttentionKind)(0),         // 1: supertag.runtime.v2.ObjectiveAttentionKind
@@ -1280,33 +1517,40 @@ var file_supertag_runtime_v2_objective_overview_proto_goTypes = []any{
 	(*ObjectiveLimitNotice)(nil),        // 8: supertag.runtime.v2.ObjectiveLimitNotice
 	(*ObjectiveAttention)(nil),          // 9: supertag.runtime.v2.ObjectiveAttention
 	(*ObjectiveSessionView)(nil),        // 10: supertag.runtime.v2.ObjectiveSessionView
-	(*ObjectiveTurn)(nil),               // 11: supertag.runtime.v2.ObjectiveTurn
-	(*ObjectiveTeamPost)(nil),           // 12: supertag.runtime.v2.ObjectiveTeamPost
-	(*Objective)(nil),                   // 13: supertag.runtime.v2.Objective
-	(TaskState)(0),                      // 14: supertag.runtime.v2.TaskState
+	(*ObjectiveSessionDelivery)(nil),    // 11: supertag.runtime.v2.ObjectiveSessionDelivery
+	(*ObjectiveSessionFailure)(nil),     // 12: supertag.runtime.v2.ObjectiveSessionFailure
+	(*ObjectiveTurn)(nil),               // 13: supertag.runtime.v2.ObjectiveTurn
+	(*ObjectiveTeamPost)(nil),           // 14: supertag.runtime.v2.ObjectiveTeamPost
+	(*Objective)(nil),                   // 15: supertag.runtime.v2.Objective
+	(TaskState)(0),                      // 16: supertag.runtime.v2.TaskState
+	(HarnessKind)(0),                    // 17: supertag.runtime.v2.HarnessKind
 }
 var file_supertag_runtime_v2_objective_overview_proto_depIdxs = []int32{
-	13, // 0: supertag.runtime.v2.ObjectiveOverview.objective:type_name -> supertag.runtime.v2.Objective
+	15, // 0: supertag.runtime.v2.ObjectiveOverview.objective:type_name -> supertag.runtime.v2.Objective
 	5,  // 1: supertag.runtime.v2.ObjectiveOverview.team:type_name -> supertag.runtime.v2.ObjectiveOverviewTeam
 	6,  // 2: supertag.runtime.v2.ObjectiveOverview.pool:type_name -> supertag.runtime.v2.ObjectiveBudgetPool
 	7,  // 3: supertag.runtime.v2.ObjectiveOverview.deadline:type_name -> supertag.runtime.v2.ObjectiveDeadlineView
 	9,  // 4: supertag.runtime.v2.ObjectiveOverview.attention:type_name -> supertag.runtime.v2.ObjectiveAttention
 	10, // 5: supertag.runtime.v2.ObjectiveOverview.sessions:type_name -> supertag.runtime.v2.ObjectiveSessionView
-	11, // 6: supertag.runtime.v2.ObjectiveOverview.conversation:type_name -> supertag.runtime.v2.ObjectiveTurn
-	12, // 7: supertag.runtime.v2.ObjectiveOverview.posts:type_name -> supertag.runtime.v2.ObjectiveTeamPost
-	11, // 8: supertag.runtime.v2.ObjectiveOverview.tasks:type_name -> supertag.runtime.v2.ObjectiveTurn
+	13, // 6: supertag.runtime.v2.ObjectiveOverview.conversation:type_name -> supertag.runtime.v2.ObjectiveTurn
+	14, // 7: supertag.runtime.v2.ObjectiveOverview.posts:type_name -> supertag.runtime.v2.ObjectiveTeamPost
+	13, // 8: supertag.runtime.v2.ObjectiveOverview.tasks:type_name -> supertag.runtime.v2.ObjectiveTurn
 	8,  // 9: supertag.runtime.v2.ObjectiveOverview.notices:type_name -> supertag.runtime.v2.ObjectiveLimitNotice
 	0,  // 10: supertag.runtime.v2.ObjectiveBudgetPool.measure:type_name -> supertag.runtime.v2.ObjectiveBudgetMeasure
 	1,  // 11: supertag.runtime.v2.ObjectiveAttention.kind:type_name -> supertag.runtime.v2.ObjectiveAttentionKind
 	2,  // 12: supertag.runtime.v2.ObjectiveSessionView.status:type_name -> supertag.runtime.v2.ObjectiveSessionStatus
-	14, // 13: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
-	3,  // 14: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
-	4,  // 15: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
-	15, // [15:16] is the sub-list for method output_type
-	14, // [14:15] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 13: supertag.runtime.v2.ObjectiveSessionView.delivery:type_name -> supertag.runtime.v2.ObjectiveSessionDelivery
+	12, // 14: supertag.runtime.v2.ObjectiveSessionView.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
+	16, // 15: supertag.runtime.v2.ObjectiveSessionFailure.state:type_name -> supertag.runtime.v2.TaskState
+	17, // 16: supertag.runtime.v2.ObjectiveSessionFailure.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	16, // 17: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
+	3,  // 18: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
+	4,  // 19: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
+	19, // [19:20] is the sub-list for method output_type
+	18, // [18:19] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_objective_overview_proto_init() }
@@ -1318,14 +1562,15 @@ func file_supertag_runtime_v2_objective_overview_proto_init() {
 	file_supertag_runtime_v2_objective_overview_proto_msgTypes[1].OneofWrappers = []any{}
 	file_supertag_runtime_v2_objective_overview_proto_msgTypes[2].OneofWrappers = []any{}
 	file_supertag_runtime_v2_objective_overview_proto_msgTypes[3].OneofWrappers = []any{}
-	file_supertag_runtime_v2_objective_overview_proto_msgTypes[8].OneofWrappers = []any{}
+	file_supertag_runtime_v2_objective_overview_proto_msgTypes[7].OneofWrappers = []any{}
+	file_supertag_runtime_v2_objective_overview_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_objective_overview_proto_rawDesc), len(file_supertag_runtime_v2_objective_overview_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

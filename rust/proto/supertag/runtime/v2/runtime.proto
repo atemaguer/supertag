@@ -720,6 +720,25 @@ message WorkerHostStatus {
   repeated HostHarnessCapacity harnesses = 1500;
   // Increases with every credential rotation, from 1.
   uint64 credential_revision = 3300;
+  // Task Attempts of this host that may have executed and need an operator's recovery
+  // decision: uncertain, or cancelled with execution cleanup not confirmed after the lease
+  // lapsed. Each keeps a slot until it is resolved. At most 20 are listed, oldest first.
+  repeated HostUncertainAttempt uncertain_attempts = 5400;
+  uint32 total_uncertain_attempts = 5401;
+}
+
+message HostUncertainAttempt {
+  string task_id = 1;
+  string attempt_id = 2;
+  HarnessKind harness_kind = 3;
+  // Why the Attempt is uncertain, in words.
+  string reason = 4;
+  // When its execution lease lapsed.
+  int64 since_ms = 5;
+  // The host reported that its execution stopped, so `confirmed_stopped` is not needed.
+  bool cleanup_observed = 6;
+  // A cancelled Task can only be marked failed by recovery, never retried.
+  bool cancelled = 7;
 }
 
 message ListHostsRequest {

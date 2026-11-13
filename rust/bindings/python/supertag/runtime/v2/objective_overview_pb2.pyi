@@ -70,7 +70,7 @@ class GetObjectiveOverviewRequest(_message.Message):
     def __init__(self, objective_id: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class ObjectiveOverview(_message.Message):
-    __slots__ = ("objective", "as_of_ms", "team", "pool", "deadline", "attention", "sessions", "conversation", "posts", "tasks", "total_tasks", "next_offset", "notices", "pending_approvals", "total_sessions")
+    __slots__ = ("objective", "as_of_ms", "team", "pool", "deadline", "attention", "sessions", "conversation", "posts", "tasks", "total_tasks", "next_offset", "notices", "pending_approvals", "total_sessions", "objective_created_at_ms", "objective_updated_at_ms")
     OBJECTIVE_FIELD_NUMBER: _ClassVar[int]
     AS_OF_MS_FIELD_NUMBER: _ClassVar[int]
     TEAM_FIELD_NUMBER: _ClassVar[int]
@@ -86,6 +86,8 @@ class ObjectiveOverview(_message.Message):
     NOTICES_FIELD_NUMBER: _ClassVar[int]
     PENDING_APPROVALS_FIELD_NUMBER: _ClassVar[int]
     TOTAL_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     objective: _runtime_pb2.Objective
     as_of_ms: int
     team: ObjectiveOverviewTeam
@@ -101,7 +103,9 @@ class ObjectiveOverview(_message.Message):
     notices: _containers.RepeatedCompositeFieldContainer[ObjectiveLimitNotice]
     pending_approvals: int
     total_sessions: int
-    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., as_of_ms: _Optional[int] = ..., team: _Optional[_Union[ObjectiveOverviewTeam, _Mapping]] = ..., pool: _Optional[_Union[ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[ObjectiveDeadlineView, _Mapping]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSessionView, _Mapping]]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., posts: _Optional[_Iterable[_Union[ObjectiveTeamPost, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_offset: _Optional[int] = ..., notices: _Optional[_Iterable[_Union[ObjectiveLimitNotice, _Mapping]]] = ..., pending_approvals: _Optional[int] = ..., total_sessions: _Optional[int] = ...) -> None: ...
+    objective_created_at_ms: int
+    objective_updated_at_ms: int
+    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., as_of_ms: _Optional[int] = ..., team: _Optional[_Union[ObjectiveOverviewTeam, _Mapping]] = ..., pool: _Optional[_Union[ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[ObjectiveDeadlineView, _Mapping]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSessionView, _Mapping]]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., posts: _Optional[_Iterable[_Union[ObjectiveTeamPost, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTurn, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_offset: _Optional[int] = ..., notices: _Optional[_Iterable[_Union[ObjectiveLimitNotice, _Mapping]]] = ..., pending_approvals: _Optional[int] = ..., total_sessions: _Optional[int] = ..., objective_created_at_ms: _Optional[int] = ..., objective_updated_at_ms: _Optional[int] = ...) -> None: ...
 
 class ObjectiveOverviewTeam(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "running_turns")
@@ -178,7 +182,7 @@ class ObjectiveAttention(_message.Message):
     def __init__(self, kind: _Optional[_Union[ObjectiveAttentionKind, str]] = ..., message: _Optional[str] = ..., next_actions: _Optional[_Iterable[str]] = ..., task_id: _Optional[str] = ..., tag_id: _Optional[str] = ...) -> None: ...
 
 class ObjectiveSessionView(_message.Message):
-    __slots__ = ("session_id", "tag_id", "owner", "title", "parent_session_id", "status", "question", "task_count", "latest_task_id")
+    __slots__ = ("session_id", "tag_id", "owner", "title", "parent_session_id", "status", "question", "task_count", "latest_task_id", "delivery", "failure", "latest_completed_at_ms")
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_FIELD_NUMBER: _ClassVar[int]
@@ -188,6 +192,9 @@ class ObjectiveSessionView(_message.Message):
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     TASK_COUNT_FIELD_NUMBER: _ClassVar[int]
     LATEST_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_FIELD_NUMBER: _ClassVar[int]
+    LATEST_COMPLETED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     session_id: str
     tag_id: str
     owner: bool
@@ -197,7 +204,42 @@ class ObjectiveSessionView(_message.Message):
     question: str
     task_count: int
     latest_task_id: str
-    def __init__(self, session_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., owner: _Optional[bool] = ..., title: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveSessionStatus, str]] = ..., question: _Optional[str] = ..., task_count: _Optional[int] = ..., latest_task_id: _Optional[str] = ...) -> None: ...
+    delivery: ObjectiveSessionDelivery
+    failure: ObjectiveSessionFailure
+    latest_completed_at_ms: int
+    def __init__(self, session_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., owner: _Optional[bool] = ..., title: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveSessionStatus, str]] = ..., question: _Optional[str] = ..., task_count: _Optional[int] = ..., latest_task_id: _Optional[str] = ..., delivery: _Optional[_Union[ObjectiveSessionDelivery, _Mapping]] = ..., failure: _Optional[_Union[ObjectiveSessionFailure, _Mapping]] = ..., latest_completed_at_ms: _Optional[int] = ...) -> None: ...
+
+class ObjectiveSessionDelivery(_message.Message):
+    __slots__ = ("task_id", "workspace_id", "base_commit", "head_commit", "committed", "changed_files", "patch")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    HEAD_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    COMMITTED_FIELD_NUMBER: _ClassVar[int]
+    CHANGED_FILES_FIELD_NUMBER: _ClassVar[int]
+    PATCH_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    workspace_id: str
+    base_commit: str
+    head_commit: str
+    committed: bool
+    changed_files: int
+    patch: bool
+    def __init__(self, task_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., head_commit: _Optional[str] = ..., committed: _Optional[bool] = ..., changed_files: _Optional[int] = ..., patch: _Optional[bool] = ...) -> None: ...
+
+class ObjectiveSessionFailure(_message.Message):
+    __slots__ = ("task_id", "state", "harness_kind", "message", "next_actions")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    NEXT_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    state: _runtime_pb2.TaskState
+    harness_kind: _runtime_pb2.HarnessKind
+    message: str
+    next_actions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, task_id: _Optional[str] = ..., state: _Optional[_Union[_runtime_pb2.TaskState, str]] = ..., harness_kind: _Optional[_Union[_runtime_pb2.HarnessKind, str]] = ..., message: _Optional[str] = ..., next_actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ObjectiveTurn(_message.Message):
     __slots__ = ("task_id", "tag_id", "session_id", "state", "kind", "prompt", "result", "completed_at_ms")

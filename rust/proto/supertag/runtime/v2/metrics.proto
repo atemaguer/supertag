@@ -24,6 +24,18 @@ message MetricSnapshot {
   MetricBacklog mailbox = 6;
   // Replies waiting to reach collaboration surfaces.
   MetricReplyDelivery reply_delivery = 7;
+  // Task Attempts that may have executed and the operator decisions recorded for them.
+  MetricRecovery recovery = 5400;
+}
+
+message MetricRecovery {
+  // Attempts that need an operator's recovery decision; each keeps a Worker Host slot.
+  int64 awaiting_decision = 1;
+  // Cancelled Attempts whose execution cleanup the host has not confirmed yet.
+  int64 cleanup_unconfirmed = 2;
+  // Recorded `supertag task resolve-attempt` decisions.
+  int64 resolved_failed = 3;
+  int64 resolved_retried = 4;
 }
 
 message MetricResources {
@@ -68,6 +80,16 @@ message MetricScheduling {
   int64 queued = 1;
   // Every Worker Host that is not removed, by ID.
   repeated MetricWorkerHost worker_hosts = 2;
+  // When the longest-waiting queued Task was accepted. Absent when none waits.
+  optional int64 oldest_queued_at_ms = 5400;
+  // Tasks a Worker Host claimed at least once, measured from acceptance to first claim.
+  int64 placed_tasks = 5401;
+  int64 average_queue_wait_ms = 5402;
+  int64 maximum_queue_wait_ms = 5403;
+  // Claimed Attempts that started, measured from claim to start.
+  int64 started_attempts = 5404;
+  int64 average_start_wait_ms = 5405;
+  int64 maximum_start_wait_ms = 5406;
 }
 
 // One Worker Host's capacity, from its latest report.

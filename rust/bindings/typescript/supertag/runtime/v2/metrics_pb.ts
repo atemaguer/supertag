@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/metrics.proto.
  */
 export const file_supertag_runtime_v2_metrics: GenFile = /*@__PURE__*/
-  fileDesc("CiFzdXBlcnRhZy9ydW50aW1lL3YyL21ldHJpY3MucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiEwoRR2V0TWV0cmljc1JlcXVlc3Qi+gIKDk1ldHJpY1NuYXBzaG90EhYKDmNhcHR1cmVkX2F0X21zGAEgASgDEjcKCXJlc291cmNlcxgCIAEoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuTWV0cmljUmVzb3VyY2VzEjQKBXRhc2tzGAMgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNUYXNrQ291bnRzEi8KBXVzYWdlGAQgASgLMiAuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNVc2FnZRI5CgpzY2hlZHVsaW5nGAUgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNTY2hlZHVsaW5nEjMKB21haWxib3gYBiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLk1ldHJpY0JhY2tsb2cSQAoOcmVwbHlfZGVsaXZlcnkYByABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLk1ldHJpY1JlcGx5RGVsaXZlcnkiowEKD01ldHJpY1Jlc291cmNlcxIMCgR0YWdzGAEgASgDEg0KBXJvbGVzGAIgASgDEhgKEHJvbGVfYXNzaWdubWVudHMYAyABKAMSGAoQc3VyZmFjZV9hY2NvdW50cxgEIAEoAxIXCg9wZXJtaXNzaW9uX3NldHMYBSABKAMSFAoMY29udGV4dF9zZXRzGAYgASgDEhAKCHNlc3Npb25zGAcgASgDIpwBChBNZXRyaWNUYXNrQ291bnRzEg0KBXRvdGFsGAEgASgDEg4KBnF1ZXVlZBgCIAEoAxIPCgdjbGFpbWVkGAMgASgDEg8KB3J1bm5pbmcYBCABKAMSEQoJdW5jZXJ0YWluGAUgASgDEhEKCXN1Y2NlZWRlZBgGIAEoAxIOCgZmYWlsZWQYByABKAMSEQoJY2FuY2VsbGVkGAggASgDIuoBCgtNZXRyaWNVc2FnZRIQCghhdHRlbXB0cxgBIAEoAxIcCg9yZXBvcnRlZF90b2tlbnMYAiABKARIAIgBARIeChZ1bmtub3duX3Rva2VuX2F0dGVtcHRzGAMgASgDEjcKDXJlcG9ydGVkX2Nvc3QYBCADKAsyIC5zdXBlcnRhZy5ydW50aW1lLnYyLlNwZW5kQW1vdW50Eh0KFXVua25vd25fY29zdF9hdHRlbXB0cxgFIAEoAxIfChdlc3RpbWF0ZWRfY29zdF9hdHRlbXB0cxgGIAEoA0ISChBfcmVwb3J0ZWRfdG9rZW5zIl8KEE1ldHJpY1NjaGVkdWxpbmcSDgoGcXVldWVkGAEgASgDEjsKDHdvcmtlcl9ob3N0cxgCIAMoCzIlLnN1cGVydGFnLnJ1bnRpbWUudjIuTWV0cmljV29ya2VySG9zdCKoAQoQTWV0cmljV29ya2VySG9zdBIPCgdob3N0X2lkGAEgASgJEi0KBXBoYXNlGAIgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGhhc2USEAoIZHJhaW5pbmcYAyABKAgSEAoIY2FwYWNpdHkYBCABKA0SFwoPYXZhaWxhYmxlX3Nsb3RzGAUgASgNEhcKD2FjdGl2ZV9hdHRlbXB0cxgGIAEoDSJcCg1NZXRyaWNCYWNrbG9nEg8KB3BlbmRpbmcYASABKAMSIQoUb2xkZXN0X3BlbmRpbmdfYXRfbXMYAiABKANIAIgBAUIXChVfb2xkZXN0X3BlbmRpbmdfYXRfbXMiNgoTTWV0cmljUmVwbHlEZWxpdmVyeRIPCgdiYWNrbG9nGAEgASgDEg4KBmZhaWxlZBgCIAEoAzJkCgdNZXRyaWNzElkKCkdldE1ldHJpY3MSJi5zdXBlcnRhZy5ydW50aW1lLnYyLkdldE1ldHJpY3NSZXF1ZXN0GiMuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNTbmFwc2hvdGIGcHJvdG8z", [file_supertag_runtime_v2_runtime, file_supertag_runtime_v2_spend]);
+  fileDesc("CiFzdXBlcnRhZy9ydW50aW1lL3YyL21ldHJpY3MucHJvdG8SE3N1cGVydGFnLnJ1bnRpbWUudjIiEwoRR2V0TWV0cmljc1JlcXVlc3QisgMKDk1ldHJpY1NuYXBzaG90EhYKDmNhcHR1cmVkX2F0X21zGAEgASgDEjcKCXJlc291cmNlcxgCIAEoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuTWV0cmljUmVzb3VyY2VzEjQKBXRhc2tzGAMgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNUYXNrQ291bnRzEi8KBXVzYWdlGAQgASgLMiAuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNVc2FnZRI5CgpzY2hlZHVsaW5nGAUgASgLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNTY2hlZHVsaW5nEjMKB21haWxib3gYBiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLk1ldHJpY0JhY2tsb2cSQAoOcmVwbHlfZGVsaXZlcnkYByABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLk1ldHJpY1JlcGx5RGVsaXZlcnkSNgoIcmVjb3ZlcnkYmCogASgLMiMuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNSZWNvdmVyeSJ7Cg5NZXRyaWNSZWNvdmVyeRIZChFhd2FpdGluZ19kZWNpc2lvbhgBIAEoAxIbChNjbGVhbnVwX3VuY29uZmlybWVkGAIgASgDEhcKD3Jlc29sdmVkX2ZhaWxlZBgDIAEoAxIYChByZXNvbHZlZF9yZXRyaWVkGAQgASgDIqMBCg9NZXRyaWNSZXNvdXJjZXMSDAoEdGFncxgBIAEoAxINCgVyb2xlcxgCIAEoAxIYChByb2xlX2Fzc2lnbm1lbnRzGAMgASgDEhgKEHN1cmZhY2VfYWNjb3VudHMYBCABKAMSFwoPcGVybWlzc2lvbl9zZXRzGAUgASgDEhQKDGNvbnRleHRfc2V0cxgGIAEoAxIQCghzZXNzaW9ucxgHIAEoAyKcAQoQTWV0cmljVGFza0NvdW50cxINCgV0b3RhbBgBIAEoAxIOCgZxdWV1ZWQYAiABKAMSDwoHY2xhaW1lZBgDIAEoAxIPCgdydW5uaW5nGAQgASgDEhEKCXVuY2VydGFpbhgFIAEoAxIRCglzdWNjZWVkZWQYBiABKAMSDgoGZmFpbGVkGAcgASgDEhEKCWNhbmNlbGxlZBgIIAEoAyLqAQoLTWV0cmljVXNhZ2USEAoIYXR0ZW1wdHMYASABKAMSHAoPcmVwb3J0ZWRfdG9rZW5zGAIgASgESACIAQESHgoWdW5rbm93bl90b2tlbl9hdHRlbXB0cxgDIAEoAxI3Cg1yZXBvcnRlZF9jb3N0GAQgAygLMiAuc3VwZXJ0YWcucnVudGltZS52Mi5TcGVuZEFtb3VudBIdChV1bmtub3duX2Nvc3RfYXR0ZW1wdHMYBSABKAMSHwoXZXN0aW1hdGVkX2Nvc3RfYXR0ZW1wdHMYBiABKANCEgoQX3JlcG9ydGVkX3Rva2VucyLMAgoQTWV0cmljU2NoZWR1bGluZxIOCgZxdWV1ZWQYASABKAMSOwoMd29ya2VyX2hvc3RzGAIgAygLMiUuc3VwZXJ0YWcucnVudGltZS52Mi5NZXRyaWNXb3JrZXJIb3N0EiEKE29sZGVzdF9xdWV1ZWRfYXRfbXMYmCogASgDSACIAQESFQoMcGxhY2VkX3Rhc2tzGJkqIAEoAxIeChVhdmVyYWdlX3F1ZXVlX3dhaXRfbXMYmiogASgDEh4KFW1heGltdW1fcXVldWVfd2FpdF9tcxibKiABKAMSGQoQc3RhcnRlZF9hdHRlbXB0cxicKiABKAMSHgoVYXZlcmFnZV9zdGFydF93YWl0X21zGJ0qIAEoAxIeChVtYXhpbXVtX3N0YXJ0X3dhaXRfbXMYniogASgDQhYKFF9vbGRlc3RfcXVldWVkX2F0X21zIqgBChBNZXRyaWNXb3JrZXJIb3N0Eg8KB2hvc3RfaWQYASABKAkSLQoFcGhhc2UYAiABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RQaGFzZRIQCghkcmFpbmluZxgDIAEoCBIQCghjYXBhY2l0eRgEIAEoDRIXCg9hdmFpbGFibGVfc2xvdHMYBSABKA0SFwoPYWN0aXZlX2F0dGVtcHRzGAYgASgNIlwKDU1ldHJpY0JhY2tsb2cSDwoHcGVuZGluZxgBIAEoAxIhChRvbGRlc3RfcGVuZGluZ19hdF9tcxgCIAEoA0gAiAEBQhcKFV9vbGRlc3RfcGVuZGluZ19hdF9tcyI2ChNNZXRyaWNSZXBseURlbGl2ZXJ5Eg8KB2JhY2tsb2cYASABKAMSDgoGZmFpbGVkGAIgASgDMmQKB01ldHJpY3MSWQoKR2V0TWV0cmljcxImLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0TWV0cmljc1JlcXVlc3QaIy5zdXBlcnRhZy5ydW50aW1lLnYyLk1ldHJpY1NuYXBzaG90YgZwcm90bzM", [file_supertag_runtime_v2_runtime, file_supertag_runtime_v2_spend]);
 
 /**
  * @generated from message supertag.runtime.v2.GetMetricsRequest
@@ -73,6 +73,13 @@ export type MetricSnapshot = Message<"supertag.runtime.v2.MetricSnapshot"> & {
    * @generated from field: supertag.runtime.v2.MetricReplyDelivery reply_delivery = 7;
    */
   replyDelivery?: MetricReplyDelivery | undefined;
+
+  /**
+   * Task Attempts that may have executed and the operator decisions recorded for them.
+   *
+   * @generated from field: supertag.runtime.v2.MetricRecovery recovery = 5400;
+   */
+  recovery?: MetricRecovery | undefined;
 };
 
 /**
@@ -81,6 +88,44 @@ export type MetricSnapshot = Message<"supertag.runtime.v2.MetricSnapshot"> & {
  */
 export const MetricSnapshotSchema: GenMessage<MetricSnapshot> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_metrics, 1);
+
+/**
+ * @generated from message supertag.runtime.v2.MetricRecovery
+ */
+export type MetricRecovery = Message<"supertag.runtime.v2.MetricRecovery"> & {
+  /**
+   * Attempts that need an operator's recovery decision; each keeps a Worker Host slot.
+   *
+   * @generated from field: int64 awaiting_decision = 1;
+   */
+  awaitingDecision: bigint;
+
+  /**
+   * Cancelled Attempts whose execution cleanup the host has not confirmed yet.
+   *
+   * @generated from field: int64 cleanup_unconfirmed = 2;
+   */
+  cleanupUnconfirmed: bigint;
+
+  /**
+   * Recorded `supertag task resolve-attempt` decisions.
+   *
+   * @generated from field: int64 resolved_failed = 3;
+   */
+  resolvedFailed: bigint;
+
+  /**
+   * @generated from field: int64 resolved_retried = 4;
+   */
+  resolvedRetried: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.MetricRecovery.
+ * Use `create(MetricRecoverySchema)` to create a new message.
+ */
+export const MetricRecoverySchema: GenMessage<MetricRecovery> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_metrics, 2);
 
 /**
  * @generated from message supertag.runtime.v2.MetricResources
@@ -131,7 +176,7 @@ export type MetricResources = Message<"supertag.runtime.v2.MetricResources"> & {
  * Use `create(MetricResourcesSchema)` to create a new message.
  */
 export const MetricResourcesSchema: GenMessage<MetricResources> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 2);
+  messageDesc(file_supertag_runtime_v2_metrics, 3);
 
 /**
  * Tasks by state.
@@ -185,7 +230,7 @@ export type MetricTaskCounts = Message<"supertag.runtime.v2.MetricTaskCounts"> &
  * Use `create(MetricTaskCountsSchema)` to create a new message.
  */
 export const MetricTaskCountsSchema: GenMessage<MetricTaskCounts> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 3);
+  messageDesc(file_supertag_runtime_v2_metrics, 4);
 
 /**
  * Claimed Attempts and their recorded usage, counted as `Spend.GetSpend` counts
@@ -234,7 +279,7 @@ export type MetricUsage = Message<"supertag.runtime.v2.MetricUsage"> & {
  * Use `create(MetricUsageSchema)` to create a new message.
  */
 export const MetricUsageSchema: GenMessage<MetricUsage> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 4);
+  messageDesc(file_supertag_runtime_v2_metrics, 5);
 
 /**
  * @generated from message supertag.runtime.v2.MetricScheduling
@@ -253,6 +298,47 @@ export type MetricScheduling = Message<"supertag.runtime.v2.MetricScheduling"> &
    * @generated from field: repeated supertag.runtime.v2.MetricWorkerHost worker_hosts = 2;
    */
   workerHosts: MetricWorkerHost[];
+
+  /**
+   * When the longest-waiting queued Task was accepted. Absent when none waits.
+   *
+   * @generated from field: optional int64 oldest_queued_at_ms = 5400;
+   */
+  oldestQueuedAtMs?: bigint | undefined;
+
+  /**
+   * Tasks a Worker Host claimed at least once, measured from acceptance to first claim.
+   *
+   * @generated from field: int64 placed_tasks = 5401;
+   */
+  placedTasks: bigint;
+
+  /**
+   * @generated from field: int64 average_queue_wait_ms = 5402;
+   */
+  averageQueueWaitMs: bigint;
+
+  /**
+   * @generated from field: int64 maximum_queue_wait_ms = 5403;
+   */
+  maximumQueueWaitMs: bigint;
+
+  /**
+   * Claimed Attempts that started, measured from claim to start.
+   *
+   * @generated from field: int64 started_attempts = 5404;
+   */
+  startedAttempts: bigint;
+
+  /**
+   * @generated from field: int64 average_start_wait_ms = 5405;
+   */
+  averageStartWaitMs: bigint;
+
+  /**
+   * @generated from field: int64 maximum_start_wait_ms = 5406;
+   */
+  maximumStartWaitMs: bigint;
 };
 
 /**
@@ -260,7 +346,7 @@ export type MetricScheduling = Message<"supertag.runtime.v2.MetricScheduling"> &
  * Use `create(MetricSchedulingSchema)` to create a new message.
  */
 export const MetricSchedulingSchema: GenMessage<MetricScheduling> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 5);
+  messageDesc(file_supertag_runtime_v2_metrics, 6);
 
 /**
  * One Worker Host's capacity, from its latest report.
@@ -304,7 +390,7 @@ export type MetricWorkerHost = Message<"supertag.runtime.v2.MetricWorkerHost"> &
  * Use `create(MetricWorkerHostSchema)` to create a new message.
  */
 export const MetricWorkerHostSchema: GenMessage<MetricWorkerHost> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 6);
+  messageDesc(file_supertag_runtime_v2_metrics, 7);
 
 /**
  * @generated from message supertag.runtime.v2.MetricBacklog
@@ -328,7 +414,7 @@ export type MetricBacklog = Message<"supertag.runtime.v2.MetricBacklog"> & {
  * Use `create(MetricBacklogSchema)` to create a new message.
  */
 export const MetricBacklogSchema: GenMessage<MetricBacklog> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 7);
+  messageDesc(file_supertag_runtime_v2_metrics, 8);
 
 /**
  * @generated from message supertag.runtime.v2.MetricReplyDelivery
@@ -354,7 +440,7 @@ export type MetricReplyDelivery = Message<"supertag.runtime.v2.MetricReplyDelive
  * Use `create(MetricReplyDeliverySchema)` to create a new message.
  */
 export const MetricReplyDeliverySchema: GenMessage<MetricReplyDelivery> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_metrics, 8);
+  messageDesc(file_supertag_runtime_v2_metrics, 9);
 
 /**
  * An operational snapshot for monitoring, read with database aggregates so it

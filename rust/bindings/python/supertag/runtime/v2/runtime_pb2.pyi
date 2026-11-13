@@ -1161,7 +1161,7 @@ class HostHarnessCapacities(_message.Message):
     def __init__(self, harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ...) -> None: ...
 
 class WorkerHostStatus(_message.Message):
-    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space", "labels", "granted_labels", "ephemeral", "removed_at_ms", "harnesses", "credential_revision")
+    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space", "labels", "granted_labels", "ephemeral", "removed_at_ms", "harnesses", "credential_revision", "uncertain_attempts", "total_uncertain_attempts")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
@@ -1184,6 +1184,8 @@ class WorkerHostStatus(_message.Message):
     REMOVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     HARNESSES_FIELD_NUMBER: _ClassVar[int]
     CREDENTIAL_REVISION_FIELD_NUMBER: _ClassVar[int]
+    UNCERTAIN_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_UNCERTAIN_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     generation: int
     phase: HostPhase
@@ -1206,7 +1208,27 @@ class WorkerHostStatus(_message.Message):
     removed_at_ms: int
     harnesses: _containers.RepeatedCompositeFieldContainer[HostHarnessCapacity]
     credential_revision: int
-    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., granted_labels: _Optional[_Iterable[str]] = ..., ephemeral: _Optional[bool] = ..., removed_at_ms: _Optional[int] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ..., credential_revision: _Optional[int] = ...) -> None: ...
+    uncertain_attempts: _containers.RepeatedCompositeFieldContainer[HostUncertainAttempt]
+    total_uncertain_attempts: int
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., granted_labels: _Optional[_Iterable[str]] = ..., ephemeral: _Optional[bool] = ..., removed_at_ms: _Optional[int] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ..., credential_revision: _Optional[int] = ..., uncertain_attempts: _Optional[_Iterable[_Union[HostUncertainAttempt, _Mapping]]] = ..., total_uncertain_attempts: _Optional[int] = ...) -> None: ...
+
+class HostUncertainAttempt(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "harness_kind", "reason", "since_ms", "cleanup_observed", "cancelled")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    SINCE_MS_FIELD_NUMBER: _ClassVar[int]
+    CLEANUP_OBSERVED_FIELD_NUMBER: _ClassVar[int]
+    CANCELLED_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    harness_kind: HarnessKind
+    reason: str
+    since_ms: int
+    cleanup_observed: bool
+    cancelled: bool
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., reason: _Optional[str] = ..., since_ms: _Optional[int] = ..., cleanup_observed: _Optional[bool] = ..., cancelled: _Optional[bool] = ...) -> None: ...
 
 class ListHostsRequest(_message.Message):
     __slots__ = ("limit", "cursor")

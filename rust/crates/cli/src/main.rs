@@ -25,6 +25,7 @@ mod network;
 mod node_bridges;
 mod notifications;
 mod objective_overview;
+mod objective_watch;
 mod objectives;
 mod observe;
 mod operator_access;
@@ -2348,6 +2349,7 @@ async fn connect_operator_with_timeout(
 }
 
 /// Where an operator command connects, and with which credentials.
+#[derive(Clone)]
 struct OperatorTarget {
     url: String,
     token: String,
