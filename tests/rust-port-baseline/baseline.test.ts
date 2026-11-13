@@ -18,10 +18,18 @@ const cases = JSON.parse(
 ) as BaselineCase[];
 const execute = promisify(execFile);
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
+const driver = process.env["SUPERTAG_BASELINE_DRIVER"] ?? "old";
+const drivers: Readonly<Record<string, string>> = {
+  old: "old-system-driver.ts",
+  rust: "rust-driver.ts",
+};
+const driverSource = drivers[driver];
+if (!driverSource) throw new Error("SUPERTAG_BASELINE_DRIVER must be old or rust");
+const rustBinary = process.env["SUPERTAG_BASELINE_RUST_BINARY"];
 if (process.env["SUPERTAG_BASELINE_REQUIRE_POSTGRES"] === "1" && !postgres)
   throw new Error("This baseline run requires an isolated SUPERTAG_POSTGRES_URL");
 
-describe("portable Rust-port behavioral baseline", () => {
+describe(`portable Rust-port behavioral baseline [${driver} driver]`, () => {
   for (const scenario of cases) {
     for (const backend of scenario.backends) {
       it.skipIf(backend === "postgresql" && !postgres)(
@@ -30,21 +38,18 @@ describe("portable Rust-port behavioral baseline", () => {
           const directory = await mkdtemp(join(tmpdir(), "supertag-port-baseline-"));
           const home = join(directory, "home");
           await mkdir(home);
-          const customDriver = process.env["SUPERTAG_BASELINE_DRIVER"];
-          const args = customDriver
-            ? [scenario.id, backend, directory]
-            : [
-                "--import",
-                "tsx",
-                "--conditions=development",
-                join(import.meta.dirname, "old-system-driver.ts"),
-                scenario.id,
-                backend,
-                directory,
-              ];
+          const args = [
+            "--import",
+            "tsx",
+            "--conditions=development",
+            join(import.meta.dirname, driverSource),
+            scenario.id,
+            backend,
+            directory,
+          ];
           try {
             // No provider or operator credentials enter the child process.
-            const { stdout } = await execute(customDriver ?? process.execPath, args, {
+            const { stdout } = await execute(process.execPath, args, {
               cwd: root,
               timeout: 90_000,
               maxBuffer: 2 * 1024 * 1024,
@@ -53,6 +58,9 @@ describe("portable Rust-port behavioral baseline", () => {
                 HOME: home,
                 SUPERTAG_STATE_DIR: join(directory, "state"),
                 GIT_CONFIG_NOSYSTEM: "1",
+                ...(driver === "rust" && rustBinary
+                  ? { SUPERTAG_BASELINE_RUST_BINARY: rustBinary }
+                  : {}),
                 ...(backend === "postgresql" && postgres
                   ? { SUPERTAG_POSTGRES_URL: postgres }
                   : {}),
