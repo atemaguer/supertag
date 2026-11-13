@@ -543,7 +543,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     /// `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
     /// from standard input when that is not set.
     Connect {
-        /// The Gateway origin, such as https://supertag.example.com.
+        /// The Gateway origin, such as https://supertag.example.com, or its wss:// tunnel URL.
         url: String,
         /// The name to save it under.
         #[arg(long)]

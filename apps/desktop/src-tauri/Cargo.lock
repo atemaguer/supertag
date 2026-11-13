@@ -4680,6 +4680,7 @@ dependencies = [
  "supertag-control-plane",
  "supertag-gateway",
  "supertag-protocol",
+ "supertag-transport",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4747,6 +4748,24 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "supertag-transport"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http 1.5.0",
+ "hyper-util",
+ "rustls",
+ "rustls-native-certs",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tonic",
+ "tower-service",
+ "url",
 ]
 
 [[package]]

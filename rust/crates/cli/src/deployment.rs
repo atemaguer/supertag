@@ -173,7 +173,7 @@ pub struct CheckArgs {
     after_help = "The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Gateway's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Gateway requires client certificates. Verification registers no Worker Host and runs no Task."
 )]
 pub struct VerifyArgs {
-    /// The Gateway's public HTTPS origin, such as https://supertag.example.com.
+    /// The Gateway's public HTTPS origin, such as https://supertag.example.com, or its wss:// tunnel URL.
     url: String,
     /// Private env file that holds SUPERTAG_OPERATOR_TOKEN.
     #[arg(long)]
@@ -728,10 +728,20 @@ const INVALID_HOST_CREDENTIAL: &str = "supertag-deployment-verification-invalid-
 
 pub async fn verify(command: VerifyCommand) -> Result<()> {
     let VerifyCommand::Deployment(args) = command;
-    ensure!(
-        https_origin(&args.url, false),
-        "Deployment URL must be an HTTPS origin without credentials, path, query, or fragment"
-    );
+    let origin = if args.url.starts_with("wss://") {
+        // A tunnel URL keeps its path; `tunneled_uri` refuses credentials, query, and fragment.
+        ensure!(
+            supertag_transport::tunneled_uri(&args.url).is_ok(),
+            "Deployment URL must be a WSS URL without credentials, query, or fragment"
+        );
+        args.url.clone()
+    } else {
+        ensure!(
+            https_origin(&args.url, false),
+            "Deployment URL must be an HTTPS origin without credentials, path, query, or fragment, or a WSS tunnel URL"
+        );
+        args.url.trim_end_matches('/').to_owned()
+    };
     let token = match &args.env_file {
         Some(path) => {
             let environment = read_private(path)?;
@@ -747,7 +757,6 @@ pub async fn verify(command: VerifyCommand) -> Result<()> {
     }
     .filter(|token| !token.trim().is_empty())
     .context("SUPERTAG_OPERATOR_TOKEN is required")?;
-    let origin = args.url.trim_end_matches('/').to_owned();
     // The Gateway refuses operator calls that skip protocol negotiation.
     let channel = crate::network::operator_channel(
         &crate::network::operator_endpoint(origin, Duration::from_secs(15), None).await?,

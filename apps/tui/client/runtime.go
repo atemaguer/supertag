@@ -33,29 +33,33 @@ type runtimeClient struct {
 	artifactFiles runtimev2connect.ArtifactTransfersClient
 }
 
-// NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2. The first call
-// negotiates the SuperTag protocol version, which every call then names.
+// NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2, natively for an
+// `https://` or loopback `http://` URL, or through a WebSocket tunnel for a `wss://` or loopback
+// `ws://` URL. The first call negotiates the SuperTag protocol version, which every call then
+// names.
 func NewRuntimeV2(target Target, version string) (*Client, error) {
 	base, err := url.Parse(strings.TrimSpace(target.URL))
+	tunnel := err == nil && (base.Scheme == "ws" || base.Scheme == "wss")
 	if err != nil || base.Hostname() == "" || base.User != nil ||
-		(base.Path != "" && base.Path != "/") || base.RawQuery != "" ||
+		(!tunnel && base.Path != "" && base.Path != "/") || base.RawQuery != "" ||
 		base.ForceQuery || base.Fragment != "" {
 		return nil, errors.New("invalid Gateway URL")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Protocols = new(http.Protocols)
+	origin := base.Scheme + "://" + base.Host
 	switch base.Scheme {
-	case "http":
+	case "http", "ws":
 		ip := net.ParseIP(base.Hostname())
 		if ip == nil || !ip.IsLoopback() {
 			return nil, errors.New("cleartext Gateway URL must use a loopback IP address")
 		}
 		if target.ServerCAFile != "" || target.ClientCertFile != "" || target.ClientKeyFile != "" {
-			return nil, errors.New("Gateway TLS settings require an HTTPS URL")
+			return nil, errors.New("Gateway TLS settings require an HTTPS or WSS URL")
 		}
 		transport.Proxy = nil
 		transport.Protocols.SetUnencryptedHTTP2(true)
-	case "https":
+	case "https", "wss":
 		transport.Protocols.SetHTTP2(true)
 		config, err := runtimeTLS(target)
 		if err != nil {
@@ -63,7 +67,26 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		}
 		transport.TLSClientConfig = config
 	default:
-		return nil, errors.New("Gateway URL must use http or https")
+		return nil, errors.New("Gateway URL must use http, https, ws or wss")
+	}
+	if tunnel {
+		// The tunnel runs the same TLS, from runtimeTLS, inside the WebSocket. A `wss://` URL
+		// never falls back to cleartext.
+		dialer := tunnelDialer{url: base}
+		if base.Scheme == "wss" {
+			var serverCA []byte
+			if target.ServerCAFile != "" {
+				if serverCA, err = os.ReadFile(target.ServerCAFile); err != nil {
+					return nil, fmt.Errorf("read Gateway certificate authority: %w", err)
+				}
+			}
+			if dialer.outer, err = outerTLS(serverCA); err != nil {
+				return nil, err
+			}
+		}
+		transport.Proxy = nil
+		transport.DialContext = dialer.DialContext
+		origin = tunnelURI(base)
 	}
 	if target.Token == "" {
 		return nil, errors.New("Gateway operator credential required")
@@ -74,7 +97,6 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 			return errors.New("the Gateway redirected; requests must stay on the configured origin")
 		},
 	}
-	origin := base.Scheme + "://" + base.Host
 	c := &Client{target: target, origin: origin, version: version, http: httpClient}
 	session := &protocolSession{
 		client: runtimev2connect.NewProtocolNegotiationClient(httpClient, origin,

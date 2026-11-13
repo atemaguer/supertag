@@ -10,12 +10,16 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 #[test]
-fn only_origin_urls_and_loopback_plaintext_are_accepted() {
+fn only_origin_or_tunnel_urls_and_loopback_plaintext_are_accepted() {
     for value in [
         "http://127.0.0.1:4545",
         "http://[::1]:4545/",
         "https://gateway.example.com",
         "https://127.0.0.1:4545",
+        "ws://127.0.0.1:4545",
+        "ws://[::1]:4545/supertag",
+        "wss://gateway.example.com",
+        "wss://gateway.example.com:8443/supertag",
     ] {
         assert!(endpoint(value).is_ok(), "{value}");
     }
@@ -31,6 +35,12 @@ fn only_origin_urls_and_loopback_plaintext_are_accepted() {
         "https://gateway.example.com/#secret",
         "http://127.0.0.1\\@example.com",
         "127.0.0.1:4545",
+        "ws://localhost:4545",
+        "ws://gateway.example.com",
+        "wss://token@gateway.example.com",
+        "wss://gateway.example.com/?token=secret",
+        "wss://gateway.example.com/#secret",
+        "wss://gateway.example.com:0",
     ] {
         assert!(endpoint(value).is_err(), "{value}");
     }
@@ -139,10 +149,13 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert!(json["latestTask"].get("prompt").is_none());
 }
 
+/// A Gateway and its Control Plane. With `tunnel`, the Gateway also accepts WebSocket tunnels,
+/// as with `--websocket-listen`, and the returned URL is a `ws://` tunnel URL with a path.
 async fn gateway_fixture(
     database: &std::path::Path,
     tag_id: &str,
     token: &str,
+    tunnel: bool,
 ) -> (
     String,
     tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
@@ -176,6 +189,8 @@ async fn gateway_fixture(
     .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
+    let websocket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let tunnel_url = format!("ws://{}/supertag", websocket.local_addr().unwrap());
     let gateway_task = tokio::spawn(
         Server::builder()
             .layer(supertag_protocol::negotiation::fence(
@@ -184,7 +199,7 @@ async fn gateway_fixture(
             .add_service(gateway.negotiation_service())
             .add_service(gateway.operator_service())
             .add_service(gateway.conversations_service())
-            .serve_with_incoming(TcpListenerStream::new(listener)),
+            .serve_with_incoming(supertag_transport::incoming(listener, Some(websocket))),
     );
     let mut operator = OperatorClient::new(
         supertag_protocol::negotiation::connect(
@@ -217,7 +232,8 @@ async fn gateway_fixture(
         .await
         .unwrap();
 
-    (address, gateway_task, cp_task)
+    let url = if tunnel { tunnel_url } else { address };
+    (url, gateway_task, cp_task)
 }
 
 #[tokio::test]
@@ -227,6 +243,7 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
         &directory.path().join("state.sqlite"),
         "engineer",
         "operator-test-token",
+        false,
     )
     .await;
     let client = GatewayState::default();
@@ -354,6 +371,7 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
 }
 
 #[tokio::test]
+/// The second Gateway is saved and reached through a `ws://` tunnel URL, which keeps its path.
 async fn saved_gateways_switch_rosters_and_scope_late_ipc_requests() {
     let directory = tempfile::tempdir().unwrap();
     let store = directory.path().join("gateways.json");
@@ -361,12 +379,14 @@ async fn saved_gateways_switch_rosters_and_scope_late_ipc_requests() {
         &directory.path().join("first.sqlite"),
         "first-tag",
         "first-operator",
+        false,
     )
     .await;
     let (second, second_gateway, second_plane) = gateway_fixture(
         &directory.path().join("second.sqlite"),
         "second-tag",
         "second-operator",
+        true,
     )
     .await;
 

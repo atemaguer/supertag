@@ -964,13 +964,21 @@ fn provision_files(base: &Path, path: &Path) -> Result<Vec<crate::manifests::Pro
         .map(crate::manifests::ProvisionSource::File)
         .collect())
 }
+/// An `https://` origin or a `wss://` tunnel URL, or the loopback cleartext `http://` and `ws://`
+/// forms. A tunnel URL may carry a path; it dials the native origin `tunneled_uri` names.
 fn validate_endpoint(value: &str) -> Result<()> {
-    let uri: tonic::transport::Uri = value.parse().context("invalid Gateway endpoint")?;
+    let tunnel = supertag_transport::tunneled_uri(value)
+        .map_err(|error| anyhow::anyhow!("invalid Gateway endpoint: {error}"))?;
+    let uri: tonic::transport::Uri = tunnel
+        .as_deref()
+        .unwrap_or(value)
+        .parse()
+        .context("invalid Gateway endpoint")?;
     ensure!(
         uri.authority().is_some_and(|a| !a.as_str().contains('@'))
             && uri.query().is_none()
             && uri.path() == "/",
-        "Gateway endpoint must be an origin without credentials"
+        "Gateway endpoint must be an origin or tunnel URL without credentials"
     );
     match uri.scheme_str() {
         Some("https") => {}
@@ -981,7 +989,7 @@ fn validate_endpoint(value: &str) -> Result<()> {
                 .is_ok_and(|ip| ip.is_loopback())),
             "cleartext Gateway must use a literal loopback address"
         ),
-        _ => bail!("Gateway must use HTTPS or loopback HTTP"),
+        _ => bail!("Gateway must use HTTPS, WSS, or loopback HTTP or WS"),
     };
     Ok(())
 }
@@ -1329,6 +1337,29 @@ secrets:
         .unwrap();
         assert!(!format!("{invalid:#}").contains("secret-looking-value"));
     }
+    #[test]
+    fn host_control_planes_may_be_websocket_tunnels() {
+        for value in [
+            "https://plane.example",
+            "wss://plane.example",
+            "wss://plane.example:8443/supertag",
+            "ws://127.0.0.1:7001/tunnel",
+            "http://[::1]:7001",
+        ] {
+            assert!(validate_endpoint(value).is_ok(), "{value}");
+        }
+        for value in [
+            "ws://plane.example",
+            "ws://localhost:7001",
+            "wss://user:secret@plane.example",
+            "wss://plane.example/?query",
+            "https://plane.example/path",
+            "ftp://plane.example",
+        ] {
+            assert!(validate_endpoint(value).is_err(), "{value}");
+        }
+    }
+
     #[test]
     fn invalid_unsupported_and_credential_bearing_config_fails_closed() {
         for input in [

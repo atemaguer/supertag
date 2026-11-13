@@ -8,6 +8,8 @@
 //! - severing either tunnel mid-Attempt, after which the Worker Host and Gateway reconnect
 //!   and the Attempt completes once;
 //! - refusal of clients without valid inner TLS;
+//! - `verify deployment`, saved Gateways, and the terminal UI handover with a `wss://` URL, and,
+//!   with tmux and a version-matched Go terminal UI, that terminal UI dialing the tunnel itself;
 //! - with Docker, the same deployment behind a real HTTP/1.1-only nginx that forwards only
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
 #[path = "../../../test-support/prerequisites.rs"]
@@ -37,9 +39,9 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::ProtocolChannel,
     v2::{
-        ListTagsRequest, WatchChange, WatchEvent, WatchKind, WatchRequest,
-        operator_client::OperatorClient, operator_events_client::OperatorEventsClient,
-        watch_event::Update,
+        ListConversationsRequest, ListTagsRequest, WatchChange, WatchEvent, WatchKind,
+        WatchRequest, conversations_client::ConversationsClient, operator_client::OperatorClient,
+        operator_events_client::OperatorEventsClient, watch_event::Update,
     },
 };
 use supertag_transport::{Target, tunneled_uri};
@@ -69,6 +71,8 @@ database_tests! {
     tunnel_carries_every_service_role_and_call_shape_with_mutual_tls;
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     severed_tunnels_reconnect_and_the_attempt_completes_once;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    operator_clients_verify_save_and_hand_over_a_wss_gateway;
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1138,275 @@ async fn tunnel_crosses_an_http1_only_nginx_and_outlives_its_idle_timeout() -> R
         closed,
         "nginx closed the idle tunnel"
     );
+    ensure!(deployment.running()?);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Operator clients
+
+/// `supertag connect` with the operator's TLS files, run with `home` as HOME.
+async fn save_tunnel_gateway(deployment: &Deployment, home: &Path, url: &str) -> Result<Value> {
+    let mut connect = binary(&["connect", url, "--name", "tunnel"]);
+    connect
+        .arg("--server-ca-file")
+        .arg(deployment.pki.ca())
+        .arg("--client-cert-file")
+        .arg(&deployment.operator_leaf.cert)
+        .arg("--client-key-file")
+        .arg(&deployment.operator_leaf.key)
+        .env("HOME", home)
+        .env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
+    run_json(connect).await
+}
+
+/// A terminal UI stand-in that prints the handover `supertag tui` passes on descriptor 3.
+fn handover_fixture(path: &Path) -> Result<()> {
+    std::fs::write(
+        path,
+        format!(
+            "#!/bin/sh\nset -eu\nif [ \"${{1:-}}\" = \"--version\" ]; then\n  printf '%s\\n' \"{}\"\n  exit 0\nfi\ncat <&3\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    )?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+/// Every operator client entry point takes a `wss://` Gateway URL: `verify deployment` runs its
+/// checks through the tunnel, `connect` proves the token through it and saves the tunnel URL
+/// with its TLS files, a later command reaches the Gateway by the saved name, and `supertag tui`
+/// hands the terminal UI the tunnel URL with the TLS files it needs, by name or by URL.
+async fn operator_clients_verify_save_and_hand_over_a_wss_gateway(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut deployment = Deployment::start(&database, root).await?;
+    let public = deployment.gateway_edge.url();
+    run_json(deployment.operator(&["tag", "put", "builder", "--instructions", "Build"])).await?;
+
+    let mut verify = binary(&["verify", "deployment", &public]);
+    verify.env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
+    client_tls(
+        &mut verify,
+        &deployment.pki.ca(),
+        Some(&deployment.operator_leaf),
+    );
+    let output = run(verify).await?;
+    ensure!(
+        output.status.success(),
+        "verify deployment through the tunnel failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    ensure!(String::from_utf8(output.stdout)?.contains("operator authentication"));
+
+    let home = root.join("home");
+    std::fs::create_dir(&home)?;
+    let saved = save_tunnel_gateway(&deployment, &home, &public).await?;
+    assert_eq!(saved["name"], "tunnel");
+    let store = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/supertag/tui-gateways.json")
+    } else {
+        home.join(".config/supertag/tui-gateways.json")
+    };
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["gateways"][0]["url"], public.as_str());
+    let mut tags = binary(&["get", "tags", "--gateway", "tunnel"]);
+    tags.env("HOME", &home);
+    let output = run(tags).await?;
+    ensure!(
+        output.status.success(),
+        "a saved wss:// Gateway was not reachable by name: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let launcher = root.join("supertag-tui-fixture");
+    handover_fixture(&launcher)?;
+    let ca = std::fs::canonicalize(deployment.pki.ca())?;
+    let cert = std::fs::canonicalize(&deployment.operator_leaf.cert)?;
+    let mut by_name = binary(&["tui", "--gateway", "tunnel", "--binary"]);
+    by_name.arg(&launcher).env("HOME", &home);
+    let mut by_url = binary(&["tui", "--gateway", &public, "--binary"]);
+    by_url
+        .arg(&launcher)
+        .env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
+    client_tls(&mut by_url, &ca, Some(&deployment.operator_leaf));
+    for command in [by_name, by_url] {
+        let output = run(command).await?;
+        ensure!(
+            output.status.success(),
+            "terminal UI handover refused a wss:// Gateway: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let handover: Value = serde_json::from_slice(&output.stdout)?;
+        let context = &handover["contexts"][0];
+        assert_eq!(context["url"], public.as_str());
+        assert_eq!(context["token"], deployment.tokens.operator.as_str());
+        assert_eq!(context["server_ca_file"], ca.to_str().context("CA path")?);
+        assert_eq!(
+            context["client_cert_file"],
+            cert.to_str().context("certificate path")?
+        );
+    }
+    ensure!(deployment.running()?);
+    Ok(())
+}
+
+struct Tmux {
+    socket: PathBuf,
+}
+
+impl Tmux {
+    async fn run(&self, args: &[&str]) -> Result<String> {
+        let output = timeout(
+            STARTUP,
+            Command::new("tmux")
+                .args(["-f", "/dev/null", "-S"])
+                .arg(&self.socket)
+                .args(args)
+                .output(),
+        )
+        .await??;
+        ensure!(
+            output.status.success(),
+            "tmux command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(String::from_utf8(output.stdout)?)
+    }
+
+    async fn wait_for(&self, text: &str) -> Result<()> {
+        let deadline = Instant::now() + STARTUP;
+        loop {
+            let pane = self.run(&["capture-pane", "-p", "-t", "tunnel"]).await?;
+            if pane.contains(text) {
+                return Ok(());
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "terminal did not show {text:?}:\n{pane}"
+            );
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+impl Drop for Tmux {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&self.socket)
+            .arg("kill-server")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+fn shell_word(path: &Path) -> Result<String> {
+    let value = path
+        .to_str()
+        .context("terminal fixture path is not UTF-8")?;
+    Ok(format!("'{}'", value.replace('\'', "'\\''")))
+}
+
+/// The Go terminal UI dials the Gateway's TLS through a `wss://` edge itself: first from the
+/// saved Gateway a bare `supertag` reopens, then from the URL `supertag tui` hands over with the
+/// TLS files in the environment. It lists the Gateway's Tag, sends a message the Gateway records,
+/// and loads it back as history.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn go_tui_reaches_the_gateway_through_a_wss_tunnel() -> Result<()> {
+    let Some(tui) = prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
+    let directory = tempfile::Builder::new()
+        .prefix("tui-wss-")
+        .tempdir_in("/tmp")?;
+    let root = directory.path();
+    let database = format!("sqlite://{}?mode=rwc", root.join("control.db").display());
+    let mut deployment = Deployment::start(&database, root).await?;
+    let public = deployment.gateway_edge.url();
+    run_json(deployment.operator(&["tag", "put", "builder", "--instructions", "Build"])).await?;
+    let home = root.join("home");
+    std::fs::create_dir(&home)?;
+    save_tunnel_gateway(&deployment, &home, &public).await?;
+
+    let base = format!(
+        "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_TUI_BINARY={}",
+        shell_word(&home)?,
+        shell_word(Path::new(&tui))?,
+    );
+    let saved = format!("{base} {}", shell_word(Path::new(BINARY))?);
+    let tmux = Tmux {
+        socket: root.join("tmux.sock"),
+    };
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "tunnel",
+        "-x",
+        "140",
+        "-y",
+        "40",
+        &saved,
+        ";",
+        "set-option",
+        "-t",
+        "tunnel",
+        "remain-on-exit",
+        "on",
+    ])
+    .await?;
+    tmux.wait_for("Say something to builder.").await?;
+    tmux.run(&["send-keys", "-t", "tunnel", "-l", "Through the tunnel"])
+        .await?;
+    tmux.run(&["send-keys", "-t", "tunnel", "Enter"]).await?;
+    let mut conversations = ConversationsClient::new(deployment.operator_channel(&public).await?);
+    let deadline = Instant::now() + STARTUP;
+    loop {
+        let page = conversations
+            .list_conversations(authenticated_request(
+                ListConversationsRequest {
+                    tag_id: "builder".into(),
+                    ..Default::default()
+                },
+                &deployment.tokens.operator,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        if page.conversations.iter().any(|conversation| {
+            conversation
+                .latest_task
+                .as_ref()
+                .is_some_and(|task| task.prompt == "Through the tunnel")
+        }) {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the message sent through the tunnel never reached the Gateway: {page:?}"
+        );
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    let handed = format!(
+        "{base} SUPERTAG_OPERATOR_TOKEN={} SUPERTAG_SERVER_CA_FILE={} SUPERTAG_CLIENT_CERT_FILE={} SUPERTAG_CLIENT_KEY_FILE={} {} tui --gateway {}",
+        deployment.tokens.operator,
+        shell_word(&deployment.pki.ca())?,
+        shell_word(&deployment.operator_leaf.cert)?,
+        shell_word(&deployment.operator_leaf.key)?,
+        shell_word(Path::new(BINARY))?,
+        public,
+    );
+    tmux.run(&["respawn-pane", "-k", "-t", "tunnel", &handed])
+        .await?;
+    // The conversation history loads through the tunnel.
+    tmux.wait_for("Through the tunnel").await?;
+    tmux.wait_for("connected").await?;
+    tmux.run(&["send-keys", "-t", "tunnel", "C-c"]).await?;
+    ensure!(deployment.gateway_edge.accepted() >= 2);
     ensure!(deployment.running()?);
     Ok(())
 }

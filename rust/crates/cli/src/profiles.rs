@@ -254,22 +254,24 @@ pub struct NewGateway {
     pub client_key_file: Option<PathBuf>,
 }
 
-/// The origin form the terminal UI stores: lowercase scheme and host, no default port.
+/// The form the terminal UI stores a Gateway URL in: lowercase scheme and host and no default
+/// port, plus the path of a `ws://` or `wss://` tunnel URL.
 fn gateway_origin(raw: &str) -> Result<String> {
     let url = url::Url::parse(raw.trim()).context("enter a Gateway URL")?;
+    let tunnel = matches!(url.scheme(), "ws" | "wss");
     ensure!(
-        matches!(url.scheme(), "http" | "https")
+        matches!(url.scheme(), "http" | "https" | "ws" | "wss")
             && url.host_str().is_some_and(|host| !host.is_empty())
             && url.username().is_empty()
             && url.password().is_none()
-            && matches!(url.path(), "" | "/")
+            && (tunnel || matches!(url.path(), "" | "/"))
             && url.query().is_none()
             && url.fragment().is_none()
             && raw.len() <= 2048,
-        "enter a Gateway origin without credentials, path, query or fragment"
+        "enter a Gateway origin without credentials, path, query or fragment, or a ws or wss tunnel URL without credentials, query or fragment"
     );
     let host = url.host().context("enter a Gateway URL")?;
-    if url.scheme() == "http" {
+    if matches!(url.scheme(), "http" | "ws") {
         let loopback = match host {
             url::Host::Ipv4(address) => address.is_loopback(),
             url::Host::Ipv6(address) => address.is_loopback(),
@@ -277,16 +279,21 @@ fn gateway_origin(raw: &str) -> Result<String> {
         };
         ensure!(
             loopback,
-            "remote Gateways require HTTPS; HTTP requires a loopback IP"
+            "remote Gateways require HTTPS or WSS; HTTP and WS require a loopback IP"
         );
     }
     let host = match host {
         url::Host::Ipv6(address) => format!("[{address}]"),
         other => other.to_string().to_lowercase(),
     };
+    let path = if tunnel && url.path() != "/" {
+        url.path()
+    } else {
+        ""
+    };
     Ok(match url.port() {
-        Some(port) => format!("{}://{host}:{port}", url.scheme()),
-        None => format!("{}://{host}", url.scheme()),
+        Some(port) => format!("{}://{host}:{port}{path}", url.scheme()),
+        None => format!("{}://{host}{path}", url.scheme()),
     })
 }
 
@@ -330,8 +337,10 @@ fn check(gateway: &NewGateway) -> Result<Checked> {
         "provide both the client certificate and key"
     );
     ensure!(
-        url.starts_with("https:") || (server_ca.is_empty() && client_cert.is_empty()),
-        "TLS files require an HTTPS Gateway"
+        url.starts_with("https:")
+            || url.starts_with("wss:")
+            || (server_ca.is_empty() && client_cert.is_empty()),
+        "TLS files require an HTTPS or WSS Gateway"
     );
     Ok(Checked {
         url,
@@ -479,6 +488,42 @@ mod tests {
         assert_eq!(desktop_matches(desktop, "prod").unwrap()[0].token, "tok");
         assert!(desktop_matches(desktop, "missing").unwrap().is_empty());
         assert!(tui_matches(br#"{"version":2,"gateways":[]}"#, "prod").is_err());
+    }
+
+    #[test]
+    fn saved_gateways_accept_tunnel_urls_in_the_terminal_ui_form() {
+        for (raw, saved) in [
+            ("WSS://Gateway.Example:443/", "wss://gateway.example"),
+            (
+                "wss://gateway.example:8443/Supertag",
+                "wss://gateway.example:8443/Supertag",
+            ),
+            ("ws://127.0.0.1:80/tunnel/", "ws://127.0.0.1/tunnel/"),
+            ("ws://[::1]:7001", "ws://[::1]:7001"),
+            ("https://Gateway.Example:443/", "https://gateway.example"),
+        ] {
+            assert_eq!(gateway_origin(raw).unwrap(), saved, "{raw}");
+        }
+        for raw in [
+            "ws://gateway.example",
+            "ws://localhost:7001",
+            "wss://user:secret@gateway.example",
+            "wss://gateway.example/?token=secret",
+            "wss://gateway.example/#secret",
+            "https://gateway.example/path",
+        ] {
+            assert!(gateway_origin(raw).is_err(), "{raw}");
+        }
+        let gateway = |url: &str| NewGateway {
+            name: "tunnel".into(),
+            url: url.into(),
+            token: "token".into(),
+            server_ca_file: Some("/ca.pem".into()),
+            client_cert_file: None,
+            client_key_file: None,
+        };
+        assert!(check(&gateway("wss://gateway.example/supertag")).is_ok());
+        assert!(check(&gateway("ws://127.0.0.1:7001")).is_err());
     }
 
     #[test]

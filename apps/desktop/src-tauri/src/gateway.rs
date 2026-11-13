@@ -9,6 +9,7 @@ use supertag_protocol::{
         operator_client::OperatorClient,
     },
 };
+use supertag_transport::{Target, tunneled_uri};
 use tokio::sync::{Mutex, RwLock};
 use tonic::{
     Code, Request, Status,
@@ -57,9 +58,9 @@ struct Session {
 }
 
 impl Session {
-    async fn connect(endpoint: Endpoint, token: &str) -> Result<Self> {
+    async fn connect(target: Target, token: &str) -> Result<Self> {
         let authorization = bearer(token)?;
-        let channel = endpoint.connect().await.map_err(|_| {
+        let channel = target.connect().await.map_err(|_| {
             "Could not connect to the Gateway. Check its address and TLS certificate.".to_owned()
         })?;
         // The Gateway refuses every call that does not name a negotiated version.
@@ -307,11 +308,17 @@ impl GatewayState {
     }
 }
 
-fn endpoint(gateway: &str) -> Result<Endpoint> {
+/// `https://` and loopback `http://` URLs dial native gRPC. `wss://` and loopback `ws://` URLs
+/// carry the same connection through a WebSocket tunnel, which may have a path; the Gateway's
+/// TLS still runs inside a `wss://` tunnel.
+fn endpoint(gateway: &str) -> Result<Target> {
     if gateway.contains(['#', '\\']) {
         return Err("Enter a valid Gateway origin without a fragment.".into());
     }
-    let endpoint = Endpoint::from_shared(gateway.trim().to_owned())
+    let gateway = gateway.trim();
+    let invalid = "The Gateway URL must be an origin without credentials, path, or query, or a tunnel URL without credentials or query.";
+    let tunnel = tunneled_uri(gateway).map_err(|_| invalid.to_owned())?;
+    let endpoint = Endpoint::from_shared(tunnel.clone().unwrap_or_else(|| gateway.to_owned()))
         .map_err(|_| "Enter a valid Gateway URL.".to_owned())?;
     let uri = endpoint.uri();
     let authority = uri.authority().ok_or("Enter a Gateway host.")?;
@@ -320,9 +327,7 @@ fn endpoint(gateway: &str) -> Result<Endpoint> {
         || uri.query().is_some()
         || uri.port_u16() == Some(0)
     {
-        return Err(
-            "The Gateway URL must be an origin without credentials, path, or query.".into(),
-        );
+        return Err(invalid.into());
     }
     let tls = match uri.scheme_str() {
         Some("https") => true,
@@ -335,22 +340,30 @@ fn endpoint(gateway: &str) -> Result<Endpoint> {
                 .is_ok_and(|ip| ip.is_loopback())
             {
                 return Err(
-                    "HTTP requires a loopback IP address. Use HTTPS for a remote Gateway.".into(),
+                    "HTTP and WS require a loopback IP address. Use HTTPS or WSS for a remote Gateway."
+                        .into(),
                 );
             }
             false
         }
-        _ => return Err("The Gateway URL must use HTTP or HTTPS.".into()),
+        _ => return Err("The Gateway URL must use HTTP, HTTPS, WS, or WSS.".into()),
     };
+    // A tunnel dial also covers the outer TLS and the WebSocket upgrade, and a platform proxy
+    // may hold the upgrade while it starts a Gateway that scaled to zero.
     let endpoint = endpoint
-        .connect_timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(if tunnel.is_some() { 30 } else { 5 }))
         .timeout(TIMEOUT);
-    if tls {
+    let endpoint = if tls {
         endpoint
             .tls_config(ClientTlsConfig::new().with_native_roots())
-            .map_err(|_| "Could not configure Gateway TLS.".into())
+            .map_err(|_| "Could not configure Gateway TLS.".to_owned())?
     } else {
-        Ok(endpoint)
+        endpoint
+    };
+    match tunnel {
+        Some(_) => Target::tunnel(gateway, endpoint, None)
+            .map_err(|_| "Could not configure the Gateway tunnel.".into()),
+        None => Ok(Target::native(endpoint)),
     }
 }
 

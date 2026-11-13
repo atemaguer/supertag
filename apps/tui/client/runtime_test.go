@@ -25,6 +25,20 @@ import (
 
 func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	t.Helper()
+	server, target := testGateway(t, handler, secure)
+	target.URL = server.URL
+	c, err := NewRuntimeV2(target, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	return c
+}
+
+// testGateway serves handler as a Gateway speaking binary gRPC over HTTP/2, with TLS when
+// secure, and returns the target that trusts it, without a URL.
+func testGateway(t *testing.T, handler http.Handler, secure bool) (*httptest.Server, Target) {
+	t.Helper()
 	negotiation := testNegotiation(t, []uint32{2})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 || r.Header.Get("Content-Type") != "application/grpc" {
@@ -60,13 +74,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 		server.Config.Protocols.SetUnencryptedHTTP2(true)
 		server.Start()
 	}
-	target.URL = server.URL
-	c, err := NewRuntimeV2(target, "test-version")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(c.Close)
-	return c
+	return server, target
 }
 
 // testNegotiation answers ProtocolNegotiation.Negotiate as a Gateway speaking versions.
@@ -482,6 +490,14 @@ func TestRuntimeV2RejectsUnsafeTargets(t *testing.T) {
 		{URL: "https://user@example.test", Token: "token"},
 		{URL: "https://example.test", Token: "token", ClientKeyFile: "key.pem"},
 		{URL: "https://example.test"},
+		{URL: "ws://example.test", Token: "token"},
+		{URL: "ws://localhost/tunnel", Token: "token"},
+		{URL: "ws://127.0.0.1", Token: "token", ClientCertFile: "cert.pem", ClientKeyFile: "key.pem"},
+		{URL: "wss://user@example.test", Token: "token"},
+		{URL: "wss://example.test/tunnel?parameter", Token: "token"},
+		{URL: "wss://example.test/#fragment", Token: "token"},
+		{URL: "wss://example.test", Token: "token", ClientCertFile: "cert.pem"},
+		{URL: "ftp://example.test", Token: "token"},
 	} {
 		if _, err := NewRuntimeV2(target, "test-version"); err == nil {
 			t.Errorf("invalid target %q was accepted", target.URL)

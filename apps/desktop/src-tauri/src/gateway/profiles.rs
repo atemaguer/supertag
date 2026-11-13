@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tonic::transport::Endpoint;
+use supertag_transport::Target;
 
 use super::{GatewayState, Result, Session, Tag, bearer, endpoint};
 
@@ -164,14 +164,17 @@ impl Profiles {
     }
 }
 
-fn gateway_origin(address: &str) -> Result<(String, Endpoint)> {
+/// The form a Gateway is saved under: its origin, plus the path of a tunnel URL.
+fn gateway_origin(address: &str) -> Result<(String, Target)> {
     if address.len() > MAX_ORIGIN_BYTES {
         return Err("Enter a Gateway URL of up to 2048 characters.".into());
     }
     let checked = endpoint(address)?;
-    let url =
-        tauri::Url::parse(&checked.uri().to_string()).map_err(|_| "Enter a valid Gateway URL.")?;
-    let origin = url.origin().ascii_serialization();
+    let url = tauri::Url::parse(&checked.url()).map_err(|_| "Enter a valid Gateway URL.")?;
+    let mut origin = url.origin().ascii_serialization();
+    if matches!(url.scheme(), "ws" | "wss") && url.path() != "/" {
+        origin.push_str(url.path());
+    }
     let endpoint = endpoint(&origin)?;
     Ok((origin, endpoint))
 }
@@ -252,7 +255,7 @@ impl GatewayState {
         path: &Path,
         mut profiles: Profiles,
         origin: String,
-        endpoint: Endpoint,
+        endpoint: Target,
         token: &str,
     ) -> Result<GatewayActivation> {
         let generation = self.0.read().await.generation;

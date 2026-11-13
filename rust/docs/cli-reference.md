@@ -376,7 +376,7 @@ Check a deployed Gateway: health, authentication, the Control Plane hop, and rea
 Usage: supertag verify deployment [OPTIONS] <URL>
 
 Arguments:
-  <URL>  The Gateway's public HTTPS origin, such as https://supertag.example.com
+  <URL>  The Gateway's public HTTPS origin, such as https://supertag.example.com, or its wss:// tunnel URL
 
 Options:
       --env-file <ENV_FILE>  Private env file that holds SUPERTAG_OPERATOR_TOKEN
@@ -2240,7 +2240,7 @@ Check an operator token against a Gateway, then save the Gateway under a name fo
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
 Arguments:
-  <URL>  The Gateway origin, such as https://supertag.example.com
+  <URL>  The Gateway origin, such as https://supertag.example.com, or its wss:// tunnel URL
 
 Options:
       --name <NAME>

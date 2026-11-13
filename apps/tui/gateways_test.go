@@ -333,3 +333,38 @@ func TestGatewaySwitchCancelsInflightRuntimeRequest(t *testing.T) {
 		t.Fatal("old Gateway cancellation poisoned the new model")
 	}
 }
+
+func TestSavedGatewaysAcceptWebSocketTunnelURLs(t *testing.T) {
+	for _, url := range []string{"wss://gateway.example", "wss://gateway.example:8443/supertag", "ws://127.0.0.1:7001/tunnel", "ws://[::1]:7001"} {
+		if err := validateSavedGateway(client.Target{Name: "tunnel", URL: url, Token: "credential"}); err != nil {
+			t.Errorf("%s: %v", url, err)
+		}
+	}
+	tls := client.Target{Name: "tunnel", URL: "wss://gateway.example/supertag", Token: "credential", ServerCAFile: "/ca.pem", ClientCertFile: "/c.pem", ClientKeyFile: "/c.key"}
+	if err := validateSavedGateway(tls); err != nil {
+		t.Errorf("wss with TLS files: %v", err)
+	}
+	for _, target := range []client.Target{
+		{Name: "tunnel", URL: "ws://gateway.example", Token: "credential"},
+		{Name: "tunnel", URL: "ws://localhost:7001", Token: "credential"},
+		{Name: "tunnel", URL: "ws://127.0.0.1:7001", Token: "credential", ServerCAFile: "/ca.pem"},
+		{Name: "tunnel", URL: "wss://user:secret@gateway.example", Token: "credential"},
+		{Name: "tunnel", URL: "wss://gateway.example/?token=secret", Token: "credential"},
+		{Name: "tunnel", URL: "wss://gateway.example/#secret", Token: "credential"},
+		{Name: "tunnel", URL: "https://gateway.example/path", Token: "credential"},
+	} {
+		if validateSavedGateway(target) == nil {
+			t.Errorf("accepted %s", target.URL)
+		}
+	}
+	for raw, want := range map[string]string{
+		"WSS://Gateway.Example:443/":          "wss://gateway.example",
+		"wss://gateway.example:8443/Supertag": "wss://gateway.example:8443/Supertag",
+		"ws://127.0.0.1:80/tunnel/":           "ws://127.0.0.1/tunnel/",
+		"https://Gateway.Example:443/":        "https://gateway.example",
+	} {
+		if got := gatewayOrigin(raw); got != want {
+			t.Errorf("gatewayOrigin(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

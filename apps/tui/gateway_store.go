@@ -107,15 +107,16 @@ func validateSavedGateway(target client.Target) error {
 		return errors.New("enter a Gateway name of 1 to 64 characters")
 	}
 	u, err := url.Parse(target.URL)
-	if err != nil || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || len(target.URL) > 2048 {
-		return errors.New("enter a Gateway origin without credentials, path, query or fragment")
+	tunnel := err == nil && (u.Scheme == "ws" || u.Scheme == "wss")
+	if err != nil || u.Hostname() == "" || u.User != nil || (!tunnel && u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https" && !tunnel) || len(target.URL) > 2048 {
+		return errors.New("enter a Gateway origin without credentials, path, query or fragment, or a ws or wss tunnel URL without credentials, query or fragment")
 	}
-	if u.Scheme == "http" {
+	if u.Scheme == "http" || u.Scheme == "ws" {
 		if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
-			return errors.New("remote Gateways require HTTPS; HTTP requires a loopback IP")
+			return errors.New("remote Gateways require HTTPS or WSS; HTTP and WS require a loopback IP")
 		}
 		if target.ServerCAFile != "" || target.ClientCertFile != "" || target.ClientKeyFile != "" {
-			return errors.New("TLS files require an HTTPS Gateway")
+			return errors.New("TLS files require an HTTPS or WSS Gateway")
 		}
 	}
 	if (target.ClientCertFile == "") != (target.ClientKeyFile == "") {
@@ -132,14 +133,17 @@ func validateSavedGateway(target client.Target) error {
 	return nil
 }
 
+// gatewayOrigin is the form a Gateway URL is saved and compared in: lowercase scheme and host
+// without a default port, plus the path of a ws or wss tunnel URL.
 func gatewayOrigin(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return raw
 	}
+	scheme := strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Hostname())
 	port := u.Port()
-	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+	if ((scheme == "https" || scheme == "wss") && port == "443") || ((scheme == "http" || scheme == "ws") && port == "80") {
 		port = ""
 	}
 	if port != "" {
@@ -147,7 +151,11 @@ func gatewayOrigin(raw string) string {
 	} else if strings.Contains(host, ":") {
 		host = "[" + host + "]"
 	}
-	return strings.ToLower(u.Scheme) + "://" + host
+	path := ""
+	if (scheme == "ws" || scheme == "wss") && u.EscapedPath() != "/" {
+		path = u.EscapedPath()
+	}
+	return scheme + "://" + host + path
 }
 
 func (s *gatewayStore) update(change func(*gatewayProfiles) error) (gatewayProfiles, error) {
