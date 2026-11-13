@@ -782,7 +782,7 @@ fn shell_path(path: &Path) -> Result<String> {
 
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn bare_launcher_opens_the_gateway_chooser_without_a_local_service() -> Result<()> {
+async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
     let binary =
         std::env::var_os("SUPERTAG_RUST_TEST_TUI").context("terminal UI binary required")?;
     let directory = tempfile::Builder::new()
@@ -797,6 +797,39 @@ async fn bare_launcher_opens_the_gateway_chooser_without_a_local_service() -> Re
         shell_path(Path::new(&binary))?,
         shell_path(Path::new(BINARY))?,
     );
+
+    let mut services = Vec::new();
+    let mut addresses = Vec::new();
+    for (tag, token) in [
+        ("first-tag", "first-fixture-token"),
+        ("second-tag", "second-fixture-token"),
+    ] {
+        let private_token = Uuid::new_v4().to_string();
+        let mut control = command(&["control-plane"]);
+        control.env("SUPERTAG_GATEWAY_TOKEN", &private_token).env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join(format!("{tag}.sqlite")).display()
+            ),
+        );
+        let (plane, private) = service(control).await?;
+        let (public, address) =
+            service(gateway(&private, &private_token, token, "operator:tui")).await?;
+        operator_client::OperatorClient::new(channel(&address).await?)
+            .put_tag(authenticated_request(
+                PutTagRequest {
+                    tag_id: tag.into(),
+                    ..Default::default()
+                },
+                token,
+                None,
+            )?)
+            .await?;
+        addresses.push((address, token));
+        services.extend([plane, public]);
+    }
+
     tmux.run(&[
         "new-session",
         "-d",
@@ -810,8 +843,54 @@ async fn bare_launcher_opens_the_gateway_chooser_without_a_local_service() -> Re
     ])
     .await?;
     tmux.wait_for("Gateways").await?;
-    tmux.run(&["send-keys", "-t", "runtime", "a"]).await?;
-    tmux.wait_for("Save a Gateway").await?;
+    for (index, (address, token)) in addresses.iter().enumerate() {
+        if index > 0 {
+            tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
+            tmux.wait_for("Gateways").await?;
+        }
+        tmux.run(&["send-keys", "-t", "runtime", "a"]).await?;
+        tmux.wait_for("Save a Gateway").await?;
+        let name = if index == 0 { "First" } else { "Second" };
+        for (field, value) in [name, address.as_str(), token].into_iter().enumerate() {
+            if field > 0 {
+                tmux.run(&["send-keys", "-t", "runtime", "Tab"]).await?;
+            }
+            tmux.run(&["send-keys", "-t", "runtime", "-l", value])
+                .await?;
+        }
+        let form = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+        ensure!(!form.contains(token), "the Gateway token was visible");
+        tmux.run(&["send-keys", "-t", "runtime", "C-s"]).await?;
+        let tag = if index == 0 {
+            "first-tag"
+        } else {
+            "second-tag"
+        };
+        tmux.wait_for(&format!("Say something to {tag}.")).await?;
+    }
+    let second = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    ensure!(
+        !second.contains("first-tag"),
+        "the previous Gateway roster was visible"
+    );
+
+    tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
+    tmux.wait_for("Gateways").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Up", "Enter"])
+        .await?;
+    tmux.wait_for("Say something to first-tag.").await?;
+    let first = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    ensure!(
+        !first.contains("second-tag"),
+        "the other Gateway roster was visible"
+    );
+
+    tmux.run(&["respawn-pane", "-k", "-t", "runtime", &shell])
+        .await?;
+    tmux.wait_for("Say something to first-tag.").await?;
+    for mut child in services {
+        child.kill().await?;
+    }
     Ok(())
 }
 
