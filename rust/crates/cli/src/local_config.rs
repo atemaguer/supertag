@@ -14,6 +14,7 @@ use std::{
 };
 
 const MAX_BYTES: usize = 1024 * 1024;
+const MAX_PROVISION_SOURCES: usize = 256;
 #[derive(Clone, Copy, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Restart {
@@ -50,6 +51,8 @@ enum Service {
         credentials: Option<String>,
         #[serde(default)]
         restart: Restart,
+        #[serde(default)]
+        provision: Vec<ProvisionEntry>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -80,6 +83,12 @@ enum Service {
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
+enum ProvisionEntry {
+    File(PathBuf),
+    Inline(serde_json::Value),
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
 enum Models {
     One(String),
     Many(Vec<String>),
@@ -107,6 +116,7 @@ pub struct Config {
 }
 pub struct Plane {
     pub listen: SocketAddr,
+    pub provision: Vec<crate::manifests::ProvisionSource>,
 }
 #[derive(Clone)]
 pub struct Host {
@@ -144,8 +154,9 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
         Err(e) if !explicit && e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e).context("read local services file"),
     };
+    let metadata = file.metadata()?;
     ensure!(
-        file.metadata()?.is_file(),
+        metadata.is_file(),
         "local services configuration must be a regular file"
     );
     let mut bytes = Vec::new();
@@ -159,7 +170,18 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
         .parent()
         .context("configuration directory missing")?
         .to_owned();
-    Ok(Some(parse(&bytes, &base)?))
+    let config = parse(&bytes, &base)?;
+    if config
+        .plane
+        .as_ref()
+        .is_some_and(|plane| !plane.provision.is_empty())
+    {
+        ensure!(
+            metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o022 == 0,
+            "provisioning configuration must be owned by this user and not writable by others"
+        );
+    }
+    Ok(Some(config))
 }
 fn parse(bytes: &[u8], base: &Path) -> Result<Config> {
     let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000,max_total_scalar_bytes:MAX_BYTES}};
@@ -184,6 +206,7 @@ fn parse(bytes: &[u8], base: &Path) -> Result<Config> {
             url,
             credentials,
             restart,
+            provision,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -216,7 +239,33 @@ fn parse(bytes: &[u8], base: &Path) -> Result<Config> {
                     "local Gateway URL must match its listener"
                 );
             }
-            plane = Some(Plane { listen });
+            ensure!(
+                provision.len() <= MAX_PROVISION_SOURCES,
+                "configure at most 256 provisioning sources"
+            );
+            let mut sources = Vec::new();
+            for source in provision {
+                match source {
+                    ProvisionEntry::File(path) => {
+                        sources.extend(provision_files(base, path)?);
+                    }
+                    ProvisionEntry::Inline(value) => {
+                        ensure!(
+                            value.is_object(),
+                            "inline provision entries must be resource objects"
+                        );
+                        sources.push(crate::manifests::ProvisionSource::Inline(value.clone()));
+                    }
+                }
+                ensure!(
+                    sources.len() <= MAX_PROVISION_SOURCES,
+                    "configure at most 256 provisioning sources"
+                );
+            }
+            plane = Some(Plane {
+                listen,
+                provision: sources,
+            });
             plane_name = Some(name.clone());
         }
     }
@@ -406,6 +455,57 @@ fn resolve_path(base: &Path, path: &Path) -> Result<PathBuf> {
         base.join(path)
     })
 }
+fn provision_files(base: &Path, path: &Path) -> Result<Vec<crate::manifests::ProvisionSource>> {
+    let path = resolve_path(base, path)?;
+    let metadata = std::fs::symlink_metadata(&path).context("inspect provisioning source")?;
+    if !metadata.is_dir() {
+        // The shared manifest loader validates every selected leaf with O_NOFOLLOW.
+        return Ok(vec![crate::manifests::ProvisionSource::File(path)]);
+    }
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+        .open(&path)
+        .context("open provisioning directory")?;
+    let opened = directory.metadata()?;
+    ensure!(
+        opened.uid() == unsafe { libc::geteuid() }
+            && opened.mode() & 0o022 == 0
+            && opened.dev() == metadata.dev()
+            && opened.ino() == metadata.ino(),
+        "provisioning directories must be owned by this user and not writable by others"
+    );
+    let mut paths = Vec::new();
+    for (index, entry) in std::fs::read_dir(&path)
+        .context("read provisioning directory")?
+        .enumerate()
+    {
+        ensure!(index < 4096, "provisioning directory has too many entries");
+        let path = entry?.path();
+        if matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("yaml" | "yml" | "json")
+        ) {
+            // Include selected symlinks and nonregular files so the shared loader
+            // rejects them instead of silently omitting intended configuration.
+            paths.push(path);
+            ensure!(
+                paths.len() <= MAX_PROVISION_SOURCES,
+                "configure at most 256 provisioning sources"
+            );
+        }
+    }
+    let after = std::fs::symlink_metadata(&path)?;
+    ensure!(
+        after.is_dir() && after.dev() == opened.dev() && after.ino() == opened.ino(),
+        "provisioning directory changed during selection"
+    );
+    paths.sort();
+    Ok(paths
+        .into_iter()
+        .map(crate::manifests::ProvisionSource::File)
+        .collect())
+}
 fn validate_endpoint(value: &str) -> Result<()> {
     let uri: tonic::transport::Uri = value.parse().context("invalid Gateway endpoint")?;
     ensure!(
@@ -513,6 +613,68 @@ secrets:
                 .expect("must reject");
             assert!(!error.to_string().contains("literal-secret"));
         }
+    }
+    #[test]
+    fn provisioning_configuration_requires_owner_control() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("supertag.yaml");
+        fs::write(
+            &path,
+            r#"services:
+  control-plane:
+    type: control-plane
+    provision:
+      - apiVersion: supertag/v1
+        kind: Tag
+        metadata: {name: engineer}
+        spec: {instructions: Work}
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(load(Some(path.clone()), temp.path()).is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            load(Some(path), temp.path())
+                .unwrap()
+                .unwrap()
+                .plane
+                .unwrap()
+                .provision
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn provisioning_directories_are_bounded_and_do_not_hide_unsafe_leaves() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let temp = tempfile::tempdir().unwrap();
+        let resources = temp.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::set_permissions(&resources, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(resources.join("b.yaml"), "{}").unwrap();
+        fs::write(resources.join("a.json"), "{}").unwrap();
+        fs::write(resources.join("ignored.txt"), "not a manifest").unwrap();
+        symlink(resources.join("a.json"), resources.join("c.yml")).unwrap();
+        let sources = provision_files(temp.path(), Path::new("resources")).unwrap();
+        let paths = sources
+            .iter()
+            .map(|source| match source {
+                crate::manifests::ProvisionSource::File(path) => {
+                    path.file_name().unwrap().to_str().unwrap()
+                }
+                _ => panic!("directory must expand to leaf paths"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["a.json", "b.yaml", "c.yml"]);
+        fs::set_permissions(&resources, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(provision_files(temp.path(), Path::new("resources")).is_err());
+        fs::set_permissions(&resources, fs::Permissions::from_mode(0o755)).unwrap();
+        for i in 0..254 {
+            fs::write(resources.join(format!("{i}.yaml")), "{}").unwrap();
+        }
+        assert!(provision_files(temp.path(), Path::new("resources")).is_err());
     }
     #[test]
     fn private_file_secrets_are_bounded_and_no_follow() {

@@ -370,3 +370,254 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     server.stop().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn local_provision_creates_ordered_resources_once_and_preserves_operator_edits() -> Result<()>
+{
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("provisioned");
+    let file = temp.path().join("supertag.yaml");
+    let resources = temp.path().join("resources");
+    fs::create_dir(&resources)?;
+    fs::write(
+        resources.join("policy.yaml"),
+        r#"apiVersion: supertag/v1
+kind: Role
+metadata: {name: engineer-role}
+spec: {purpose: Read fixture evidence., permissionSets: [read-fixture]}
+---
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: {name: read-fixture}
+spec: {permissions: [{target: runtime, action: 'files:read'}]}
+"#,
+    )?;
+    let mut config = serde_json::json!({"services":{
+        "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":[
+            {"apiVersion":"supertag/v1","kind":"Objective","metadata":{"name":"fixture-objective"},"spec":{"ownerTag":"engineer","ongoing":true,"outcome":"Read provisioned fixture evidence."}},
+            "resources",
+            {"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"engineer"},"spec":{"instructions":"Initially provisioned","roles":["engineer-role"]}}
+        ]},
+        "worker":{"type":"host","adapter":ADAPTER}
+    }});
+    yaml(&file, &config)?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+    let endpoint = supervisor.ready()?;
+    let credential = token(&state)?;
+    let channel = Channel::from_shared(endpoint.clone())?.connect().await?;
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut objectives = objectives_client::ObjectivesClient::new(channel.clone());
+    let mut policy = policy_catalog_client::PolicyCatalogClient::new(channel);
+    let objective = objectives
+        .get_objective(authenticated_request(
+            GetObjectiveRequest {
+                objective_id: "fixture-objective".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let task = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: objective.starting_task_id.clone(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert!(task.allowed_actions.iter().any(|a| a == "files:read"));
+    assert_eq!(
+        task.policy_snapshot
+            .as_ref()
+            .context("initial policy snapshot missing")?
+            .roles
+            .len(),
+        1
+    );
+    timeout(WAIT, async {
+        loop {
+            let current = operator
+                .get_task(authenticated_request(
+                    GetTaskRequest {
+                        task_id: task.task_id.clone(),
+                    },
+                    &credential,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if current.state() == TaskState::Succeeded {
+                break Ok::<_, anyhow::Error>(());
+            }
+            ensure!(current.state() != TaskState::Failed);
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+    let original = operator
+        .get_tag(authenticated_request(
+            GetTagRequest {
+                tag_id: "engineer".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let edited = operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: original.tag_id,
+                instructions: "Edited by operator".into(),
+                expected_revision: Some(original.revision),
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let assignments = policy
+        .list_role_assignments(authenticated_request(
+            ListRoleAssignmentsRequest {
+                tag_id: "engineer".into(),
+                limit: 10,
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let assignment = assignments
+        .assignments
+        .first()
+        .context("assignment missing")?;
+    policy
+        .deactivate_role_assignment(authenticated_request(
+            DeactivateRoleAssignmentRequest {
+                operation_id: Uuid::new_v4().to_string(),
+                assignment_id: assignment.assignment_id.clone(),
+                expected_revision: assignment.revision,
+            },
+            &credential,
+            None,
+        )?)
+        .await?;
+    supervisor.stop().await?;
+    config["services"]["control-plane"]["provision"].as_array_mut().unwrap().push(serde_json::json!({"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"later"},"spec":{"instructions":"Added later"}}));
+    yaml(&file, &config)?;
+    let mut restarted = Process::spawn(&state, Some(&file), &[])?;
+    assert_eq!(restarted.ready()?, endpoint);
+    let channel = Channel::from_shared(endpoint)?.connect().await?;
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let current = operator
+        .get_tag(authenticated_request(
+            GetTagRequest {
+                tag_id: "engineer".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(current, edited);
+    assert_eq!(
+        operator
+            .get_tag(authenticated_request(
+                GetTagRequest {
+                    tag_id: "later".into()
+                },
+                &credential,
+                None
+            )?)
+            .await?
+            .into_inner()
+            .instructions,
+        "Added later"
+    );
+    let objective_again = objectives_client::ObjectivesClient::new(channel.clone())
+        .get_objective(authenticated_request(
+            GetObjectiveRequest {
+                objective_id: "fixture-objective".into(),
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(objective_again.starting_task_id, objective.starting_task_id);
+    let assignments = policy_catalog_client::PolicyCatalogClient::new(channel)
+        .list_role_assignments(authenticated_request(
+            ListRoleAssignmentsRequest {
+                tag_id: "engineer".into(),
+                limit: 10,
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(assignments.assignments.len(), 1);
+    assert_eq!(
+        assignments.assignments[0].status(),
+        RoleAssignmentStatus::Inactive
+    );
+    restarted.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()> {
+    for linked in [false, true] {
+        let temp = tempfile::tempdir()?;
+        let state = temp.path().join("unsafe");
+        let file = temp.path().join("supertag.yaml");
+        let resource = temp.path().join("resource.yaml");
+        fs::write(
+            &resource,
+            "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: unsafe}\nspec: {instructions: untrusted}\n",
+        )?;
+        let selection = if linked {
+            let directory = temp.path().join("resources");
+            fs::create_dir(&directory)?;
+            std::os::unix::fs::symlink(&resource, directory.join("resource.yaml"))?;
+            "resources"
+        } else {
+            fs::set_permissions(&resource, fs::Permissions::from_mode(0o666))?;
+            "resource.yaml"
+        };
+        yaml(
+            &file,
+            &serde_json::json!({"services":{
+                "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":[selection]},
+                "worker":{"type":"host","adapter":ADAPTER}
+            }}),
+        )?;
+        let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+        assert!(supervisor.ready().is_err());
+        let status = timeout(WAIT, async {
+            loop {
+                if let Some(status) = supervisor.child.try_wait()? {
+                    break Ok::<_, std::io::Error>(status);
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await??;
+        assert!(!status.success());
+        assert!(!state.join("hosts").exists());
+        assert!(!state.join("endpoint").exists());
+        let address = fs::read_to_string(state.join("gateway-address"))?;
+        assert!(
+            tokio::net::TcpStream::connect(address.trim())
+                .await
+                .is_err()
+        );
+    }
+    Ok(())
+}

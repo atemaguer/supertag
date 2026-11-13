@@ -601,7 +601,7 @@ pub async fn configured(
             .as_ref()
             .map(|_| Credentials::load_or_create(&directory))
             .transpose()?;
-        let endpoint = if let Some(plane) = &config.plane {
+        let endpoint = if let Some(plane) = config.plane {
             // An enrolled installation pins its Gateway origin. Reuse an initially selected
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
@@ -626,6 +626,18 @@ pub async fn configured(
                     .expect("loopback origin")
                     .as_bytes(),
             )?;
+            if !plane.provision.is_empty() {
+                let channel = crate::network::endpoint(endpoint.clone(), false)
+                    .await?
+                    .connect()
+                    .await?;
+                crate::manifests::provision(
+                    channel,
+                    &credentials.as_ref().expect("local credentials").operator,
+                    plane.provision,
+                )
+                .await?;
+            }
             Some(endpoint)
         } else {
             None
