@@ -97,10 +97,13 @@ pub enum ObjectiveCommand {
     Pause(Action),
     Resume(Action),
     Cancel(Action),
+    /// Approve the owner's assessment of an Objective ready for review, or
+    /// request changes with feedback the owner works from.
     Review {
         objective_id: String,
         #[arg(value_enum)]
         decision: ReviewDecision,
+        /// What to change; required to request changes, refused on approval.
         #[arg(long, default_value = "")]
         feedback: String,
         #[arg(long)]

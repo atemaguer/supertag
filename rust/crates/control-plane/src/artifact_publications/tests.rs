@@ -147,7 +147,7 @@ async fn exercise(url: &str) {
                 objective_id: "source".into(),
                 operation_id: "review".into(),
                 approved: true,
-                feedback: "Accepted exact submitted evidence".into(),
+                feedback: String::new(),
             },
         )
         .await

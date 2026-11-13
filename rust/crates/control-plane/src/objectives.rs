@@ -87,6 +87,29 @@ async fn report_completion_in(
     .await
 }
 
+/// The home-thread text of a limit event (TS `budgetNoticeText` over
+/// `inboxLimitReason`): an approaching deadline states the time left when posted.
+fn home_limit_text(record: &Record, notice: &limits::Notice, now_ms: i64) -> String {
+    let reason = match (notice.kind, record.limits.deadline) {
+        (limits::NoticeKind::ObjectiveDeadlineApproaching, Some(deadline)) => {
+            let left = deadline.as_millis() - now_ms;
+            if left > 0 {
+                format!(
+                    "The Objective deadline {deadline} is near: {} left.",
+                    limits::readable_duration(left)
+                )
+            } else {
+                format!("The Objective deadline {deadline} has passed.")
+            }
+        }
+        _ => notice.message.clone(),
+    };
+    let id = &record.value.objective_id;
+    format!(
+        "Objective {id:?}: {reason} Inspect supertag describe objective {id}. An operator can change the budget or deadline with supertag objective set-limits."
+    )
+}
+
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidArgument(message.into())
 }
@@ -941,10 +964,16 @@ pub(crate) async fn review_in(
     crate::artifact_publications::review_in(tx, &record.value, principal, input.approved, now_ms)
         .await?;
     if input.approved {
-        record.change_status(ObjectiveStatus::Completed, now_ms);
+        // Approval accepts the owner's assessment as it stands (TS `approveObjective`);
+        // an operator who wants it changed requests changes instead.
         if !input.feedback.trim().is_empty() {
-            record.set_summary(&input.feedback);
+            return Err(invalid(
+                "approval takes no feedback; request changes to revise the owner's assessment",
+            ));
         }
+        // The ready signal always records a non-empty assessment, so TS's
+        // "Approved by operator" fallback has nothing to fill.
+        record.change_status(ObjectiveStatus::Completed, now_ms);
         cancel_open_in(tx, &input.objective_id, None).await?;
         report_completion_in(tx, &record, now_ms).await?;
     } else {
@@ -1387,20 +1416,17 @@ pub(crate) async fn reconcile_in(
     save_in(tx, &record).await?;
     for notice in limits::notices_to_deliver(&record.limits) {
         internal_turn_in(tx, &record, &notice.key, &notice.message, "notice", now_ms).await?;
-        // A person in the Objective's home thread learns of a reached limit directly.
-        if matches!(
-            notice.kind,
-            limits::NoticeKind::ObjectiveBudgetExhausted | limits::NoticeKind::DeadlinePassed
-        ) {
+        // A person in the Objective's home thread learns of every limit event: the
+        // budget warning, an approaching deadline, and a reached budget or deadline
+        // (TS `objectiveLimitEvents` through `BudgetNotifications`). Setting a
+        // deadline is the operator's own act and reaches only the owner.
+        if notice.kind != limits::NoticeKind::ObjectiveDeadlineSet {
             crate::surface_objectives::home_report_in(
                 tx,
                 &record.value.objective_id,
                 &record.value.owner_tag_id,
                 &format!("limit:{}", notice.key),
-                &format!(
-                    "Objective {:?}: {} Inspect supertag describe objective {}. An operator can change the budget or deadline with supertag objective set-limits.",
-                    record.value.objective_id, notice.message, record.value.objective_id
-                ),
+                &home_limit_text(&record, &notice, now_ms),
                 now_ms,
             )
             .await?;

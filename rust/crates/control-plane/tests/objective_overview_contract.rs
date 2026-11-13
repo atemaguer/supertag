@@ -233,6 +233,30 @@ async fn completion_reports(store: &Store, url: &str, host: &HostAuthority) {
             reviewed.objective_id
         )
     );
+    // Approval accepts the owner's assessment as it stands: feedback that would
+    // replace it is refused and leaves the Objective waiting for review.
+    assert!(matches!(
+        store
+            .review_objective(
+                OPERATOR,
+                &ReviewObjectiveRequest {
+                    objective_id: reviewed.objective_id.clone(),
+                    operation_id: "approve-docs-with-feedback".into(),
+                    approved: true,
+                    feedback: "Looks fine to me.".into(),
+                },
+            )
+            .await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    assert_eq!(
+        store
+            .get_objective(&reviewed.objective_id)
+            .await
+            .unwrap()
+            .status(),
+        ObjectiveStatus::ReadyForReview
+    );
     store
         .review_objective(
             OPERATOR,
@@ -698,22 +722,35 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
         .await
         .unwrap();
     let turn = claim(store, host, &objective.starting_task_id).await;
+    let usage = |sequence: u64, amount: u64| ReportAttemptUsageRequest {
+        attempt: Some(turn.clone()),
+        sequence,
+        native_usage: Some(NativeTokenUsage {
+            input_tokens: 10 * sequence,
+            total_tokens: Some(10 * sequence),
+            ..Default::default()
+        }),
+        amount_minor: Some(amount),
+        currency: Some("USD".into()),
+        estimated: false,
+    };
+    // The budget warning reaches the home thread before the budget runs out.
     store
-        .report_attempt_usage(
-            host,
-            &ReportAttemptUsageRequest {
-                attempt: Some(turn.clone()),
-                sequence: 1,
-                native_usage: Some(NativeTokenUsage {
-                    input_tokens: 10,
-                    total_tokens: Some(10),
-                    ..Default::default()
-                }),
-                amount_minor: Some(150),
-                currency: Some("USD".into()),
-                estimated: false,
-            },
-        )
+        .report_attempt_usage(host, &usage(1, 80))
+        .await
+        .unwrap();
+    store.sweep_objectives().await.unwrap();
+    store.sweep_objectives().await.unwrap();
+    let notices = home_replies(url, &format!("Objective {id:?}:")).await;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(
+        notices[0].contains("reached 80% of the Objective budget"),
+        "{}",
+        notices[0]
+    );
+    assert!(notices[0].contains(&format!("supertag describe objective {id}")));
+    store
+        .report_attempt_usage(host, &usage(2, 150))
         .await
         .unwrap();
     finish(
@@ -727,13 +764,12 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
     store.sweep_objectives().await.unwrap();
     store.sweep_objectives().await.unwrap();
     let notices = home_replies(url, &format!("Objective {id:?}:")).await;
-    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices.len(), 2, "{notices:?}");
     assert!(
-        notices[0].contains("reached the Objective budget"),
+        notices[1].contains("reached the Objective budget"),
         "{}",
-        notices[0]
+        notices[1]
     );
-    assert!(notices[0].contains(&format!("supertag describe objective {id}")));
     let view = overview(store, id).await;
     let pool = view.pool.as_ref().unwrap();
     assert!(pool.exhausted);
@@ -743,6 +779,105 @@ async fn budget_notice(store: &Store, url: &str, host: &HostAuthority) {
         view.notices
             .iter()
             .any(|notice| notice.kind == "objective_budget_exhausted")
+    );
+}
+
+/// An approaching and a passed deadline are each announced once in the home
+/// thread; setting the deadline reaches only the owner (TS `objectiveLimitEvents`
+/// through `BudgetNotifications`).
+async fn deadline_notices(store: &Store, url: &str, clock: &AtomicI64) {
+    let thread = "1794470400.100000";
+    let objective = surface_objective(store, thread, "Cut the release branch").await;
+    let id = objective.objective_id.as_str();
+    let deadline = NOW + 2 * 60 * 60 * 1000;
+    store
+        .set_objective_limits(
+            OPERATOR,
+            &SetObjectiveLimitsRequest {
+                objective_id: id.into(),
+                operation_id: "deadline".into(),
+                deadline_ms: Some(deadline),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store.sweep_objectives().await.unwrap();
+    let needle = format!("Objective {id:?}:");
+    let notices = || home_replies(url, &needle);
+    assert!(notices().await.is_empty(), "{:?}", notices().await);
+
+    // An hour before the deadline the thread hears how long is left.
+    clock.store(deadline - 60 * 60 * 1000, Ordering::SeqCst);
+    store.sweep_objectives().await.unwrap();
+    store.sweep_objectives().await.unwrap();
+    let posted = notices().await;
+    assert_eq!(posted.len(), 1, "{posted:?}");
+    assert!(
+        posted[0].contains("is near: about 1 hour left."),
+        "{}",
+        posted[0]
+    );
+    assert!(posted[0].contains(&format!("supertag describe objective {id}")));
+
+    // Once it passes the thread hears that new work is refused, once.
+    clock.store(deadline + 1, Ordering::SeqCst);
+    store.sweep_objectives().await.unwrap();
+    store.sweep_objectives().await.unwrap();
+    let posted = notices().await;
+    assert!(
+        posted
+            .iter()
+            .filter(|text| text.contains("passed. New Tasks and continuations are refused"))
+            .count()
+            == 1,
+        "{posted:?}"
+    );
+    assert!(
+        !posted
+            .iter()
+            .any(|text| text.contains("set the Objective deadline")),
+        "{posted:?}"
+    );
+}
+
+/// A report the home Tag can no longer accept is skipped; the completion it
+/// reports still stands. The store refuses to retire a Tag that owns an open
+/// Objective, so the test retires it directly to reach this defensive path.
+async fn skipped_report(store: &Store, url: &str, host: &HostAuthority) {
+    let objective = surface_objective(store, "1794470500.100000", "Archive the logs").await;
+    let turn = claim(store, host, &objective.starting_task_id).await;
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    sqlx::query("UPDATE supertag_v2_tags SET retired_at_ms=$1 WHERE tag_id='owner'")
+        .bind(NOW)
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    connection.close().await.unwrap();
+    finish(
+        store,
+        host,
+        &turn,
+        "Logs archived.",
+        ObjectiveSignal::Completed,
+    )
+    .await;
+    assert_eq!(
+        store
+            .get_objective(&objective.objective_id)
+            .await
+            .unwrap()
+            .status(),
+        ObjectiveStatus::Completed
+    );
+    assert!(
+        home_replies(
+            url,
+            &format!("Objective {} is completed", objective.objective_id)
+        )
+        .await
+        .is_empty()
     );
 }
 
@@ -827,12 +962,14 @@ async fn contract(url: String, part: usize) {
         1 => operator_completion(&store, &host).await,
         2 => objective_overview(&store, &host, &clock).await,
         3 => budget_notice(&store, &url, &host).await,
+        4 => deadline_notices(&store, &url, &clock).await,
+        5 => skipped_report(&store, &url, &host).await,
         _ => team_concurrency(&store, &host).await,
     }
     store.close().await;
 }
 
-const PARTS: usize = 5;
+const PARTS: usize = 7;
 
 #[tokio::test]
 async fn sqlite_objective_completion_and_overview() {
