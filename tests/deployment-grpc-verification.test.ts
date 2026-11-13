@@ -115,7 +115,7 @@ it.each([
 });
 
 afterEach(() => vi.unstubAllEnvs());
-it("selects the generated Fly gRPC profile through the CLI and rejects unsupported profiles", async () => {
+it("selects the generated Fly gRPC profile through the CLI and refuses platforms it no longer defines", async () => {
   vi.stubEnv("SUPERTAG_DATABASE_URL", "postgresql://test:password@db.example.com/supertag");
   vi.stubEnv("SUPERTAG_ADMIN_TOKEN", "private-admin-test");
   vi.stubEnv("SUPERTAG_COORDINATION_URL", "https://control.example.com");
@@ -124,5 +124,5 @@ it("selects the generated Fly gRPC profile through the CLI and rejects unsupport
   expect(result).not.toContain("private-admin-test");
   await expect(
     runDeploymentCommand(["check", "--platform", "render", "--transport", "grpc"]),
-  ).rejects.toThrow("template requires WebSocket");
+  ).rejects.toThrow("Deployment platform must be one of");
 });
