@@ -658,6 +658,22 @@ message ReportHostRequest {
   HarnessKind harness_kind = 6;
   repeated string workspace_ids = 7;
   HarnessExecutionProfile execution_profile = 8;
+  // Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
+  // When present, capacity and available_slots above are the sums of these entries.
+  repeated HostHarnessCapacity harnesses = 1500;
+}
+
+// One harness profile a Worker Host serves, with its own concurrent Attempt slots.
+message HostHarnessCapacity {
+  HarnessKind harness_kind = 1;
+  HarnessExecutionProfile execution_profile = 2;
+  uint32 capacity = 3;
+  uint32 available_slots = 4;
+}
+
+// Stored form of a Host's reported harness slots.
+message HostHarnessCapacities {
+  repeated HostHarnessCapacity harnesses = 1;
 }
 
 message WorkerHostStatus {
@@ -676,6 +692,7 @@ message WorkerHostStatus {
   optional int64 presence_expires_at_ms = 13;
   optional int64 revoked_at_ms = 14;
   HarnessExecutionProfile execution_profile = 15;
+  repeated HostHarnessCapacity harnesses = 1500;
 }
 
 message ListHostsRequest {

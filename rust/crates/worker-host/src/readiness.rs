@@ -48,6 +48,7 @@ impl State {
             harness_kind: harness,
             workspace_ids: workspaces.to_vec(),
             execution_profile: Some(profile.clone()),
+            harnesses: vec![],
         }
     }
 }
