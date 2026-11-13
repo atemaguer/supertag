@@ -207,8 +207,9 @@ async fn status_in(
     // Reservations and unconfirmed cleanup consume capacity, including a replaced
     // generation. Once cleanup is proven the Session can still require recovery,
     // but that stopped process no longer occupies a native execution slot.
-    let occupied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks WHERE host_principal=$1 AND (state IN (2,6) OR ((state=7 OR cleanup_pending=1) AND cleanup_observed=0))")
-        .bind(format!("host:{id}")).fetch_one(&mut **transaction).await?;
+    let occupied_by_harness: Vec<(i64, i64)> = sqlx::query_as("SELECT harness_kind,COUNT(*) FROM supertag_v2_tasks WHERE host_principal=$1 AND (state IN (2,6) OR ((state=7 OR cleanup_pending=1) AND cleanup_observed=0)) GROUP BY harness_kind")
+        .bind(format!("host:{id}")).fetch_all(&mut **transaction).await?;
+    let occupied: i64 = occupied_by_harness.iter().map(|(_, count)| count).sum();
     let mut view = WorkerHostStatus {
         host_id: id.into(),
         generation: generation as u64,
@@ -231,6 +232,11 @@ async fn status_in(
             view.harnesses = HostHarnessCapacities::decode(bytes.as_slice())
                 .map_err(|_| invalid("stored Worker Host harness capacity is invalid"))?
                 .harnesses;
+            clamp_harness_slots(
+                &mut view.harnesses,
+                &occupied_by_harness,
+                view.available_slots,
+            );
         }
         view.last_seen_at_ms = Some(row.try_get("last_seen_at_ms")?);
         let expires: i64 = row.try_get("presence_expires_at_ms")?;
@@ -261,6 +267,24 @@ async fn status_in(
     }
     view.phase = phase as i32;
     Ok(view)
+}
+
+/// Per-harness slots never show more than the Host's occupancy leaves: each harness loses the
+/// slots its own occupying Attempts hold, and the entries never sum past the Host's total.
+fn clamp_harness_slots(harnesses: &mut [HostHarnessCapacity], occupied: &[(i64, i64)], total: u32) {
+    let mut remaining = total;
+    for harness in harnesses {
+        let held = occupied
+            .iter()
+            .filter(|(kind, _)| *kind == i64::from(harness.harness_kind))
+            .map(|(_, count)| u32::try_from(*count).unwrap_or(u32::MAX))
+            .sum::<u32>();
+        harness.available_slots = harness
+            .available_slots
+            .min(harness.capacity.saturating_sub(held))
+            .min(remaining);
+        remaining -= harness.available_slots;
+    }
 }
 
 /// A Host that runs several harnesses or concurrent Attempts reports one slot entry per harness.

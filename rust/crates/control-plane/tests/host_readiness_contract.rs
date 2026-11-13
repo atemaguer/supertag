@@ -186,6 +186,60 @@ async fn shared_contract(url: &str) {
         store.report_host(&single, &one).await,
         Err(StoreError::InvalidArgument(_))
     ));
+
+    // An occupying Attempt holds its own harness's slot even when a lane still reports it
+    // free, so per-harness slots never exceed the Host's clamped total.
+    store.set_host_draining("shared", false).await.unwrap();
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "coder".into(),
+            instructions: "Code".into(),
+            harness_kind: HarnessKind::Codex as i32,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                tag_id: "coder".into(),
+                session_id: "occupied".into(),
+                operation_id: "occupied".into(),
+                prompt: "Hold a slot".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let claimed = store
+        .claim_task_for_host(&registered, "occupy", &[], HarnessKind::Codex)
+        .await
+        .unwrap();
+    assert!(claimed.is_some());
+    let stale = store
+        .report_host(&registered, &shared_report(2, 2, 2))
+        .await
+        .unwrap();
+    assert_eq!(stale.phase(), HostPhase::Ready);
+    assert_eq!((stale.active_attempts, stale.available_slots), (1, 3));
+    let slots = stale
+        .harnesses
+        .iter()
+        .map(|h| (h.harness_kind(), h.available_slots))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        slots,
+        [(HarnessKind::Codex, 1), (HarnessKind::OpenaiAgents, 2)]
+    );
+    assert_eq!(
+        stale
+            .harnesses
+            .iter()
+            .map(|h| h.available_slots)
+            .sum::<u32>(),
+        stale.available_slots
+    );
     store.close().await;
 }
 
