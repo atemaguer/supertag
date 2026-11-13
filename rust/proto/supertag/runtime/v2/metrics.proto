@@ -36,6 +36,11 @@ message MetricRecovery {
   // Recorded `supertag task resolve-attempt` decisions.
   int64 resolved_failed = 3;
   int64 resolved_retried = 4;
+  // Sessions whose queued Task waits behind another of their Tasks that is claimed, running,
+  // uncertain, or not yet cleaned up.
+  int64 blocked_sessions = 5;
+  // Live inputs whose delivery into a running Attempt is unknown.
+  int64 unknown_live_inputs = 6;
 }
 
 message MetricResources {

@@ -170,8 +170,13 @@ type MetricRecovery struct {
 	// Recorded `supertag task resolve-attempt` decisions.
 	ResolvedFailed  int64 `protobuf:"varint,3,opt,name=resolved_failed,json=resolvedFailed,proto3" json:"resolved_failed,omitempty"`
 	ResolvedRetried int64 `protobuf:"varint,4,opt,name=resolved_retried,json=resolvedRetried,proto3" json:"resolved_retried,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Sessions whose queued Task waits behind another of their Tasks that is claimed, running,
+	// uncertain, or not yet cleaned up.
+	BlockedSessions int64 `protobuf:"varint,5,opt,name=blocked_sessions,json=blockedSessions,proto3" json:"blocked_sessions,omitempty"`
+	// Live inputs whose delivery into a running Attempt is unknown.
+	UnknownLiveInputs int64 `protobuf:"varint,6,opt,name=unknown_live_inputs,json=unknownLiveInputs,proto3" json:"unknown_live_inputs,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *MetricRecovery) Reset() {
@@ -228,6 +233,20 @@ func (x *MetricRecovery) GetResolvedFailed() int64 {
 func (x *MetricRecovery) GetResolvedRetried() int64 {
 	if x != nil {
 		return x.ResolvedRetried
+	}
+	return 0
+}
+
+func (x *MetricRecovery) GetBlockedSessions() int64 {
+	if x != nil {
+		return x.BlockedSessions
+	}
+	return 0
+}
+
+func (x *MetricRecovery) GetUnknownLiveInputs() int64 {
+	if x != nil {
+		return x.UnknownLiveInputs
 	}
 	return 0
 }
@@ -836,12 +855,14 @@ const file_supertag_runtime_v2_metrics_proto_rawDesc = "" +
 	"scheduling\x12<\n" +
 	"\amailbox\x18\x06 \x01(\v2\".supertag.runtime.v2.MetricBacklogR\amailbox\x12O\n" +
 	"\x0ereply_delivery\x18\a \x01(\v2(.supertag.runtime.v2.MetricReplyDeliveryR\rreplyDelivery\x12@\n" +
-	"\brecovery\x18\x98* \x01(\v2#.supertag.runtime.v2.MetricRecoveryR\brecovery\"\xc2\x01\n" +
+	"\brecovery\x18\x98* \x01(\v2#.supertag.runtime.v2.MetricRecoveryR\brecovery\"\x9d\x02\n" +
 	"\x0eMetricRecovery\x12+\n" +
 	"\x11awaiting_decision\x18\x01 \x01(\x03R\x10awaitingDecision\x12/\n" +
 	"\x13cleanup_unconfirmed\x18\x02 \x01(\x03R\x12cleanupUnconfirmed\x12'\n" +
 	"\x0fresolved_failed\x18\x03 \x01(\x03R\x0eresolvedFailed\x12)\n" +
-	"\x10resolved_retried\x18\x04 \x01(\x03R\x0fresolvedRetried\"\xf9\x01\n" +
+	"\x10resolved_retried\x18\x04 \x01(\x03R\x0fresolvedRetried\x12)\n" +
+	"\x10blocked_sessions\x18\x05 \x01(\x03R\x0fblockedSessions\x12.\n" +
+	"\x13unknown_live_inputs\x18\x06 \x01(\x03R\x11unknownLiveInputs\"\xf9\x01\n" +
 	"\x0fMetricResources\x12\x12\n" +
 	"\x04tags\x18\x01 \x01(\x03R\x04tags\x12\x14\n" +
 	"\x05roles\x18\x02 \x01(\x03R\x05roles\x12)\n" +

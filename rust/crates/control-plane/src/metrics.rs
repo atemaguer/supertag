@@ -141,7 +141,9 @@ impl Store {
 
 impl Store {
     /// Attempts that may have executed: those `ResolveAttempt` accepts, cancelled Attempts whose
-    /// cleanup is unconfirmed, and the decisions operators recorded.
+    /// cleanup is unconfirmed, and the decisions operators recorded; Sessions whose next Task
+    /// waits behind an unfinished one, as the claim query skips them; and live inputs whose
+    /// delivery is unknown.
     async fn recovery_metrics(&self, now: i64) -> Result<MetricRecovery> {
         let row = sqlx::query(
             "SELECT \
@@ -150,7 +152,13 @@ impl Store {
                  AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms<=$4)))) AS awaiting, \
              (SELECT COUNT(*) FROM supertag_v2_tasks WHERE state=$3 AND cleanup_pending=1 AND cleanup_observed=0) AS unconfirmed, \
              (SELECT COUNT(*) FROM supertag_v2_attempt_resolutions WHERE decision=$5) AS failed, \
-             (SELECT COUNT(*) FROM supertag_v2_attempt_resolutions WHERE decision=$6) AS retried",
+             (SELECT COUNT(*) FROM supertag_v2_attempt_resolutions WHERE decision=$6) AS retried, \
+             (SELECT COUNT(*) FROM (SELECT DISTINCT pending.tag_id, pending.session_id \
+               FROM supertag_v2_tasks pending WHERE pending.state=$7 AND EXISTS ( \
+                 SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id=pending.tag_id \
+                   AND active.session_id=pending.session_id \
+                   AND (active.state IN ($8,$2,$1) OR active.cleanup_pending=1))) blocked) AS blocked, \
+             (SELECT COUNT(*) FROM supertag_v2_live_inputs WHERE state=$9) AS unknown_inputs",
         )
         .bind(TaskState::Uncertain as i64)
         .bind(TaskState::Running as i64)
@@ -158,6 +166,9 @@ impl Store {
         .bind(now)
         .bind(AttemptDecision::Failed as i64)
         .bind(AttemptDecision::Retry as i64)
+        .bind(TaskState::Queued as i64)
+        .bind(TaskState::Claimed as i64)
+        .bind(LiveInputState::Unknown as i64)
         .fetch_one(&self.pool)
         .await?;
         Ok(MetricRecovery {
@@ -165,6 +176,8 @@ impl Store {
             cleanup_unconfirmed: row.try_get("unconfirmed")?,
             resolved_failed: row.try_get("failed")?,
             resolved_retried: row.try_get("retried")?,
+            blocked_sessions: row.try_get("blocked")?,
+            unknown_live_inputs: row.try_get("unknown_inputs")?,
         })
     }
 

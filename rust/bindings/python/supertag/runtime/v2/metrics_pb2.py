@@ -26,7 +26,7 @@ from supertag.runtime.v2 import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_r
 from supertag.runtime.v2 import spend_pb2 as supertag_dot_runtime_dot_v2_dot_spend__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!supertag/runtime/v2/metrics.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\x1a\x1fsupertag/runtime/v2/spend.proto\"\x13\n\x11GetMetricsRequest\"\xb2\x03\n\x0eMetricSnapshot\x12\x16\n\x0e\x63\x61ptured_at_ms\x18\x01 \x01(\x03\x12\x37\n\tresources\x18\x02 \x01(\x0b\x32$.supertag.runtime.v2.MetricResources\x12\x34\n\x05tasks\x18\x03 \x01(\x0b\x32%.supertag.runtime.v2.MetricTaskCounts\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .supertag.runtime.v2.MetricUsage\x12\x39\n\nscheduling\x18\x05 \x01(\x0b\x32%.supertag.runtime.v2.MetricScheduling\x12\x33\n\x07mailbox\x18\x06 \x01(\x0b\x32\".supertag.runtime.v2.MetricBacklog\x12@\n\x0ereply_delivery\x18\x07 \x01(\x0b\x32(.supertag.runtime.v2.MetricReplyDelivery\x12\x36\n\x08recovery\x18\x98* \x01(\x0b\x32#.supertag.runtime.v2.MetricRecovery\"{\n\x0eMetricRecovery\x12\x19\n\x11\x61waiting_decision\x18\x01 \x01(\x03\x12\x1b\n\x13\x63leanup_unconfirmed\x18\x02 \x01(\x03\x12\x17\n\x0fresolved_failed\x18\x03 \x01(\x03\x12\x18\n\x10resolved_retried\x18\x04 \x01(\x03\"\xa3\x01\n\x0fMetricResources\x12\x0c\n\x04tags\x18\x01 \x01(\x03\x12\r\n\x05roles\x18\x02 \x01(\x03\x12\x18\n\x10role_assignments\x18\x03 \x01(\x03\x12\x18\n\x10surface_accounts\x18\x04 \x01(\x03\x12\x17\n\x0fpermission_sets\x18\x05 \x01(\x03\x12\x14\n\x0c\x63ontext_sets\x18\x06 \x01(\x03\x12\x10\n\x08sessions\x18\x07 \x01(\x03\"\x9c\x01\n\x10MetricTaskCounts\x12\r\n\x05total\x18\x01 \x01(\x03\x12\x0e\n\x06queued\x18\x02 \x01(\x03\x12\x0f\n\x07\x63laimed\x18\x03 \x01(\x03\x12\x0f\n\x07running\x18\x04 \x01(\x03\x12\x11\n\tuncertain\x18\x05 \x01(\x03\x12\x11\n\tsucceeded\x18\x06 \x01(\x03\x12\x0e\n\x06\x66\x61iled\x18\x07 \x01(\x03\x12\x11\n\tcancelled\x18\x08 \x01(\x03\"\xea\x01\n\x0bMetricUsage\x12\x10\n\x08\x61ttempts\x18\x01 \x01(\x03\x12\x1c\n\x0freported_tokens\x18\x02 \x01(\x04H\x00\x88\x01\x01\x12\x1e\n\x16unknown_token_attempts\x18\x03 \x01(\x03\x12\x37\n\rreported_cost\x18\x04 \x03(\x0b\x32 .supertag.runtime.v2.SpendAmount\x12\x1d\n\x15unknown_cost_attempts\x18\x05 \x01(\x03\x12\x1f\n\x17\x65stimated_cost_attempts\x18\x06 \x01(\x03\x42\x12\n\x10_reported_tokens\"\xcc\x02\n\x10MetricScheduling\x12\x0e\n\x06queued\x18\x01 \x01(\x03\x12;\n\x0cworker_hosts\x18\x02 \x03(\x0b\x32%.supertag.runtime.v2.MetricWorkerHost\x12!\n\x13oldest_queued_at_ms\x18\x98* \x01(\x03H\x00\x88\x01\x01\x12\x15\n\x0cplaced_tasks\x18\x99* \x01(\x03\x12\x1e\n\x15\x61verage_queue_wait_ms\x18\x9a* \x01(\x03\x12\x1e\n\x15maximum_queue_wait_ms\x18\x9b* \x01(\x03\x12\x19\n\x10started_attempts\x18\x9c* \x01(\x03\x12\x1e\n\x15\x61verage_start_wait_ms\x18\x9d* \x01(\x03\x12\x1e\n\x15maximum_start_wait_ms\x18\x9e* \x01(\x03\x42\x16\n\x14_oldest_queued_at_ms\"\xa8\x01\n\x10MetricWorkerHost\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12-\n\x05phase\x18\x02 \x01(\x0e\x32\x1e.supertag.runtime.v2.HostPhase\x12\x10\n\x08\x64raining\x18\x03 \x01(\x08\x12\x10\n\x08\x63\x61pacity\x18\x04 \x01(\r\x12\x17\n\x0f\x61vailable_slots\x18\x05 \x01(\r\x12\x17\n\x0f\x61\x63tive_attempts\x18\x06 \x01(\r\"\\\n\rMetricBacklog\x12\x0f\n\x07pending\x18\x01 \x01(\x03\x12!\n\x14oldest_pending_at_ms\x18\x02 \x01(\x03H\x00\x88\x01\x01\x42\x17\n\x15_oldest_pending_at_ms\"6\n\x13MetricReplyDelivery\x12\x0f\n\x07\x62\x61\x63klog\x18\x01 \x01(\x03\x12\x0e\n\x06\x66\x61iled\x18\x02 \x01(\x03\x32\x64\n\x07Metrics\x12Y\n\nGetMetrics\x12&.supertag.runtime.v2.GetMetricsRequest\x1a#.supertag.runtime.v2.MetricSnapshotb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!supertag/runtime/v2/metrics.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\x1a\x1fsupertag/runtime/v2/spend.proto\"\x13\n\x11GetMetricsRequest\"\xb2\x03\n\x0eMetricSnapshot\x12\x16\n\x0e\x63\x61ptured_at_ms\x18\x01 \x01(\x03\x12\x37\n\tresources\x18\x02 \x01(\x0b\x32$.supertag.runtime.v2.MetricResources\x12\x34\n\x05tasks\x18\x03 \x01(\x0b\x32%.supertag.runtime.v2.MetricTaskCounts\x12/\n\x05usage\x18\x04 \x01(\x0b\x32 .supertag.runtime.v2.MetricUsage\x12\x39\n\nscheduling\x18\x05 \x01(\x0b\x32%.supertag.runtime.v2.MetricScheduling\x12\x33\n\x07mailbox\x18\x06 \x01(\x0b\x32\".supertag.runtime.v2.MetricBacklog\x12@\n\x0ereply_delivery\x18\x07 \x01(\x0b\x32(.supertag.runtime.v2.MetricReplyDelivery\x12\x36\n\x08recovery\x18\x98* \x01(\x0b\x32#.supertag.runtime.v2.MetricRecovery\"\xb2\x01\n\x0eMetricRecovery\x12\x19\n\x11\x61waiting_decision\x18\x01 \x01(\x03\x12\x1b\n\x13\x63leanup_unconfirmed\x18\x02 \x01(\x03\x12\x17\n\x0fresolved_failed\x18\x03 \x01(\x03\x12\x18\n\x10resolved_retried\x18\x04 \x01(\x03\x12\x18\n\x10\x62locked_sessions\x18\x05 \x01(\x03\x12\x1b\n\x13unknown_live_inputs\x18\x06 \x01(\x03\"\xa3\x01\n\x0fMetricResources\x12\x0c\n\x04tags\x18\x01 \x01(\x03\x12\r\n\x05roles\x18\x02 \x01(\x03\x12\x18\n\x10role_assignments\x18\x03 \x01(\x03\x12\x18\n\x10surface_accounts\x18\x04 \x01(\x03\x12\x17\n\x0fpermission_sets\x18\x05 \x01(\x03\x12\x14\n\x0c\x63ontext_sets\x18\x06 \x01(\x03\x12\x10\n\x08sessions\x18\x07 \x01(\x03\"\x9c\x01\n\x10MetricTaskCounts\x12\r\n\x05total\x18\x01 \x01(\x03\x12\x0e\n\x06queued\x18\x02 \x01(\x03\x12\x0f\n\x07\x63laimed\x18\x03 \x01(\x03\x12\x0f\n\x07running\x18\x04 \x01(\x03\x12\x11\n\tuncertain\x18\x05 \x01(\x03\x12\x11\n\tsucceeded\x18\x06 \x01(\x03\x12\x0e\n\x06\x66\x61iled\x18\x07 \x01(\x03\x12\x11\n\tcancelled\x18\x08 \x01(\x03\"\xea\x01\n\x0bMetricUsage\x12\x10\n\x08\x61ttempts\x18\x01 \x01(\x03\x12\x1c\n\x0freported_tokens\x18\x02 \x01(\x04H\x00\x88\x01\x01\x12\x1e\n\x16unknown_token_attempts\x18\x03 \x01(\x03\x12\x37\n\rreported_cost\x18\x04 \x03(\x0b\x32 .supertag.runtime.v2.SpendAmount\x12\x1d\n\x15unknown_cost_attempts\x18\x05 \x01(\x03\x12\x1f\n\x17\x65stimated_cost_attempts\x18\x06 \x01(\x03\x42\x12\n\x10_reported_tokens\"\xcc\x02\n\x10MetricScheduling\x12\x0e\n\x06queued\x18\x01 \x01(\x03\x12;\n\x0cworker_hosts\x18\x02 \x03(\x0b\x32%.supertag.runtime.v2.MetricWorkerHost\x12!\n\x13oldest_queued_at_ms\x18\x98* \x01(\x03H\x00\x88\x01\x01\x12\x15\n\x0cplaced_tasks\x18\x99* \x01(\x03\x12\x1e\n\x15\x61verage_queue_wait_ms\x18\x9a* \x01(\x03\x12\x1e\n\x15maximum_queue_wait_ms\x18\x9b* \x01(\x03\x12\x19\n\x10started_attempts\x18\x9c* \x01(\x03\x12\x1e\n\x15\x61verage_start_wait_ms\x18\x9d* \x01(\x03\x12\x1e\n\x15maximum_start_wait_ms\x18\x9e* \x01(\x03\x42\x16\n\x14_oldest_queued_at_ms\"\xa8\x01\n\x10MetricWorkerHost\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12-\n\x05phase\x18\x02 \x01(\x0e\x32\x1e.supertag.runtime.v2.HostPhase\x12\x10\n\x08\x64raining\x18\x03 \x01(\x08\x12\x10\n\x08\x63\x61pacity\x18\x04 \x01(\r\x12\x17\n\x0f\x61vailable_slots\x18\x05 \x01(\r\x12\x17\n\x0f\x61\x63tive_attempts\x18\x06 \x01(\r\"\\\n\rMetricBacklog\x12\x0f\n\x07pending\x18\x01 \x01(\x03\x12!\n\x14oldest_pending_at_ms\x18\x02 \x01(\x03H\x00\x88\x01\x01\x42\x17\n\x15_oldest_pending_at_ms\"6\n\x13MetricReplyDelivery\x12\x0f\n\x07\x62\x61\x63klog\x18\x01 \x01(\x03\x12\x0e\n\x06\x66\x61iled\x18\x02 \x01(\x03\x32\x64\n\x07Metrics\x12Y\n\nGetMetrics\x12&.supertag.runtime.v2.GetMetricsRequest\x1a#.supertag.runtime.v2.MetricSnapshotb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,22 +37,22 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_GETMETRICSREQUEST']._serialized_end=145
   _globals['_METRICSNAPSHOT']._serialized_start=148
   _globals['_METRICSNAPSHOT']._serialized_end=582
-  _globals['_METRICRECOVERY']._serialized_start=584
-  _globals['_METRICRECOVERY']._serialized_end=707
-  _globals['_METRICRESOURCES']._serialized_start=710
-  _globals['_METRICRESOURCES']._serialized_end=873
-  _globals['_METRICTASKCOUNTS']._serialized_start=876
-  _globals['_METRICTASKCOUNTS']._serialized_end=1032
-  _globals['_METRICUSAGE']._serialized_start=1035
-  _globals['_METRICUSAGE']._serialized_end=1269
-  _globals['_METRICSCHEDULING']._serialized_start=1272
-  _globals['_METRICSCHEDULING']._serialized_end=1604
-  _globals['_METRICWORKERHOST']._serialized_start=1607
-  _globals['_METRICWORKERHOST']._serialized_end=1775
-  _globals['_METRICBACKLOG']._serialized_start=1777
-  _globals['_METRICBACKLOG']._serialized_end=1869
-  _globals['_METRICREPLYDELIVERY']._serialized_start=1871
-  _globals['_METRICREPLYDELIVERY']._serialized_end=1925
-  _globals['_METRICS']._serialized_start=1927
-  _globals['_METRICS']._serialized_end=2027
+  _globals['_METRICRECOVERY']._serialized_start=585
+  _globals['_METRICRECOVERY']._serialized_end=763
+  _globals['_METRICRESOURCES']._serialized_start=766
+  _globals['_METRICRESOURCES']._serialized_end=929
+  _globals['_METRICTASKCOUNTS']._serialized_start=932
+  _globals['_METRICTASKCOUNTS']._serialized_end=1088
+  _globals['_METRICUSAGE']._serialized_start=1091
+  _globals['_METRICUSAGE']._serialized_end=1325
+  _globals['_METRICSCHEDULING']._serialized_start=1328
+  _globals['_METRICSCHEDULING']._serialized_end=1660
+  _globals['_METRICWORKERHOST']._serialized_start=1663
+  _globals['_METRICWORKERHOST']._serialized_end=1831
+  _globals['_METRICBACKLOG']._serialized_start=1833
+  _globals['_METRICBACKLOG']._serialized_end=1925
+  _globals['_METRICREPLYDELIVERY']._serialized_start=1927
+  _globals['_METRICREPLYDELIVERY']._serialized_end=1981
+  _globals['_METRICS']._serialized_start=1983
+  _globals['_METRICS']._serialized_end=2083
 # @@protoc_insertion_point(module_scope)

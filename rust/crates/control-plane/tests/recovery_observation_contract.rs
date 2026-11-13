@@ -84,6 +84,22 @@ async fn contract(url: String) {
     let (expired_task, expired_attempt, _) = started(&store, &host, "expired").await;
     let (cancelled_task, cancelled_attempt, _) = started(&store, &host, "cancelled").await;
     store.cancel_task(&cancelled_task).await.unwrap();
+    // A next Task in each Session waits behind the running and the uncleaned Attempt.
+    for name in ["expired", "cancelled"] {
+        store
+            .submit_task(
+                OPERATOR,
+                &SubmitTaskRequest {
+                    tag_id: "fixture".into(),
+                    session_id: format!("session-{name}"),
+                    operation_id: format!("next-{name}"),
+                    prompt: format!("Then {name}"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
 
     // A cancelled Attempt whose host has not confirmed cleanup holds its slot, also after a
     // Control Plane restart, but needs no decision while its lease is live.
@@ -97,10 +113,15 @@ async fn contract(url: String) {
     let recovery = metrics.recovery.unwrap();
     assert_eq!(recovery.cleanup_unconfirmed, 1);
     assert_eq!(recovery.awaiting_decision, 0);
+    assert_eq!(recovery.blocked_sessions, 2);
+    assert_eq!(recovery.unknown_live_inputs, 0);
     let scheduling = metrics.scheduling.unwrap();
     assert_eq!(scheduling.placed_tasks, 2);
     assert_eq!(scheduling.started_attempts, 2);
-    assert!(scheduling.oldest_queued_at_ms.is_none());
+    assert_eq!(scheduling.queued, 2);
+    assert!(scheduling.oldest_queued_at_ms.is_some());
+    // The execution clock measures claims, so the start waits are exact.
+    assert_eq!(scheduling.maximum_start_wait_ms, 0);
 
     // Once both leases lapse, each is listed with the reason it needs a decision.
     clock.store(NOW + LAPSE, Ordering::SeqCst);
@@ -218,11 +239,13 @@ async fn contract(url: String) {
             cleanup_unconfirmed: 0,
             resolved_failed: 1,
             resolved_retried: 1,
+            blocked_sessions: 0,
+            unknown_live_inputs: 0,
         }
     );
     // The retried Task waits again, with its original acceptance time.
     let scheduling = metrics.scheduling.unwrap();
-    assert_eq!(scheduling.queued, 1);
+    assert_eq!(scheduling.queued, 3);
     assert!(scheduling.oldest_queued_at_ms.is_some());
     store.close().await;
 }

@@ -262,7 +262,7 @@ async fn uncertain_attempts_in(
     }
     let list = format!(
         "SELECT task_id,attempt_id,harness_kind,state,lease_expires_at_ms,cleanup_observed {WHERE} \
-         ORDER BY lease_expires_at_ms,task_id LIMIT {UNCERTAIN_ATTEMPTS_LISTED}"
+         ORDER BY COALESCE(lease_expires_at_ms,0),task_id LIMIT {UNCERTAIN_ATTEMPTS_LISTED}"
     );
     let rows = sqlx::query(&list)
         .bind(format!("host:{id}"))

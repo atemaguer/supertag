@@ -146,6 +146,8 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
             "cleanup_unconfirmed": recovery.cleanup_unconfirmed,
             "resolved_failed": recovery.resolved_failed,
             "resolved_retried": recovery.resolved_retried,
+            "blocked_sessions": recovery.blocked_sessions,
+            "unknown_live_inputs": recovery.unknown_live_inputs,
         },
         "scheduling": {
             "queued": scheduling.queued,
@@ -153,6 +155,9 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
                 .oldest_queued_at_ms
                 .and_then(Timestamp::from_millis)
                 .map(|at| at.to_string()),
+            "oldest_queued_age_seconds": scheduling
+                .oldest_queued_at_ms
+                .map(|at| age_seconds(snapshot.captured_at_ms, at)),
             "placed_tasks": scheduling.placed_tasks,
             "average_queue_wait_ms": scheduling.average_queue_wait_ms,
             "maximum_queue_wait_ms": scheduling.maximum_queue_wait_ms,
@@ -166,6 +171,7 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
                 "capacity": host.capacity,
                 "available_slots": host.available_slots,
                 "active_attempts": host.active_attempts,
+                "utilization": utilization(host),
             })).collect::<Vec<_>>(),
         },
         "mailbox": {
@@ -189,6 +195,20 @@ fn host_phase(phase: HostPhase) -> &'static str {
             .as_str_name()
             .strip_prefix("HOST_PHASE_")
             .unwrap_or("unknown"),
+    }
+}
+
+/// Whole seconds from `at_ms` to the snapshot, never negative.
+fn age_seconds(captured_at_ms: i64, at_ms: i64) -> i64 {
+    captured_at_ms.saturating_sub(at_ms).max(0) / 1_000
+}
+
+/// The share of a Worker Host's slots its Attempts hold, from 0 to 1.
+fn utilization(host: &supertag_protocol::v2::MetricWorkerHost) -> f64 {
+    if host.capacity == 0 {
+        0.0
+    } else {
+        (f64::from(host.active_attempts) / f64::from(host.capacity)).min(1.0)
     }
 }
 
@@ -220,7 +240,7 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
          Attempts {}: tokens {}, cost {}\n\
          Worker Hosts {}: {} active of {} slots\n\
          Queue: {} placed, waited {} on average and {} at most before a claim; started {} on average and {} at most after it{}\n\
-         Recovery: {} Attempts await a decision, {} cancelled Attempts await cleanup; {} resolved as failed, {} retried\n\
+         Recovery: {} Attempts await a decision, {} cancelled Attempts await cleanup; {} resolved as failed, {} retried; {} Sessions wait behind an unfinished Task; {} live inputs have an unknown delivery\n\
          Mailbox backlog {}, reply backlog {}, failed replies {}\n",
         resources.tags,
         resources.sessions,
@@ -264,14 +284,17 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
         wait(scheduling.maximum_start_wait_ms),
         scheduling
             .oldest_queued_at_ms
-            .and_then(Timestamp::from_millis)
-            .map_or_else(String::new, |at| format!(
-                "; oldest queued Task accepted {at}"
+            .and_then(|at| Some((Timestamp::from_millis(at)?, at)))
+            .map_or_else(String::new, |(at, ms)| format!(
+                "; oldest queued Task accepted {at}, {} ago",
+                wait(age_seconds(snapshot.captured_at_ms, ms) * 1_000)
             )),
         recovery.awaiting_decision,
         recovery.cleanup_unconfirmed,
         recovery.resolved_failed,
         recovery.resolved_retried,
+        recovery.blocked_sessions,
+        recovery.unknown_live_inputs,
         mailbox.pending,
         replies.backlog,
         replies.failed,

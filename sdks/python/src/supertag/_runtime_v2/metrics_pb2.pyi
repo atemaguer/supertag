@@ -33,16 +33,20 @@ class MetricSnapshot(_message.Message):
     def __init__(self, captured_at_ms: _Optional[int] = ..., resources: _Optional[_Union[MetricResources, _Mapping]] = ..., tasks: _Optional[_Union[MetricTaskCounts, _Mapping]] = ..., usage: _Optional[_Union[MetricUsage, _Mapping]] = ..., scheduling: _Optional[_Union[MetricScheduling, _Mapping]] = ..., mailbox: _Optional[_Union[MetricBacklog, _Mapping]] = ..., reply_delivery: _Optional[_Union[MetricReplyDelivery, _Mapping]] = ..., recovery: _Optional[_Union[MetricRecovery, _Mapping]] = ...) -> None: ...
 
 class MetricRecovery(_message.Message):
-    __slots__ = ("awaiting_decision", "cleanup_unconfirmed", "resolved_failed", "resolved_retried")
+    __slots__ = ("awaiting_decision", "cleanup_unconfirmed", "resolved_failed", "resolved_retried", "blocked_sessions", "unknown_live_inputs")
     AWAITING_DECISION_FIELD_NUMBER: _ClassVar[int]
     CLEANUP_UNCONFIRMED_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_FAILED_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_RETRIED_FIELD_NUMBER: _ClassVar[int]
+    BLOCKED_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    UNKNOWN_LIVE_INPUTS_FIELD_NUMBER: _ClassVar[int]
     awaiting_decision: int
     cleanup_unconfirmed: int
     resolved_failed: int
     resolved_retried: int
-    def __init__(self, awaiting_decision: _Optional[int] = ..., cleanup_unconfirmed: _Optional[int] = ..., resolved_failed: _Optional[int] = ..., resolved_retried: _Optional[int] = ...) -> None: ...
+    blocked_sessions: int
+    unknown_live_inputs: int
+    def __init__(self, awaiting_decision: _Optional[int] = ..., cleanup_unconfirmed: _Optional[int] = ..., resolved_failed: _Optional[int] = ..., resolved_retried: _Optional[int] = ..., blocked_sessions: _Optional[int] = ..., unknown_live_inputs: _Optional[int] = ...) -> None: ...
 
 class MetricResources(_message.Message):
     __slots__ = ("tags", "roles", "role_assignments", "surface_accounts", "permission_sets", "context_sets", "sessions")
