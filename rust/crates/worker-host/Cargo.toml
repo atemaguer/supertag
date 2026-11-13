@@ -24,3 +24,4 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 uuid.workspace = true
+base64 = "0.22"

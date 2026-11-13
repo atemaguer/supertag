@@ -3,9 +3,9 @@ use std::time::Duration;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde_json::{Value, json};
 
-use super::{Failure, catalog::Server};
+use super::{Failure, catalog::HttpServer, oauth::McpLoginStore};
 
-const PROTOCOL_VERSION: &str = "2025-11-25";
+pub(super) const PROTOCOL_VERSION: &str = "2025-11-25";
 const SESSION: &str = "mcp-session-id";
 const PROTOCOL: &str = "mcp-protocol-version";
 const HTTP_BYTES: usize = 256 * 1024;
@@ -23,15 +23,29 @@ pub(super) fn client() -> Result<Client, Failure> {
 
 pub(super) struct Session {
     client: Client,
-    server: Server,
+    server: HttpServer,
     version: &'static str,
     session_id: Option<header::HeaderValue>,
     next_id: u64,
     pub(super) unconfirmed_call: bool,
+    login: Option<McpLoginStore>,
+    access_token: Option<header::HeaderValue>,
+    /// Every access token this session sent; all are withheld from Task-visible output.
+    pub(super) tokens: Vec<String>,
+}
+
+pub(super) fn accepted_version(initialized: &Value) -> Result<&'static str, Failure> {
+    match initialized.get("protocolVersion").and_then(Value::as_str) {
+        Some(PROTOCOL_VERSION) => Ok(PROTOCOL_VERSION),
+        Some("2025-06-18") => Ok("2025-06-18"),
+        Some("2025-03-26") => Ok("2025-03-26"),
+        _ => Err(Failure::InvalidResponse),
+    }
 }
 
 impl Session {
-    pub(super) fn new(client: Client, server: Server) -> Self {
+    pub(super) fn new(client: Client, server: HttpServer, logins: Option<&McpLoginStore>) -> Self {
+        let login = logins.filter(|_| server.oauth).cloned();
         Self {
             client,
             server,
@@ -39,7 +53,39 @@ impl Session {
             session_id: None,
             next_id: 1,
             unconfirmed_call: false,
+            login,
+            access_token: None,
+            tokens: Vec::new(),
         }
+    }
+
+    /// Takes the access token from this host's login, refreshing it when it expires or when
+    /// the server refused `rejected`.
+    async fn authorize(&mut self, rejected: Option<&str>) -> Result<(), Failure> {
+        let Some(login) = &self.login else {
+            return if self.server.oauth {
+                Err(Failure::Unavailable)
+            } else {
+                Ok(())
+            };
+        };
+        let token = login
+            .access_token(
+                &self.client,
+                &self.server.name,
+                self.server.endpoint.as_str(),
+                rejected,
+            )
+            .await
+            .map_err(|_| Failure::Unavailable)?;
+        let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| Failure::Unavailable)?;
+        value.set_sensitive(true);
+        if !self.tokens.contains(&token) {
+            self.tokens.push(token);
+        }
+        self.access_token = Some(value);
+        Ok(())
     }
 
     fn request(&self, method: Method) -> reqwest::RequestBuilder {
@@ -49,6 +95,9 @@ impl Session {
             .headers(self.server.headers.clone())
             .header(header::ACCEPT, "application/json, text/event-stream")
             .header(PROTOCOL, self.version);
+        if let Some(token) = &self.access_token {
+            request = request.header(header::AUTHORIZATION, token.clone());
+        }
         if let Some(session) = &self.session_id {
             request = request.header(SESSION, session.clone());
         }
@@ -56,17 +105,15 @@ impl Session {
     }
 
     pub(super) async fn initialize(&mut self) -> Result<(), Failure> {
+        if self.server.oauth {
+            self.authorize(None).await?;
+        }
         let initialized = self.rpc("initialize", json!({
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name":"supertag-worker-host", "version":env!("CARGO_PKG_VERSION")}
         })).await?;
-        self.version = match initialized.get("protocolVersion").and_then(Value::as_str) {
-            Some(PROTOCOL_VERSION) => PROTOCOL_VERSION,
-            Some("2025-06-18") => "2025-06-18",
-            Some("2025-03-26") => "2025-03-26",
-            _ => return Err(Failure::InvalidResponse),
-        };
+        self.version = accepted_version(&initialized)?;
         if !initialized
             .get("capabilities")
             .and_then(|value| value.get("tools"))
@@ -89,12 +136,25 @@ impl Session {
     pub(super) async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, Failure> {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or(Failure::InvalidResponse)?;
-        let response = self
+        let body = json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params});
+        let mut response = self
             .request(Method::POST)
-            .json(&json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
+            .json(&body)
             .send()
             .await
             .map_err(|_| Failure::Unavailable)?;
+        // A refused access token means the request was not processed: refresh the login once
+        // and resend. A refused refresh marks the login lapsed.
+        if response.status() == StatusCode::UNAUTHORIZED && self.login.is_some() {
+            let rejected = self.tokens.last().cloned();
+            self.authorize(rejected.as_deref()).await?;
+            response = self
+                .request(Method::POST)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|_| Failure::Unavailable)?;
+        }
         if response.status() != StatusCode::OK {
             return Err(Failure::Unavailable);
         }
@@ -142,7 +202,7 @@ impl Session {
     }
 }
 
-fn decode(bytes: &[u8], id: u64) -> Result<Option<Value>, Failure> {
+pub(super) fn decode(bytes: &[u8], id: u64) -> Result<Option<Value>, Failure> {
     let value: Value = serde_json::from_slice(bytes).map_err(|_| Failure::InvalidResponse)?;
     if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return Err(Failure::InvalidResponse);
@@ -266,7 +326,12 @@ mod tests {
             Some("Bearer fixture-secret".into())
         })
         .unwrap();
-        let mut session = Session::new(client().unwrap(), catalog.servers["catalog"].clone());
+        let crate::mcp::catalog::Transport::Http(server) =
+            catalog.servers["catalog"].transport.clone()
+        else {
+            panic!("HTTP server expected");
+        };
+        let mut session = Session::new(client().unwrap(), server, None);
         assert_eq!(session.initialize().await, Err(Failure::Unavailable));
         serve.await.unwrap();
         assert!(
@@ -274,5 +339,72 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn oauth_login_supplies_the_bearer_and_refreshes_once_on_401() {
+        use crate::mcp::{
+            oauth::{McpLogin, McpLoginStore, now_ms},
+            test_http::serve,
+        };
+        let initialize = json!({"jsonrpc":"2.0","id":1,"result":{
+            "protocolVersion":"2025-06-18","capabilities":{"tools":{}}
+        }})
+        .to_string();
+        let (address, served) = serve(vec![
+            (401, "application/json", String::new()),
+            (
+                200,
+                "application/json",
+                json!({"access_token":"access-2","expires_in":3600}).to_string(),
+            ),
+            (200, "application/json", initialize),
+            (202, "application/json", String::new()),
+        ])
+        .await;
+        let url = format!("http://127.0.0.1:{}/mcp", address.port());
+        let root = tempfile::tempdir().unwrap();
+        let store = McpLoginStore::new(root.path().join("mcp-logins"));
+        store
+            .store(
+                "docs",
+                &McpLogin {
+                    url: url.clone(),
+                    token_endpoint: format!("http://127.0.0.1:{}/token", address.port()),
+                    client_id: "client".into(),
+                    client_secret: None,
+                    refresh_token: "refresh-1".into(),
+                    access_token: Some("access-1".into()),
+                    access_token_expires_at: Some(now_ms() + 3_600_000),
+                    refresh_token_expires_at: None,
+                    logged_in_at: 1,
+                    lapsed_at: None,
+                },
+            )
+            .unwrap();
+        let config = json!({"version":1,"servers":[{"name":"docs","url":url,"oauth":true}]});
+        let catalog = McpCatalog::parse(config.to_string().as_bytes(), |_| None).unwrap();
+        let crate::mcp::catalog::Transport::Http(server) =
+            catalog.servers["docs"].transport.clone()
+        else {
+            panic!("HTTP server expected");
+        };
+        let mut session = Session::new(client().unwrap(), server, Some(&store));
+        session.initialize().await.unwrap();
+        assert_eq!(session.tokens, ["access-1", "access-2"]);
+        let requests = served.await.unwrap();
+        assert!(
+            requests[0]
+                .headers
+                .contains(&"authorization: bearer access-1".into())
+        );
+        assert_eq!(requests[1].line, "POST /token HTTP/1.1");
+        for request in &requests[2..] {
+            assert!(
+                request
+                    .headers
+                    .contains(&"authorization: bearer access-2".into())
+            );
+        }
     }
 }

@@ -22,7 +22,10 @@ pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
-pub use mcp::McpCatalog;
+pub use mcp::{
+    McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
+    login_command as mcp_login_command, run_mcp_login,
+};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
 pub use workspace_mounts::WorkspaceMounts;

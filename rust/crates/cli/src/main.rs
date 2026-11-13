@@ -11,6 +11,7 @@ mod local;
 mod local_config;
 mod mailbox_grants;
 mod manifests;
+mod mcp;
 mod network;
 mod node_bridges;
 mod objectives;
@@ -159,6 +160,11 @@ enum Command {
         #[command(subcommand)]
         command: inbox::InboxCommand,
     },
+    /// List this host's catalog MCP servers and log in to OAuth servers.
+    Mcp {
+        #[command(subcommand)]
+        command: mcp::McpCommand,
+    },
     /// Read the messages sent to or from a Tag.
     Mailbox {
         #[command(flatten)]
@@ -304,13 +310,17 @@ enum Command {
             allow_hyphen_values = true
         )]
         modal_workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+        /// Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
         #[arg(
             long,
             conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"],
-            long_help = r#"Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+            long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
 
-Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
+Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
+
+A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+
+The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
@@ -640,6 +650,7 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => inbox::run(connection, command).await?,
+        Command::Mcp { command } => mcp::run(command).await?,
         Command::MailboxGrants {
             connection,
             command,
@@ -874,7 +885,10 @@ async fn run(command: Command) -> Result<()> {
                 execution_profile.declared_task_outputs = true;
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
-            let mcp_catalog = supertag_worker_host::McpCatalog::load(mcp_catalog.as_deref())?;
+            let mcp_catalog = supertag_worker_host::McpCatalog::load(
+                mcp_catalog.as_deref(),
+                supertag_worker_host::McpLoginStore::default_location().ok(),
+            )?;
             execution_profile.mcp_servers = mcp_catalog.capabilities();
             let shared_execution = if let Some((endpoint, environment)) =
                 shared_execution_endpoint.zip(shared_execution_environment)

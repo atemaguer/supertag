@@ -222,6 +222,18 @@ impl LanguageServices {
     }
 
     async fn start_with_volume(directory: &Path, volume: Option<&Path>) -> Result<Self> {
+        let database = format!(
+            "sqlite://{}?mode=rwc",
+            directory.join("control.db").display()
+        );
+        Self::start_with_database(directory, volume, &database).await
+    }
+
+    async fn start_with_database(
+        directory: &Path,
+        volume: Option<&Path>,
+        database: &str,
+    ) -> Result<Self> {
         let gateway_token = Uuid::new_v4().to_string();
         let operator_token = Uuid::new_v4().to_string();
         let host_token = Uuid::new_v4().to_string();
@@ -229,13 +241,7 @@ impl LanguageServices {
         control
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env(
-                "SUPERTAG_DATABASE_URL",
-                format!(
-                    "sqlite://{}?mode=rwc",
-                    directory.join("control.db").display()
-                ),
-            );
+            .env("SUPERTAG_DATABASE_URL", database);
         let (control, private) = service(control).await?;
         let mut gateway = command(&["gateway", "--control-plane", &private]);
         gateway
@@ -520,6 +526,246 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
     let exact = services.operator(&["inbox", "approval", exact_id]).await?;
     assert!(exact["consumed_at_ms"].is_i64());
     provider.kill().await?;
+    services.stop().await
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn sqlite_claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("control.db").display()
+    );
+    exercise_stdio_mcp(directory.path(), &database).await
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE, a built Claude Code language adapter, and SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool() -> Result<()> {
+    use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
+    use std::str::FromStr;
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .context("PostgreSQL process integration requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")?;
+    let admin_url = std::fs::read_to_string(path)?;
+    let options = PgConnectOptions::from_str(admin_url.trim())?;
+    let mut admin = PgConnection::connect_with(&options).await?;
+    let name = format!("supertag_rust_stdio_mcp_{}", Uuid::new_v4().simple());
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await?;
+    let database = options.database(&name).to_url_lossy().to_string();
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().to_owned();
+    let result = tokio::spawn(async move { exercise_stdio_mcp(&path, &database).await }).await;
+    let cleanup = admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await;
+    admin.close().await?;
+    cleanup?;
+    result.context("PostgreSQL stdio MCP test panicked")?
+}
+
+/// The Worker Host launches a stdio MCP server for each Attempt with only its catalog `env`,
+/// exposes only granted tools, holds the gated call for exact approval, withholds a result that
+/// reflects the server's credential, and stops the server when the Attempt ends.
+async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
+    let node =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let native = claude_fixture(directory)?;
+    let services = LanguageServices::start_with_database(directory, None, database).await?;
+    let journal = directory.join("mcp-stdio.jsonl");
+    let catalog = directory.join("mcp-catalog.json");
+    let mapping = serde_json::json!([{
+        "prefix":"repository:", "separator":"/",
+        "components":[{"arguments":["owner","org"]},{"arguments":["repo"]}]
+    }]);
+    let config = serde_json::json!({"version":1,"servers":[{
+        "name":"catalog",
+        "command":[
+            Path::new(&node).to_str().context("Node path")?,
+            repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs")?
+                .to_str()
+                .context("fixture path")?,
+            journal.to_str().context("journal path")?,
+        ],
+        "env":{"CATALOG_TOKEN":"CATALOG_MCP_AUTH"},
+        "resources":{"tools":{"list_docs":mapping,"publish":mapping}}
+    }]});
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&catalog)?
+        .write_all(config.to_string().as_bytes())?;
+    let permissions = directory.join("mcp-grants.json");
+    std::fs::write(&permissions, serde_json::json!({
+        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "permissions":[
+            {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
+            {"target":"mcp","action":"catalog/publish"},
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+        ]
+    }).to_string())?;
+    let role = directory.join("mcp-role.json");
+    std::fs::write(&role, serde_json::json!({
+        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+    }).to_string())?;
+    services
+        .operator(&[
+            "put-tag",
+            "mcp-reader",
+            "--harness",
+            "claude-code",
+            "--instructions",
+            "Read the scoped catalog.",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "policy",
+            "put",
+            "permission-set",
+            permissions.to_str().context("permission set path")?,
+        ])
+        .await?;
+    services
+        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .await?;
+    services
+        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .await?;
+    let task = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "mcp-reader",
+            "--session",
+            "mcp",
+            "scoped-http-mcp",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID")?;
+    let catalog_worker = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.join(state),
+            Path::new(&node),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .arg("--mcp-catalog")
+            .arg(&catalog)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key")
+            .env("CATALOG_MCP_AUTH", "synthetic-catalog-credential")
+            .env("WORKER_ONLY_VARIABLE", "worker-only-value");
+        host
+    };
+    success(catalog_worker("catalog-host")).await?;
+    let completed = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
+    assert_eq!(completed["result"], "fixture used one scoped MCP tool");
+    let receipts = std::fs::read_to_string(&journal)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(
+        receipts,
+        [
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs"}}),
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs","mirror":true}}),
+            serde_json::json!({"closed":true}),
+        ]
+    );
+    let waiting = services
+        .operator(&["inbox", "list", "--kind", "approval"])
+        .await?;
+    let approvals = waiting["items"].as_array().context("MCP approvals")?;
+    assert_eq!(approvals.len(), 2);
+    let id_for = |resource| -> Result<&str> {
+        approvals
+            .iter()
+            .find(|item| item["approval"]["resource"] == resource)
+            .and_then(|item| item["approval"]["approval_id"].as_str())
+            .context("MCP approval for the expected resource")
+    };
+    let missing_id = id_for("")?;
+    let exact_id = id_for("repository:acme/docs")?;
+    services
+        .operator(&[
+            "inbox",
+            "deny",
+            missing_id,
+            "--operation-id",
+            "reject-missing-stdio-mcp",
+            "--reason",
+            "The repository was not specified.",
+        ])
+        .await?;
+    let decision = services
+        .operator(&[
+            "inbox",
+            "approve",
+            exact_id,
+            "--operation-id",
+            "approve-exact-stdio-mcp",
+        ])
+        .await?;
+    let resumed_id = decision["continuation_task_id"]
+        .as_str()
+        .context("MCP continuation Task")?;
+    success(catalog_worker("catalog-resume")).await?;
+    let resumed = services.operator(&["get-task", resumed_id]).await?;
+    assert_eq!(resumed["state"], "TASK_STATE_SUCCEEDED", "{resumed}");
+    assert_eq!(
+        resumed["result"],
+        "fixture resumed and dispatched one approved MCP effect"
+    );
+    let effects = std::fs::read_to_string(&journal)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(effects.len(), 5);
+    assert_eq!(
+        effects[3],
+        serde_json::json!({"tool":"publish","arguments":{"owner":"acme","repo":"docs"}})
+    );
+    assert_eq!(effects[4], serde_json::json!({"closed":true}));
+    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    assert!(exact["consumed_at_ms"].is_i64());
+    // One launch per Attempt, each with only the catalog env and the minimal default, and each
+    // stopped when its Attempt ended.
+    let prefix = "mcp-stdio.jsonl.";
+    let mut launches = 0;
+    for entry in std::fs::read_dir(directory)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with(prefix) && name.ends_with(".launch")) {
+            continue;
+        }
+        launches += 1;
+        let launch: Value = serde_json::from_slice(&std::fs::read(directory.join(&name))?)?;
+        let environment = launch["env"].as_object().context("launch environment")?;
+        assert_eq!(environment["CATALOG_TOKEN"], "synthetic-catalog-credential");
+        for key in environment.keys() {
+            assert!(
+                matches!(
+                    key.as_str(),
+                    "CATALOG_TOKEN" | "PATH" | "HOME" | "__CF_USER_TEXT_ENCODING"
+                ),
+                "unexpected stdio MCP variable {key}"
+            );
+        }
+        let pid = launch["pid"].as_i64().context("launch pid")?;
+        // SAFETY: signal 0 only checks for the process.
+        assert!(
+            unsafe { libc::kill(pid as libc::pid_t, 0) } != 0,
+            "stdio MCP server outlived its Attempt"
+        );
+    }
+    assert_eq!(launches, 2);
     services.stop().await
 }
 
