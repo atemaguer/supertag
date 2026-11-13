@@ -109,6 +109,11 @@ pub struct AdapterOptions {
     /// pinned checkouts. Several Workspace IDs may name the same source.
     #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
     workspace_source: Vec<PathBuf>,
+    /// ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of
+    /// a local Workspace. It runs on this host, outside any harness sandbox, on the
+    /// Workspace's base commit, and again only when that commit or the command changes.
+    #[arg(long, value_name = "ID=COMMAND", requires = "workspace_source")]
+    workspace_setup: Vec<String>,
     /// Retrieve each Workspace's accepted GitHub source from the Gateway.
     #[arg(
         long,
@@ -145,6 +150,20 @@ impl AdapterOptions {
                 "give each --workspace-id its own --workspace-source"
             );
         }
+        let mut setups = std::collections::BTreeMap::new();
+        for value in &self.workspace_setup {
+            let (id, command) = value
+                .split_once('=')
+                .context("give --workspace-setup as ID=COMMAND")?;
+            ensure!(
+                self.workspace_id.iter().any(|workspace| workspace == id),
+                "--workspace-setup names an unmapped Workspace"
+            );
+            ensure!(
+                setups.insert(id, command.to_owned()).is_none(),
+                "Workspace {id} has more than one setup command"
+            );
+        }
         let mut seen = std::collections::BTreeSet::new();
         self.workspace_id
             .iter()
@@ -160,6 +179,7 @@ impl AdapterOptions {
                         Some(source) => WorkspaceSource::Local(source.clone()),
                         None => WorkspaceSource::Gateway,
                     },
+                    setup: setups.get(workspace_id.as_str()).cloned(),
                 })
             })
             .collect()
@@ -327,6 +347,9 @@ impl AdapterOptions {
                     source.as_os_str().to_owned(),
                 ]);
             }
+        }
+        for setup in &self.workspace_setup {
+            args.extend([OsString::from("--workspace-setup"), setup.into()]);
         }
         if self.workspace_from_gateway {
             args.push(OsString::from("--workspace-from-gateway"));

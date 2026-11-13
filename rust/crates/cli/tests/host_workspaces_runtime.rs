@@ -29,6 +29,8 @@ database_tests! {
     one_host_serves_several_named_workspaces;
     #[tokio::test]
     named_auth_keys_and_rotated_host_credentials;
+    #[tokio::test]
+    workspace_setup_prepares_checkouts_and_a_failure_fails_the_task;
 }
 
 struct Services {
@@ -267,6 +269,114 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
     assert_eq!(ran["workspace_delivery"]["workspace_id"], "missing");
     assert_eq!(json(get(&tasks[4])).await?["state"], "TASK_STATE_QUEUED");
     Ok(())
+}
+
+/// tests/workspace-setup-outputs.test.ts: `setup` prepares each checkout on the base commit,
+/// its ignored outputs reach the Task, it reruns only for a new command, and a failed setup fails
+/// the Task before the harness starts with its untrusted output.
+async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let app = root.join("app");
+    std::fs::create_dir(&app)?;
+    git(&app, &["init", "--quiet"]).await?;
+    std::fs::write(app.join("workspace.txt"), "app source\n")?;
+    std::fs::write(app.join(".gitignore"), "deps/\n")?;
+    git(&app, &["add", "-A"]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Initial source"]).await?;
+    let base = git(&app, &["rev-parse", "HEAD"]).await?;
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    json(cli(&[
+        "tag",
+        "put",
+        "builder",
+        "--instructions",
+        "Edit the repository",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "app",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    let submit = |session: &str| {
+        cli(&[
+            "task",
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            session,
+            session,
+        ])
+    };
+    let runs = root.join("setup-runs");
+    let install = format!(
+        "echo run >> '{}' && mkdir deps && echo installed > deps/marker",
+        runs.display()
+    );
+    let state = root.join("host-state");
+    let worker = |setup: &str| {
+        let mut command = services.worker(&state, Some(&services.host), &[("app", &app)]);
+        command.arg(format!("--workspace-setup=app={setup}"));
+        command
+    };
+    let mut tasks = Vec::new();
+    for session in ["first", "second"] {
+        tasks.push(field(&json(submit(session)).await?, "task_id")?.to_owned());
+        success(worker(&install)).await?;
+    }
+    for task in &tasks {
+        let task = json(cli(&["get", "task", task])).await?;
+        assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+        // Setup's ignored output reached the checkout; the delivery holds only the Task's edit.
+        assert_ne!(
+            task["workspace_delivery"]["head_commit"],
+            task["workspace_delivery"]["base_commit"]
+        );
+    }
+    let checkouts = state.join("workspaces");
+    let markers = walk(&checkouts)
+        .into_iter()
+        .filter(|path| path.ends_with("deps/marker"))
+        .count();
+    ensure!(markers >= 1, "setup outputs were not prepared");
+    assert_eq!(std::fs::read_to_string(&runs)?.lines().count(), 1);
+
+    let failed = field(&json(submit("broken")).await?, "task_id")?.to_owned();
+    success(worker(
+        "echo resolving packages; echo 'registry unreachable' >&2; exit 7",
+    ))
+    .await?;
+    let failed = json(cli(&["get", "task", &failed])).await?;
+    assert_eq!(failed["state"], "TASK_STATE_FAILED", "{failed}");
+    let result = failed["result"].as_str().context("result")?;
+    ensure!(result.starts_with("Workspace setup failed"), "{result}");
+    ensure!(result.contains("registry unreachable"), "{result}");
+    ensure!(
+        !result.contains("Change:"),
+        "the harness never ran: {result}"
+    );
+    Ok(())
+}
+
+fn walk(path: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !path.is_symlink() {
+                found.extend(walk(&path));
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    found
 }
 
 async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Result<()> {

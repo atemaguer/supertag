@@ -1089,6 +1089,11 @@ async fn run(command: Command) -> Result<()> {
             } else {
                 None
             };
+            ensure!(
+                (remote_provider.is_none() && shared_execution_endpoint.is_none())
+                    || workspaces.iter().all(|mapping| mapping.setup.is_none()),
+                "Workspace setup prepares local checkouts; remote Workspaces and shared execution cannot use it"
+            );
             if remote_provider.is_some() {
                 ensure!(
                     harness == HarnessKind::Cursor

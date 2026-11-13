@@ -607,11 +607,20 @@ pub(crate) fn sync_tree(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<String, String>> {
+    scan_skipping(root, &[], cancel)
+}
+
+/// Like [`scan`], but never descends into `skip`: paths relative to `root`.
+pub(crate) fn scan_skipping(
+    root: &Path,
+    skip: &[String],
+    cancel: &CancellationToken,
+) -> Result<BTreeMap<String, String>> {
     fn visit(
         directory: &File,
         prefix: &str,
         depth: usize,
-        output: &mut BTreeMap<String, String>,
+        (output, skip): (&mut BTreeMap<String, String>, &[String]),
         cancel: &CancellationToken,
     ) -> Result<()> {
         ensure!(
@@ -628,6 +637,9 @@ pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<S
             } else {
                 format!("{prefix}/{name}")
             };
+            if skip.contains(&path) {
+                continue;
+            }
             validate_repo_path(&path)?;
             let metadata = metadata_at(directory, &name)?;
             match metadata.st_mode & libc::S_IFMT {
@@ -635,7 +647,7 @@ pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<S
                     &open_dir_at(directory, &name)?,
                     &path,
                     depth + 1,
-                    output,
+                    (&mut *output, skip),
                     cancel,
                 )?,
                 libc::S_IFREG => {
@@ -663,7 +675,7 @@ pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<S
         Ok(())
     }
     let mut files = BTreeMap::new();
-    visit(&open_root(root)?, "", 0, &mut files, cancel)?;
+    visit(&open_root(root)?, "", 0, (&mut files, skip), cancel)?;
     Ok(files)
 }
 

@@ -1324,12 +1324,15 @@ async fn run_assignment(
             wait_for_work(shutdown).await;
             return Ok(());
         }
-        Err(_) => {
-            return save_finish(
-                journal,
-                attempt,
-                adapter::failed("Task workspace could not be prepared safely"),
-            );
+        Err(error) => {
+            // A failed setup names itself and keeps its untrusted output, as TypeScript's
+            // `workspace-setup` failure does.
+            let message = if error.message().starts_with("Workspace setup") {
+                error.message()
+            } else {
+                "Task workspace could not be prepared safely"
+            };
+            return save_finish(journal, attempt, adapter::failed(message));
         }
     };
     if !task.input_artifacts.is_empty() && options.remote_provider.is_none() {

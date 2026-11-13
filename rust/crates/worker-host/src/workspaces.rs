@@ -30,6 +30,8 @@ use crate::{checkpoints::Transfers, journal::Attempt, request};
 pub struct WorkspaceMapping {
     pub workspace_id: String,
     pub source: WorkspaceSource,
+    /// Shell command run on each new Task checkout's base commit; local sources only.
+    pub setup: Option<String>,
 }
 
 impl WorkspaceMapping {
@@ -94,6 +96,13 @@ impl Workspaces {
                     "Workspace {} is mapped more than once",
                     mapping.workspace_id
                 );
+                if let Some(command) = &mapping.setup {
+                    ensure!(
+                        matches!(mapping.source, WorkspaceSource::Local(_)),
+                        "Workspace setup runs only for a local source"
+                    );
+                    supertag_workspaces::setup::validate_command(command)?;
+                }
                 // An unavailable source cannot be advertised for new work, but
                 // must not prevent recovery cleanup from recorded private state.
                 if let WorkspaceSource::Local(path) = &mapping.source
@@ -258,10 +267,17 @@ impl Workspaces {
                     attempt_id: attempt.attempt_id.clone(),
                     session_id: task.session_id.clone(),
                     expected_head,
+                    setup: mapping.setup.clone(),
                 },
                 cancel,
             )
-            .await?;
+            .await
+            .map_err(
+                |error| match error.downcast::<supertag_workspaces::setup::SetupFailed>() {
+                    Ok(failed) => Status::failed_precondition(failed.0).into(),
+                    Err(error) => error,
+                },
+            )?;
         Ok(Some(PreparedWorkspace {
             workspace_id: spec.workspace_id.clone(),
             checkout,
@@ -686,6 +702,7 @@ mod tests {
         let mapping = WorkspaceMapping {
             workspace_id: "project".into(),
             source: WorkspaceSource::Local(source.clone()),
+            setup: None,
         };
         let workspaces = Workspaces::new(&state, vec![mapping.clone()])?;
         assert_eq!(workspaces.ids(), ["project"]);
@@ -698,6 +715,7 @@ mod tests {
                     attempt_id: "attempt".into(),
                     session_id: "session".into(),
                     expected_head: Some(base_commit.clone()),
+                    setup: None,
                 },
                 &CancellationToken::new(),
             )

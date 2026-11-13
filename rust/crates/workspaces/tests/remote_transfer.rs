@@ -76,6 +76,7 @@ impl Fixture {
                     attempt_id: format!("{task}-attempt"),
                     session_id: "session".into(),
                     expected_head: Some(pin.into()),
+                    setup: None,
                 },
                 &CancellationToken::new(),
             )

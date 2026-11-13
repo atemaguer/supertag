@@ -108,6 +108,9 @@ enum WorkspaceMapping {
         path: PathBuf,
         #[serde(default)]
         delivery: Delivery,
+        /// Shell command that prepares each new Task checkout; see `--workspace-setup`.
+        #[serde(default)]
+        setup: Option<String>,
     },
 }
 /// `branch` imports each delivered Task into the repository as its Session branch; `patch`
@@ -120,10 +123,14 @@ enum Delivery {
     Patch,
 }
 impl WorkspaceMapping {
-    fn parts(&self) -> (&Path, Delivery) {
+    fn parts(&self) -> (&Path, Delivery, Option<&str>) {
         match self {
-            Self::Path(path) => (path, Delivery::Branch),
-            Self::Detailed { path, delivery } => (path, *delivery),
+            Self::Path(path) => (path, Delivery::Branch, None),
+            Self::Detailed {
+                path,
+                delivery,
+                setup,
+            } => (path, *delivery, setup.as_deref()),
         }
     }
 }
@@ -581,10 +588,11 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             "a named Worker Host maps at most 128 Workspaces"
         );
         let mut mapping = Vec::new();
+        let mut setups = Vec::new();
         let mut session_branches = BTreeMap::new();
         for (id, workspace) in &workspaces {
             identifier(id)?;
-            let (path, delivery) = workspace.parts();
+            let (path, delivery, setup) = workspace.parts();
             let path = resolve_path(base, path)?;
             if delivery == Delivery::Branch && remote.is_none() {
                 session_branches.insert(id.clone(), path.clone());
@@ -595,7 +603,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 "--workspace-source".into(),
                 path.into_os_string(),
             ]);
+            if let Some(setup) = setup {
+                supertag_workspaces::setup::validate_command(setup)?;
+                setups.push(OsString::from(format!("--workspace-setup={id}={setup}")));
+            }
         }
+        mapping.extend(setups);
         let mut selections = Vec::new();
         if let Some(adapter) = adapter {
             ensure!(
@@ -1179,7 +1192,7 @@ secrets:
             br#"services:
   control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
   branch: {type: host, adapter: ./adapter, workspaces: {app: ./app}}
-  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch}}}
+  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch, setup: npm ci}}}
   patch: {type: host, adapter: ./adapter, workspaces: {docs: {path: ./docs, delivery: patch}}}
   remote: {type: host, control-plane: "https://plane.example", adapter: ./adapter, workspaces: {api: ./api}}
 "#,
@@ -1202,6 +1215,16 @@ secrets:
         assert_eq!(
             branches("explicit"),
             [("web".to_owned(), PathBuf::from("/trusted/./web"))].into()
+        );
+        // A Workspace's setup command reaches its host's Workers.
+        let explicit = c.hosts.iter().find(|h| h.name == "explicit").unwrap();
+        let mappings = explicit.harnesses[0].workspace_mappings().unwrap();
+        assert_eq!(mappings[0].setup.as_deref(), Some("npm ci"));
+        assert!(
+            explicit.harnesses[0]
+                .worker_args()
+                .iter()
+                .any(|v| v == "web=npm ci")
         );
         // The repository is still the host's source; only the import is off.
         assert!(branches("patch").is_empty());
