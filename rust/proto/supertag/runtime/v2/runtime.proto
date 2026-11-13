@@ -61,8 +61,10 @@ message ApplySetDeclaration {
   // The resource's revision as this apply left it: the revision its write
   // returned, or the revision it planned against when it did not write.
   uint64 revision = 3;
-  // True when this apply created the resource. Only a resource an apply set
-  // created joins it; an existing resource is never adopted.
+  // True when this apply is about to create the resource. Declaring a missing
+  // resource as created claims it for the set before the write, and the next
+  // reconcile that finds it records it as a member. Only a resource an apply
+  // set claimed joins it; an existing resource is never adopted.
   bool created = 4;
 }
 
@@ -83,8 +85,9 @@ enum ApplySetPruneAction {
   APPLY_SET_PRUNE_ACTION_DELETE = 1;
   // The member is still in use. It stays in the set for the next prune.
   APPLY_SET_PRUNE_ACTION_KEEP = 2;
-  // Another writer changed the member after this apply set last applied it.
-  // It is left in place and leaves the set.
+  // Another writer changed the member after this apply set last applied it,
+  // or the set claimed it but never recorded creating it. It is left in place
+  // and leaves the set.
   APPLY_SET_PRUNE_ACTION_RELEASE = 3;
   // The member no longer exists. It leaves the set.
   APPLY_SET_PRUNE_ACTION_FORGET = 4;

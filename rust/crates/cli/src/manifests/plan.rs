@@ -1124,6 +1124,16 @@ impl<'a> Catalog<'a> {
         Ok(())
     }
 
+    /// Claims for the apply set every resource this apply is about to create,
+    /// before any write. A claim outlives an apply that stops after a create,
+    /// so the next run of the same apply still records the resource as a member.
+    pub(super) async fn claim_apply_set(&mut self) -> Result<()> {
+        self.send_apply_set(|value| value.created && !value.applied, false, false)
+            .await
+            .context("claim apply set")?;
+        Ok(())
+    }
+
     /// Records the apply set's members and, with `prune`, removes those the
     /// input no longer declares. Only resources whose planned write succeeded
     /// are declared, so a failed apply records what it created and prunes nothing.
@@ -1132,20 +1142,39 @@ impl<'a> Catalog<'a> {
         prune: bool,
         preview: bool,
     ) -> Result<Vec<String>> {
+        let pruned = self
+            .send_apply_set(|value| preview || value.applied, prune, preview)
+            .await
+            .context("reconcile apply set")?;
+        Ok(pruned
+            .iter()
+            .map(|item| prune_line(item, preview, self.manager))
+            .collect())
+    }
+
+    async fn send_apply_set(
+        &mut self,
+        include: impl Fn(&Declared) -> bool,
+        prune: bool,
+        preview: bool,
+    ) -> Result<Vec<ApplySetPrune>> {
         if self.manager.is_empty() || self.create_only {
             return Ok(Vec::new());
         }
         let declared = self
             .declared
             .iter()
-            .filter(|(_, value)| preview || value.applied)
+            .filter(|(_, value)| include(value))
             .map(|((kind, name), value)| ApplySetDeclaration {
                 kind: format!("{kind:?}"),
                 name: name.clone(),
                 revision: value.revision,
                 created: value.created,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if declared.is_empty() && !prune {
+            return Ok(Vec::new());
+        }
         let response = self
             .relationships
             .reconcile_apply_set(request(
@@ -1157,14 +1186,9 @@ impl<'a> Catalog<'a> {
                 },
                 self.token,
             )?)
-            .await
-            .context("reconcile apply set")?
+            .await?
             .into_inner();
-        Ok(response
-            .pruned
-            .into_iter()
-            .map(|item| prune_line(&item, preview, self.manager))
-            .collect())
+        Ok(response.pruned)
     }
 }
 

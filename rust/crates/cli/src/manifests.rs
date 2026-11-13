@@ -465,6 +465,7 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         return Ok(());
     }
     let unchanged = changes.is_empty();
+    catalog.claim_apply_set().await?;
     for change in changes {
         if let Err(error) = catalog.apply(change, true).await {
             // Record what this apply created so a rerun still owns it; never prune here.

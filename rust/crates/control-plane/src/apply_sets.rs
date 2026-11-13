@@ -1,7 +1,11 @@
 //! Apply-set membership and pruning for declarative manifests.
 //!
-//! A resource joins an apply set only when that set's apply created it. The
-//! membership records the revision the set last left it at. Pruning removes a
+//! A resource joins an apply set only when that set's apply created it. Before
+//! writing, an apply claims each resource it is about to create, in its own
+//! committed write; the next reconcile records the claimed resource with the
+//! revision the set left it at. A claim survives an apply that stops between a
+//! create and that reconcile, so rerunning the apply finishes recording it.
+//! An existing resource is never claimed, so it is never adopted. Pruning removes a
 //! member the set's input no longer declares only while it is still at that
 //! revision: a member another writer changed since is released instead, and
 //! a member still in use is kept for a later prune. Reconciliation and every
@@ -71,6 +75,7 @@ async fn revision(tx: &mut Transaction<'_, Any>, kind: &str, id: &str) -> Result
 
 async fn remove(
     tx: &mut Transaction<'_, Any>,
+    apply_set: &str,
     kind: &str,
     id: &str,
     expected: u64,
@@ -87,7 +92,7 @@ async fn remove(
             }
             crate::teams::delete_team_in(tx, &team, Some(expected)).await
         }
-        "Tag" => crate::tags::retire_in(tx, id, expected, now_ms).await,
+        "Tag" => crate::tags::retire_in(tx, id, expected, now_ms, apply_set).await,
         "Role" => crate::policy::retire_role_in(tx, id, expected).await,
         "PermissionSet" => crate::policy::delete_permission_set_in(tx, id, expected).await,
         "ContextSet" => crate::policy::delete_context_set_in(tx, id, expected).await,
@@ -108,14 +113,19 @@ async fn owner(tx: &mut Transaction<'_, Any>, kind: &str, id: &str) -> Result<Op
     .await?)
 }
 
+/// Records a member at `revision`, or claims a resource the set is about to
+/// create when `revision` is `None`.
 async fn record(
     tx: &mut Transaction<'_, Any>,
     apply_set: &str,
     kind: &str,
     id: &str,
-    revision: u64,
+    revision: Option<u64>,
 ) -> Result<()> {
-    let revision = i64::try_from(revision).map_err(|_| invalid("revision is out of range"))?;
+    let revision = revision
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| invalid("revision is out of range"))?;
     sqlx::query("INSERT INTO supertag_v2_apply_set_members (kind,name,apply_set,observed_revision) VALUES ($1,$2,$3,$4) ON CONFLICT(kind,name) DO UPDATE SET apply_set=excluded.apply_set,observed_revision=excluded.observed_revision")
         .bind(kind)
         .bind(id)
@@ -154,19 +164,22 @@ impl Store {
         let (mut tx, _) = self.write().await?;
         let now_ms = self.execution_now_ms();
         for ((kind, id), item) in &declared {
-            let Some(current) = revision(&mut tx, kind, id).await? else {
-                // A preview declares resources the apply has not created yet.
-                continue;
-            };
             let stored = owner(&mut tx, kind, id).await?;
             let mine = stored.as_deref() == Some(apply_set);
+            let Some(current) = revision(&mut tx, kind, id).await? else {
+                // Claim what the apply is about to create; a preview claims nothing.
+                if item.created && stored.is_none() {
+                    record(&mut tx, apply_set, kind, id, None).await?;
+                }
+                continue;
+            };
             if current != item.revision {
                 // Another writer changed it after this apply left it.
                 if mine {
                     forget(&mut tx, kind, id).await?;
                 }
-            } else if mine || (stored.is_none() && item.created) {
-                record(&mut tx, apply_set, kind, id, current).await?;
+            } else if mine {
+                record(&mut tx, apply_set, kind, id, Some(current)).await?;
             } else if stored.is_some() {
                 // Two apply sets declare it; neither may prune it.
                 forget(&mut tx, kind, id).await?;
@@ -187,7 +200,9 @@ impl Store {
                 if declared.contains_key(&(kind.as_str(), id.as_str())) {
                     continue;
                 }
-                let observed = row.try_get::<i64, _>("observed_revision")? as u64;
+                let observed = row
+                    .try_get::<Option<i64>, _>("observed_revision")?
+                    .map(|value| value as u64);
                 members.push((order(&kind)?, kind, id, observed));
             }
             members.sort();
@@ -197,20 +212,33 @@ impl Store {
                         forget(&mut tx, &kind, &id).await?;
                         (ApplySetPruneAction::Forget, String::new())
                     }
-                    Some(current) if current != observed => {
+                    Some(_) if observed.is_none() => {
+                        // The set claimed it but never recorded creating it, so
+                        // it cannot tell whether its own create made it.
+                        forget(&mut tx, &kind, &id).await?;
+                        (
+                            ApplySetPruneAction::Release,
+                            format!(
+                                "apply set {apply_set} claimed it but never recorded creating it"
+                            ),
+                        )
+                    }
+                    Some(current) if Some(current) != observed => {
                         forget(&mut tx, &kind, &id).await?;
                         (
                             ApplySetPruneAction::Release,
                             format!("changed outside apply set {apply_set} after it was applied"),
                         )
                     }
-                    Some(current) => match remove(&mut tx, &kind, &id, current, now_ms).await {
-                        Ok(()) => (ApplySetPruneAction::Delete, String::new()),
-                        Err(StoreError::FailedPrecondition(reason)) => {
-                            (ApplySetPruneAction::Keep, reason)
+                    Some(current) => {
+                        match remove(&mut tx, apply_set, &kind, &id, current, now_ms).await {
+                            Ok(()) => (ApplySetPruneAction::Delete, String::new()),
+                            Err(StoreError::FailedPrecondition(reason)) => {
+                                (ApplySetPruneAction::Keep, reason)
+                            }
+                            Err(error) => return Err(error),
                         }
-                        Err(error) => return Err(error),
-                    },
+                    }
                 };
                 pruned.push(ApplySetPrune {
                     kind,

@@ -46,8 +46,10 @@ export type ApplySetDeclaration = Message<"supertag.runtime.v2.ApplySetDeclarati
   revision: bigint;
 
   /**
-   * True when this apply created the resource. Only a resource an apply set
-   * created joins it; an existing resource is never adopted.
+   * True when this apply is about to create the resource. Declaring a missing
+   * resource as created claims it for the set before the write, and the next
+   * reconcile that finds it records it as a member. Only a resource an apply
+   * set claimed joins it; an existing resource is never adopted.
    *
    * @generated from field: bool created = 4;
    */
@@ -8164,8 +8166,9 @@ export enum ApplySetPruneAction {
   KEEP = 2,
 
   /**
-   * Another writer changed the member after this apply set last applied it.
-   * It is left in place and leaves the set.
+   * Another writer changed the member after this apply set last applied it,
+   * or the set claimed it but never recorded creating it. It is left in place
+   * and leaves the set.
    *
    * @generated from enum value: APPLY_SET_PRUNE_ACTION_RELEASE = 3;
    */
