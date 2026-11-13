@@ -88,3 +88,21 @@ pub fn read_declarations(
         })
         .collect())
 }
+
+/// Operator JSON for configured mounts and the Volume pins frozen at admission.
+pub fn describe(mounts: &[supertag_protocol::v2::WorkspaceCopyMount]) -> serde_json::Value {
+    mounts
+        .iter()
+        .map(|mount| {
+            json!({
+                "volume_id": mount.volume_id,
+                "destination": mount.destination,
+                "max_bytes": mount.max_bytes,
+                "volume": mount.volume.as_ref().map(|volume| json!({
+                    "source": volume.source,
+                    "revision": volume.revision,
+                })),
+            })
+        })
+        .collect()
+}

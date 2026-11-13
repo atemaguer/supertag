@@ -2226,6 +2226,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
+        "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
     })
@@ -2241,6 +2242,7 @@ fn print_task(task: &Task) {
             "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+                "mounts": workspace_mounts::describe(&spec.mounts),
                 "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
