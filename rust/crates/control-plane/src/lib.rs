@@ -25,6 +25,7 @@ mod objectives;
 mod policy;
 mod replies;
 mod review_artifacts;
+mod spend;
 mod store;
 mod surface_policy;
 mod tags;

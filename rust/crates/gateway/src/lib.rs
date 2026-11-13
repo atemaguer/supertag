@@ -19,6 +19,7 @@ mod policy;
 #[cfg(test)]
 mod readiness_tests;
 pub mod slack;
+mod spend;
 mod surface_policy;
 mod teams;
 pub mod transfers;
