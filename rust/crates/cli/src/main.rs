@@ -8,6 +8,7 @@ mod host_status;
 mod inbox;
 mod inputs;
 mod local;
+mod local_config;
 mod mailbox_grants;
 mod manifests;
 mod network;
@@ -188,10 +189,13 @@ enum Command {
         #[command(subcommand)]
         command: teams::TeamCommand,
     },
-    /// Start the local Control Plane, Gateway, and Worker Host.
+    /// Supervise local services or configured Worker Hosts connected to a Gateway.
     Up {
+        /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
         #[arg(long)]
-        state_directory: PathBuf,
+        state_directory: Option<PathBuf>,
         #[command(flatten)]
         adapter: AdapterOptions,
         /// Private host allowlist of Skill packages.
@@ -672,21 +676,33 @@ async fn run(command: Command) -> Result<()> {
             command,
         } => teams::run(connection, command).await?,
         Command::Up {
+            file,
             state_directory,
             adapter,
             skill_catalog,
             gateway_listen,
         } => {
-            local::up(
-                local::LocalOptions {
-                    state_directory,
-                    adapter,
-                    skill_catalog,
-                    gateway_listen,
-                },
-                termination_signal(),
-            )
-            .await?;
+            let state_directory = local_config::state_directory(state_directory)?;
+            if let Some(config) = local_config::load(file, &state_directory)? {
+                ensure!(
+                    !adapter.has_options()
+                        && skill_catalog.is_none()
+                        && gateway_listen == "127.0.0.1:0".parse::<SocketAddr>()?,
+                    "configure adapters and listeners in the services file when using local configuration"
+                );
+                local::configured(config, state_directory, termination_signal()).await?;
+            } else {
+                local::up(
+                    local::LocalOptions {
+                        state_directory,
+                        adapter,
+                        skill_catalog,
+                        gateway_listen,
+                    },
+                    termination_signal(),
+                )
+                .await?;
+            }
         }
         Command::ControlPlane { listen } => control_plane(listen).await?,
         Command::Gateway {

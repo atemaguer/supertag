@@ -141,3 +141,8 @@ required-features = ["test-fixtures"]
 name = "artifact_publication_runtime"
 path = "tests/artifact_publication_runtime.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "local_services"
+path = "tests/local_services.rs"
+required-features = ["test-fixtures"]

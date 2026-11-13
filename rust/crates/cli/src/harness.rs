@@ -12,7 +12,7 @@ use supertag_worker_host::{
 
 use crate::node_bridges::{self, NodeBridge};
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, ValueEnum, PartialEq)]
 pub enum Harness {
     Codex,
     ClaudeCode,
@@ -45,10 +45,10 @@ impl Harness {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone, Default, PartialEq)]
 pub struct AdapterOptions {
     /// Executable that implements the SuperTag harness protocol.
-    #[arg(long, conflicts_with = "harness", required_unless_present = "harness")]
+    #[arg(long, conflicts_with = "harness")]
     adapter: Option<PathBuf>,
     #[arg(long, requires = "adapter", allow_hyphen_values = true)]
     adapter_arg: Vec<OsString>,
@@ -114,6 +114,13 @@ pub struct AdapterOptions {
 }
 
 impl AdapterOptions {
+    pub fn has_options(&self) -> bool {
+        self != &Self::default()
+    }
+    pub fn is_selected(&self) -> bool {
+        self.adapter.is_some() || self.harness.is_some()
+    }
+
     pub fn uses_gateway_workspace(&self) -> bool {
         self.workspace_from_gateway
     }
@@ -224,7 +231,7 @@ impl AdapterOptions {
             OsString::from("--harness"),
             OsString::from(
                 self.harness
-                    .expect("Clap requires a harness or adapter")
+                    .expect("validated harness or adapter selection")
                     .name(),
             ),
         ];

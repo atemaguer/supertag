@@ -42,6 +42,10 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         options.gateway_listen.ip().is_loopback(),
         "local Gateway must listen on loopback"
     );
+    ensure!(
+        options.adapter.is_selected(),
+        "select a harness, an adapter, or a local services file"
+    );
     options.adapter.provider_environment()?;
     let mut directories = DirBuilder::new();
     directories
@@ -53,15 +57,12 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     lock.try_lock().context("local state is already in use")?;
     remove_endpoint(&directory)?;
     let credentials = Credentials::load_or_create(&directory)?;
-    let database = directory.join("runtime.sqlite3");
-    open_private_file(&database, true)?;
-    let database_url = sqlite_url(&database)?;
     let executable = std::env::current_exe()?;
 
     let mut children = Children::default();
     tokio::pin!(shutdown);
     let start = tokio::select! {
-        result = children.start(&executable, &options, &directory, &credentials, database_url) => result.map(Some),
+        result = children.start(&executable, &options, &directory, &credentials) => result.map(Some),
         _ = &mut shutdown => Ok(None),
     };
     let result = match start {
@@ -122,20 +123,26 @@ struct Service {
 }
 
 impl Children {
-    async fn start(
+    async fn start_base(
         &mut self,
         executable: &Path,
-        options: &LocalOptions,
         directory: &Path,
         credentials: &Credentials,
-        database_url: String,
+        gateway_listen: SocketAddr,
+        uses_gateway_workspace: bool,
+        bootstrap_host: bool,
     ) -> Result<String> {
+        let database = directory.join("runtime.sqlite3");
+        open_private_file(&database, true)?;
+        let database_url = sqlite_url(&database)?;
         let mut plane = command(executable, "control-plane");
         plane
             .args(["--listen", "127.0.0.1:0"])
             .env("SUPERTAG_DATABASE_URL", database_url)
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host)
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
+        if bootstrap_host {
+            plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
+        }
         let address = start_child(&mut self.control_plane, &mut plane, "Control Plane").await?;
         let control_plane = format!("http://{}", loopback_address(&address)?);
 
@@ -145,13 +152,13 @@ impl Children {
                 "--control-plane",
                 &control_plane,
                 "--listen",
-                &options.gateway_listen.to_string(),
+                &gateway_listen.to_string(),
             ])
             .arg("--checkpoint-directory")
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
-        if options.adapter.uses_gateway_workspace() {
+        if uses_gateway_workspace {
             gateway
                 .arg("--github-workspace-directory")
                 .arg(directory.join("github-sources"));
@@ -181,6 +188,26 @@ impl Children {
         let address = start_child(&mut self.gateway, &mut gateway, "Gateway").await?;
         let endpoint = format!("http://{}", loopback_address(&address)?);
 
+        Ok(endpoint)
+    }
+
+    async fn start(
+        &mut self,
+        executable: &Path,
+        options: &LocalOptions,
+        directory: &Path,
+        credentials: &Credentials,
+    ) -> Result<String> {
+        let endpoint = self
+            .start_base(
+                executable,
+                directory,
+                credentials,
+                options.gateway_listen,
+                options.adapter.uses_gateway_workspace(),
+                true,
+            )
+            .await?;
         let mut host = command(executable, "worker-host");
         host.args(["--gateway", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
@@ -505,4 +532,301 @@ fn sqlite_url(database: &Path) -> Result<String> {
     }
     url.push_str("?mode=rw");
     Ok(url)
+}
+
+struct ManagedHost {
+    definition: crate::local_config::Host,
+    endpoint: String,
+    directory: PathBuf,
+    service: Option<Service>,
+}
+impl ManagedHost {
+    async fn start(&mut self, executable: &Path) -> Result<()> {
+        let mut host = command(executable, "worker-host");
+        host.args(["--gateway", &self.endpoint, "--state-directory"])
+            .arg(&self.directory)
+            .arg("--wait-for-recovery")
+            .args(self.definition.adapter.worker_args());
+        if let Some(path) = &self.definition.skills {
+            host.arg("--skill-catalog").arg(path);
+        }
+        for name in self
+            .definition
+            .adapter
+            .provider_environment()?
+            .iter()
+            .copied()
+            .chain([
+                "SUPERTAG_SERVER_CA_FILE",
+                "SUPERTAG_CLIENT_CERT_FILE",
+                "SUPERTAG_CLIENT_KEY_FILE",
+            ])
+        {
+            if let Some(value) = std::env::var_os(name) {
+                host.env(name, value);
+            }
+        }
+        let ready = start_child(
+            &mut self.service,
+            &mut host,
+            &format!("Worker Host {}", self.definition.name),
+        )
+        .await?;
+        ensure!(ready == "ready", "invalid Worker Host readiness signal");
+        Ok(())
+    }
+}
+
+/// Supervise explicitly configured services. Each named Host owns one credential and journal.
+pub async fn configured(
+    config: crate::local_config::Config,
+    state: PathBuf,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&state)?;
+    let directory = private_directory(&state)?;
+    let lock = open_private_file(&directory.join(STATE_LOCK), true)?;
+    lock.try_lock().context("local state is already in use")?;
+    remove_endpoint(&directory)?;
+    let executable = std::env::current_exe()?;
+    let mut base = Children::default();
+    let mut hosts = Vec::new();
+    tokio::pin!(shutdown);
+    let startup = async {
+        let credentials = config
+            .plane
+            .as_ref()
+            .map(|_| Credentials::load_or_create(&directory))
+            .transpose()?;
+        let endpoint = if let Some(plane) = &config.plane {
+            // An enrolled installation pins its Gateway origin. Reuse an initially selected
+            // random loopback port on restart instead of silently retargeting credentials.
+            let listen = stable_listen(&directory, plane.listen)?;
+            let endpoint = base
+                .start_base(
+                    &executable,
+                    &directory,
+                    credentials.as_ref().expect("local credentials"),
+                    listen,
+                    config
+                        .hosts
+                        .iter()
+                        .any(|h| h.adapter.uses_gateway_workspace()),
+                    false,
+                )
+                .await?;
+            write_private(
+                &directory,
+                "gateway-address",
+                endpoint
+                    .strip_prefix("http://")
+                    .expect("loopback origin")
+                    .as_bytes(),
+            )?;
+            Some(endpoint)
+        } else {
+            None
+        };
+        for definition in config.hosts {
+            let target = definition
+                .gateway
+                .clone()
+                .or_else(|| endpoint.clone())
+                .context("host Gateway is unavailable")?;
+            let host_directory = directory.join("hosts").join(&definition.name);
+            enroll_configured(
+                &definition,
+                &target,
+                &host_directory,
+                credentials
+                    .as_ref()
+                    .filter(|_| definition.gateway.is_none()),
+            )
+            .await?;
+            let index = hosts.len();
+            hosts.push(ManagedHost {
+                definition,
+                endpoint: target,
+                directory: host_directory,
+                service: None,
+            });
+            hosts[index].start(&executable).await?;
+        }
+        if let Some(endpoint) = endpoint {
+            announce(&directory, &endpoint)?;
+        } else {
+            // Host-only machines hold no operator credential and cannot use --state-directory
+            // to impersonate an operator on the remote Gateway.
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(b"ready\n")?;
+            stdout.flush()?;
+        }
+        Ok::<_, anyhow::Error>(())
+    };
+    let started = tokio::select! {result=startup=>result.map(|()|true),_=&mut shutdown=>Ok(false)};
+    let result = match started {
+        Ok(true) => {
+            tokio::select! {result=wait_configured(&mut base,&mut hosts,&executable)=>result,_=&mut shutdown=>Ok(())}
+        }
+        Ok(false) => Ok(()),
+        Err(error) => Err(error),
+    };
+    let mut failures = Vec::new();
+    let mut stops = tokio::task::JoinSet::new();
+    for host in &mut hosts {
+        if let Some(mut service) = host.service.take() {
+            let name = host.definition.name.clone();
+            stops.spawn(async move {
+                stop_child(&mut service.process)
+                    .await
+                    .with_context(|| format!("stop Worker Host {name}"))
+            });
+        }
+    }
+    while let Some(stopped) = stops.join_next().await {
+        if let Err(error) = stopped
+            .context("Worker Host shutdown task failed")
+            .and_then(|r| r)
+        {
+            failures.push(format!("{error:#}"));
+        }
+    }
+    if let Err(error) = base.stop().await {
+        failures.push(format!("{error:#}"));
+    }
+    if let Err(error) = remove_endpoint(&directory) {
+        failures.push(format!("{error:#}"));
+    }
+    drop(lock);
+    if !failures.is_empty() {
+        return Err(anyhow::anyhow!(
+            "local service cleanup failed: {}",
+            failures.join("; ")
+        ))
+        .context(
+            result
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "stopping local services".into()),
+        );
+    }
+    result
+}
+fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr> {
+    let path = directory.join("gateway-address");
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            let address = loopback_address(read_private(&path)?.trim())?;
+            ensure!(
+                address.ip() == configured.ip()
+                    && (configured.port() == 0 || configured.port() == address.port()),
+                "stored local Gateway address differs from configured listener"
+            );
+            Ok(address)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(configured),
+        Err(error) => Err(error.into()),
+    }
+}
+async fn enroll_configured(
+    definition: &crate::local_config::Host,
+    endpoint: &str,
+    state: &Path,
+    local: Option<&Credentials>,
+) -> Result<()> {
+    let gateway = crate::network::endpoint(endpoint.into(), false).await?;
+    match supertag_worker_host::enroll(gateway.clone(), state, definition.name.clone(), None).await
+    {
+        Ok(_) => return Ok(()),
+        // The enrollment helper checks any stored receipt before asking for an Auth Key.
+        // A consumed key is intentionally not required again after a confirmed enrollment.
+        Err(error) if error.to_string() == "Auth Key required" => {}
+        Err(error) => return Err(error),
+    }
+    let key = if let Some(credentials) = local {
+        use sha2::{Digest, Sha256};
+        use supertag_protocol::v2::{CreateAuthKeyRequest, operator_client::OperatorClient};
+        let key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        OperatorClient::new(gateway.connect_lazy())
+            .create_auth_key(crate::request(
+                CreateAuthKeyRequest {
+                    host_id: definition.name.clone(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    key_digest: Sha256::digest(key.as_bytes()).to_vec(),
+                    expires_in_ms: 600_000,
+                    allowed_tag_ids: vec![],
+                    all_tags: true,
+                },
+                &credentials.operator,
+            )?)
+            .await?;
+        key
+    } else {
+        definition
+            .key
+            .as_ref()
+            .context("remote Worker Host needs an Auth Key secret for its first enrollment")?
+            .read()?
+    };
+    supertag_worker_host::enroll(gateway, state, definition.name.clone(), Some(&key)).await?;
+    Ok(())
+}
+async fn wait_configured(
+    base: &mut Children,
+    hosts: &mut [ManagedHost],
+    executable: &Path,
+) -> Result<()> {
+    loop {
+        for (name, service) in [
+            ("Control Plane", base.control_plane.as_mut()),
+            ("Gateway", base.gateway.as_mut()),
+        ] {
+            if let Some(service) = service
+                && let Some(status) = service.process.try_wait()?
+            {
+                bail!("{name} exited unexpectedly with {status}");
+            }
+        }
+        for host in hosts.iter_mut() {
+            if let Some(status) = host
+                .service
+                .as_mut()
+                .expect("started Host")
+                .process
+                .try_wait()?
+            {
+                ensure!(
+                    host.definition.restart == crate::local_config::Restart::UnlessStopped,
+                    "Worker Host {} exited unexpectedly with {status}",
+                    host.definition.name
+                );
+                host.service.take();
+                time::sleep(Duration::from_secs(1)).await;
+                host.start(executable).await?;
+            }
+        }
+        time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn enrolled_gateway_origin_cannot_be_retargeted_by_config() {
+        let temp = tempfile::tempdir().unwrap();
+        write_private(temp.path(), "gateway-address", b"127.0.0.1:19876").unwrap();
+        assert_eq!(
+            stable_listen(temp.path(), "127.0.0.1:0".parse().unwrap()).unwrap(),
+            "127.0.0.1:19876".parse::<SocketAddr>().unwrap()
+        );
+        assert!(stable_listen(temp.path(), "127.0.0.1:19877".parse().unwrap()).is_err());
+        assert_eq!(
+            read_private(&temp.path().join("gateway-address")).unwrap(),
+            "127.0.0.1:19876"
+        );
+    }
 }
