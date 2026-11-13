@@ -100,10 +100,18 @@ async fn interrupt_input_receipt(
     result
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and built Claude adapter"]
-async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch() -> Result<()> {
-    let node = std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable")?;
+database_tests! {
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and built Claude adapter"]
+    accepted_inputs_reach_an_exclusive_workspace_before_native_launch;
+}
+
+async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
+    database: String,
+) -> Result<()> {
+    let Some(node) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let root = tempfile::tempdir()?;
     let source = root.path().join("source");
     let base = super::python_artifacts_runtime::checkout(&source).await?;
@@ -117,7 +125,8 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch() -> 
     let volume = root.path().canonicalize()?.join("volume");
     std::fs::create_dir(&volume)?;
     std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
-    let services = LanguageServices::start_with_volume(root.path(), Some(&volume)).await?;
+    let services =
+        LanguageServices::start_with_volume(root.path(), &database, Some(&volume)).await?;
     // A fixture Task creates and submits a file through the real declared-output lifecycle.
     services
         .operator(&[

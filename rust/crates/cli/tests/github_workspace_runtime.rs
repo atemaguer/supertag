@@ -1,4 +1,10 @@
 //! Real split services fetch only the pinned source from a loopback GitHub/Git fixture.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use anyhow::{Context, Result, ensure};
 use axum::{
     Router,
@@ -232,27 +238,51 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .with_context(|| format!("missing {name}: {value}"))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn source_and_continuation_cross_hosts_without_provider_credentials() -> Result<()> {
-    scenario(false, false, false).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn publication_approval_then_replacement_proves_lost_create_without_reposting() -> Result<()>
-{
-    scenario(true, false, false).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn moving_ref_pins_session_before_execution_and_survives_gateway_restart() -> Result<()> {
-    scenario(false, true, false).await
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn github_workspace_output_references_are_verified_by_the_credentialed_gateway() -> Result<()>
-{
-    scenario(false, false, true).await
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    source_and_continuation_cross_hosts_without_provider_credentials;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    publication_approval_then_replacement_proves_lost_create_without_reposting;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    moving_ref_pins_session_before_execution_and_survives_gateway_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    github_workspace_output_references_are_verified_by_the_credentialed_gateway;
 }
 
-async fn scenario(publication: bool, moving: bool, git_outputs: bool) -> Result<()> {
+async fn source_and_continuation_cross_hosts_without_provider_credentials(
+    database: String,
+) -> Result<()> {
+    scenario(&database, false, false, false).await
+}
+
+async fn publication_approval_then_replacement_proves_lost_create_without_reposting(
+    database: String,
+) -> Result<()> {
+    scenario(&database, true, false, false).await
+}
+
+async fn moving_ref_pins_session_before_execution_and_survives_gateway_restart(
+    database: String,
+) -> Result<()> {
+    scenario(&database, false, true, false).await
+}
+
+async fn github_workspace_output_references_are_verified_by_the_credentialed_gateway(
+    database: String,
+) -> Result<()> {
+    if crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")?.is_none() {
+        return Ok(());
+    }
+    scenario(&database, false, false, true).await
+}
+
+async fn scenario(
+    database: &str,
+    publication: bool,
+    moving: bool,
+    git_outputs: bool,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let repository = root.join("input");
@@ -326,10 +356,7 @@ async fn scenario(publication: bool, moving: bool, git_outputs: bool) -> Result<
         command
     };
     let mut cp = command(&["control-plane"]);
-    cp.env(
-        "SUPERTAG_DATABASE_URL",
-        format!("sqlite://{}?mode=rwc", root.join("state.sqlite").display()),
-    );
+    cp.env("SUPERTAG_DATABASE_URL", database);
     let (mut plane, private) = service(cp).await?;
     let gateway_command = |listen: &str| {
         let mut gateway = command(&["gateway", "--control-plane", &private, "--listen", listen]);

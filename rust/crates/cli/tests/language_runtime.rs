@@ -1,3 +1,9 @@
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 #[path = "support/python_artifacts_runtime.rs"]
 mod python_artifacts_runtime;
 #[path = "support/task_artifact_inputs_runtime.rs"]
@@ -91,8 +97,32 @@ exec "$program"
     Ok(())
 }
 
-#[tokio::test]
-async fn language_profiles_route_tasks_and_limit_credentials_and_scratch() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    language_profiles_route_tasks_and_limit_credentials_and_scratch;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
+    python_agents_sdk_restores_session_on_a_fresh_host;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_code_sdk_restores_session_on_a_fresh_host;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_captures_selected_workspace_files_for_the_operator;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage;
+}
+
+async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let gateway_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -101,13 +131,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch() -> Re
     control
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut control, private) = service(control).await?;
     let mut gateway = command(&["gateway", "--control-plane", &private]);
     gateway
@@ -217,11 +241,15 @@ struct LanguageServices {
 }
 
 impl LanguageServices {
-    async fn start(directory: &Path) -> Result<Self> {
-        Self::start_with_volume(directory, None).await
+    async fn start(directory: &Path, database: &str) -> Result<Self> {
+        Self::start_with_volume(directory, database, None).await
     }
 
-    async fn start_with_volume(directory: &Path, volume: Option<&Path>) -> Result<Self> {
+    async fn start_with_volume(
+        directory: &Path,
+        database: &str,
+        volume: Option<&Path>,
+    ) -> Result<Self> {
         let gateway_token = Uuid::new_v4().to_string();
         let operator_token = Uuid::new_v4().to_string();
         let host_token = Uuid::new_v4().to_string();
@@ -229,13 +257,7 @@ impl LanguageServices {
         control
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env(
-                "SUPERTAG_DATABASE_URL",
-                format!(
-                    "sqlite://{}?mode=rwc",
-                    directory.join("control.db").display()
-                ),
-            );
+            .env("SUPERTAG_DATABASE_URL", database);
         let (control, private) = service(control).await?;
         let mut gateway = command(&["gateway", "--control-plane", &private]);
         gateway
@@ -326,15 +348,14 @@ async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> 
     Ok(serde_json::from_str(latest)?)
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
-    let node =
-        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String) -> Result<()> {
+    let Some(node) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     let journal = directory.path().join("mcp-provider.jsonl");
     let mut provider = Command::new(&node);
     provider
@@ -523,14 +544,15 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
     services.stop().await
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
-async fn python_agents_sdk_restores_session_on_a_fresh_host() -> Result<()> {
-    let interpreter = std::env::var_os("SUPERTAG_RUST_TEST_AGENTS_PYTHON")
-        .context("installed Python Agents test interpreter required")?;
+async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) -> Result<()> {
+    let Some(interpreter) =
+        crate::prerequisites::env("agents-python", "SUPERTAG_RUST_TEST_AGENTS_PYTHON")?
+    else {
+        return Ok(());
+    };
     let fixture = repo_path("sdks/python/tests/fixtures/openai_agents_runtime.py")?;
     let directory = tempfile::tempdir()?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
             "put-tag",
@@ -581,15 +603,14 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host() -> Result<()> {
     services.stop().await
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn claude_code_sdk_restores_session_on_a_fresh_host() -> Result<()> {
-    let interpreter =
-        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
             "put-tag",
@@ -639,11 +660,10 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host() -> Result<()> {
     services.stop().await
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<()> {
-    let interpreter =
-        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+async fn claude_captures_selected_workspace_files_for_the_operator(database: String) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
@@ -675,7 +695,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     success(git(&["add", "report.txt", "empty.txt", "removed.txt"])).await?;
     success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
     let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
             "put-tag",
@@ -1012,15 +1032,16 @@ async fn declared_output_cases(
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn() -> Result<()> {
-    let interpreter =
-        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     let worker = |state: &str| {
         let mut host = services.worker(
             "claude-code",
@@ -1172,15 +1193,16 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn()
     services.stop().await
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage() -> Result<()> {
-    let interpreter =
-        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
             "put-tag",

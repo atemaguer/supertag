@@ -1,13 +1,17 @@
 //! Separate Control Plane, Gateway and Worker Host processes stage a read-only
 //! Workspace Volume copy for a real Codex Task, then remove it at cleanup.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
-    net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, str::FromStr,
-    time::Duration,
+    net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -417,35 +421,12 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_stages_a_read_only_workspace_copy_for_a_codex_task() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("runtime.sqlite3").display()
-    );
-    exercise(&database, directory.path()).await
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    stages_a_read_only_workspace_copy_for_a_codex_task;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_stages_a_read_only_workspace_copy_for_a_codex_task() -> Result<()> {
-    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
-        .context("PostgreSQL URL file required")?;
-    let options = PgConnectOptions::from_str(std::fs::read_to_string(path)?.trim())?;
-    let mut admin = PgConnection::connect_with(&options).await?;
-    let name = format!("supertag_mount_process_{}", Uuid::new_v4().simple());
-    admin
-        .execute(format!("CREATE DATABASE {name}").as_str())
-        .await?;
-    let database = options.database(&name).to_url_lossy().to_string();
+async fn stages_a_read_only_workspace_copy_for_a_codex_task(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let path = directory.path().to_owned();
-    let result = tokio::spawn(async move { exercise(&database, &path).await }).await;
-    let cleanup = admin
-        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-        .await;
-    admin.close().await?;
-    cleanup?;
-    result.context("workspace mount process test panicked")?
+    exercise(&database, directory.path()).await
 }

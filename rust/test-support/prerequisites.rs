@@ -53,6 +53,8 @@ pub fn missing<T>(name: &str, detail: &str) -> Result<Option<T>> {
 
 /// Returns a non-empty environment variable that carries the prerequisite `name`.
 pub fn env(name: &str, variable: &str) -> Result<Option<OsString>> {
+    // Validate the require list even when the prerequisite is present.
+    required(name)?;
     match std::env::var_os(variable).filter(|value| !value.is_empty()) {
         Some(value) => Ok(Some(value)),
         None => missing(name, &format!("set {variable}")),
@@ -62,6 +64,7 @@ pub fn env(name: &str, variable: &str) -> Result<Option<OsString>> {
 /// Returns `Some(())` when the test runs as root on Linux, the isolated environment the shared
 /// execution workload cases need to switch to a distinct workload UID.
 pub fn linux_root() -> Result<Option<()>> {
+    required("linux-root")?;
     // SAFETY: geteuid has no preconditions and cannot fail.
     if cfg!(target_os = "linux") && unsafe { libc::geteuid() } == 0 {
         return Ok(Some(()));

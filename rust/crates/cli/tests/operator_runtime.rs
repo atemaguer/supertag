@@ -146,8 +146,9 @@ async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata()
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn go_tui_lists_and_saves_completed_task_files() -> Result<()> {
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
-        .context("version-matched terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     captured_artifact_round_trip(Some(Path::new(&binary))).await
 }
 
@@ -790,8 +791,9 @@ fn shell_path(path: &Path) -> Result<String> {
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
-    let binary =
-        std::env::var_os("SUPERTAG_RUST_TEST_TUI").context("terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     let directory = tempfile::Builder::new()
         .prefix("tui-chooser-")
         .tempdir_in("/tmp")?;
@@ -910,8 +912,9 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
-        .context("version-matched terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     let directory = tempfile::Builder::new()
         .prefix("tui-v2-")
         .tempdir_in("/tmp")?;
@@ -1023,8 +1026,9 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()> {
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
-        .context("version-matched terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     let directory = tempfile::Builder::new()
         .prefix("work-tui-")
         .tempdir_in("/tmp")?;
@@ -1100,8 +1104,9 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result<()> {
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
-        .context("version-matched terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     let directory = tempfile::Builder::new()
         .prefix("work-question-tui-")
         .tempdir_in("/tmp")?;
@@ -1428,8 +1433,9 @@ async fn watch_replays_private_conversations_after_services_restart(
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
-        .context("version-matched terminal UI binary required")?;
+    let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
+        return Ok(());
+    };
     let directory = tempfile::Builder::new()
         .prefix("inbox-v2-")
         .tempdir_in("/tmp")?;

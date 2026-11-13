@@ -20,6 +20,9 @@ const ENVIRONMENT: &str = "fixture-fixed-root";
 const WAIT: Duration = Duration::from_secs(15);
 
 #[cfg(target_os = "linux")]
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[cfg(target_os = "linux")]
 #[path = "support/process_contract.rs"]
 mod process_contract;
 

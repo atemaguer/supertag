@@ -1,8 +1,13 @@
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use sqlx::{Connection, Executor};
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -576,33 +581,14 @@ spec: {items: []}
     Ok(())
 }
 
-#[tokio::test]
-async fn applies_and_previews_a_multi_file_organization_through_split_services() -> Result<()> {
-    let temp = tempfile::tempdir()?;
-    let url = format!(
-        "sqlite://{}?mode=rwc",
-        temp.path().join("runtime.sqlite").display()
-    );
-    exercise(temp.path(), &url).await
+database_tests! {
+    #[tokio::test]
+    applies_and_previews_a_multi_file_organization_through_split_services;
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn applies_organization_manifests_against_postgres() -> Result<()> {
-    let temporary = tempfile::tempdir()?;
-    let url_file = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
-        .context("disposable PostgreSQL URL file required")?;
-    let admin_url = std::fs::read_to_string(url_file)?;
-    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await?;
-    let database = format!("supertag_manifest_{}", uuid::Uuid::new_v4().simple());
-    let mut url = url::Url::parse(admin_url.trim())?;
-    url.set_path(&database);
-    admin
-        .execute(format!("CREATE DATABASE {database}").as_str())
-        .await?;
-    let result = tokio::spawn(async move { exercise(temporary.path(), url.as_str()).await }).await;
-    admin
-        .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())
-        .await?;
-    result?
+async fn applies_and_previews_a_multi_file_organization_through_split_services(
+    database: String,
+) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    exercise(temp.path(), &database).await
 }

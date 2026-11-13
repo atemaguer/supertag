@@ -67,16 +67,23 @@ async fn captured(services: &LanguageServices, task: &Value) -> Result<Value> {
     services.operator(&["artifact", "get", id]).await
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
-async fn python_agents_sdk_uses_attempt_scoped_artifact_tools() -> Result<()> {
-    let interpreter = std::env::var_os("SUPERTAG_RUST_TEST_AGENTS_PYTHON")
-        .context("installed Python Agents test interpreter required")?;
+database_tests! {
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
+    python_agents_sdk_uses_attempt_scoped_artifact_tools;
+}
+
+async fn python_agents_sdk_uses_attempt_scoped_artifact_tools(database: String) -> Result<()> {
+    let Some(interpreter) =
+        crate::prerequisites::env("agents-python", "SUPERTAG_RUST_TEST_AGENTS_PYTHON")?
+    else {
+        return Ok(());
+    };
     let fixture = repo_path("sdks/python/tests/fixtures/openai_agents_runtime.py")?;
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("source");
     let base = checkout(&source).await?;
-    let services = LanguageServices::start(directory.path()).await?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
     let worker = |phase: &str, workspace: bool| {
         let mut command = services.worker(
             "openai-agents",

@@ -99,6 +99,9 @@ macro_rules! database_tests {
         "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
     };
     (@postgres_reason $reason:literal) => {
-        $reason
+        concat!(
+            $reason,
+            "; also requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+        )
     };
 }

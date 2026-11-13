@@ -45,6 +45,9 @@ fn workload_fixture() -> Result<Fixture> {
 #[tokio::test]
 #[ignore = "requires isolated Linux root and util-linux setsid to launch a distinct workload UID"]
 async fn expired_command_lease_reaps_detached_work_while_provider_is_stopped() -> Result<()> {
+    if crate::prerequisites::linux_root()?.is_none() {
+        return Ok(());
+    }
     let fixture = workload_fixture()?;
     let mut running = fixture.start(true).await?;
     let token = "lease-fixture-private-access-token-0123456789";
@@ -173,6 +176,9 @@ async fn expired_command_lease_reaps_detached_work_while_provider_is_stopped() -
 #[tokio::test]
 #[ignore = "requires isolated Linux root and util-linux setsid to launch a distinct workload UID"]
 async fn resumes_owned_output_and_proves_detached_cleanup_after_owner_death() -> Result<()> {
+    if crate::prerequisites::linux_root()?.is_none() {
+        return Ok(());
+    }
     let fixture = workload_fixture()?;
     let mut running = fixture.start(true).await?;
     let (one, _) = grant(&mut running.client, "one").await?;
@@ -335,6 +341,9 @@ async fn resumes_owned_output_and_proves_detached_cleanup_after_owner_death() ->
 #[tokio::test]
 #[ignore = "requires isolated Linux root to launch a distinct workload UID"]
 async fn refuses_to_acknowledge_revocation_when_owned_cleanup_proof_is_missing() -> Result<()> {
+    if crate::prerequisites::linux_root()?.is_none() {
+        return Ok(());
+    }
     use prost::Message;
     use sqlx::{
         Connection,
