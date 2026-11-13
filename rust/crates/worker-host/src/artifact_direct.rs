@@ -4,15 +4,13 @@ use std::{
     fs::{self, DirBuilder, File, OpenOptions},
     io::{Read, Write},
     net::{IpAddr, SocketAddr},
-    os::{
-        fd::AsRawFd,
-        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
-    },
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
+use crate::journal::ExclusiveLock;
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
@@ -243,7 +241,7 @@ impl Drop for Serving {
 pub(crate) struct SourceStorage {
     root: PathBuf,
     id: String,
-    directory: Arc<File>,
+    directory: Arc<ExclusiveLock>,
 }
 
 impl SourceStorage {
@@ -258,10 +256,8 @@ impl SourceStorage {
         let directory = supertag_workspaces::packages::open_directory(&root)?;
         check_directory(&directory.metadata()?)?;
         // One serving process owns the configured storage directory.
-        ensure!(
-            unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-            "artifact source directory is already in use"
-        );
+        let directory = ExclusiveLock::try_acquire(directory)
+            .context("artifact source directory is already in use")?;
         let identity = root.join("storage-id");
         let id = match open_private(&identity)? {
             Some(file) => read_id(file)?,

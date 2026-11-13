@@ -183,9 +183,40 @@ impl Entry {
     }
 }
 
+/// An exclusive `flock` that is released when this value drops.
+///
+/// `flock` ownership belongs to the open file description, not the descriptor. A child
+/// process spawned concurrently on another thread briefly shares every descriptor until
+/// its exec closes the close-on-exec ones, so merely closing ours can leave the lock held
+/// past drop and make an immediate reopen in this process fail. Unlocking explicitly
+/// releases the description's lock regardless of those transient copies.
+#[derive(Debug)]
+pub(crate) struct ExclusiveLock(File);
+
+impl ExclusiveLock {
+    pub(crate) fn try_acquire(file: File) -> std::io::Result<Self> {
+        file.try_lock()?;
+        Ok(Self(file))
+    }
+}
+
+impl std::ops::Deref for ExclusiveLock {
+    type Target = File;
+
+    fn deref(&self) -> &File {
+        &self.0
+    }
+}
+
+impl Drop for ExclusiveLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 pub(crate) struct Journal {
     directory: PathBuf,
-    _lock: File,
+    _lock: ExclusiveLock,
 }
 
 impl Journal {
@@ -214,7 +245,7 @@ impl Journal {
             metadata.is_file() && metadata.uid() == owner && metadata.mode() & 0o077 == 0,
             "Worker Host state lock must be private"
         );
-        lock.try_lock()
+        let lock = ExclusiveLock::try_acquire(lock)
             .context("another Worker Host owns this state directory")?;
         Ok(Self {
             directory: directory.to_owned(),
@@ -639,6 +670,34 @@ mod tests {
         assert!(journal.load()?.is_none());
         assert!(journal.remote_sandbox()?.is_none());
         Ok(())
+    }
+
+    #[test]
+    fn released_ownership_is_immediately_reacquirable_while_children_spawn() -> Result<()> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Children spawned on other threads briefly share the lock's open file description
+        // until exec closes it. Dropping a Journal must still release ownership at once.
+        let state = tempfile::tempdir()?;
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let spawners = (0..4)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        let _ = std::process::Command::new("/usr/bin/true")
+                            .stdin(std::process::Stdio::null())
+                            .status();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let reopened = (0..2_000).try_for_each(|_| Journal::open(state.path()).map(drop));
+        stop.store(true, Ordering::Relaxed);
+        for spawner in spawners {
+            spawner.join().expect("spawner thread panicked");
+        }
+        reopened
     }
 
     #[test]
