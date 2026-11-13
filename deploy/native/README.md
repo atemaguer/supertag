@@ -191,13 +191,20 @@ A client on a network that allows outbound traffic only through an HTTP proxy na
 of a tunnel, run end to end through it. `NO_PROXY` (or `no_proxy`) lists hosts reached directly:
 `*`, an IP address, or a domain, which also covers its subdomains. Loopback addresses never use
 the proxy. A proxy that refuses `CONNECT` fails the connection; nothing falls back to a direct
-connection. Only `http://` proxy URLs are supported. `supertag up` passes these variables to the
-services it starts.
+connection. Only `http://` proxy URLs are supported; any other proxy URL fails only the
+connections that would use it, so loopback and `NO_PROXY` hosts still connect.
 
-Every client and service sends an HTTP/2 ping every 20 seconds, idle or not, and drops a
-connection whose ping goes unanswered for 20 seconds. A connection that a proxy or NAT drops
-without closing it therefore fails within about 40 seconds, and the caller reconnects, instead of
-waiting for a call's deadline.
+`supertag up` passes these variables to the services it starts, from its own environment and
+then from `env_file`. A service unit (launchd or systemd) does not inherit the shell's
+environment, so put them in `env_file` for a unit-managed installation; `supertag up` warns
+when the shell names a proxy the unit cannot see.
+
+Every SuperTag client and gRPC service that crosses the network sends an HTTP/2 ping every 10
+seconds, idle or not, and drops a connection whose ping goes unanswered for 10 seconds. This
+includes shared execution and direct artifact transfer between Worker Hosts. A connection that a
+proxy or NAT drops without closing it therefore fails within about 20 seconds, and the caller
+reconnects, instead of waiting for a call's deadline. That is within the Control Plane's
+30-second execution lease, so a running Task survives the drop.
 
 ## Platforms behind an HTTP proxy
 

@@ -2158,11 +2158,12 @@ mod durability_tests {
 
     /// A process kill cannot lose a commit SQLite has written, but power loss can lose one
     /// that is still in the operating system's cache. With `synchronous = FULL` SQLite
-    /// syncs the journal and the database file before a commit returns, so an
-    /// acknowledged transition is on stable storage. A real power cut is not simulated:
-    /// see "Hard-crash durability" in `rust/docs/rust-port-capability-ledger.md`.
+    /// syncs the journal and the database file before a commit returns. This guards the
+    /// setting (sqlx's default, and SQLite's as TypeScript used it) against a regression;
+    /// it does not observe an `fsync`, and a real power cut is not simulated: see
+    /// "Hard-crash durability" in `rust/docs/rust-port-capability-ledger.md`.
     #[tokio::test]
-    async fn sqlite_commits_are_synced_to_storage_before_they_return() {
+    async fn sqlite_store_opens_with_full_synchronous_commits() {
         let directory = tempfile::tempdir().unwrap();
         let url = format!(
             "sqlite://{}?mode=rwc",
