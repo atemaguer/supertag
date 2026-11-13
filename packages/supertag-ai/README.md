@@ -165,7 +165,9 @@ try {
 Use an HTTPS origin for a remote Gateway. Local cleartext connections use a loopback IP
 address. Pass `ca` for private TLS and `identity` when the Gateway requires a client certificate.
 Each service exposes typed protobuf requests and responses. `client.events.watch` returns an
-async iterable and accepts an `AbortSignal`. Resume a watch with its last `resumeToken`.
+async iterable and accepts an `AbortSignal`. Resume a watch with its last `resumeToken`. The
+first call negotiates the SuperTag protocol version with the Gateway; a Gateway from an
+incompatible release fails it with `Code.FailedPrecondition`.
 
 In a Rust deployment, a Worker Host is the machine or sandbox that provides execution.
 It launches a harness adapter to run one Task Attempt, which is a single try at completing

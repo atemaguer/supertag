@@ -146,7 +146,9 @@ The generated gRPC methods use the protobuf RPC names, such as `ListTags` and `W
 Pass a `timeout` in seconds to bound a call. Watch streams can resume from their last
 `resume_token`. Use HTTPS for a remote Gateway and a loopback IP address for local
 cleartext. Pass a PEM `ca` for private TLS and a PEM certificate chain and key as
-`identity=(cert, key)` if the Gateway requires mutual TLS.
+`identity=(cert, key)` if the Gateway requires mutual TLS. The first call negotiates the
+SuperTag protocol version with the Gateway and raises `GatewayProtocolError` when the Gateway
+runs an incompatible release.
 
 ### Connect operator API
 
