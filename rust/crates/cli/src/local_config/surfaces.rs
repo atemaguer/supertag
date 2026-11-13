@@ -365,6 +365,62 @@ impl Surface {
     }
 }
 
+/// Gateway environment naming the Slack Surface Account that Slack `notify` destinations post as
+/// when no Slack location runs a connector (TypeScript resolves the account from the store): the
+/// account a destination names as `slack:WORKSPACE_ID/TARGET`, or else the only Slack account.
+/// `None` when no destination is a Slack one, a Slack connector runs, or no account matches, in
+/// which case each Slack delivery fails with its reason.
+pub fn notify_slack_account(
+    surfaces: &BTreeMap<String, Surface>,
+    notify: &[String],
+) -> Result<Option<Vec<(String, String)>>> {
+    let targets: Vec<&str> = notify
+        .iter()
+        .filter_map(|value| value.trim().strip_prefix("slack:"))
+        .collect();
+    if targets.is_empty()
+        || surfaces
+            .values()
+            .any(|surface| surface.provider == Provider::Slack && surface.location.is_some())
+    {
+        return Ok(None);
+    }
+    let workspaces: BTreeSet<&str> = targets
+        .iter()
+        .filter_map(|target| target.split_once('/').map(|(workspace, _)| workspace))
+        .collect();
+    ensure!(
+        workspaces.len() <= 1,
+        "Slack notify destinations name several workspaces; the local Gateway posts as one Slack surface"
+    );
+    let mut accounts = surfaces
+        .iter()
+        .filter(|(_, surface)| surface.provider == Provider::Slack);
+    let chosen = match workspaces.first() {
+        Some(workspace) => accounts.find(|(_, surface)| surface.account == *workspace),
+        None => {
+            let first = accounts.next();
+            ensure!(
+                accounts.next().is_none(),
+                "several Slack surfaces are configured; name the workspace in the notify destination as slack:WORKSPACE_ID/TARGET"
+            );
+            first
+        }
+    };
+    Ok(chosen.map(|(name, surface)| {
+        vec![
+            (
+                "SUPERTAG_NOTIFY_SLACK_TEAM_ID".to_owned(),
+                surface.account.clone(),
+            ),
+            (
+                "SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID".to_owned(),
+                surface.credential_id(name),
+            ),
+        ]
+    }))
+}
+
 fn numeric(value: &str) -> bool {
     !value.is_empty() && value.len() <= 19 && value.bytes().all(|b| b.is_ascii_digit())
 }
@@ -394,4 +450,68 @@ pub fn validate(surfaces: &BTreeMap<String, Surface>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn surfaces(entries: serde_json::Value) -> BTreeMap<String, Surface> {
+        serde_json::from_value(entries).unwrap()
+    }
+
+    #[test]
+    fn slack_notify_destinations_post_as_the_named_or_only_slack_account() {
+        let notify = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        let one = surfaces(serde_json::json!({
+            "ops": {"provider": "slack", "account": "T0OPS"},
+            "gh": {"provider": "github", "account": "acme"},
+        }));
+        assert_eq!(
+            notify_slack_account(&one, &notify(&["desktop", "slack:C0ALERTS"])).unwrap(),
+            Some(vec![
+                ("SUPERTAG_NOTIFY_SLACK_TEAM_ID".into(), "T0OPS".into()),
+                (
+                    "SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID".into(),
+                    "surface/slack/ops".into()
+                ),
+            ])
+        );
+        // No Slack destination, or a workspace no account serves: nothing to name.
+        assert_eq!(
+            notify_slack_account(&one, &notify(&["desktop"])).unwrap(),
+            None
+        );
+        assert_eq!(
+            notify_slack_account(&one, &notify(&["slack:T0OTHER/U0ME"])).unwrap(),
+            None
+        );
+        let two = surfaces(serde_json::json!({
+            "ops": {"provider": "slack", "account": "T0OPS"},
+            "eng": {"provider": "slack", "account": "T0ENG"},
+        }));
+        assert!(notify_slack_account(&two, &notify(&["slack:C0ALERTS"])).is_err());
+        assert_eq!(
+            notify_slack_account(&two, &notify(&["slack:T0ENG/U0ME"])).unwrap(),
+            Some(vec![
+                ("SUPERTAG_NOTIFY_SLACK_TEAM_ID".into(), "T0ENG".into()),
+                (
+                    "SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID".into(),
+                    "surface/slack/eng".into()
+                ),
+            ])
+        );
+        assert!(
+            notify_slack_account(&two, &notify(&["slack:T0ENG/U0ME", "slack:T0OPS/U0ME"])).is_err()
+        );
+        // A Slack location runs the connector, which posts the notifications itself.
+        let located = surfaces(serde_json::json!({
+            "ops": {"provider": "slack", "account": "T0OPS", "listen": "127.0.0.1:0",
+                "location": {"tag": "eng", "allowed-users": ["U0ME"], "channel-id": "C0WORK"}},
+        }));
+        assert_eq!(
+            notify_slack_account(&located, &notify(&["slack:C0ALERTS"])).unwrap(),
+            None
+        );
+    }
 }

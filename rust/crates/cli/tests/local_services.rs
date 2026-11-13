@@ -1824,6 +1824,17 @@ async fn webhook_mock() -> Result<(
     String,
     std::sync::Arc<tokio::sync::Mutex<Vec<(String, Value)>>>,
 )> {
+    answering_mock(None).await
+}
+
+/// A loopback HTTP mock that records each request's authorization and JSON body, and answers
+/// `200` with `body`, or `204` without one.
+async fn answering_mock(
+    body: Option<&'static str>,
+) -> Result<(
+    String,
+    std::sync::Arc<tokio::sync::Mutex<Vec<(String, Value)>>>,
+)> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("http://{}/hook", listener.local_addr()?);
@@ -1866,9 +1877,14 @@ async fn webhook_mock() -> Result<(
             if let Some(request) = parsed {
                 recorded.lock().await.push(request);
             }
-            let _ = stream
-                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
-                .await;
+            let response = match body {
+                Some(body) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+                None => "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_owned(),
+            };
+            let _ = stream.write_all(response.as_bytes()).await;
         }
     });
     Ok((url, requests))
@@ -2003,5 +2019,61 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
     assert!(
         fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
     );
+    supervisor.stop().await
+}
+
+/// TypeScript parity: a Slack destination posts as the enrolled Slack Surface Account
+/// (`createOperatorNotificationSender` in `apps/cli/src/gateway-surfaces.ts`). Under `supertag up`
+/// a Slack surface without a location runs no connector, yet its bot token still posts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slack_notify_destination_posts_as_a_slack_surface_without_a_location() -> Result<()> {
+    use supertag_gateway::credential_vault::{CredentialVault, FileCredentialVault};
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    fs::create_dir_all(&state)?;
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+    let file = temp.path().join("supertag.yaml");
+    let (url, posts) = answering_mock(Some(r#"{"ok":true,"ts":"1.000"}"#)).await?;
+    CredentialVault::File(FileCredentialVault::new(
+        state.join("gateway-credentials.json"),
+    ))
+    .store(
+        "surface/slack/ops",
+        &[
+            ("botToken".to_owned(), "xoxb-synthetic-ops".to_owned()),
+            ("signingSecret".to_owned(), "synthetic-signing".to_owned()),
+        ]
+        .into(),
+    )
+    .await?;
+    yaml(
+        &file,
+        &serde_json::json!({"version":1,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],
+                "notify":["slack:C0ALERTS"]}
+        },"surfaces":{"ops":{"provider":"slack","account":"T0OPS"}}}),
+    )?;
+    let mut supervisor = Process::spawn(
+        &state,
+        Some(&file),
+        &[("SUPERTAG_TEST_SLACK_API_URL", url.as_str())],
+    )?;
+    supervisor.ready()?;
+    let output = Command::new(BIN)
+        .args(["test", "notification", "--state-directory"])
+        .arg(&state)
+        .env_clear()
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout)?, "slack: delivered\n");
+    let posts = posts.lock().await;
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].0, "Bearer xoxb-synthetic-ops");
+    assert_eq!(posts[0].1["channel"], "C0ALERTS");
+    drop(posts);
     supervisor.stop().await
 }

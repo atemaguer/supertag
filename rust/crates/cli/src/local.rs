@@ -366,6 +366,14 @@ impl Children {
                     connected = true;
                 }
             }
+            // Slack notify destinations post as a Slack Surface Account. Without a Slack
+            // location the Gateway runs no Slack connector, so name the account to post as.
+            if let Some(variables) =
+                crate::local_config::surfaces::notify_slack_account(surfaces, &self.notify.0)?
+            {
+                gateway.envs(variables);
+                connected = true;
+            }
             if connected {
                 gateway
                     .env("SUPERTAG_STATE_DIR", directory)
