@@ -267,3 +267,51 @@ async fn routes_only_authenticated_worker_generations_and_hashes_enrollment_keys
     server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn classifies_operator_credentials_without_contacting_the_control_plane() {
+    let gateway = gateway();
+    let presented = |values: &[&'static str]| {
+        let mut request = Request::new(());
+        for value in values {
+            request
+                .metadata_mut()
+                .append(AUTHORIZATION, MetadataValue::from_static(value));
+        }
+        gateway.credentials.presented_operator(&request)
+    };
+    assert!(matches!(
+        presented(&["Bearer operator-test-token"]),
+        Ok(OperatorCredential::Admin)
+    ));
+    let secret = format!("stop_{}", "a1".repeat(32));
+    let header: &'static str = Box::leak(format!("Bearer {secret}").into_boxed_str());
+    match presented(&[header]) {
+        Ok(OperatorCredential::Token(digest)) => {
+            assert_eq!(digest, Sha256::digest(secret.as_bytes()).to_vec());
+        }
+        _ => panic!("well-formed Operator Token was not recognized"),
+    }
+    for refused in [
+        &[][..],
+        &["Bearer gateway-test-token"][..],
+        &["Bearer stop_short"][..],
+        &["Bearer host-test-token"][..],
+        &[header, header][..],
+        &["Bearer operator-test-token", header][..],
+    ] {
+        assert_eq!(
+            presented(refused).err().map(|status| status.code()),
+            Some(Code::Unauthenticated)
+        );
+    }
+    assert!(
+        Gateway::new(
+            Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            "gateway-test-token".into(),
+            "operator-test-token".into(),
+            "operator:token:alice".into(),
+        )
+        .is_err()
+    );
+}

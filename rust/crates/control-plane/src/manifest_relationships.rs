@@ -399,10 +399,28 @@ impl manifest_relationships_server::ManifestRelationships for ControlPlane {
         request: Request<ReconcileApplySetRequest>,
     ) -> std::result::Result<Response<ReconcileApplySetResponse>, Status> {
         let principal = self.principal(&request, "operator:")?;
-        Ok(Response::new(
-            self.store
-                .reconcile_apply_set(&principal, request.get_ref())
-                .await?,
-        ))
+        let reconciled = self
+            .store
+            .reconcile_apply_set(&principal, request.get_ref())
+            .await?;
+        // Each member the prune removed is its own audit entry, like `resource.prune Tag/NAME`.
+        let changes = if request.get_ref().preview {
+            Vec::new()
+        } else {
+            reconciled
+                .pruned
+                .iter()
+                .filter(|item| item.action() == ApplySetPruneAction::Delete)
+                .map(|item| crate::audit::AuditChange {
+                    action: "resource.prune".into(),
+                    target: format!("{}/{}", item.kind, item.name),
+                })
+                .collect()
+        };
+        let mut response = Response::new(reconciled);
+        response
+            .extensions_mut()
+            .insert(crate::audit::AuditChanges(changes));
+        Ok(response)
     }
 }

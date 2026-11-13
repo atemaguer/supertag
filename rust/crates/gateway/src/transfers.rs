@@ -587,7 +587,37 @@ impl Transfers for GatewayTransfers {
         request: Request<GetWorkspaceArtifactRequest>,
     ) -> Result<Response<Self::DownloadWorkspaceArtifactStream>, Status> {
         let kind = request.get_ref().kind();
-        let delivery =
+        let input = request.get_ref().clone();
+        let metadata = request.metadata().clone();
+        let delivery = self.get_workspace_artifact(request).await?;
+        let expected = delivery.clone();
+        let service = self.clone();
+        // Recheck the operator's credential, such as a revoked Operator Token, while streaming.
+        let authorize = move || {
+            let service = service.clone();
+            let expected = expected.clone();
+            let mut request = Request::new(input.clone());
+            *request.metadata_mut() = metadata.clone();
+            async move {
+                if service.get_workspace_artifact(request).await? == expected {
+                    Ok(())
+                } else {
+                    Err(Status::permission_denied(
+                        "workspace artifact is no longer authorized",
+                    ))
+                }
+            }
+        };
+        self.workspace_download(delivery, kind, authorize).await
+    }
+}
+
+impl GatewayTransfers {
+    async fn get_workspace_artifact(
+        &self,
+        request: Request<GetWorkspaceArtifactRequest>,
+    ) -> Result<WorkspaceDeliveryReference, Status> {
+        Ok(
             self.gateway
                 .forward(
                     request,
@@ -597,9 +627,8 @@ impl Transfers for GatewayTransfers {
                     },
                 )
                 .await?
-                .into_inner();
-        self.workspace_download(delivery, kind, || async { Ok(()) })
-            .await
+                .into_inner(),
+        )
     }
 }
 
