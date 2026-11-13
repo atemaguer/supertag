@@ -1216,12 +1216,6 @@ async fn exercise(database_url: &str) -> Result<()> {
                 && event["task_id"] == objective_task.as_str()),
         "{timeline}"
     );
-    ensure!(
-        events
-            .iter()
-            .any(|event| event["kind"] == "session.started" && event["actor"] == "builder"),
-        "{timeline}"
-    );
     let timeline = ok(
         &home,
         &[

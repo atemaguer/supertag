@@ -169,12 +169,12 @@ fn failure(row: &sqlx::any::AnyRow, state: TaskState) -> Result<ObjectiveSession
     let task_id: String = row.try_get("task_id")?;
     let attempt_id: Option<String> = row.try_get("attempt_id")?;
     let mut next_actions = vec![format!("supertag task events {task_id}")];
-    if state == TaskState::Uncertain {
-        if let Some(attempt) = &attempt_id {
-            next_actions.push(format!(
-                "supertag task resolve-attempt {task_id} {attempt} --decision retry --evidence TEXT --confirmed-stopped"
-            ));
-        }
+    if state == TaskState::Uncertain
+        && let Some(attempt) = &attempt_id
+    {
+        next_actions.push(format!(
+            "supertag task resolve-attempt {task_id} {attempt} --decision retry --evidence TEXT --confirmed-stopped"
+        ));
     }
     Ok(ObjectiveSessionFailure {
         state: state as i32,
