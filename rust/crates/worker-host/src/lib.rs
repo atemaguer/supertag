@@ -1863,7 +1863,7 @@ fn retryable(error: &Status) -> bool {
     matches!(
         error.code(),
         Code::Unavailable | Code::DeadlineExceeded | Code::Cancelled
-    )
+    ) || supertag_protocol::interrupted_transport(error)
 }
 
 async fn wait_for_work(shutdown: &CancellationToken) {

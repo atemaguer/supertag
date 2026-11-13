@@ -133,6 +133,7 @@ impl Gateway {
         tokio::time::timeout(timeout, call(self.control_plane.clone(), request))
             .await
             .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+            .map_err(supertag_protocol::upstream_status)
     }
 
     async fn forward_host<T, R, F>(
@@ -169,7 +170,9 @@ impl Gateway {
                     .metadata_mut()
                     .insert(HOST_GENERATION_HEADER, host.generation.into());
             }
-            call(self.control_plane.clone(), upstream).await
+            call(self.control_plane.clone(), upstream)
+                .await
+                .map_err(supertag_protocol::upstream_status)
         })
         .await
         .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
@@ -322,6 +325,7 @@ fn request_budget<T>(request: &Request<T>) -> Result<Duration, Status> {
 }
 
 fn host_authentication_error(error: Status) -> Status {
+    let error = supertag_protocol::upstream_status(error);
     match error.code() {
         Code::PermissionDenied | Code::Unauthenticated => {
             Status::unauthenticated("valid Worker Host credential required")
