@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 if sys.argv[1:] == ["--version"]:
     print("codex-cli 0.163.0")
@@ -89,6 +90,16 @@ for line in sys.stdin:
         reply(request, {"turn": {"id": turn, "status": "inProgress", "items": []}})
         notify("turn/started", {"threadId": thread, "turn": {"id": turn, "status": "inProgress", "items": []}})
         if "Wait for live input" in prompt:
+            continue
+        if "Show the plan" in prompt:
+            # Report a plan, hold the turn until the test has seen it, then answer.
+            release = Path(prompt.split("wait for ", 1)[1].split()[0])
+            notify("turn/plan/updated", {"threadId": thread, "turnId": turn, "explanation": None, "plan": [{"step": "Read the fixture", "status": "completed"}, {"step": "Report back", "status": "inProgress"}]})
+            deadline = time.time() + 60
+            while not release.exists():
+                assert time.time() < deadline, "plan fixture was not released"
+                time.sleep(0.02)
+            finish("Native plan done")
             continue
         assert ("Resume the native harness" if resumed else "Verify the native harness") in prompt
         finish("Native adapter resumed" if resumed else "Native adapter verified")

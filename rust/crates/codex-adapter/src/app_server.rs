@@ -341,6 +341,23 @@ impl Stream {
                     "Codex moderation metadata belongs to an inactive turn"
                 );
             }
+            // The model's plan, shown while the Task runs, as TypeScript shows Codex
+            // `todo_list` items (`taskProgressFromCodexTodo`). Progress is cosmetic: a plan for
+            // another turn or one this adapter cannot read is skipped, never fatal.
+            "turn/plan/updated" => {
+                let active = self.turn_requested
+                    && !self.completed
+                    && params["turnId"].as_str() == self.turn.as_deref();
+                if let Some(progress) = active.then(|| plan_progress(params)).flatten() {
+                    publish(
+                        harness,
+                        token,
+                        &mut self.sequence,
+                        &auth::redact(progress, secrets),
+                    )
+                    .await?;
+                }
+            }
             "thread/tokenUsage/updated" => {
                 ensure!(
                     params["threadId"].as_str() == Some(&self.thread),
@@ -980,6 +997,47 @@ pub(crate) async fn execute(
     }
     outcome?;
     stream.finish()
+}
+
+/// A `progress.updated` Task event for a Codex plan: the first eight steps, the first
+/// incomplete one active, as TypeScript `taskProgressFromCodexTodo` formats a todo list. A step
+/// status other than `completed` counts as incomplete. `None` when the plan is unreadable.
+fn plan_progress(params: &Value) -> Option<String> {
+    let plan = params["plan"].as_array()?;
+    let mut steps = Vec::with_capacity(plan.len().min(1_000));
+    for step in plan.iter().take(1_000) {
+        steps.push((step["step"].as_str()?, step["status"] == "completed"));
+    }
+    let first_incomplete = steps.iter().position(|(_, completed)| !completed);
+    let turn = params["turnId"].as_str().unwrap_or("plan");
+    let items: Vec<Value> = steps
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(index, (text, completed))| {
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let text: String = text.chars().take(160).collect();
+            json!({
+                "id": format!("{turn}:{index}"),
+                "text": if text.is_empty() { format!("Step {}", index + 1) } else { text },
+                "status": if *completed {
+                    "completed"
+                } else if Some(index) == first_incomplete {
+                    "active"
+                } else {
+                    "pending"
+                },
+            })
+        })
+        .collect();
+    Some(json!({
+        "type": "progress.updated",
+        "progress": {
+            "summary": if first_incomplete.is_none() { "Finishing up" } else { "Working through the plan" },
+            "items": items,
+        },
+    })
+    .to_string())
 }
 
 #[cfg(test)]

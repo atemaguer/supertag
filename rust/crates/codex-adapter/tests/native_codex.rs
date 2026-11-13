@@ -1610,6 +1610,103 @@ async fn installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint() -
 }
 
 #[tokio::test]
+async fn native_plan_updates_become_redacted_progress_events() -> Result<()> {
+    let fixture = NativeFixture::new(
+        &event_lines(&[
+            json!({"type":"thread.started","thread_id":"native-thread"}),
+            json!({"type":"turn.started"}),
+            json!({"type":"item.started","item":{"id":"plan","type":"todo_list","items":[
+                {"text":"Read   the fixture","completed":true},
+                {"text":format!("Check {KEY}"),"completed":false},
+                {"text":"","completed":false},
+            ]}}),
+            json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Planned"}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
+        ]),
+        "exit 0",
+    )?;
+    let server = HarnessProcess::start(&["files:read"]).await?;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("no native outcome")?;
+    assert!(outcome.succeeded, "{}", outcome.result);
+    let progress: Value = observed
+        .events
+        .iter()
+        .find_map(|event| {
+            serde_json::from_str::<Value>(&event.text)
+                .ok()
+                .filter(|value| value["type"] == "progress.updated")
+        })
+        .context("no progress event")?;
+    assert_eq!(
+        progress,
+        json!({"type":"progress.updated","progress":{"summary":"Working through the plan","items":[
+            {"id":"native-turn:0","text":"Read the fixture","status":"completed"},
+            {"id":"native-turn:1","text":"Check [REDACTED]","status":"active"},
+            {"id":"native-turn:2","text":"Step 3","status":"pending"},
+        ]}})
+    );
+    Ok(())
+}
+
+/// Progress is cosmetic: an unreadable plan, an unknown step status, a very long plan, or a plan
+/// after the turn completed never fails the Task. (A plan naming another turn is still a protocol
+/// violation, rejected for every turn notification before the plan is read.)
+#[tokio::test]
+async fn unusual_native_plans_never_fail_the_turn() -> Result<()> {
+    let steps = |count: usize| -> Vec<Value> {
+        (0..count)
+            .map(|i| json!({"step": format!("Step {i}"), "status": "pending"}))
+            .collect()
+    };
+    let fixture = NativeFixture::new(
+        &event_lines(&[
+            json!({"type":"thread.started","thread_id":"native-thread"}),
+            json!({"type":"turn.started"}),
+            json!({"type":"plan.raw","plan":"not a list"}),
+            json!({"type":"plan.raw","plan":[{"status":"completed"}]}),
+            json!({"type":"plan.raw","plan":steps(1_001)}),
+            json!({"type":"plan.raw","plan":[
+                {"step":"Read the fixture","status":"blocked"},
+                {"step":"Report back","status":"completed"},
+            ]}),
+            json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Planned"}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
+            json!({"type":"plan.raw","plan":steps(1)}),
+        ]),
+        "exit 0",
+    )?;
+    let server = HarnessProcess::start(&["files:read"]).await?;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("no native outcome")?;
+    assert!(outcome.succeeded, "{}", outcome.result);
+    let progress: Vec<Value> = observed
+        .events
+        .iter()
+        .filter_map(|event| {
+            serde_json::from_str::<Value>(&event.text)
+                .ok()
+                .filter(|value| value["type"] == "progress.updated")
+        })
+        .collect();
+    assert_eq!(progress.len(), 2, "{progress:?}");
+    assert_eq!(
+        progress[0]["progress"]["items"].as_array().map(Vec::len),
+        Some(8)
+    );
+    assert_eq!(
+        progress[1]["progress"]["items"],
+        json!([
+            {"id":"native-turn:0","text":"Read the fixture","status":"active"},
+            {"id":"native-turn:1","text":"Report back","status":"completed"},
+        ])
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_redacted_events()
 -> Result<()> {
     let fixture = NativeFixture::new(

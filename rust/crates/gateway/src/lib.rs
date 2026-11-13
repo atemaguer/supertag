@@ -18,6 +18,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod metrics;
 pub mod microsoft_teams;
+pub mod notifications;
 mod operator_access;
 mod ownership;
 mod placement;

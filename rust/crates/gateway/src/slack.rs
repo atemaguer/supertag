@@ -2,7 +2,7 @@
 
 mod delivery;
 mod progress;
-mod render;
+pub(crate) mod render;
 
 use std::{
     path::PathBuf,
@@ -159,6 +159,16 @@ impl Slack {
             .context("set test Slack URL before sharing the connector")?
             .post_message = url;
         Ok(self)
+    }
+
+    /// Posts top-level operator notifications with this connector's bot token.
+    pub fn operator_sender(&self) -> crate::notifications::SlackSender {
+        crate::notifications::SlackSender {
+            http: self.0.http.clone(),
+            post_message: self.0.post_message.clone(),
+            bot_token: self.0.config.bot_token.clone(),
+            team_id: self.0.config.team_id.clone(),
+        }
     }
 
     pub async fn serve(self, listener: TcpListener, shutdown: CancellationToken) -> Result<()> {

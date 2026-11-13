@@ -57,6 +57,9 @@ enum Service {
         restart: Restart,
         #[serde(default)]
         provision: Vec<ProvisionEntry>,
+        /// Where the operator hears about Inbox items; `desktop` when unset.
+        #[serde(default)]
+        notify: Option<Notify>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -121,6 +124,12 @@ impl WorkspaceMapping {
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
+enum Notify {
+    One(String),
+    Many(Vec<String>),
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
 enum Models {
     One(String),
     Many(Vec<String>),
@@ -161,6 +170,37 @@ pub struct Config {
 pub struct Plane {
     pub listen: SocketAddr,
     pub provision: Vec<crate::manifests::ProvisionSource>,
+    pub notify: Notifications,
+}
+/// The Gateway's `--notify` destinations and the named secrets their webhooks send.
+#[derive(Clone)]
+pub struct Notifications {
+    pub destinations: Vec<String>,
+    pub secrets: BTreeMap<String, Secret>,
+}
+impl Notifications {
+    /// The Gateway's `--notify` values and `SUPERTAG_NOTIFY_SECRET_<NAME>` environment. A
+    /// missing secret fails only its own destination when it sends, as TypeScript does.
+    pub fn resolve(&self, environment: &Environment) -> (Vec<String>, Vec<(String, String)>) {
+        let secrets = self
+            .secrets
+            .iter()
+            .filter_map(|(name, secret)| {
+                let value = secret.read(environment).ok()?;
+                Some((crate::notify_secret_variable(name), value))
+            })
+            .collect();
+        (self.destinations.clone(), secrets)
+    }
+}
+impl Default for Notifications {
+    /// A local installation tells its operator on the desktop, as TypeScript does.
+    fn default() -> Self {
+        Self {
+            destinations: vec!["desktop".into()],
+            secrets: BTreeMap::new(),
+        }
+    }
 }
 #[derive(Clone)]
 pub struct Host {
@@ -311,6 +351,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             credentials,
             restart,
             provision,
+            notify,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -365,9 +406,34 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                     "configure at most 256 provisioning sources"
                 );
             }
+            let destinations = match notify {
+                None => vec!["desktop".to_owned()],
+                Some(Notify::One(value)) => vec![value.clone()],
+                Some(Notify::Many(values)) => values.clone(),
+            };
+            // Refuse an invalid destination now; errors never echo a webhook URL.
+            let parsed = supertag_gateway::notifications::parse_destinations(
+                &destinations,
+                crate::notify_loopback_http(),
+            )?;
+            let mut secrets = BTreeMap::new();
+            for name in parsed.iter().filter_map(|d| d.secret_name.as_ref()) {
+                let secret = document.secrets.get(name).with_context(|| {
+                    format!("notify webhook secret {name} is not a named secret")
+                })?;
+                let mut secret = secret.clone();
+                if let Secret::File(source) = &mut secret {
+                    source.file = resolve_path(base, &source.file)?;
+                }
+                secrets.insert(name.clone(), secret);
+            }
             plane = Some(Plane {
                 listen,
                 provision: sources,
+                notify: Notifications {
+                    destinations,
+                    secrets,
+                },
             });
             plane_name = Some(name.clone());
         }

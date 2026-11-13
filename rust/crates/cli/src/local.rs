@@ -229,6 +229,8 @@ struct Children {
     control_plane_address: Option<String>,
     gateway: Option<Service>,
     worker_host: Option<Service>,
+    /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
+    notify: (Vec<String>, Vec<(String, String)>),
 }
 
 struct Service {
@@ -246,6 +248,7 @@ impl Children {
             control_plane_address: None,
             gateway: None,
             worker_host: None,
+            notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
         })
     }
 
@@ -293,6 +296,19 @@ impl Children {
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+        for destination in &self.notify.0 {
+            gateway.arg("--notify").arg(destination);
+        }
+        gateway.envs(self.notify.1.iter().map(|(name, value)| (name, value)));
+        #[cfg(feature = "test-fixtures")]
+        for name in [
+            "SUPERTAG_TEST_DESKTOP_NOTIFIER",
+            "SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP",
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                gateway.env(name, value);
+            }
+        }
         if let Some(environment) = gateway_workspace {
             gateway
                 .arg("--github-workspace-directory")
@@ -1213,6 +1229,7 @@ pub async fn configured(
             // An enrolled installation pins its Gateway origin. Reuse an initially selected
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
+            base.notify = plane.notify.resolve(&environment);
             let endpoint = base
                 .start_base(
                     &executable,

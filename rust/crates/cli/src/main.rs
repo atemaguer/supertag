@@ -18,6 +18,7 @@ mod manifests;
 mod mcp;
 mod network;
 mod node_bridges;
+mod notifications;
 mod objectives;
 mod observe;
 mod operator_access;
@@ -325,6 +326,13 @@ enum Command {
         microsoft_teams_listen: Option<SocketAddr>,
         #[arg(long, requires = "microsoft_teams_listen")]
         microsoft_teams_state_directory: Option<PathBuf>,
+        /// Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME],
+        /// slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable.
+        #[arg(
+            long,
+            long_help = "Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector."
+        )]
+        notify: Vec<String>,
     },
     /// Open the terminal UI for a saved or explicitly configured Gateway.
     Tui {
@@ -751,6 +759,11 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: inputs::InputCommand,
     },
+    /// Check operator settings by sending a sample.
+    Test {
+        #[command(subcommand)]
+        command: notifications::TestCommand,
+    },
     /// Report recorded spend by Objective, Tag, or day.
     Spend {
         #[command(flatten)]
@@ -838,6 +851,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Health(args) => health::run(args).await?,
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
         Command::Metrics { connection, args } => observe::metrics(connection, args).await?,
+        Command::Test { command } => notifications::run(command).await?,
         Command::Describe { connection, args } => observe::describe(connection, args).await?,
         Command::Watch { connection, args } => observe::watch(connection, args).await?,
         Command::Diff(args) => manifests::run(args, false).await?,
@@ -1027,6 +1041,7 @@ async fn run(command: Command) -> Result<()> {
             lark_state_directory,
             microsoft_teams_listen,
             microsoft_teams_state_directory,
+            notify,
         } => {
             gateway(
                 listen,
@@ -1041,6 +1056,7 @@ async fn run(command: Command) -> Result<()> {
                     linear: linear_listen.zip(linear_state_directory),
                     lark: lark_state_directory,
                     microsoft_teams: microsoft_teams_listen.zip(microsoft_teams_state_directory),
+                    notify,
                 },
             )
             .await?
@@ -1916,6 +1932,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.github_publications_service())
         .add_service(plane.github_publisher_service())
         .add_service(plane.reply_progress_service())
+        .add_service(plane.operator_notifications_service())
         .add_service(
             ArtifactPublicationsServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -1967,6 +1984,7 @@ struct GatewayConnectors {
     linear: Option<(SocketAddr, PathBuf)>,
     lark: Option<PathBuf>,
     microsoft_teams: Option<(SocketAddr, PathBuf)>,
+    notify: Vec<String>,
 }
 
 async fn gateway(
@@ -2041,11 +2059,20 @@ async fn gateway(
         .transpose()?;
     let publication_channel = channel.clone();
     let publication_token = gateway_token.clone();
+    let operator_principal =
+        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
+    let notifier = operator_notifier(
+        &connectors.notify,
+        slack.as_ref().map(|(slack, _)| slack.operator_sender()),
+        channel.clone(),
+        gateway_token.clone(),
+        operator_principal.clone(),
+    )?;
     let gateway = Gateway::new(
         channel,
         gateway_token,
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
-        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into()),
+        operator_principal,
     )?;
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<Gateway>>().await;
@@ -2114,6 +2141,9 @@ async fn gateway(
     health
         .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<Gateway>>()
         .await;
+    health
+        .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -2168,6 +2198,7 @@ async fn gateway(
         .add_service(gateway.attempt_effects_service())
         .add_service(gateway.spend_service())
         .add_service(gateway.metrics_service())
+        .add_service(notifier.test_service(gateway.clone()))
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router
@@ -2249,8 +2280,9 @@ async fn gateway(
             Ok(())
         }
     };
+    let notification_loop = notifier.run(shutdown.clone());
     let services = async {
-        let (grpc, slack, github, linear, lark, teams, publication, source) = tokio::join!(
+        let (grpc, slack, github, linear, lark, teams, publication, (source, notifications)) = tokio::join!(
             grpc,
             webhook,
             github_webhook,
@@ -2258,8 +2290,9 @@ async fn gateway(
             lark_connection,
             microsoft_teams_webhook,
             publication_loop,
-            source_loop
+            async { tokio::join!(source_loop, notification_loop) }
         );
+        notifications?;
         grpc?;
         slack?;
         github?;
@@ -2278,6 +2311,56 @@ async fn gateway(
                 .await.context("Gateway shutdown timed out")?
         }
     }
+}
+
+/// The `--notify` destinations and their senders. Webhook secrets come from
+/// `SUPERTAG_NOTIFY_SECRET_<NAME>`, with the name uppercased and `-` written as `_`.
+fn operator_notifier(
+    values: &[String],
+    slack: Option<supertag_gateway::notifications::SlackSender>,
+    channel: ProtocolChannel,
+    gateway_token: String,
+    principal: String,
+) -> Result<supertag_gateway::notifications::OperatorNotifier> {
+    use supertag_gateway::notifications::{Desktop, OperatorNotifier, Senders, parse_destinations};
+    // Test builds never show real desktop notifications.
+    #[cfg(feature = "test-fixtures")]
+    let desktop = std::env::var_os("SUPERTAG_TEST_DESKTOP_NOTIFIER")
+        .map_or(Desktop::Unavailable, |path| Desktop::Command(path.into()));
+    #[cfg(not(feature = "test-fixtures"))]
+    let desktop = Desktop::Native;
+    let destinations = parse_destinations(values, notify_loopback_http())?;
+    let mut secrets = std::collections::BTreeMap::new();
+    for name in destinations.iter().filter_map(|d| d.secret_name.as_ref()) {
+        let variable = notify_secret_variable(name);
+        // A missing secret fails only its own destination, as TypeScript does.
+        if let Some(value) = std::env::var(&variable)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        {
+            secrets.insert(name.clone(), value.trim().to_owned());
+        }
+    }
+    OperatorNotifier::new(
+        destinations,
+        Senders::new(slack, secrets, desktop)?,
+        channel,
+        gateway_token,
+        principal,
+    )
+}
+
+/// Test builds may notify a loopback HTTP webhook; release builds require HTTPS.
+pub(crate) fn notify_loopback_http() -> bool {
+    cfg!(feature = "test-fixtures")
+        && std::env::var_os("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP").is_some()
+}
+
+pub(crate) fn notify_secret_variable(name: &str) -> String {
+    format!(
+        "SUPERTAG_NOTIFY_SECRET_{}",
+        name.to_ascii_uppercase().replace('-', "_")
+    )
 }
 
 /// The Slack signing secret and bot token come from the environment when both are set, and

@@ -574,6 +574,10 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     slack_reply_streams_progress_and_never_repeats_an_uncertain_acknowledgement;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    operator_notifications_reach_slack_webhook_and_desktop_once;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    native_codex_plan_replaces_the_slack_acknowledgement_in_place;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "exercises the real 30-second execution authority deadline"]
     gateway_partition_expires_execution_and_requires_audited_retry_before_replay;
 }
@@ -1406,6 +1410,16 @@ async fn slack_gateway(
     directory: &Path,
     mock: &MockSlackApi,
 ) -> Result<(Process, String, String)> {
+    slack_gateway_with(credentials, private_endpoint, directory, mock, &[]).await
+}
+
+async fn slack_gateway_with(
+    credentials: &Credentials,
+    private_endpoint: &str,
+    directory: &Path,
+    mock: &MockSlackApi,
+    extra: &[&std::ffi::OsStr],
+) -> Result<(Process, String, String)> {
     let mut command = credentials.command();
     command
         .args([
@@ -1424,7 +1438,8 @@ async fn slack_gateway(
         .env("SUPERTAG_SLACK_ALLOWED_USERS", SLACK_USER)
         .env("SUPERTAG_SLACK_SIGNING_SECRET", SLACK_SIGNING_SECRET)
         .env("SUPERTAG_SLACK_BOT_TOKEN", SLACK_BOT_TOKEN)
-        .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint);
+        .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint)
+        .args(extra);
     let mut gateway = Process::spawn(command, directory, "slack-gateway", true)?;
     let endpoints = gateway.endpoints(2).await?;
     Ok((gateway, endpoints[0].clone(), endpoints[1].clone()))
@@ -1806,27 +1821,13 @@ async fn signed_slack_mention(
 
 /// TypeScript parity: the acknowledgement, `progress.updated` replacement, and in-place final
 /// result of `packages/control-plane/src/index.ts`, through real services and a mock Slack API.
-async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Result<()> {
+/// The `slack-engineer` Tag and the Slack Surface Account and Location the mock workspace uses.
+async fn configure_slack_surface(services: &Services, credentials: &Credentials) -> Result<()> {
     use supertag_protocol::v2::{
         PutSurfaceAccountRequest, PutSurfaceLocationRequest, SlackSurfaceChannel,
         SlackSurfaceIdentity, SurfaceAccount, SurfaceAccountIdentity, SurfaceLocation,
         SurfaceLocationScope, surface_account_identity, surface_location_scope,
         surface_policy_catalog_client::SurfacePolicyCatalogClient,
-    };
-    let credentials = Credentials::new();
-    let mock = MockSlackApi::start().await?;
-    let mut command = credentials.command();
-    command
-        .arg("control-plane")
-        .env("SUPERTAG_DATABASE_URL", database);
-    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
-    let private_endpoint = control_plane.endpoint().await?;
-    let (gateway, endpoint, http) =
-        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
-    let mut services = Services {
-        gateway,
-        control_plane,
-        endpoint,
     };
     let mut operator = services.client().await?;
     operator
@@ -1883,6 +1884,26 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
             expected_revision: None,
         })?)
         .await?;
+    Ok(())
+}
+
+async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Result<()> {
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private_endpoint = control_plane.endpoint().await?;
+    let (gateway, endpoint, http) =
+        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
+    let mut services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+    configure_slack_surface(&services, &credentials).await?;
     let body = |method: &str, target: (&str, &str), text: &str| {
         let mut body = serde_json::json!({
             "channel": SLACK_CHANNEL, "text": text,
@@ -2688,5 +2709,429 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     .await?;
     next_host.successful_exit().await?;
     assert_eq!(std::fs::read_to_string(&launches)?.lines().count(), 3);
+    Ok(())
+}
+
+/// TypeScript parity: `tests/operator-channel-runtime.test.ts`,
+/// `tests/operator-notification-delivery.test.ts`, and `apps/cli/notification-command.test.ts`.
+async fn operator_notifications_reach_slack_webhook_and_desktop_once(
+    database: String,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = TempDir::new()?;
+    let directory = directory.path();
+    let credentials = Credentials::new();
+    let slack = MockSlackApi::start().await?;
+    slack.responses.add_permits(1_000);
+    let hook = MockSlackApi::start().await?;
+    hook.responses.add_permits(1_000);
+    let hook_url = hook.endpoint.replace("/chat.postMessage", "/hook");
+    let desktop = directory.join("desktop.log");
+    let notifier = directory.join("desktop-notifier");
+    std::fs::write(
+        &notifier,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s\\n--\\n' \"$1\" \"$2\" >> '{}'\n",
+            desktop.display()
+        ),
+    )?;
+    std::fs::set_permissions(&notifier, std::fs::Permissions::from_mode(0o700))?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private = control_plane.endpoint().await?;
+    let start_gateway = || -> Result<Process> {
+        let mut command = credentials.command();
+        command
+            .args([
+                "gateway",
+                "--control-plane",
+                &private,
+                "--slack-listen",
+                "127.0.0.1:0",
+                "--slack-state-directory",
+            ])
+            .arg(directory.join("slack"))
+            .args(["--notify", "slack:U0OPERATOR"])
+            .args(["--notify", "slack:TOTHER/U0OPERATOR"])
+            .arg("--notify")
+            .arg(format!("webhook:{hook_url}#hook-token"))
+            .args(["--notify", "desktop"])
+            .env("SUPERTAG_SLACK_ACCOUNT_ID", SLACK_ACCOUNT)
+            .env("SUPERTAG_SLACK_TEAM_ID", SLACK_TEAM)
+            .env("SUPERTAG_SLACK_CHANNEL_ID", SLACK_CHANNEL)
+            .env("SUPERTAG_SLACK_TAG_ID", "engineer")
+            .env("SUPERTAG_SLACK_ALLOWED_USERS", SLACK_USER)
+            .env("SUPERTAG_SLACK_SIGNING_SECRET", SLACK_SIGNING_SECRET)
+            .env("SUPERTAG_SLACK_BOT_TOKEN", SLACK_BOT_TOKEN)
+            .env("SUPERTAG_TEST_SLACK_API_URL", &slack.endpoint)
+            .env("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1")
+            .env("SUPERTAG_NOTIFY_SECRET_HOOK_TOKEN", "synthetic-hook-secret")
+            .env("SUPERTAG_TEST_DESKTOP_NOTIFIER", &notifier);
+        Process::spawn(command, directory, "notify-gateway", true)
+    };
+    let mut gateway = start_gateway()?;
+    let endpoint = gateway.endpoints(2).await?.remove(0);
+    let mut services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+
+    // The sample goes through every destination at once, outside the outbox.
+    let mut test = credentials.command();
+    test.args([
+        "test",
+        "notification",
+        "--gateway",
+        &services.endpoint,
+        "--objective",
+        "release",
+    ]);
+    let mut process = Process::spawn(test, directory, "test-notification", false)?;
+    process.successful_exit().await?;
+    assert_eq!(
+        std::fs::read_to_string(process.log.with_extension("stdout"))?,
+        "slack: delivered\nslack: failed: No Slack Surface Account is enrolled for TOTHER\nwebhook: delivered\ndesktop: delivered\n"
+    );
+    // Samples are throttled per Gateway.
+    let mut again = credentials.command();
+    again.args(["test", "notification", "--gateway", &services.endpoint]);
+    let mut process = Process::spawn(again, directory, "test-notification-again", false)?;
+    ensure!(
+        !process.exited().await?.success(),
+        "a second sample was not throttled"
+    );
+    ensure!(
+        process.logs().contains("wait a few seconds"),
+        "{}",
+        process.logs()
+    );
+    let sample = "SuperTag test notification\n`supertag describe objective release`";
+    let slack_body = |text: &str| {
+        serde_json::json!({
+            "channel": "U0OPERATOR", "text": text, "mrkdwn": true,
+            "unfurl_links": false, "unfurl_media": false,
+        })
+    };
+    {
+        let requests = slack.requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].path, "/chat.postMessage");
+        assert_eq!(
+            requests[0].authorization,
+            format!("Bearer {SLACK_BOT_TOKEN}")
+        );
+        assert_eq!(requests[0].body, slack_body(sample));
+        let hooks = hook.requests.lock().await;
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].path, "/hook");
+        assert_eq!(hooks[0].authorization, "Bearer synthetic-hook-secret");
+        assert_eq!(
+            hooks[0].body,
+            serde_json::json!({
+                "objectiveId": "release", "kinds": ["test"], "count": 1,
+                "title": "SuperTag needs you", "text": sample,
+                "command": "supertag describe objective release",
+                "itemKeys": ["test:release"],
+            })
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&desktop)?,
+        format!("SuperTag needs you|{sample}\n--\n")
+    );
+
+    // A question the Objective owner asks reaches each destination once.
+    // The connection flags follow the command's first word.
+    let operator = |args: &[&str]| {
+        let mut command = credentials.command();
+        command
+            .arg(args[0])
+            .args(["--gateway", &services.endpoint])
+            .args(&args[1..]);
+        command
+    };
+    cli(
+        operator(&[
+            "put-tag",
+            "engineer",
+            "--instructions",
+            "Release engineering",
+        ]),
+        directory,
+        &[],
+    )
+    .await?;
+    cli(
+        operator(&[
+            "objective",
+            "create",
+            "release",
+            "--owner",
+            "engineer",
+            "Ask which branch to release",
+        ]),
+        directory,
+        &[],
+    )
+    .await?;
+    let mut host = credentials.command();
+    host.args([
+        "worker-host",
+        "--gateway",
+        &services.endpoint,
+        "--adapter",
+        ADAPTER,
+        "--once",
+        "--adapter-arg=--objective-question",
+    ])
+    .arg("--state-directory")
+    .arg(directory.join("host"));
+    Process::spawn(host, directory, "worker-host", false)?
+        .successful_exit()
+        .await?;
+    let message = "Objective release needs you: Objective release waits on your answer\n`supertag describe objective release`";
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let delivered = slack.requests.lock().await.len() == 2
+            && hook.requests.lock().await.len() == 2
+            && std::fs::read_to_string(&desktop)?.matches("\n--\n").count() == 2;
+        if delivered {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "operator notifications were not delivered"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(slack.requests.lock().await[1].body, slack_body(message));
+    let webhook = hook.requests.lock().await[1].body.clone();
+    assert_eq!(webhook["text"], message);
+    assert_eq!(webhook["kinds"], serde_json::json!(["question"]));
+    assert_eq!(webhook["command"], "supertag describe objective release");
+    assert_eq!(webhook["objectiveId"], "release");
+    assert!(
+        std::fs::read_to_string(&desktop)?
+            .ends_with(&format!("SuperTag needs you|{message}\n--\n"))
+    );
+
+    // A restarted Gateway resumes from the durable outbox and never repeats a message.
+    services.gateway.crash()?;
+    let mut gateway = start_gateway()?;
+    services.endpoint = gateway.endpoints(2).await?.remove(0);
+    services.gateway = gateway;
+    sleep(Duration::from_millis(4_500)).await;
+    assert_eq!(slack.requests.lock().await.len(), 2);
+    assert_eq!(hook.requests.lock().await.len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(&desktop)?.matches("\n--\n").count(),
+        2
+    );
+
+    // Text an agent or operator wrote is rendered for Slack, never posted as live mentions.
+    let mut test = credentials.command();
+    test.args([
+        "test",
+        "notification",
+        "--gateway",
+        &services.endpoint,
+        "--objective",
+        "<!channel> `<@U0OTHER>`",
+    ]);
+    Process::spawn(test, directory, "test-notification-mention", false)?
+        .successful_exit()
+        .await?;
+    let posted = slack.requests.lock().await[2].body["text"]
+        .as_str()
+        .context("Slack text")?
+        .to_owned();
+    ensure!(
+        !posted.contains("<!channel>") && !posted.contains("<@U0OTHER>"),
+        "{posted}"
+    );
+    ensure!(posted.contains("&lt;!channel&gt;"), "{posted}");
+
+    // A graceful shutdown finishes the delivery in flight instead of dropping it, so the
+    // restarted Gateway never sends it again.
+    hook.responses.forget_permits(usize::MAX);
+    let hooks_before = hook.requests.lock().await.len();
+    let mut create = credentials.command();
+    create
+        .arg("objective")
+        .args(["--gateway", &services.endpoint])
+        .args([
+            "create",
+            "hotfix",
+            "--owner",
+            "engineer",
+            "Ask which branch to release",
+        ]);
+    cli(create, directory, &[]).await?;
+    let mut host = credentials.command();
+    host.args([
+        "worker-host",
+        "--gateway",
+        &services.endpoint,
+        "--adapter",
+        ADAPTER,
+        "--once",
+        "--adapter-arg=--objective-question",
+    ])
+    .arg("--state-directory")
+    .arg(directory.join("host"));
+    Process::spawn(host, directory, "worker-host-hotfix", false)?
+        .successful_exit()
+        .await?;
+    let deadline = Instant::now() + WAIT;
+    while hook.requests.lock().await.len() == hooks_before {
+        ensure!(
+            Instant::now() < deadline,
+            "the webhook delivery did not start"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    services.gateway.terminate()?;
+    sleep(Duration::from_millis(1_000)).await;
+    ensure!(
+        services.gateway.child.try_wait()?.is_none(),
+        "the Gateway stopped before its delivery finished"
+    );
+    hook.responses.add_permits(1_000);
+    services.gateway.successful_exit().await?;
+    let mut gateway = start_gateway()?;
+    services.endpoint = gateway.endpoints(2).await?.remove(0);
+    services.gateway = gateway;
+    sleep(Duration::from_millis(4_500)).await;
+    let hotfix: Vec<_> = hook
+        .requests
+        .lock()
+        .await
+        .iter()
+        .filter(|request| request.body["objectiveId"] == "hotfix")
+        .map(|request| request.body["kinds"].clone())
+        .collect();
+    assert_eq!(hotfix, [serde_json::json!(["question"])]);
+    Ok(())
+}
+
+/// A real harness path for `progress.updated`: the native Codex adapter forwards the model's
+/// plan, and Slack shows it in place of the acknowledgement until the final reply replaces it.
+async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
+    database: String,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = TempDir::new()?;
+    let directory = directory.path();
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private = control_plane.endpoint().await?;
+    // Codex Session checkpoints are stored through the Gateway.
+    let checkpoints = directory.join("checkpoints");
+    let (gateway, endpoint, http) = slack_gateway_with(
+        &credentials,
+        &private,
+        directory,
+        &mock,
+        &["--checkpoint-directory".as_ref(), checkpoints.as_os_str()],
+    )
+    .await?;
+    let services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+    configure_slack_surface(&services, &credentials).await?;
+    let home = directory.join("fixture-home");
+    let codex_home = home.join(".codex");
+    std::fs::create_dir_all(&codex_home)?;
+    let auth = codex_home.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{"tokens":{"access_token":"fixture-native-sign-in","refresh_token":"fixture-native-refresh"}}"#,
+    )?;
+    std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
+    let fake = directory.join("codex-fixture");
+    std::fs::write(
+        &fake,
+        include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
+    let release = directory.join("plan-release");
+    let thread = "1794470400.000001";
+    assert_eq!(
+        signed_slack_mention(
+            &http,
+            "EvPLAN1",
+            thread,
+            &format!("Show the plan and wait for {} first", release.display()),
+        )
+        .await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(1).await?;
+    mock.responses.add_permits(1);
+    let mut command = credentials.command();
+    command
+        .args(["worker-host", "--gateway", &services.endpoint, "--once"])
+        .args(["--harness", "codex", "--codex-model", "fixture-model"])
+        .arg("--codex-path")
+        .arg(&fake)
+        .arg("--state-directory")
+        .arg(directory.join("codex-host"))
+        .env("HOME", &home);
+    let mut host = Process::spawn(command, directory, "codex-host", false)?;
+    if let Err(error) = mock.wait_for_requests(2).await {
+        let log = std::fs::read_to_string(&host.log).unwrap_or_default();
+        return Err(error.context(format!("Codex Worker Host log: {log}")));
+    }
+    mock.responses.add_permits(1);
+    std::fs::write(&release, b"")?;
+    mock.wait_for_requests(3).await?;
+    mock.responses.add_permits(1);
+    host.successful_exit().await?;
+    let requests: Vec<_> = mock
+        .requests
+        .lock()
+        .await
+        .iter()
+        .map(|request| (request.path.clone(), request.body.clone()))
+        .collect();
+    let body = |target: (&str, &str), text: &str| {
+        let mut body = serde_json::json!({
+            "channel": SLACK_CHANNEL, "text": text,
+            "unfurl_links": false, "unfurl_media": false, "mrkdwn": true,
+        });
+        body[target.0] = target.1.into();
+        body
+    };
+    assert_eq!(
+        requests,
+        [
+            (
+                "/chat.postMessage".to_owned(),
+                body(("thread_ts", thread), "Got it. I’m looking into this now.")
+            ),
+            (
+                "/chat.update".to_owned(),
+                body(
+                    ("ts", SLACK_RECEIPT),
+                    "Working through the plan\n\n✓ Read the fixture\n• Report back"
+                )
+            ),
+            (
+                "/chat.update".to_owned(),
+                body(("ts", SLACK_RECEIPT), "Native plan done")
+            ),
+        ]
+    );
     Ok(())
 }
