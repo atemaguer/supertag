@@ -703,6 +703,105 @@ fn write_back_refuses_over_bounds_and_stops_at_the_first_failure() {
 }
 
 #[test]
+fn write_back_refuses_names_and_links_it_cannot_write_instead_of_dropping_them() {
+    let fixture = fixture();
+    let copy = fixture.root.join("data");
+    let refuse = |attempt: &str, change: &dyn Fn(), key: &str, reason: &str| {
+        fixture
+            .stage(attempt, &[fixture.writable("data", 1024)])
+            .unwrap();
+        fs::write(copy.join("a.txt"), "a").unwrap();
+        change();
+        let writes = write_back(
+            &fixture.mounts,
+            &fixture.state,
+            attempt,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Refused);
+        assert_eq!(writes[0].error_key, key, "{attempt}");
+        assert!(writes[0].error_reason.contains(reason), "{attempt}");
+        assert!(writes[0].files.is_empty());
+        assert!(!fixture.source.join("a.txt").exists(), "{attempt}");
+        assert!(
+            supertag_protocol::workspace_mounts::validate_writes(
+                &writes,
+                &[fixture.writable("data", 1024)]
+            )
+            .is_ok(),
+            "{attempt}"
+        );
+        cleanup(&fixture.state, attempt).unwrap();
+    };
+    refuse(
+        "git",
+        &|| {
+            fs::create_dir_all(copy.join("nested/.git")).unwrap();
+            fs::write(copy.join("nested/.git/HEAD"), "ref").unwrap();
+        },
+        "nested",
+        "file name",
+    );
+    refuse(
+        "reserved",
+        &|| fs::write(copy.join(".supertag-x"), "x").unwrap(),
+        "",
+        "file name",
+    );
+    refuse(
+        "hardlink",
+        &|| fs::hard_link(copy.join("a.txt"), copy.join("b.txt")).unwrap(),
+        "a.txt",
+        "another link",
+    );
+    refuse(
+        "deep",
+        &|| {
+            let deep = (0..=MAX_DEPTH).fold(copy.clone(), |path, n| path.join(format!("d{n}")));
+            fs::create_dir_all(&deep).unwrap();
+        },
+        &(0..=MAX_DEPTH)
+            .map(|n| format!("d{n}"))
+            .collect::<Vec<_>>()
+            .join("/"),
+        "too deeply",
+    );
+}
+
+#[test]
+fn a_rewrite_after_a_restart_replaces_the_interrupted_temporary_file() {
+    let fixture = fixture();
+    fixture
+        .stage("attempt", &[fixture.writable("data", 1024)])
+        .unwrap();
+    fs::write(fixture.root.join("data/nested/new.txt"), "new").unwrap();
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.receipts("attempt").join("0.json")).unwrap())
+            .unwrap();
+    let token = receipt["token"].as_str().unwrap();
+    let digest = Sha256::digest(format!("{token}\0nested/new.txt").as_bytes());
+    let leftover = fixture
+        .source
+        .join(format!("nested/{STAGING_PREFIX}write-{digest:x}"));
+    fs::write(&leftover, "interrupted").unwrap();
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "attempt",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
+    assert!(!leftover.exists());
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("nested/new.txt")).unwrap(),
+        "new"
+    );
+    cleanup(&fixture.state, "attempt").unwrap();
+}
+
+#[test]
 fn write_back_never_follows_a_link_in_the_volume() {
     let fixture = fixture();
     fixture
@@ -886,21 +985,18 @@ mod object_store {
             .unwrap();
         fs::write(copy.join("rows.csv"), "changed").unwrap();
         fs::write(copy.join("nested/new.txt"), "created").unwrap();
-        fs::write(copy.join("bad name.txt"), "unsupported key").unwrap();
+        fs::write(copy.join("bad name+é.txt"), "any key").unwrap();
         let writes = fixture.write_back("write").await;
         assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
         let mut written = keys(&writes[0]);
         written.sort();
-        assert_eq!(written, ["nested/new.txt", "rows.csv"]);
-        assert_eq!(
-            writes[0].skipped, 3,
-            "two unchanged files and one unsupported key"
-        );
+        assert_eq!(written, ["bad name+é.txt", "nested/new.txt", "rows.csv"]);
+        assert_eq!(writes[0].skipped, 2, "two unchanged files");
         {
             let objects = fixture.store.objects.lock().unwrap();
             assert_eq!(objects["bucket-a/data/rows.csv"], b"changed");
             assert_eq!(objects["bucket-a/data/nested/new.txt"], b"created");
-            assert!(!objects.keys().any(|key| key.contains("bad")));
+            assert_eq!(objects["bucket-a/data/bad name+é.txt"], b"any key");
         }
         cleanup(&fixture.state, "write").unwrap();
 

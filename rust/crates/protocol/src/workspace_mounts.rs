@@ -291,7 +291,9 @@ pub fn validate_writes(
                     || !write.not_attempted.is_empty()))
             || (!complete
                 && (write.error_reason.is_empty()
-                    || !write.not_attempted.contains(&write.error_key)))
+                    || (status == WorkspaceMountWriteStatus::Partial
+                        || !write.error_key.is_empty())
+                        && !write.not_attempted.contains(&write.error_key)))
             || (status == WorkspaceMountWriteStatus::Refused && !write.files.is_empty())
         {
             return invalid("invalid Workspace mount write summary");
@@ -388,7 +390,13 @@ mod tests {
         refused.status = WorkspaceMountWriteStatus::Refused as i32;
         assert!(validate_writes(std::slice::from_ref(&refused), &pins).is_err());
         refused.files.clear();
-        assert!(validate_writes(&[refused], &pins).is_ok());
+        assert!(validate_writes(std::slice::from_ref(&refused), &pins).is_ok());
+        // A refusal at the copy root names no key; a failed write always does.
+        refused.error_key.clear();
+        assert!(validate_writes(std::slice::from_ref(&refused), &pins).is_ok());
+        let mut unnamed = refused.clone();
+        unnamed.status = WorkspaceMountWriteStatus::Partial as i32;
+        assert!(validate_writes(&[unnamed], &pins).is_err());
         for key in [
             "",
             "../x",

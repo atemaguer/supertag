@@ -157,7 +157,12 @@ impl S3Source {
             "unsupported S3 Workspace Volume object key"
         );
         let mut url = self.endpoint.clone();
-        url.set_path(&format!("/{}/{}/{key}", self.bucket, self.prefix));
+        url.set_path(&format!(
+            "/{}/{}/{}",
+            self.bucket,
+            self.prefix,
+            encode_key(key)
+        ));
         Ok(url)
     }
 
@@ -294,14 +299,25 @@ impl S3Source {
     }
 }
 
-/// Object keys are copied to and written from local paths, so each part is
-/// a plain name SigV4 and the filesystem agree on.
+/// Object keys are copied to and written from local paths, so each must be
+/// a Volume key the filesystem can hold.
 pub(super) fn object_key(key: &str) -> bool {
     supertag_protocol::workspace_mounts::volume_key(key)
-        && key.split('/').all(|part| {
-            part.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~'))
-        })
+}
+
+/// Percent-encode every byte of each key part except the RFC 3986 unreserved
+/// set, as S3 does when it computes the SigV4 canonical URI, so the signed
+/// path is the path S3 checks.
+fn encode_key(key: &str) -> String {
+    let mut encoded = String::with_capacity(key.len());
+    for byte in key.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 fn endpoint_url(value: &str) -> Result<Url> {
@@ -470,7 +486,9 @@ pub(super) mod fake {
         if !signed(&headers) {
             return (StatusCode::FORBIDDEN, Vec::new());
         }
-        let path = uri.path().trim_start_matches('/').to_owned();
+        let Some(path) = decode(uri.path().trim_start_matches('/')) else {
+            return (StatusCode::BAD_REQUEST, Vec::new());
+        };
         if method == axum::http::Method::PUT {
             use sha2::Digest;
             let declared = headers
@@ -489,6 +507,23 @@ pub(super) mod fake {
             Some(bytes) => (StatusCode::OK, bytes.clone()),
             None => (StatusCode::NOT_FOUND, Vec::new()),
         }
+    }
+
+    /// Decode a path S3 would accept: only unreserved bytes appear bare.
+    fn decode(path: &str) -> Option<String> {
+        let mut bytes = Vec::new();
+        let mut rest = path.bytes();
+        while let Some(byte) = rest.next() {
+            if byte == b'%' {
+                let hex = [rest.next()?, rest.next()?];
+                bytes.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
+            } else if byte.is_ascii_alphanumeric() || b"-_.~/".contains(&byte) {
+                bytes.push(byte);
+            } else {
+                return None;
+            }
+        }
+        String::from_utf8(bytes).ok()
     }
 
     pub(crate) async fn start(store: Store) -> String {
@@ -515,10 +550,13 @@ mod tests {
         );
         assert_eq!(text("<Key>a&bogus;</Key>", "Key"), None);
         assert_eq!(elements("<C>1</C><C>2</C>", "C"), ["1", "2"]);
-        assert!(object_key("reports/2026/a.csv"));
-        for key in ["a b", "a/../b", ".git/x", "a/.supertag-x", "a%2f", "é"] {
+        for key in ["reports/2026/a.csv", "a b", "a+b@c", "é/x%2f"] {
+            assert!(object_key(key), "{key}");
+        }
+        for key in ["a/../b", ".git/x", "a/.supertag-x", "a\\b", "a\nb", ""] {
             assert!(!object_key(key), "{key}");
         }
+        assert_eq!(encode_key("r/a b+é%.~_-"), "r/a%20b%2B%C3%A9%25.~_-");
     }
 
     #[test]

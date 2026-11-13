@@ -2,10 +2,13 @@
 //!
 //! The change set is every regular file whose size or SHA-256 differs from
 //! what was staged, plus every new regular file. Links, deletions and other
-//! entry types are not written. Bounds are checked over the whole change set
+//! entry types are not written. A name the Volume cannot hold, a directory
+//! nested too deep, or a file with another hard link refuses the whole copy
+//! rather than being dropped. Bounds are checked over the whole change set
 //! before anything is written; writing then stops at the first failure. Each
 //! copy's summary is journaled before it is reported, so a restarted Host
-//! reports the same summary without writing again.
+//! reports the same summary without writing again. A Host that stops while
+//! writing rewrites the same change set, reusing the same temporary names.
 use super::*;
 use prost::Message;
 use std::collections::HashMap;
@@ -19,13 +22,18 @@ const MAX_WALK: usize = 2 * MAX_ENTRIES;
 /// The most summary bytes one copy's change set may need.
 const MAX_SUMMARY_BYTES: usize = 256 * 1024;
 
-#[derive(Default)]
 struct Listing {
     files: Vec<Copied>,
     skipped: u64,
     visited: usize,
-    overflow: Option<String>,
+    device: u64,
+    /// The first entry that refuses the copy: the nearest key the summary
+    /// can name (empty for the copy root) and why.
+    refusal: Option<(String, &'static str)>,
 }
+
+/// Why an entry name refuses a write-back.
+const UNNAMEABLE: &str = "a file name cannot be written to the Volume";
 
 /// Write each read-write copy of this Attempt back to its Volume, in mount
 /// order, stopping after the first copy that is not complete.
@@ -117,9 +125,14 @@ impl WorkspaceMounts {
             .iter()
             .map(|file| (file.key.as_str(), file))
             .collect();
-        let mut listing = Listing::default();
-        let s3 = matches!(mapping.source, Source::S3(_));
-        listing.walk(&copy, "", 0, s3, cancel)?;
+        let mut listing = Listing {
+            files: vec![],
+            skipped: 0,
+            visited: 0,
+            device: copy.metadata()?.dev(),
+            refusal: None,
+        };
+        listing.walk(&copy, "", 0, cancel)?;
         let mut changed = vec![];
         let mut skipped = listing.skipped;
         for file in listing.files {
@@ -129,6 +142,8 @@ impl WorkspaceMounts {
                 changed.push(file);
             }
         }
+        // Written in full-key order, so the first failure is deterministic.
+        changed.sort_unstable_by(|a, b| a.key.cmp(&b.key));
         let mut write = WorkspaceMountWrite {
             volume_id: entry.volume_id.clone(),
             destination: entry
@@ -145,8 +160,8 @@ impl WorkspaceMounts {
             .iter()
             .map(|file| file.key.len() + 80)
             .sum::<usize>();
-        let refusal = if let Some(key) = listing.overflow {
-            Some((key, "the copy holds too many entries to write back"))
+        let refusal = if let Some(refusal) = listing.refusal {
+            Some(refusal)
         } else if let Some(file) = changed.iter().find(|file| file.size > entry.max_bytes) {
             Some((file.key.clone(), "file exceeds the copy byte limit"))
         } else if total > entry.max_bytes {
@@ -180,7 +195,7 @@ impl WorkspaceMounts {
                 .take(MAX_WRITE_FILES)
                 .map(|file| file.key.clone())
                 .collect();
-            if !write.not_attempted.contains(&key) {
+            if !key.is_empty() && !write.not_attempted.contains(&key) {
                 write.not_attempted.push(key.clone());
             }
             write.error_key = key;
@@ -192,7 +207,7 @@ impl WorkspaceMounts {
                 Err(anyhow::anyhow!("cancelled"))
             } else {
                 match &mapping.source {
-                    Source::File(path) => self.write_file(path, &copy, file),
+                    Source::File(path) => self.write_file(path, &copy, file, &entry.token),
                     Source::S3(source) => write_object(source, &copy, file),
                 }
             };
@@ -223,8 +238,10 @@ impl WorkspaceMounts {
 
     /// Replace or create one file under a file Volume. Directories are
     /// opened without following links, must stay on the Volume's device and
-    /// outside protected storage, and the file is renamed into place.
-    fn write_file(&self, source: &Path, copy: &File, file: &Copied) -> Result<()> {
+    /// outside protected storage, and the file is renamed into place. The
+    /// temporary name is fixed per copy and key, so a rewrite after a Host
+    /// restart replaces any temporary file the interrupted write left.
+    fn write_file(&self, source: &Path, copy: &File, file: &Copied, token: &str) -> Result<()> {
         let mut directory = open_directory(source)?;
         let device = directory.metadata()?.dev();
         let parts: Vec<&str> = file.key.split('/').collect();
@@ -256,7 +273,13 @@ impl WorkspaceMounts {
             None => 0o644,
         };
         let mut input = open_copied(copy, file)?;
-        let temp = format!("{STAGING_PREFIX}write-{}", uuid::Uuid::new_v4().simple());
+        let digest = Sha256::digest(format!("{token}\0{}", file.key).as_bytes());
+        let temp = format!("{STAGING_PREFIX}write-{:x}", digest);
+        match stat_at(&directory, &temp)? {
+            Some(mode) if is_regular(mode) => unlink_at(&directory, &temp, 0)?,
+            Some(_) => bail!("a temporary write-back path is in the way"),
+            None => {}
+        }
         let result = (|| -> Result<()> {
             let mut output = create_at(&directory, &temp, 0o600)?;
             let sha256 = stream(&mut input, &mut output, file.size)?;
@@ -314,7 +337,10 @@ fn open_copied(copy: &File, file: &Copied) -> Result<File> {
     let input = unsafe { File::from_raw_fd(fd) };
     let metadata = input.metadata()?;
     ensure!(
-        metadata.is_file() && metadata.len() == file.size,
+        metadata.is_file()
+            && metadata.len() == file.size
+            && metadata.nlink() == 1
+            && metadata.dev() == copy.metadata()?.dev(),
         "copied file changed during write-back"
     );
     Ok(input)
@@ -340,24 +366,29 @@ fn stream(input: &mut File, output: &mut impl Write, size: u64) -> Result<String
 }
 
 impl Listing {
+    fn refuse(&mut self, key: &str, reason: &'static str) {
+        if self.refusal.is_none() {
+            self.refusal = Some((key.to_owned(), reason));
+        }
+    }
+
     fn walk(
         &mut self,
         directory: &File,
         prefix: &str,
         depth: usize,
-        s3: bool,
         cancel: &CancellationToken,
     ) -> Result<()> {
         ensure!(!cancel.is_cancelled(), "Workspace write-back cancelled");
         let mut names = raw_names(directory, MAX_WALK + 1)?;
         names.sort();
         for raw in names {
-            if self.overflow.is_some() {
+            if self.refusal.is_some() {
                 return Ok(());
             }
             let Ok(name) = raw.to_str() else {
-                self.skipped += 1;
-                continue;
+                self.refuse(prefix, UNNAMEABLE);
+                return Ok(());
             };
             if prefix.is_empty() && name == MARKER {
                 continue;
@@ -367,23 +398,23 @@ impl Listing {
             } else {
                 format!("{prefix}/{name}")
             };
-            if !volume_key(&key) || (s3 && !s3::object_key(&key)) {
-                self.skipped += 1;
-                continue;
+            if !volume_key(&key) {
+                self.refuse(prefix, UNNAMEABLE);
+                return Ok(());
             }
             self.visited += 1;
             if self.visited > MAX_WALK {
-                self.overflow = Some(key);
+                self.refuse(&key, "the copy holds too many entries to write back");
                 return Ok(());
             }
             match stat_at(directory, name)? {
                 Some(mode) if is_directory(mode) => {
                     if depth >= MAX_DEPTH {
-                        self.skipped += 1;
-                        continue;
+                        self.refuse(&key, "the copy nests directories too deeply");
+                        return Ok(());
                     }
                     let child = open_dir_at(directory, name)?;
-                    self.walk(&child, &key, depth + 1, s3, cancel)?;
+                    self.walk(&child, &key, depth + 1, cancel)?;
                 }
                 Some(mode) if is_regular(mode) => {
                     let raw = c_name(name)?;
@@ -395,11 +426,17 @@ impl Listing {
                         )
                     };
                     if fd < 0 {
-                        self.skipped += 1;
-                        continue;
+                        return Err(std::io::Error::last_os_error())
+                            .context("open Workspace copy file");
                     }
                     let mut file = unsafe { File::from_raw_fd(fd) };
-                    let size = file.metadata()?.len();
+                    let metadata = file.metadata()?;
+                    if !metadata.is_file() || metadata.nlink() != 1 || metadata.dev() != self.device
+                    {
+                        self.refuse(&key, "a file has another link or changed");
+                        return Ok(());
+                    }
+                    let size = metadata.len();
                     let sha256 = stream(&mut file, &mut std::io::sink(), size)?;
                     self.files.push(Copied { key, size, sha256 });
                 }

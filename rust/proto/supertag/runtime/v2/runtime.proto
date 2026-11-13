@@ -1933,10 +1933,12 @@ message WorkspaceMountWrite {
   repeated WorkspaceMountWrittenFile files = 4;
   // Files unchanged since the copy.
   uint64 skipped = 5;
-  // The failed or refused key and why; empty when complete.
+  // The failed or refused key and why; empty when complete. A refusal
+  // whose entry has no Volume key names its nearest directory, or none
+  // for the copy root.
   string error_key = 6;
   string error_reason = 7;
-  // Changed keys not written, including `error_key`.
+  // Changed keys not written, including a non-empty `error_key`.
   repeated string not_attempted = 8;
 }
 

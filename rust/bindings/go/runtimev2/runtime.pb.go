@@ -15618,10 +15618,12 @@ type WorkspaceMountWrite struct {
 	Files       []*WorkspaceMountWrittenFile `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
 	// Files unchanged since the copy.
 	Skipped uint64 `protobuf:"varint,5,opt,name=skipped,proto3" json:"skipped,omitempty"`
-	// The failed or refused key and why; empty when complete.
+	// The failed or refused key and why; empty when complete. A refusal
+	// whose entry has no Volume key names its nearest directory, or none
+	// for the copy root.
 	ErrorKey    string `protobuf:"bytes,6,opt,name=error_key,json=errorKey,proto3" json:"error_key,omitempty"`
 	ErrorReason string `protobuf:"bytes,7,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
-	// Changed keys not written, including `error_key`.
+	// Changed keys not written, including a non-empty `error_key`.
 	NotAttempted  []string `protobuf:"bytes,8,rep,name=not_attempted,json=notAttempted,proto3" json:"not_attempted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

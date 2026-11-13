@@ -6549,7 +6549,9 @@ export type WorkspaceMountWrite = Message<"supertag.runtime.v2.WorkspaceMountWri
   skipped: bigint;
 
   /**
-   * The failed or refused key and why; empty when complete.
+   * The failed or refused key and why; empty when complete. A refusal
+   * whose entry has no Volume key names its nearest directory, or none
+   * for the copy root.
    *
    * @generated from field: string error_key = 6;
    */
@@ -6561,7 +6563,7 @@ export type WorkspaceMountWrite = Message<"supertag.runtime.v2.WorkspaceMountWri
   errorReason: string;
 
   /**
-   * Changed keys not written, including `error_key`.
+   * Changed keys not written, including a non-empty `error_key`.
    *
    * @generated from field: repeated string not_attempted = 8;
    */
