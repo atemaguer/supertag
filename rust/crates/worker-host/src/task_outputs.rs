@@ -293,13 +293,14 @@ impl PendingOutputs {
         let state = state.to_owned();
         let identity = attempt.inspect();
         let input = self.request();
+        let artifact_source = coordination.artifact_source.clone();
         let policy = self
             .policy()
             .map_err(|_| Status::data_loss("accepted output policy could not be restored"))?;
         let (snapshots, capture) = tokio::task::spawn_blocking(move || {
             let snapshots = Snapshots::open(&state, &identity.attempt_id)
                 .map_err(|_| Status::data_loss("Task output snapshot is unavailable"))?;
-            let capture = snapshots.replay_outputs(
+            let mut capture = snapshots.replay_outputs(
                 identity,
                 input,
                 policy.is_some(),
@@ -307,6 +308,9 @@ impl PendingOutputs {
                     .and_then(|value| value.max_bytes)
                     .unwrap_or(MAX_ARTIFACT_BYTES),
             )?;
+            if let Capture::Pending(manifest, selected) = &mut capture {
+                snapshots.retain_outputs(manifest, selected, artifact_source.as_ref())?;
+            }
             Ok::<_, Status>((snapshots, capture))
         })
         .await

@@ -8,8 +8,8 @@ use super::{Result, Store, StoreError, invalid, name};
 
 #[derive(Clone, Debug)]
 pub struct HostAuthority {
-    pub(super) principal: String,
-    pub(super) generation: i64,
+    pub(crate) principal: String,
+    pub(crate) generation: i64,
 }
 
 impl HostAuthority {
@@ -30,7 +30,7 @@ impl HostAuthority {
         })
     }
 
-    pub(super) fn id(&self) -> &str {
+    pub(crate) fn id(&self) -> &str {
         &self.principal["host:".len()..]
     }
 }

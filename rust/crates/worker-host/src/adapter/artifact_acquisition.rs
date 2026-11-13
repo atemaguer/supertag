@@ -5,7 +5,10 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES,
-    artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES, materialized_artifact_directory},
+    artifacts::{
+        ARTIFACT_SOURCE_UNAVAILABLE, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES,
+        materialized_artifact_directory,
+    },
     authenticated_request,
     task_artifact_inputs::OPERATION_PREFIX,
     v2::*,
@@ -266,22 +269,77 @@ impl AcquisitionClient<'_> {
         acquisition: &ArtifactAcquisition,
         file: &ArtifactFile,
     ) -> Result<Vec<u8>, Status> {
-        let stream = self
+        let input = GetAcquiredArtifactFileRequest {
+            attempt: Some(self.attempt.clone()),
+            acquisition_id: acquisition.acquisition_id.clone(),
+            path: file.path.clone(),
+        };
+        let response = self
             .coordination
             .artifacts
             .clone()
-            .download_acquired_file(authenticated_request(
-                GetAcquiredArtifactFileRequest {
-                    attempt: Some(self.attempt.clone()),
-                    acquisition_id: acquisition.acquisition_id.clone(),
-                    path: file.path.clone(),
-                },
-                self.host_token,
-                None,
-            )?)
+            .download_acquired_file(authenticated_request(input.clone(), self.host_token, None)?)
+            .await;
+        match response {
+            Ok(response) => verified_file(file, response.into_inner()).await,
+            Err(error)
+                if error.code() == tonic::Code::DataLoss
+                    && error.message() == ARTIFACT_SOURCE_UNAVAILABLE
+                    && !self.coordination.artifact_peers.is_empty() =>
+            {
+                self.read_peer(acquisition, input, file).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn read_peer(
+        &self,
+        acquisition: &ArtifactAcquisition,
+        input: GetAcquiredArtifactFileRequest,
+        file: &ArtifactFile,
+    ) -> Result<Vec<u8>, Status> {
+        let sent = tokio::time::Instant::now();
+        let grant = self
+            .coordination
+            .acquisitions
+            .clone()
+            .issue_artifact_transfer(authenticated_request(input, self.host_token, None)?)
             .await?
             .into_inner();
-        verified_file(file, stream).await
+        if grant.file.as_ref() != Some(file)
+            || !supertag_protocol::valid_sha256(&grant.token)
+            || !(1..=10_000).contains(&grant.valid_for_ms)
+        {
+            return Err(Status::data_loss(
+                "direct artifact grant differs from the selected file",
+            ));
+        }
+        let deadline = sent + Duration::from_millis(grant.valid_for_ms);
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(Status::deadline_exceeded("direct artifact grant expired"));
+        }
+        let mut client = self
+            .coordination
+            .artifact_peers
+            .peer(&grant.source_host_id)?;
+        let mut request = authenticated_request(
+            WorkerArtifactDownloadRequest {
+                artifact_id: acquisition.artifact_id.clone(),
+                path: file.path.clone(),
+                blob: file.blob.clone(),
+            },
+            &grant.token,
+            None,
+        )?;
+        request.set_timeout(remaining);
+        tokio::time::timeout_at(deadline, async {
+            let response = client.download(request).await?;
+            verified_file(file, response.into_inner()).await
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("direct artifact grant expired"))?
     }
 }
 

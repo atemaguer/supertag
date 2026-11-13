@@ -155,6 +155,8 @@ mod tests {
                     headers.clone(),
                 ),
                 transfers: crate::checkpoints::Transfers::new(channel.clone(), headers.clone()),
+                artifact_source: None,
+                artifact_peers: crate::ArtifactPeers::default(),
                 artifacts: supertag_protocol::v2::artifact_transfers_client::ArtifactTransfersClient::with_interceptor(
                     channel.clone(),
                     headers.clone(),

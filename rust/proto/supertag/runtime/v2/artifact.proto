@@ -23,6 +23,9 @@ service ArtifactDirectory {
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
   rpc GetAcquiredFile(GetAcquiredArtifactFileRequest) returns (ArtifactFile);
   rpc LocateVolumeCopies(LocateArtifactVolumeCopiesRequest) returns (LocateArtifactVolumeCopiesResponse);
+  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
+  rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
+  rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
 // Gateway facade. Identity and generation come from the authenticated Worker Host.
@@ -31,6 +34,9 @@ service AttemptArtifacts {
   rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
+  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
+  rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
+  rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
 service ArtifactTransfers {
@@ -203,6 +209,7 @@ message CommitArtifactCaptureRequest {
   bool managed_task_output = 6;
   // Collection under the immutable output policy accepted with the Task.
   bool declared_task_output = 7;
+  optional string source_storage_id = 8;
 }
 
 message GetCapturedArtifactRequest {
@@ -329,6 +336,34 @@ message ArtifactVolumeLocation {
 }
 message LocateArtifactVolumeCopiesResponse {
   repeated ArtifactVolumeLocation locations = 1;
+}
+
+// Private peer listener. A bearer grant from the Gateway authorizes this read.
+service WorkerArtifactTransfers {
+  rpc Download(WorkerArtifactDownloadRequest) returns (stream ArtifactDownload);
+}
+
+message RegisterArtifactSourceRequest { string storage_id = 1; }
+message RegisterArtifactSourceResponse { string storage_id = 1; }
+message ArtifactTransferGrant {
+  string token = 1;
+  string source_host_id = 2;
+  uint64 valid_for_ms = 3;
+  ArtifactFile file = 4;
+}
+message WorkerArtifactDownloadRequest {
+  string artifact_id = 1;
+  string path = 2;
+  BlobReference blob = 3;
+}
+message AuthorizeArtifactTransferRequest {
+  string token = 1;
+  WorkerArtifactDownloadRequest file = 2;
+}
+message AuthorizedArtifactTransfer {
+  string producer_attempt_id = 1;
+  ArtifactFile file = 2;
+  uint64 valid_for_ms = 3;
 }
 
 // Operator approvals expose only selected immutable entries to named Objectives.

@@ -1,4 +1,5 @@
 mod adapter;
+mod artifact_direct;
 mod artifact_inputs;
 mod artifact_snapshots;
 mod checkpoints;
@@ -16,6 +17,7 @@ mod task_artifact_inputs;
 mod task_outputs;
 mod workspaces;
 
+pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
@@ -71,6 +73,8 @@ pub struct HostOptions {
     pub shared_execution: Option<SharedExecutionConfig>,
     pub context_catalog: context::ContextCatalog,
     pub mcp_catalog: McpCatalog,
+    pub artifact_source: Option<ArtifactSourceConfig>,
+    pub artifact_peers: ArtifactPeers,
 }
 
 #[derive(Clone)]
@@ -91,6 +95,8 @@ pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channe
 pub(crate) struct CoordinationClients {
     transfers: checkpoints::Transfers,
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
+    artifact_source: Option<artifact_direct::SourceStorage>,
+    artifact_peers: ArtifactPeers,
     artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -175,7 +181,7 @@ fn claim_request(
 }
 
 pub async fn run(
-    options: HostOptions,
+    mut options: HostOptions,
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
@@ -281,10 +287,29 @@ pub async fn run(
     )
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let acquisitions = AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone())
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let serving = match options.artifact_source.take() {
+        Some(config) => Some(
+            config
+                .bind(
+                    &options.state_directory,
+                    options
+                        .workspace
+                        .as_ref()
+                        .and_then(workspaces::WorkspaceMapping::local_root),
+                )
+                .await?
+                .serve(acquisitions.clone(), &token, &shutdown)
+                .await?,
+        ),
+        None => None,
+    };
     let coordination = CoordinationClients {
-        acquisitions: AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        acquisitions,
+        artifact_source: serving.as_ref().map(|service| service.storage.clone()),
+        artifact_peers: options.artifact_peers.clone(),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
             options

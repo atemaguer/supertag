@@ -291,7 +291,7 @@ class HarnessCaptureArtifactRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., paths: _Optional[_Iterable[str]] = ..., native_session_id: _Optional[str] = ...) -> None: ...
 
 class CommitArtifactCaptureRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "description", "files", "native_session_id", "managed_task_output", "declared_task_output")
+    __slots__ = ("attempt", "operation_id", "description", "files", "native_session_id", "managed_task_output", "declared_task_output", "source_storage_id")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -299,6 +299,7 @@ class CommitArtifactCaptureRequest(_message.Message):
     NATIVE_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     MANAGED_TASK_OUTPUT_FIELD_NUMBER: _ClassVar[int]
     DECLARED_TASK_OUTPUT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_STORAGE_ID_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
     operation_id: str
     description: ArtifactDescription
@@ -306,7 +307,8 @@ class CommitArtifactCaptureRequest(_message.Message):
     native_session_id: str
     managed_task_output: bool
     declared_task_output: bool
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., native_session_id: _Optional[str] = ..., managed_task_output: _Optional[bool] = ..., declared_task_output: _Optional[bool] = ...) -> None: ...
+    source_storage_id: str
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., native_session_id: _Optional[str] = ..., managed_task_output: _Optional[bool] = ..., declared_task_output: _Optional[bool] = ..., source_storage_id: _Optional[str] = ...) -> None: ...
 
 class GetCapturedArtifactRequest(_message.Message):
     __slots__ = ("artifact_id",)
@@ -517,6 +519,58 @@ class LocateArtifactVolumeCopiesResponse(_message.Message):
     LOCATIONS_FIELD_NUMBER: _ClassVar[int]
     locations: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeLocation]
     def __init__(self, locations: _Optional[_Iterable[_Union[ArtifactVolumeLocation, _Mapping]]] = ...) -> None: ...
+
+class RegisterArtifactSourceRequest(_message.Message):
+    __slots__ = ("storage_id",)
+    STORAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    storage_id: str
+    def __init__(self, storage_id: _Optional[str] = ...) -> None: ...
+
+class RegisterArtifactSourceResponse(_message.Message):
+    __slots__ = ("storage_id",)
+    STORAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    storage_id: str
+    def __init__(self, storage_id: _Optional[str] = ...) -> None: ...
+
+class ArtifactTransferGrant(_message.Message):
+    __slots__ = ("token", "source_host_id", "valid_for_ms", "file")
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    FILE_FIELD_NUMBER: _ClassVar[int]
+    token: str
+    source_host_id: str
+    valid_for_ms: int
+    file: ArtifactFile
+    def __init__(self, token: _Optional[str] = ..., source_host_id: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ...) -> None: ...
+
+class WorkerArtifactDownloadRequest(_message.Message):
+    __slots__ = ("artifact_id", "path", "blob")
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    BLOB_FIELD_NUMBER: _ClassVar[int]
+    artifact_id: str
+    path: str
+    blob: _runtime_pb2.BlobReference
+    def __init__(self, artifact_id: _Optional[str] = ..., path: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
+
+class AuthorizeArtifactTransferRequest(_message.Message):
+    __slots__ = ("token", "file")
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    FILE_FIELD_NUMBER: _ClassVar[int]
+    token: str
+    file: WorkerArtifactDownloadRequest
+    def __init__(self, token: _Optional[str] = ..., file: _Optional[_Union[WorkerArtifactDownloadRequest, _Mapping]] = ...) -> None: ...
+
+class AuthorizedArtifactTransfer(_message.Message):
+    __slots__ = ("producer_attempt_id", "file", "valid_for_ms")
+    PRODUCER_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    FILE_FIELD_NUMBER: _ClassVar[int]
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    producer_attempt_id: str
+    file: ArtifactFile
+    valid_for_ms: int
+    def __init__(self, producer_attempt_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., valid_for_ms: _Optional[int] = ...) -> None: ...
 
 class ArtifactPublication(_message.Message):
     __slots__ = ("publication_id", "source_objective_id", "producer", "artifact_id", "files", "audience_objective_ids", "source_owner_tag_id", "assessment", "approved_by", "approved_at_ms", "supersedes_publication_id", "status", "revision", "withdrawn_by", "withdrawn_at_ms")

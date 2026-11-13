@@ -107,10 +107,12 @@ impl GatewayTransfers {
             Ok::<_, Status>(None)
         };
         match timeout(VOLUME_SEARCH_TIMEOUT, search).await {
-            Ok(result) => result?.ok_or_else(|| Status::data_loss(
-                "artifact bytes are absent from Gateway storage and no usable verified Volume copy was found",
+            Ok(result) => result?.ok_or_else(|| {
+                Status::data_loss(supertag_protocol::artifacts::ARTIFACT_SOURCE_UNAVAILABLE)
+            }),
+            Err(_) => Err(Status::deadline_exceeded(
+                "artifact Volume lookup timed out",
             )),
-            Err(_) => Err(Status::deadline_exceeded("artifact Volume lookup timed out")),
         }
     }
 
@@ -227,6 +229,45 @@ impl artifact_catalog_server::ArtifactCatalog for GatewayTransfers {
 
 #[tonic::async_trait]
 impl attempt_artifacts_server::AttemptArtifacts for GatewayTransfers {
+    async fn register_artifact_source(
+        &self,
+        request: Request<RegisterArtifactSourceRequest>,
+    ) -> std::result::Result<Response<RegisterArtifactSourceResponse>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel)
+                    .register_artifact_source(request)
+                    .await
+            })
+            .await
+    }
+
+    async fn issue_artifact_transfer(
+        &self,
+        request: Request<GetAcquiredArtifactFileRequest>,
+    ) -> std::result::Result<Response<ArtifactTransferGrant>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel)
+                    .issue_artifact_transfer(request)
+                    .await
+            })
+            .await
+    }
+
+    async fn authorize_artifact_transfer(
+        &self,
+        request: Request<AuthorizeArtifactTransferRequest>,
+    ) -> std::result::Result<Response<AuthorizedArtifactTransfer>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel)
+                    .authorize_artifact_transfer(request)
+                    .await
+            })
+            .await
+    }
+
     async fn find(
         &self,
         request: Request<FindAttemptArtifactsRequest>,

@@ -52,6 +52,13 @@ async fn exercise(url: &str) {
     store.seed_host("host", &[1; 32]).await.unwrap();
     let registration = store.register_host("host", "process").await.unwrap();
     let host = crate::HostAuthority::new("host:host", registration.generation).unwrap();
+    let storage = RegisterArtifactSourceRequest {
+        storage_id: Uuid::new_v4().to_string(),
+    };
+    store
+        .register_artifact_source(&host, &storage)
+        .await
+        .unwrap();
     let assignment = store.claim_task(&host, "claim").await.unwrap().unwrap();
     assert_eq!(assignment.task.unwrap().task_id, source.starting_task_id);
     let attempt = InspectAttemptRequest {
@@ -96,6 +103,7 @@ async fn exercise(url: &str) {
                 ..Default::default()
             },
         ],
+        source_storage_id: Some(storage.storage_id),
         ..Default::default()
     };
     store
@@ -283,6 +291,24 @@ async fn exercise(url: &str) {
             .unwrap(),
         publication.files[0]
     );
+    let grant = store
+        .issue_artifact_transfer(&host, &download)
+        .await
+        .unwrap();
+    let redeem = AuthorizeArtifactTransferRequest {
+        token: grant.token,
+        file: Some(WorkerArtifactDownloadRequest {
+            artifact_id: artifact.clone(),
+            path: download.path.clone(),
+            blob: publication.files[0].blob.clone(),
+        }),
+    };
+    assert!(
+        store
+            .authorize_artifact_transfer(&host, &redeem)
+            .await
+            .is_ok()
+    );
     let (mut tx, _) = store.write().await.unwrap();
     let (snapshot, pin) =
         resolve_selection_in(&mut tx, "destination", "publication", &artifact, &selected)
@@ -327,6 +353,18 @@ async fn exercise(url: &str) {
         )
         .await
         .unwrap();
+    assert!(
+        store
+            .authorize_artifact_transfer(&host, &redeem)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .issue_artifact_transfer(&host, &download)
+            .await
+            .is_err()
+    );
     let (mut tx, _) = store.write().await.unwrap();
     assert!(validate_pin_in(&mut tx, &pin).await.is_err());
     assert!(

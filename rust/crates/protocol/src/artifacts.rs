@@ -13,6 +13,9 @@ use crate::{
 };
 
 pub const MAX_ARTIFACT_FILES: usize = 100;
+pub const ARTIFACT_SOURCE_UNAVAILABLE: &str =
+    "artifact bytes are absent from Gateway storage and no usable verified Volume copy was found";
+
 pub const MAX_ARTIFACT_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -47,6 +50,14 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
         .attempt
         .as_ref()
         .ok_or_else(|| Status::invalid_argument("Attempt authority is required"))?;
+    if input.source_storage_id.as_ref().is_some_and(|id| {
+        !uuid::Uuid::parse_str(id)
+            .is_ok_and(|uuid| uuid.get_version_num() == 4 && uuid.to_string() == *id)
+    }) {
+        return Err(Status::invalid_argument(
+            "invalid artifact source storage ID",
+        ));
+    }
     validate_paths(input.files.iter().map(|file| file.path.as_str()))?;
     if input.managed_task_output && input.declared_task_output {
         return Err(Status::invalid_argument(
@@ -230,6 +241,7 @@ mod tests {
             native_session_id: Some("native-session".into()),
             managed_task_output: false,
             declared_task_output: false,
+            source_storage_id: None,
         }
     }
 

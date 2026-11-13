@@ -27,6 +27,7 @@ const SNAPSHOTS: &str = "artifact-snapshots";
 #[derive(Clone)]
 pub(crate) struct Snapshots {
     directory: PathBuf,
+    artifact_source: Option<crate::artifact_direct::SourceStorage>,
 }
 
 pub(crate) enum Capture {
@@ -58,7 +59,18 @@ impl Snapshots {
         create_private_directory(&directory)?;
         File::open(state)?.sync_all()?;
         File::open(root)?.sync_all()?;
-        Ok(Self { directory })
+        Ok(Self {
+            directory,
+            artifact_source: None,
+        })
+    }
+
+    pub(crate) fn with_artifact_source(
+        mut self,
+        source: Option<crate::artifact_direct::SourceStorage>,
+    ) -> Self {
+        self.artifact_source = source;
+        self
     }
 
     pub(crate) fn clear(state: &Path) -> Result<()> {
@@ -263,6 +275,20 @@ impl Snapshots {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             ensure_eof(&mut file).map_err(journal_error)?;
+            if let Some(id) = &manifest.source_storage_id
+                && !matches!(source, SnapshotSource::Replay)
+            {
+                let storage = self
+                    .artifact_source
+                    .as_ref()
+                    .filter(|s| s.has_id(id))
+                    .ok_or_else(|| {
+                        Status::failed_precondition(
+                            "artifact source storage changed while capture was pending",
+                        )
+                    })?;
+                storage.retain(&mut manifest, &bytes)?;
+            }
             return Ok(Capture::Pending(manifest, bytes));
         }
 
@@ -277,6 +303,7 @@ impl Snapshots {
             native_session_id: request.native_session_id,
             managed_task_output,
             declared_task_output,
+            source_storage_id: None,
         };
         let pending = self.pending_bytes().map_err(journal_error)?;
         let mut remaining = (MAX_PENDING_BYTES.saturating_sub(pending))
@@ -326,11 +353,40 @@ impl Snapshots {
             bytes.push(content);
         }
         validate_capture_manifest(&manifest)?;
+        if let Some(storage) = &self.artifact_source {
+            storage.retain(&mut manifest, &bytes)?;
+        }
         let authority = manifest.attempt.take();
         self.persist(&path, &manifest, &bytes)
             .map_err(journal_error)?;
         manifest.attempt = authority;
         Ok(Capture::Pending(manifest, bytes))
+    }
+
+    pub(crate) fn retain_outputs(
+        &self,
+        manifest: &mut CommitArtifactCaptureRequest,
+        selected: &[Vec<u8>],
+        source: Option<&crate::artifact_direct::SourceStorage>,
+    ) -> Result<(), Status> {
+        match (&manifest.source_storage_id, source) {
+            (Some(id), Some(source)) if source.has_id(id) => source.retain(manifest, selected),
+            (Some(_), _) => Err(Status::failed_precondition(
+                "artifact source storage changed while output was pending",
+            )),
+            (None, Some(source)) => {
+                source.retain(manifest, selected)?;
+                let mut pending = manifest.clone();
+                pending.attempt = None;
+                self.persist(
+                    &self.path(&manifest.operation_id, "pending"),
+                    &pending,
+                    selected,
+                )
+                .map_err(journal_error)
+            }
+            (None, None) => Ok(()),
+        }
     }
 
     pub(crate) fn commit(&self, operation: &str, receipt: &CapturedArtifact) -> Result<()> {

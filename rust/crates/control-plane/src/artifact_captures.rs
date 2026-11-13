@@ -87,8 +87,13 @@ impl Store {
                     .bind(&canonical.operation_id)
                     .execute(&mut *tx)
                     .await?;
+                    let capture = capture_row(&prior)?;
+                    if let Some(storage) = &canonical.source_storage_id {
+                        crate::artifact_direct::commit_copy_in(&mut tx, host, &capture, storage)
+                            .await?;
+                    }
                     tx.commit().await?;
-                    return capture_row(&prior);
+                    return Ok(capture);
                 }
             }
             tx.rollback().await?;
@@ -100,6 +105,9 @@ impl Store {
             ));
         }
         running(&row, now)?;
+        if let Some(storage) = &canonical.source_storage_id {
+            crate::artifact_direct::check_source_in(&mut tx, host, storage).await?;
+        }
         let task = task_row(&row)?;
         let output_environment = task.workspace.is_some()
             && task.attempt_execution.as_ref().is_some_and(|execution| {
@@ -492,6 +500,27 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
                 .get_acquired_artifact_file(&host, request.get_ref())
                 .await?,
         ))
+    }
+
+    async fn register_artifact_source(
+        &self,
+        request: Request<RegisterArtifactSourceRequest>,
+    ) -> std::result::Result<Response<RegisterArtifactSourceResponse>, Status> {
+        ControlPlane::register_artifact_source(self, request).await
+    }
+
+    async fn issue_artifact_transfer(
+        &self,
+        request: Request<GetAcquiredArtifactFileRequest>,
+    ) -> std::result::Result<Response<ArtifactTransferGrant>, Status> {
+        ControlPlane::issue_artifact_transfer(self, request).await
+    }
+
+    async fn authorize_artifact_transfer(
+        &self,
+        request: Request<AuthorizeArtifactTransferRequest>,
+    ) -> std::result::Result<Response<AuthorizedArtifactTransfer>, Status> {
+        ControlPlane::authorize_artifact_transfer(self, request).await
     }
 
     async fn locate_volume_copies(

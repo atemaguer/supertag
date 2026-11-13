@@ -2,6 +2,7 @@ mod approvals;
 mod artifact_acquisitions;
 mod artifact_captures;
 mod artifact_context;
+mod artifact_direct;
 mod artifact_publications;
 mod artifact_volumes;
 mod budget_pool;
@@ -80,6 +81,7 @@ impl ControlPlane {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;
         self.store.sweep_inputs().await?;
+        self.store.sweep_artifact_transfer_grants().await?;
         self.store.sweep_mailbox().await?;
         self.store.sweep_approvals().await?;
         self.store.sweep_work_sessions().await?;

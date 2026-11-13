@@ -99,6 +99,8 @@ impl HarnessArtifacts for Bridge {
                 ));
             }
             let attempt = self.attempt();
+            let snapshots =
+                snapshots.with_artifact_source(self.coordination.artifact_source.clone());
             let (permit, snapshots, capture) = tokio::task::spawn_blocking(move || {
                 let capture = snapshots.freeze(&checkout, attempt, input)?;
                 Ok::<_, Status>((permit, snapshots, capture))

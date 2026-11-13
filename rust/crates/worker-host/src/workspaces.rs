@@ -32,6 +32,15 @@ pub struct WorkspaceMapping {
     pub source: WorkspaceSource,
 }
 
+impl WorkspaceMapping {
+    pub(crate) fn local_root(&self) -> Option<&Path> {
+        match &self.source {
+            WorkspaceSource::Local(path) => Some(path),
+            WorkspaceSource::Gateway => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum WorkspaceSource {
     Local(PathBuf),

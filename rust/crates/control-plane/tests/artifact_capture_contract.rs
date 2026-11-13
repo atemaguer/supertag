@@ -67,6 +67,7 @@ async fn exercise(url: &str) {
                 byte_length: 12,
             }),
         }],
+        source_storage_id: None,
     };
     assert!(matches!(
         store.commit_artifact_capture(&host, &capture).await,

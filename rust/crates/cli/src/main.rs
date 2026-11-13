@@ -266,6 +266,22 @@ enum Command {
         state_directory: PathBuf,
         #[command(flatten)]
         adapter: AdapterOptions,
+        /// Listen for authorized artifact reads from other Worker Hosts.
+        #[arg(long, requires = "artifact_source_directory")]
+        artifact_transfer_listen: Option<SocketAddr>,
+        /// Dedicated owner-only absolute directory for immutable artifact copies.
+        #[arg(long, requires = "artifact_transfer_listen")]
+        artifact_source_directory: Option<PathBuf>,
+        #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_key"])]
+        artifact_transfer_tls_cert: Option<PathBuf>,
+        #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_cert"])]
+        artifact_transfer_tls_key: Option<PathBuf>,
+        /// Pin a producing Worker Host to an HTTPS origin or literal loopback HTTP.
+        #[arg(long = "artifact-peer", value_name = "HOST_ID=ORIGIN")]
+        artifact_peers: Vec<String>,
+        /// CA certificate for the configured artifact peer endpoints.
+        #[arg(long, requires = "artifact_peers")]
+        artifact_peer_ca_file: Option<PathBuf>,
         /// Executable for a private E2B workspace provider used by Cursor.
         #[arg(long)]
         e2b_workspace_provider: Option<PathBuf>,
@@ -763,6 +779,12 @@ async fn run(command: Command) -> Result<()> {
             attempt_timeout_seconds,
             once,
             wait_for_recovery,
+            artifact_transfer_listen,
+            artifact_source_directory,
+            artifact_transfer_tls_cert,
+            artifact_transfer_tls_key,
+            artifact_peers,
+            artifact_peer_ca_file,
         } => {
             let harness = adapter.harness_kind();
             ensure!(
@@ -857,6 +879,37 @@ async fn run(command: Command) -> Result<()> {
             execution_profile.task_artifact_inputs = workspace.is_some()
                 && shared_execution.is_none()
                 && supertag_protocol::task_artifact_inputs::supports_harness(harness);
+            let artifact_source = match artifact_transfer_listen.zip(artifact_source_directory) {
+                Some((listen, directory)) => {
+                    let tls = match artifact_transfer_tls_cert.zip(artifact_transfer_tls_key) {
+                        Some((cert, key)) => Some(tonic::transport::Identity::from_pem(
+                            tokio::fs::read(cert)
+                                .await
+                                .context("read artifact listener certificate")?,
+                            tokio::fs::read(key)
+                                .await
+                                .context("read artifact listener private key")?,
+                        )),
+                        None => None,
+                    };
+                    Some(supertag_worker_host::ArtifactSourceConfig {
+                        listen,
+                        directory,
+                        tls,
+                    })
+                }
+                None => None,
+            };
+            let artifact_peer_ca = match artifact_peer_ca_file {
+                Some(path) => Some(
+                    tokio::fs::read(path)
+                        .await
+                        .context("read artifact peer CA")?,
+                ),
+                None => None,
+            };
+            let artifact_peers =
+                supertag_worker_host::ArtifactPeers::configure(artifact_peers, artifact_peer_ca)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -877,6 +930,8 @@ async fn run(command: Command) -> Result<()> {
                     skill_catalog.as_deref(),
                 )?,
                 mcp_catalog,
+                artifact_source,
+                artifact_peers,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();

@@ -1,4 +1,6 @@
 //! Independent CLI processes exercise repository routing, delivery, and continuation.
+#[path = "support/direct_artifact_runtime.rs"]
+mod direct_artifact_runtime;
 use std::{net::SocketAddr, path::Path, process::Stdio, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, ensure};
