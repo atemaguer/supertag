@@ -93,6 +93,15 @@ pub fn normalize_mounts(mounts: &mut [WorkspaceCopyMount]) -> Result<(), Status>
     let mut total = 0u64;
     for mount in mounts {
         let path = absolute_path(&mount.destination)?;
+        // Dot names are configuration for tools that read the parent directory.
+        if path
+            .file_name()
+            .is_none_or(|name| name.as_encoded_bytes().starts_with(b"."))
+        {
+            return Err(Status::invalid_argument(
+                "Workspace mount destination cannot be a dot name",
+            ));
+        }
         total = total.saturating_add(mount.max_bytes);
         if !volume_id(&mount.volume_id)
             || !(1..=MAX_WORKSPACE_MOUNT_BYTES).contains(&mount.max_bytes)

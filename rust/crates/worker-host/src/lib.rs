@@ -233,7 +233,7 @@ pub async fn run(
     );
     let shutdown = shutdown.child_token();
     let journal = Arc::new(Journal::open(&options.state_directory)?);
-    if !options.workspace_mounts.capabilities().is_empty() {
+    if !options.workspace_mounts.is_empty() {
         ensure!(
             options.harness == HarnessKind::Codex
                 && options
@@ -245,16 +245,20 @@ pub async fn run(
                 && options.shared_execution.is_none(),
             "Workspace copy mounts require a local Codex Worker Host"
         );
-        options.workspace_mounts.validate_protected(
-            &options.state_directory,
-            options
-                .workspace
-                .as_ref()
-                .and_then(workspaces::WorkspaceMapping::local_root),
-            options
-                .artifact_source
-                .as_ref()
-                .map(|source| source.directory.as_path()),
+        let state_directory = options.state_directory.clone();
+        let local_root = options
+            .workspace
+            .as_ref()
+            .and_then(workspaces::WorkspaceMapping::local_root)
+            .map(std::path::Path::to_path_buf);
+        let artifact_storage = options
+            .artifact_source
+            .as_ref()
+            .map(|source| source.directory.clone());
+        options.workspace_mounts.protect(
+            &state_directory,
+            local_root.as_deref(),
+            artifact_storage.as_deref(),
         )?;
     }
     let workspaces =
@@ -1105,11 +1109,18 @@ async fn run_assignment(
         .map(|workspace| workspace.mounts.clone())
         .unwrap_or_default();
     if !mount_pins.is_empty() {
-        let check = coordination
+        let check = match coordination
             .workspace_mounts
             .clone()
             .preflight(request(attempt.inspect(), token)?)
-            .await;
+            .await
+        {
+            Err(error) if retryable(&error) => {
+                wait_for_work(shutdown).await;
+                return Ok(());
+            }
+            check => check,
+        };
         let permitted = supertag_protocol::workspace_mounts::supports(
             &task,
             options.harness,
@@ -1281,15 +1292,25 @@ async fn run_assignment(
                 )
                 .await?
                 .into_inner();
-            mappings.preflight(&mount_pins, current).map_err(|_| {
+            let protected = mappings.preflight(&mount_pins, current).map_err(|_| {
                 Status::failed_precondition("Workspace Volume path admission failed")
             })?;
             tokio::task::spawn_blocking(move || {
-                mappings.stage(&state, &attempt_id, &checkout, &mount_pins, &copy_cancel)
+                mappings.stage(
+                    &state,
+                    &attempt_id,
+                    &checkout,
+                    &mount_pins,
+                    &protected,
+                    &copy_cancel,
+                )
             })
             .await
             .map_err(|_| Status::internal("Workspace Volume staging failed"))?
-            .map_err(|_| Status::failed_precondition("Workspace Volume staging failed"))
+            .map_err(|error| {
+                eprintln!("Workspace Volume staging failed: {error:#}");
+                Status::failed_precondition("Workspace Volume staging failed")
+            })
         };
         match Box::pin(with_authority(
             host, &attempt, token, shutdown, &cancel, operation,
