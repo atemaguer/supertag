@@ -2773,6 +2773,19 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         std::fs::read_to_string(process.log.with_extension("stdout"))?,
         "slack: delivered\nslack: failed: No Slack Surface Account is enrolled for TOTHER\nwebhook: delivered\ndesktop: delivered\n"
     );
+    // Samples are throttled per Gateway.
+    let mut again = credentials.command();
+    again.args(["test", "notification", "--gateway", &services.endpoint]);
+    let mut process = Process::spawn(again, directory, "test-notification-again", false)?;
+    ensure!(
+        !process.exited().await?.success(),
+        "a second sample was not throttled"
+    );
+    ensure!(
+        process.logs().contains("wait a few seconds"),
+        "{}",
+        process.logs()
+    );
     let sample = "SuperTag test notification\n`supertag describe objective release`";
     let slack_body = |text: &str| {
         serde_json::json!({
@@ -2895,6 +2908,90 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         std::fs::read_to_string(&desktop)?.matches("\n--\n").count(),
         2
     );
+
+    // Text an agent or operator wrote is rendered for Slack, never posted as live mentions.
+    let mut test = credentials.command();
+    test.args([
+        "test",
+        "notification",
+        "--gateway",
+        &services.endpoint,
+        "--objective",
+        "<!channel> `<@U0OTHER>`",
+    ]);
+    Process::spawn(test, directory, "test-notification-mention", false)?
+        .successful_exit()
+        .await?;
+    let posted = slack.requests.lock().await[2].body["text"]
+        .as_str()
+        .context("Slack text")?
+        .to_owned();
+    ensure!(
+        !posted.contains("<!channel>") && !posted.contains("<@U0OTHER>"),
+        "{posted}"
+    );
+    ensure!(posted.contains("&lt;!channel&gt;"), "{posted}");
+
+    // A graceful shutdown finishes the delivery in flight instead of dropping it, so the
+    // restarted Gateway never sends it again.
+    hook.responses.forget_permits(usize::MAX);
+    let hooks_before = hook.requests.lock().await.len();
+    let mut create = credentials.command();
+    create
+        .arg("objective")
+        .args(["--gateway", &services.endpoint])
+        .args([
+            "create",
+            "hotfix",
+            "--owner",
+            "engineer",
+            "Ask which branch to release",
+        ]);
+    cli(create, directory, &[]).await?;
+    let mut host = credentials.command();
+    host.args([
+        "worker-host",
+        "--gateway",
+        &services.endpoint,
+        "--adapter",
+        ADAPTER,
+        "--once",
+        "--adapter-arg=--objective-question",
+    ])
+    .arg("--state-directory")
+    .arg(directory.join("host"));
+    Process::spawn(host, directory, "worker-host-hotfix", false)?
+        .successful_exit()
+        .await?;
+    let deadline = Instant::now() + WAIT;
+    while hook.requests.lock().await.len() == hooks_before {
+        ensure!(
+            Instant::now() < deadline,
+            "the webhook delivery did not start"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    services.gateway.terminate()?;
+    sleep(Duration::from_millis(1_000)).await;
+    ensure!(
+        services.gateway.child.try_wait()?.is_none(),
+        "the Gateway stopped before its delivery finished"
+    );
+    hook.responses.add_permits(1_000);
+    services.gateway.successful_exit().await?;
+    let mut gateway = start_gateway()?;
+    services.endpoint = gateway.endpoints(2).await?.remove(0);
+    services.gateway = gateway;
+    sleep(Duration::from_millis(4_500)).await;
+    let hotfix: Vec<_> = hook
+        .requests
+        .lock()
+        .await
+        .iter()
+        .filter(|request| request.body["objectiveId"] == "hotfix")
+        .map(|request| request.body["kinds"].clone())
+        .collect();
+    assert_eq!(hotfix, [serde_json::json!(["question"])]);
     Ok(())
 }
 

@@ -421,7 +421,8 @@ type SettleOperatorNotificationRequest struct {
 	LeaseToken        string                 `protobuf:"bytes,2,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
 	Delivered         bool                   `protobuf:"varint,3,opt,name=delivered,proto3" json:"delivered,omitempty"`
 	ExternalMessageId *string                `protobuf:"bytes,4,opt,name=external_message_id,json=externalMessageId,proto3,oneof" json:"external_message_id,omitempty"`
-	// Why delivery failed; retried with backoff until the message's last attempt.
+	// Why delivery failed; retried with backoff until the message's last attempt. A lease that
+	// lapses unsettled on the last attempt fails the message.
 	Error         string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

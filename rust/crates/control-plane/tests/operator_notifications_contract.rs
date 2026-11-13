@@ -15,6 +15,7 @@ use supertag_protocol::v2::*;
 use uuid::Uuid;
 
 const OPERATOR: &str = "operator:local";
+const OTHER: &str = "operator:other";
 const NOW: i64 = 1_900_000_000_000;
 const SLACK: &str = "slack:C0OPERATOR";
 const WEBHOOK: &str = "webhook:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -53,10 +54,18 @@ impl Fixture {
         &self,
         destinations: &[NotificationDestination],
     ) -> Option<(OperatorNotification, String)> {
+        self.claim_as(OPERATOR, destinations).await
+    }
+
+    async fn claim_as(
+        &self,
+        principal: &str,
+        destinations: &[NotificationDestination],
+    ) -> Option<(OperatorNotification, String)> {
         let response = self
             .store
             .claim_operator_notification(
-                OPERATOR,
+                principal,
                 &ClaimOperatorNotificationRequest {
                     destinations: destinations.to_vec(),
                 },
@@ -72,9 +81,19 @@ impl Fixture {
         lease: &str,
         outcome: Result<&str, &str>,
     ) -> Result<OperatorNotification, StoreError> {
+        self.settle_as(OPERATOR, notification, lease, outcome).await
+    }
+
+    async fn settle_as(
+        &self,
+        principal: &str,
+        notification: &OperatorNotification,
+        lease: &str,
+        outcome: Result<&str, &str>,
+    ) -> Result<OperatorNotification, StoreError> {
         self.store
             .settle_operator_notification(
-                OPERATOR,
+                principal,
                 &SettleOperatorNotificationRequest {
                     notification_id: notification.notification_id.clone(),
                     lease_token: lease.into(),
@@ -88,7 +107,7 @@ impl Fixture {
 
     async fn latest(&self, destination: &str, objective: &str) -> OperatorNotification {
         self.store
-            .latest_operator_notification(destination, objective)
+            .latest_operator_notification(OPERATOR, destination, objective)
             .await
             .unwrap()
             .expect("a recorded notification")
@@ -448,6 +467,46 @@ async fn contract(url: &str) {
     assert_eq!(dropped.status(), OperatorNotificationStatus::Delivered);
     assert!(dropped.external_message_id.is_none());
 
+    // An approval a Task ended waiting on still blocks work: it goes out at once, inside the
+    // window, as TypeScript marks every pending Inbox approval blocking.
+    let waiting = f.objective("waiting").await;
+    let held = f.running(&waiting.starting_task_id).await;
+    let opener = f.approval(&held, "opening-post").await;
+    let mut opened = false;
+    while let Some((next, lease)) = f.claim(&[slack()]).await {
+        opened |= next.text.contains(&opener.approval_id);
+        f.settle(&next, &lease, Ok("waiting-1")).await.unwrap();
+    }
+    assert!(opened, "the first approval was sent");
+    let parked = f.approval(&held, "parked-post").await;
+    f.store
+        .finish_task(
+            &f.host,
+            &FinishTaskRequest {
+                task_id: held.task_id.clone(),
+                attempt_id: held.attempt_id.clone(),
+                lease_token: held.lease_token.clone(),
+                succeeded: true,
+                result: "Waiting for the operator".into(),
+                waiting_approval_ids: vec![parked.approval_id.clone()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let (ended, lease) = f
+        .claim(&[slack()])
+        .await
+        .expect("an approval an ended Task waits on is sent at once");
+    assert_eq!(
+        ended.text,
+        format!(
+            "Objective waiting needs you: Approval {} (work is waiting): {} (requested by Tag owner)\n`supertag describe objective waiting`",
+            parked.approval_id, parked.summary
+        )
+    );
+    f.settle(&ended, &lease, Ok("waiting-2")).await.unwrap();
+
     // An unavailable desktop notifier is tried three times, then the message fails for good.
     let last = f.objective("desktop-only").await;
     f.running(&last.starting_task_id).await;
@@ -474,6 +533,99 @@ async fn contract(url: &str) {
         failed.last_error.as_deref(),
         Some("Desktop notification unavailable")
     );
+
+    // A message whose lease lapses on its last attempt fails instead of being sent again.
+    let abandoned = f.objective("abandoned").await;
+    f.running(&abandoned.starting_task_id).await;
+    f.expire().await;
+    f.advance(WINDOW_MS);
+    let (lapsed, first_lease) = loop {
+        if let Some(claimed) = f.claim(&[desktop()]).await {
+            break claimed;
+        }
+        f.advance(1_000);
+    };
+    assert_eq!(lapsed.attempt_count, 1);
+    for attempt in 2..=3 {
+        f.advance(LEASE_MS);
+        let (again, _) = f.claim(&[desktop()]).await.expect("a lapsed lease");
+        assert_eq!(again.notification_id, lapsed.notification_id);
+        assert_eq!(again.attempt_count, attempt);
+    }
+    f.advance(LEASE_MS);
+    for _ in 0..3 {
+        if let Some((next, _)) = f.claim(&[desktop()]).await {
+            assert_ne!(next.notification_id, lapsed.notification_id);
+        }
+        f.advance(LEASE_MS);
+    }
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    let (status, attempts, error): (i64, i64, String) = sqlx::query_as(
+        "SELECT status,attempt_count,last_error FROM supertag_v2_operator_notifications WHERE notification_id=$1",
+    )
+    .bind(&lapsed.notification_id)
+    .fetch_one(&mut connection)
+    .await
+    .unwrap();
+    assert_eq!(
+        (status, attempts),
+        (OperatorNotificationStatus::Failed as i64, 3)
+    );
+    assert!(error.contains("lease expired"), "{error}");
+    assert!(matches!(
+        f.settle(&lapsed, &first_lease, Ok("late")).await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+
+    // Each operator has its own outbox, even through a shared destination key such as one Slack
+    // channel. A Gateway acting for another operator never claims, settles, or drops this
+    // operator's messages, and each operator hears about each item it sees once.
+    let shared = NotificationDestination {
+        key: "slack:C0SHARED".into(),
+        provider: NotificationProvider::Slack as i32,
+    };
+    let (mine, my_lease) = f
+        .claim(std::slice::from_ref(&shared))
+        .await
+        .expect("this operator's message");
+    let (theirs, their_lease) = f
+        .claim_as(OTHER, std::slice::from_ref(&shared))
+        .await
+        .expect("the other operator's own message");
+    assert_ne!(theirs.notification_id, mine.notification_id);
+    assert_eq!(theirs.text, mine.text);
+    assert!(matches!(
+        f.settle_as(OTHER, &mine, &my_lease, Ok("stolen")).await,
+        Err(StoreError::NotFound(_))
+    ));
+    f.settle(&mine, &my_lease, Ok("mine-1")).await.unwrap();
+    f.settle_as(OTHER, &theirs, &their_lease, Ok("theirs-1"))
+        .await
+        .unwrap();
+    let mut counts = Vec::new();
+    for principal in [OPERATOR, OTHER] {
+        let mut count = 1;
+        while let Some((next, lease)) = f.claim_as(principal, std::slice::from_ref(&shared)).await {
+            f.settle_as(principal, &next, &lease, Ok("receipt"))
+                .await
+                .unwrap();
+            count += 1;
+        }
+        counts.push(count);
+    }
+    assert_eq!(counts[0], counts[1]);
+    for principal in [OPERATOR, OTHER] {
+        let (unsent,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM supertag_v2_operator_notifications WHERE principal=$1 AND destination_key=$2 AND (status<>3 OR external_message_id IS NULL)",
+        )
+        .bind(principal)
+        .bind(&shared.key)
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+        assert_eq!(unsent, 0, "{principal} lost a message");
+    }
+    connection.close().await.unwrap();
 
     // Two Gateways claiming at once record each occurrence once.
     let other = NotificationDestination {

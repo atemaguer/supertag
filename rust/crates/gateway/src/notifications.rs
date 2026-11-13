@@ -7,8 +7,21 @@
 //! `apps/cli/src/gateway-surfaces.ts`, and `parseNotificationDestination` in
 //! `packages/control-plane/src/operator-channel.ts`. Destination syntax, webhook payloads, and
 //! redaction match. The Slack sender posts with this Gateway's Slack connector, so a Slack
-//! destination needs `supertag gateway --slack-listen`.
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+//! destination needs `supertag gateway --slack-listen`, and renders the text through the Slack
+//! renderer, as TypeScript sends a `status` presentation through `renderSlackPresentation`: text
+//! an agent wrote can never post a live mention.
+//!
+//! A message being delivered when the Gateway shuts down is finished and settled before the
+//! loop stops, so a graceful restart never sends it twice. Delivery is at least once: a Gateway
+//! that crashes, or cannot settle, after the provider accepted a message sends it again once
+//! its lease lapses, up to the message's last attempt. `SendTestNotification` is throttled to
+//! one sample per Gateway every few seconds.
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
@@ -17,8 +30,9 @@ use sha2::{Digest, Sha256};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        ClaimOperatorNotificationRequest, NotificationDestination, NotificationProvider,
-        OperatorNotification, SendTestNotificationRequest, SendTestNotificationResponse,
+        ClaimOperatorNotificationRequest, ClaimOperatorNotificationResponse,
+        NotificationDestination, NotificationProvider, OperatorNotification,
+        SendTestNotificationRequest, SendTestNotificationResponse,
         SettleOperatorNotificationRequest, TestNotificationResult,
         operator_notification_test_server::{
             OperatorNotificationTest, OperatorNotificationTestServer,
@@ -34,6 +48,10 @@ use crate::{Gateway, operator_access::OperatorCredential};
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bounds a claimed delivery, which shutdown waits for, inside the Gateway's 15-second budget.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+/// At most one test notification per Gateway in this interval.
+const TEST_INTERVAL: Duration = Duration::from_secs(5);
 const IDLE: Duration = Duration::from_secs(2);
 const MAX_DESTINATIONS: usize = 16;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
@@ -214,8 +232,23 @@ impl Senders {
         redact_urls(&clean)
     }
 
-    /// Sends one message. Returns the provider's message ID when it has one.
+    /// Sends one message within the send timeout. Returns the provider's message ID when it
+    /// has one.
     pub async fn send(
+        &self,
+        destination: &Destination,
+        text: &str,
+        notification: &OperatorNotification,
+    ) -> Result<Option<String>> {
+        time::timeout(
+            SEND_TIMEOUT,
+            self.send_unbounded(destination, text, notification),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("the provider did not answer in time"))?
+    }
+
+    async fn send_unbounded(
         &self,
         destination: &Destination,
         text: &str,
@@ -253,7 +286,7 @@ impl Senders {
             .bearer_auth(&slack.bot_token)
             .json(&json!({
                 "channel": destination.target,
-                "text": text,
+                "text": crate::slack::render::markdown(text).context("the message is empty")?,
                 "mrkdwn": true,
                 "unfurl_links": false,
                 "unfurl_media": false,
@@ -427,6 +460,7 @@ struct Notifier {
     control_plane: OperatorNotificationsClient<Channel>,
     gateway_token: String,
     principal: String,
+    last_test: tokio::sync::Mutex<Option<Instant>>,
 }
 
 impl OperatorNotifier {
@@ -448,6 +482,7 @@ impl OperatorNotifier {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             gateway_token,
             principal,
+            last_test: tokio::sync::Mutex::new(None),
         })))
     }
 
@@ -462,13 +497,21 @@ impl OperatorNotifier {
             return Ok(());
         }
         loop {
-            let delivered = tokio::select! {
+            // Shutdown interrupts a claim, never a claimed delivery: dropping a send the
+            // provider may already have accepted would repeat it after restart.
+            let claimed = tokio::select! {
                 _ = shutdown.cancelled() => return Ok(()),
-                result = self.step() => result.unwrap_or_else(|error| {
-                    eprintln!("operator notification delivery paused: {error:#}");
-                    false
-                }),
+                result = self.claim() => result,
             };
+            let delivered = match claimed {
+                Ok(Some(claimed)) => self.deliver(claimed).await.map(|()| true),
+                Ok(None) => Ok(false),
+                Err(error) => Err(error),
+            }
+            .unwrap_or_else(|error| {
+                eprintln!("operator notification delivery paused: {error:#}");
+                false
+            });
             if !delivered {
                 tokio::select! {
                     _ = shutdown.cancelled() => return Ok(()),
@@ -478,35 +521,45 @@ impl OperatorNotifier {
         }
     }
 
-    fn request<T>(&self, message: T) -> Result<Request<T>> {
+    fn request<T>(&self, message: T, timeout: Duration) -> Result<Request<T>> {
         let mut request =
             authenticated_request(message, &self.0.gateway_token, Some(&self.0.principal))?;
-        request.set_timeout(CALL_TIMEOUT);
+        request.set_timeout(timeout);
         Ok(request)
     }
 
-    /// Claims and delivers one message. Returns whether one was claimed.
-    async fn step(&self) -> Result<bool> {
+    /// Leases the next due message for this Gateway's destinations.
+    async fn claim(&self) -> Result<Option<ClaimOperatorNotificationResponse>> {
         let notifier = &self.0;
-        let mut client = notifier.control_plane.clone();
-        let claimed = client
+        let claimed = notifier
+            .control_plane
+            .clone()
             .claim(
-                self.request(ClaimOperatorNotificationRequest {
-                    destinations: notifier
-                        .destinations
-                        .iter()
-                        .map(|d| NotificationDestination {
-                            key: d.key.clone(),
-                            provider: d.provider as i32,
-                        })
-                        .collect(),
-                })?,
+                self.request(
+                    ClaimOperatorNotificationRequest {
+                        destinations: notifier
+                            .destinations
+                            .iter()
+                            .map(|d| NotificationDestination {
+                                key: d.key.clone(),
+                                provider: d.provider as i32,
+                            })
+                            .collect(),
+                    },
+                    CALL_TIMEOUT,
+                )?,
             )
             .await?
             .into_inner();
-        let Some(notification) = claimed.notification else {
-            return Ok(false);
-        };
+        Ok(claimed.notification.is_some().then_some(claimed))
+    }
+
+    /// Sends one leased message and settles it, within the send and settle timeouts.
+    async fn deliver(&self, claimed: ClaimOperatorNotificationResponse) -> Result<()> {
+        let notifier = &self.0;
+        let notification = claimed
+            .notification
+            .context("the claimed notification is missing")?;
         let destination = notifier
             .destinations
             .iter()
@@ -520,16 +573,21 @@ impl OperatorNotifier {
             Ok(id) => (true, id, String::new()),
             Err(error) => (false, None, notifier.senders.redact(&format!("{error:#}"))),
         };
-        client
-            .settle(self.request(SettleOperatorNotificationRequest {
-                notification_id: notification.notification_id,
-                lease_token: claimed.lease_token,
-                delivered,
-                external_message_id,
-                error: error.chars().take(500).collect(),
-            })?)
+        notifier
+            .control_plane
+            .clone()
+            .settle(self.request(
+                SettleOperatorNotificationRequest {
+                    notification_id: notification.notification_id,
+                    lease_token: claimed.lease_token,
+                    delivered,
+                    external_message_id,
+                    error: error.chars().take(500).collect(),
+                },
+                SETTLE_TIMEOUT,
+            )?)
             .await?;
-        Ok(true)
+        Ok(())
     }
 
     /// The public operator service that sends a sample through every destination.
@@ -577,6 +635,15 @@ impl OperatorNotificationTest for TestNotifications {
             format!("supertag describe objective {objective}")
         };
         let notifier = &self.notifier.0;
+        {
+            let mut last = notifier.last_test.lock().await;
+            if last.is_some_and(|at| at.elapsed() < TEST_INTERVAL) {
+                return Err(Status::resource_exhausted(
+                    "a test notification was just sent; wait a few seconds and try again",
+                ));
+            }
+            *last = Some(Instant::now());
+        }
         let sends = notifier.destinations.iter().map(|destination| {
             let sample = OperatorNotification {
                 notification_id: "test-notification".into(),

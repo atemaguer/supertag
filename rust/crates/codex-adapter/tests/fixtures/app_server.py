@@ -134,6 +134,9 @@ def finish_events():
             completed = True
         elif kind in ("turn.failed", "error"):
             notify("turn/completed", {"threadId": thread, "turn": {"id": turn, "status": "failed", "items": [], "error": {"message": "synthetic-codex-provider-secret"}}})
+        elif kind == "plan.raw":
+            # A plan notification exactly as given, for plans the adapter must tolerate.
+            notify("turn/plan/updated", {"threadId": thread, "turnId": event.get("turnId", turn), "explanation": None, "plan": event["plan"]})
         elif kind in ("item.started", "item.updated", "item.completed") and event.get("item", {}).get("type") == "todo_list":
             # The App Server reports the model's plan as a turn notification.
             plan = [{"step": entry["text"], "status": "completed" if entry["completed"] else "pending"} for entry in event["item"]["items"]]

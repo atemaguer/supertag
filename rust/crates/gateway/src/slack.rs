@@ -2,7 +2,7 @@
 
 mod delivery;
 mod progress;
-mod render;
+pub(crate) mod render;
 
 use std::{
     path::PathBuf,

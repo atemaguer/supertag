@@ -183,7 +183,8 @@ export type SettleOperatorNotificationRequest = Message<"supertag.runtime.v2.Set
   externalMessageId?: string | undefined;
 
   /**
-   * Why delivery failed; retried with backoff until the message's last attempt.
+   * Why delivery failed; retried with backoff until the message's last attempt. A lease that
+   * lapses unsettled on the last attempt fails the message.
    *
    * @generated from field: string error = 5;
    */
@@ -335,10 +336,11 @@ export const OperatorNotificationStatusSchema: GenEnum<OperatorNotificationStatu
  * Operator notifications: Inbox items told to the operator through the destinations a Gateway
  * is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
  *
- * The Control Plane owns the durable outbox. Each claim records new Inbox item occurrences for
- * the claiming Gateway's destinations, at most one message per Objective per destination per
- * window (a pending approval that running work waits on is sent at once), then leases the next
- * due message. A message whose items were all resolved before delivery is settled unsent.
+ * The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
+ * calling operator's Inbox and records new item occurrences for the claiming Gateway's
+ * destinations, at most one message per Objective per destination per window (a pending
+ * approval, which a Session waits on, is sent at once), then leases the next due message of
+ * that operator. A message whose items were all resolved before delivery is settled unsent.
  * Destinations stay in Gateway configuration: the Control Plane stores only their keys.
  *
  * @generated from service supertag.runtime.v2.OperatorNotifications
@@ -365,7 +367,8 @@ export const OperatorNotifications: GenService<{
 
 /**
  * Public Gateway operator service: send a harmless sample through every destination this
- * Gateway is configured with, outside the outbox.
+ * Gateway is configured with, outside the outbox. Throttled to one sample per Gateway every few
+ * seconds (RESOURCE_EXHAUSTED).
  *
  * @generated from service supertag.runtime.v2.OperatorNotificationTest
  */

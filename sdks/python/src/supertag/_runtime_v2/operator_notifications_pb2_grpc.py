@@ -29,10 +29,11 @@ class OperatorNotificationsStub:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
     is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
 
-    The Control Plane owns the durable outbox. Each claim records new Inbox item occurrences for
-    the claiming Gateway's destinations, at most one message per Objective per destination per
-    window (a pending approval that running work waits on is sent at once), then leases the next
-    due message. A message whose items were all resolved before delivery is settled unsent.
+    The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
+    calling operator's Inbox and records new item occurrences for the claiming Gateway's
+    destinations, at most one message per Objective per destination per window (a pending
+    approval, which a Session waits on, is sent at once), then leases the next due message of
+    that operator. A message whose items were all resolved before delivery is settled unsent.
     Destinations stay in Gateway configuration: the Control Plane stores only their keys.
     """
 
@@ -58,10 +59,11 @@ class OperatorNotificationsServicer:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
     is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
 
-    The Control Plane owns the durable outbox. Each claim records new Inbox item occurrences for
-    the claiming Gateway's destinations, at most one message per Objective per destination per
-    window (a pending approval that running work waits on is sent at once), then leases the next
-    due message. A message whose items were all resolved before delivery is settled unsent.
+    The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
+    calling operator's Inbox and records new item occurrences for the claiming Gateway's
+    destinations, at most one message per Objective per destination per window (a pending
+    approval, which a Session waits on, is sent at once), then leases the next due message of
+    that operator. A message whose items were all resolved before delivery is settled unsent.
     Destinations stay in Gateway configuration: the Control Plane stores only their keys.
     """
 
@@ -102,10 +104,11 @@ class OperatorNotifications:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
     is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
 
-    The Control Plane owns the durable outbox. Each claim records new Inbox item occurrences for
-    the claiming Gateway's destinations, at most one message per Objective per destination per
-    window (a pending approval that running work waits on is sent at once), then leases the next
-    due message. A message whose items were all resolved before delivery is settled unsent.
+    The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
+    calling operator's Inbox and records new item occurrences for the claiming Gateway's
+    destinations, at most one message per Objective per destination per window (a pending
+    approval, which a Session waits on, is sent at once), then leases the next due message of
+    that operator. A message whose items were all resolved before delivery is settled unsent.
     Destinations stay in Gateway configuration: the Control Plane stores only their keys.
     """
 
@@ -166,7 +169,8 @@ class OperatorNotifications:
 
 class OperatorNotificationTestStub:
     """Public Gateway operator service: send a harmless sample through every destination this
-    Gateway is configured with, outside the outbox.
+    Gateway is configured with, outside the outbox. Throttled to one sample per Gateway every few
+    seconds (RESOURCE_EXHAUSTED).
     """
 
     def __init__(self, channel):
@@ -184,7 +188,8 @@ class OperatorNotificationTestStub:
 
 class OperatorNotificationTestServicer:
     """Public Gateway operator service: send a harmless sample through every destination this
-    Gateway is configured with, outside the outbox.
+    Gateway is configured with, outside the outbox. Throttled to one sample per Gateway every few
+    seconds (RESOURCE_EXHAUSTED).
     """
 
     def SendTestNotification(self, request, context):
@@ -211,7 +216,8 @@ def add_OperatorNotificationTestServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class OperatorNotificationTest:
     """Public Gateway operator service: send a harmless sample through every destination this
-    Gateway is configured with, outside the outbox.
+    Gateway is configured with, outside the outbox. Throttled to one sample per Gateway every few
+    seconds (RESOURCE_EXHAUSTED).
     """
 
     @staticmethod
