@@ -4,7 +4,8 @@
 //! file with the process umask and gives `-wal` and `-shm` files the database file's permissions,
 //! so the Control Plane creates the database owner-only before SQLite opens it, and removes group
 //! and other access from an existing database and any live WAL and shared-memory files. A path
-//! through a symbolic link changes the files SQLite actually uses, which sit beside the target.
+//! through a symbolic link changes the files SQLite actually uses, which sit beside the target; a
+//! link whose target is missing gets its target created owner-only.
 
 use std::{
     fs::{self, OpenOptions},
@@ -68,6 +69,28 @@ pub(crate) fn make_private(url: &str) -> Result<()> {
             .open(&path)
         {
             Ok(_) => {}
+            // A dangling symbolic link exists without its target, which SQLite would create
+            // with the process umask; create the target owner-only through the link instead.
+            Err(error)
+                if error.kind() == ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(&path).is_ok_and(|link| link.is_symlink())
+                    && fs::metadata(&path)
+                        .is_err_and(|error| error.kind() == ErrorKind::NotFound) =>
+            {
+                match OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(false)
+                    .mode(0o600)
+                    .open(&path)
+                {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+                    Err(error) => {
+                        return Err(error).with_context(|| format!("create {}", path.display()));
+                    }
+                }
+            }
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             // A missing directory is reported by SQLite itself when it opens the file.
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),

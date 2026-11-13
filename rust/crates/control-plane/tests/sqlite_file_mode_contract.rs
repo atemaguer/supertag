@@ -42,8 +42,16 @@ async fn retained(seed: &mut SqliteConnection) -> String {
         .unwrap()
 }
 
+/// A umask that lets SQLite create group- and world-readable files, so only the Control Plane's
+/// own owner-only steps keep the files private. Every test sets the same mask.
+fn permissive_umask() {
+    // SAFETY: umask only replaces the process file mode creation mask.
+    unsafe { libc::umask(0o022) };
+}
+
 #[tokio::test]
 async fn creates_a_private_database_and_lets_sqlite_create_private_wal_files() {
+    permissive_umask();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("supertag.db");
     let store = Store::open(&format!("sqlite://{}?mode=rwc", path.display()))
@@ -64,6 +72,7 @@ async fn creates_a_private_database_and_lets_sqlite_create_private_wal_files() {
 
 #[tokio::test]
 async fn opening_tightens_an_existing_database_and_its_live_wal_files() {
+    permissive_umask();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("supertag.db");
     let url = format!("sqlite://{}?mode=rwc", path.display());
@@ -84,6 +93,7 @@ async fn opening_tightens_an_existing_database_and_its_live_wal_files() {
 
 #[tokio::test]
 async fn tightens_the_files_behind_a_database_symlink() {
+    permissive_umask();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("supertag.db");
     let alias = directory.path().join("supertag.db-alias");
@@ -104,4 +114,22 @@ async fn tightens_the_files_behind_a_database_symlink() {
     assert_eq!(retained(&mut seed).await, "kept");
     store.close().await;
     seed.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn creates_the_missing_target_of_a_database_symlink_private() {
+    permissive_umask();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("supertag.db");
+    let alias = directory.path().join("supertag.db-alias");
+    symlink(&path, &alias).unwrap();
+    let store = Store::open(&format!("sqlite://{}?mode=rwc", alias.display()))
+        .await
+        .unwrap();
+    assert_eq!(mode(&path), 0o600);
+    store.put_tag("tag-a", "Work.", Vec::new()).await.unwrap();
+    let seed = live_wal(&path).await;
+    assert_eq!(files(&path).map(|file| mode(&file)), [0o600; 3]);
+    seed.close().await.unwrap();
+    store.close().await;
 }
