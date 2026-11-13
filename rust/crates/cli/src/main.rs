@@ -30,6 +30,7 @@ mod replies;
 mod service_manager;
 mod status;
 mod surface_policy;
+mod surface_setup;
 mod task_artifact_inputs;
 mod teams;
 mod tui;
@@ -164,6 +165,21 @@ enum Command {
         #[command(flatten)]
         args: surface_policy::SurfacePolicyArgs,
     },
+    /// Connect a collaboration surface account: verify it, save its credentials in the
+    /// credential vault, and record it in supertag.yaml.
+    Setup {
+        #[command(subcommand)]
+        command: surface_setup::SetupCommand,
+    },
+    /// Change a Tag's surface locations.
+    Update {
+        #[command(subcommand)]
+        command: surface_setup::UpdateCommand,
+    },
+    /// Apply a Permission Set or Context Set to a Tag's work at a surface location.
+    Activate(surface_setup::ActivationArgs),
+    /// Stop applying a Permission Set or Context Set at a surface location.
+    Deactivate(surface_setup::ActivationArgs),
     /// Store or delete Gateway collaboration credentials in the configured credential vault.
     GatewayCredential {
         #[command(subcommand)]
@@ -313,7 +329,9 @@ enum Command {
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
         /// Private scratch for GitHub source bundles, using the configured GitHub account.
-        #[arg(long)]
+        /// The GitHub Surface connector reads the same `SUPERTAG_GITHUB_*` variables, so one
+        /// Gateway serves either a GitHub Workspace or a GitHub location, not both.
+        #[arg(long, conflicts_with = "github_listen")]
         github_workspace_directory: Option<PathBuf>,
         #[arg(long, requires = "linear_state_directory")]
         linear_listen: Option<SocketAddr>,
@@ -869,6 +887,10 @@ async fn run(command: Command) -> Result<()> {
             surface_policy::run(client, &token, args).await?;
         }
         Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
+        Command::Setup { command } => surface_setup::setup(command).await?,
+        Command::Update { command } => surface_setup::update(command).await?,
+        Command::Activate(args) => surface_setup::activation(true, args).await?,
+        Command::Deactivate(args) => surface_setup::activation(false, args).await?,
         Command::Placement {
             connection,
             command,
@@ -2024,7 +2046,7 @@ async fn gateway(
                 "GitHub webhook listener must use loopback"
             );
             let connector =
-                github_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+                github_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
             Some((connector, TcpListener::bind(address).await?))
         }
         None => None,
@@ -2036,7 +2058,7 @@ async fn gateway(
                 "Linear webhook listener must use loopback"
             );
             let connector =
-                linear_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+                linear_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
             Some((connector, TcpListener::bind(address).await?))
         }
         None => None,
@@ -2048,15 +2070,18 @@ async fn gateway(
                 "Microsoft Teams webhook listener must use loopback"
             );
             let connector =
-                microsoft_teams_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+                microsoft_teams_connector(channel.clone(), gateway_token.clone(), state_directory)
+                    .await?;
             Some((connector, TcpListener::bind(address).await?))
         }
         None => None,
     };
-    let lark = connectors
-        .lark
-        .map(|directory| lark_connector(channel.clone(), gateway_token.clone(), directory))
-        .transpose()?;
+    let lark = match connectors.lark {
+        Some(directory) => {
+            Some(lark_connector(channel.clone(), gateway_token.clone(), directory).await?)
+        }
+        None => None,
+    };
     let publication_channel = channel.clone();
     let publication_token = gateway_token.clone();
     let operator_principal =
@@ -2092,7 +2117,7 @@ async fn gateway(
         )?)?;
     let mut source_reader = None;
     let publication = if let Some(directory) = connectors.github_workspace {
-        let sources = github_workspace_sources(directory.clone())?;
+        let sources = github_workspace_sources(directory.clone()).await?;
         transfers = transfers.with_github_sources(sources.clone());
         source_reader = Some((
             sources,
@@ -2102,12 +2127,10 @@ async fn gateway(
         let blobs = checkpoint_directory
             .as_ref()
             .context("GitHub Workspace publication requires Gateway artifact storage")?;
-        Some(github_workspace_publisher(
-            directory,
-            blobs,
-            publication_channel,
-            publication_token,
-        )?)
+        Some(
+            github_workspace_publisher(directory, blobs, publication_channel, publication_token)
+                .await?,
+        )
     } else {
         None
     };
@@ -2363,17 +2386,67 @@ pub(crate) fn notify_secret_variable(name: &str) -> String {
     )
 }
 
-/// The Slack signing secret and bot token come from the environment when both are set, and
-/// otherwise from the Gateway credential vault at `surface/slack/<account>`.
-async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
-    let nonempty = |name| {
-        std::env::var(name)
-            .ok()
+/// Secrets of one configured surface connector. Each comes from its environment variable when
+/// that is set, and otherwise from the credential vault at `SUPERTAG_<SURFACE>_CREDENTIAL_ID`,
+/// which defaults to `surface/<provider>/<account>`. The vault is read once, at startup.
+struct SurfaceSecrets {
+    label: &'static str,
+    id: String,
+    vault: Option<Option<supertag_gateway::credential_vault::CredentialValue>>,
+}
+
+impl SurfaceSecrets {
+    fn new(label: &'static str, prefix: &str, provider: &str, account_id: &str) -> Self {
+        Self {
+            label,
+            id: nonempty_env(&format!("{prefix}_CREDENTIAL_ID"))
+                .unwrap_or_else(|| format!("surface/{provider}/{account_id}")),
+            vault: None,
+        }
+    }
+
+    async fn get(&mut self, variable: &str, field: &str) -> Result<String> {
+        if let Some(value) = nonempty_env(variable) {
+            return Ok(value);
+        }
+        let (label, id) = (self.label, &self.id);
+        if self.vault.is_none() {
+            let resolved = async {
+                CredentialVault::from_process_environment()?
+                    .resolve(id)
+                    .await
+            };
+            self.vault = Some(resolved.await.with_context(|| {
+                format!("set {variable}, or make {id} readable in the credential vault")
+            })?);
+        }
+        self.vault
+            .as_ref()
+            .and_then(Option::as_ref)
+            .with_context(|| {
+                format!(
+                    "{label} credentials are missing: store {id} in the credential vault or set {variable}"
+                )
+            })?
+            .get(field)
             .filter(|value| !value.trim().is_empty())
-    };
+            .cloned()
+            .with_context(|| format!("credential {id} has no {field}"))
+    }
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+/// The Slack signing secret and bot token come from the environment when both are set, and
+/// otherwise from the credential vault.
+async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
     match (
-        nonempty("SUPERTAG_SLACK_SIGNING_SECRET"),
-        nonempty("SUPERTAG_SLACK_BOT_TOKEN"),
+        nonempty_env("SUPERTAG_SLACK_SIGNING_SECRET"),
+        nonempty_env("SUPERTAG_SLACK_BOT_TOKEN"),
     ) {
         (Some(signing), Some(bot)) => return Ok((signing, bot)),
         (None, None) => {}
@@ -2381,18 +2454,13 @@ async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
             "set both SUPERTAG_SLACK_SIGNING_SECRET and SUPERTAG_SLACK_BOT_TOKEN, or neither to use the credential vault"
         ),
     }
-    let id = format!("surface/slack/{account_id}");
-    let mut credential = CredentialVault::from_process_environment()?
-        .resolve(&id)
-        .await?
-        .with_context(|| format!("Slack credentials are missing: store {id} in the credential vault or set SUPERTAG_SLACK_SIGNING_SECRET and SUPERTAG_SLACK_BOT_TOKEN"))?;
-    let mut field = |name: &str| {
-        credential
-            .remove(name)
-            .filter(|value| !value.trim().is_empty())
-            .with_context(|| format!("credential {id} has no {name}"))
-    };
-    Ok((field("signingSecret")?, field("botToken")?))
+    let mut secrets = SurfaceSecrets::new("Slack", "SUPERTAG_SLACK", "slack", account_id);
+    Ok((
+        secrets
+            .get("SUPERTAG_SLACK_SIGNING_SECRET", "signingSecret")
+            .await?,
+        secrets.get("SUPERTAG_SLACK_BOT_TOKEN", "botToken").await?,
+    ))
 }
 
 async fn slack_connector(
@@ -2426,24 +2494,26 @@ async fn slack_connector(
     Ok(connector)
 }
 
-fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
+async fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
+    let account_id = required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?;
+    let mut secrets = SurfaceSecrets::new("GitHub", "SUPERTAG_GITHUB", "github", &account_id);
     Ok(GithubWorkspaceAccount {
-        account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
+        account_id,
         repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
             .parse()
             .context("invalid GitHub repository ID")?,
         repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
-        authentication: github_authentication()?,
+        authentication: github_authentication(&mut secrets).await?,
     })
 }
-fn github_workspace_publisher(
+async fn github_workspace_publisher(
     directory: PathBuf,
     blobs: &std::path::Path,
     channel: ProtocolChannel,
     token: String,
 ) -> Result<supertag_gateway::github::publication::GithubPublisher> {
     let publisher = supertag_gateway::github::publication::GithubPublisher::new(
-        github_workspace_account()?,
+        github_workspace_account().await?,
         &directory,
         blobs,
         channel,
@@ -2458,7 +2528,7 @@ fn github_workspace_publisher(
     }
     Ok(publisher)
 }
-fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources> {
+async fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources> {
     use std::os::unix::fs::DirBuilderExt as _;
     if !directory.exists() {
         std::fs::DirBuilder::new()
@@ -2466,7 +2536,7 @@ fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources
             .create(&directory)
             .context("create private GitHub Workspace directory")?;
     }
-    let sources = GithubWorkspaceSources::new(github_workspace_account()?, &directory)?;
+    let sources = GithubWorkspaceSources::new(github_workspace_account().await?, &directory)?;
     #[cfg(feature = "test-fixtures")]
     if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
         return sources.with_test_endpoints(
@@ -2477,14 +2547,16 @@ fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources
     Ok(sources)
 }
 
-fn github_connector(
+async fn github_connector(
     channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Github> {
+    let account_id = required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?;
+    let mut secrets = SurfaceSecrets::new("GitHub", "SUPERTAG_GITHUB", "github", &account_id);
     let connector = Github::new(
         GithubConfig {
-            account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
+            account_id,
             repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
                 .parse()
                 .context("invalid GitHub repository ID")?,
@@ -2495,8 +2567,10 @@ fn github_connector(
                 .map(|user| user.trim().parse())
                 .collect::<std::result::Result<Vec<u64>, _>>()
                 .context("invalid GitHub user ID")?,
-            webhook_secret: required_env("SUPERTAG_GITHUB_WEBHOOK_SECRET")?,
-            authentication: github_authentication()?,
+            webhook_secret: secrets
+                .get("SUPERTAG_GITHUB_WEBHOOK_SECRET", "webhookSecret")
+                .await?,
+            authentication: github_authentication(&mut secrets).await?,
             state_directory,
         },
         channel,
@@ -2509,7 +2583,9 @@ fn github_connector(
     Ok(connector)
 }
 
-fn github_authentication() -> Result<GithubAuthentication> {
+/// A token, or an App whose private key comes from `SUPERTAG_GITHUB_PRIVATE_KEY_FILE` or the
+/// credential vault's `privateKey`. Setting the App ID or installation ID selects the App.
+async fn github_authentication(secrets: &mut SurfaceSecrets) -> Result<GithubAuthentication> {
     use std::{
         fs::OpenOptions,
         io::Read,
@@ -2525,32 +2601,37 @@ fn github_authentication() -> Result<GithubAuthentication> {
         .iter()
         .any(|name| std::env::var_os(name).is_some())
     {
-        return Ok(GithubAuthentication::Token(required_env(
-            "SUPERTAG_GITHUB_TOKEN",
-        )?));
+        return Ok(GithubAuthentication::Token(
+            secrets.get("SUPERTAG_GITHUB_TOKEN", "token").await?,
+        ));
     }
     ensure!(
         std::env::var_os("SUPERTAG_GITHUB_TOKEN").is_none(),
         "select one GitHub authentication mode"
     );
-    let path = std::env::var_os("SUPERTAG_GITHUB_PRIVATE_KEY_FILE")
-        .context("set SUPERTAG_GITHUB_PRIVATE_KEY_FILE")?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .context("open GitHub App private key")?;
-    let metadata = file.metadata().context("inspect GitHub App private key")?;
-    ensure!(
-        metadata.is_file()
-            && metadata.mode() & 0o077 == 0
-            && metadata.uid() == unsafe { libc::geteuid() },
-        "GitHub App private key must be an owner-only regular file"
-    );
-    let mut private_key_pem = String::new();
-    file.take(65_537)
-        .read_to_string(&mut private_key_pem)
-        .context("read GitHub App private key")?;
+    let private_key_pem = if let Some(path) = std::env::var_os("SUPERTAG_GITHUB_PRIVATE_KEY_FILE") {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .context("open GitHub App private key")?;
+        let metadata = file.metadata().context("inspect GitHub App private key")?;
+        ensure!(
+            metadata.is_file()
+                && metadata.mode() & 0o077 == 0
+                && metadata.uid() == unsafe { libc::geteuid() },
+            "GitHub App private key must be an owner-only regular file"
+        );
+        let mut private_key_pem = String::new();
+        file.take(65_537)
+            .read_to_string(&mut private_key_pem)
+            .context("read GitHub App private key")?;
+        private_key_pem
+    } else {
+        secrets
+            .get("SUPERTAG_GITHUB_PRIVATE_KEY_FILE", "privateKey")
+            .await?
+    };
     ensure!(
         private_key_pem.len() <= 65_536,
         "GitHub App private key is too large"
@@ -2566,14 +2647,16 @@ fn github_authentication() -> Result<GithubAuthentication> {
     }))
 }
 
-fn linear_connector(
+async fn linear_connector(
     channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Linear> {
+    let account_id = required_env("SUPERTAG_LINEAR_ACCOUNT_ID")?;
+    let mut secrets = SurfaceSecrets::new("Linear", "SUPERTAG_LINEAR", "linear", &account_id);
     let connector = Linear::new(
         LinearConfig {
-            account_id: required_env("SUPERTAG_LINEAR_ACCOUNT_ID")?,
+            account_id,
             workspace_id: required_env("SUPERTAG_LINEAR_WORKSPACE_ID")?,
             team_id: required_env("SUPERTAG_LINEAR_TEAM_ID")?,
             tag_id: required_env("SUPERTAG_LINEAR_TAG_ID")?,
@@ -2581,8 +2664,10 @@ fn linear_connector(
                 .split(',')
                 .map(|value| value.trim().to_owned())
                 .collect(),
-            webhook_secret: required_env("SUPERTAG_LINEAR_WEBHOOK_SECRET")?,
-            api_key: required_env("SUPERTAG_LINEAR_API_KEY")?,
+            webhook_secret: secrets
+                .get("SUPERTAG_LINEAR_WEBHOOK_SECRET", "webhookSecret")
+                .await?,
+            api_key: secrets.get("SUPERTAG_LINEAR_API_KEY", "apiKey").await?,
             state_directory,
         },
         channel,
@@ -2595,11 +2680,13 @@ fn linear_connector(
     Ok(connector)
 }
 
-fn lark_connector(
+async fn lark_connector(
     channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Lark> {
+    let account_id = required_env("SUPERTAG_LARK_ACCOUNT_ID")?;
+    let mut secrets = SurfaceSecrets::new("Lark", "SUPERTAG_LARK", "lark", &account_id);
     let domain = match required_env("SUPERTAG_LARK_DOMAIN")?.as_str() {
         "lark" => LarkDomain::Lark,
         "feishu" => LarkDomain::Feishu,
@@ -2607,10 +2694,10 @@ fn lark_connector(
     };
     let connector = Lark::new(
         LarkConfig {
-            account_id: required_env("SUPERTAG_LARK_ACCOUNT_ID")?,
+            account_id,
             domain,
             app_id: required_env("SUPERTAG_LARK_APP_ID")?,
-            app_secret: required_env("SUPERTAG_LARK_APP_SECRET")?,
+            app_secret: secrets.get("SUPERTAG_LARK_APP_SECRET", "appSecret").await?,
             tenant_key: required_env("SUPERTAG_LARK_TENANT_KEY")?,
             bot_open_id: required_env("SUPERTAG_LARK_BOT_OPEN_ID")?,
             chat_id: required_env("SUPERTAG_LARK_CHAT_ID")?,
@@ -2631,16 +2718,25 @@ fn lark_connector(
     Ok(connector)
 }
 
-fn microsoft_teams_connector(
+async fn microsoft_teams_connector(
     channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<MicrosoftTeams> {
+    let account_id = required_env("SUPERTAG_MICROSOFT_TEAMS_ACCOUNT_ID")?;
+    let mut secrets = SurfaceSecrets::new(
+        "Microsoft Teams",
+        "SUPERTAG_MICROSOFT_TEAMS",
+        "teams",
+        &account_id,
+    );
     let connector = MicrosoftTeams::new(
         MicrosoftTeamsConfig {
-            account_id: required_env("SUPERTAG_MICROSOFT_TEAMS_ACCOUNT_ID")?,
+            account_id,
             app_id: required_env("SUPERTAG_MICROSOFT_TEAMS_APP_ID")?,
-            app_secret: required_env("SUPERTAG_MICROSOFT_TEAMS_APP_SECRET")?,
+            app_secret: secrets
+                .get("SUPERTAG_MICROSOFT_TEAMS_APP_SECRET", "appSecret")
+                .await?,
             tenant_id: required_env("SUPERTAG_MICROSOFT_TEAMS_TENANT_ID")?,
             team_id: required_env("SUPERTAG_MICROSOFT_TEAMS_TEAM_ID")?,
             channel_id: required_env("SUPERTAG_MICROSOFT_TEAMS_CHANNEL_ID")?,

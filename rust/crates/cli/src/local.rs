@@ -16,8 +16,12 @@ use std::{
 
 use crate::{
     lifecycle::{self, ServiceStatus},
-    local_config::Environment,
+    local_config::{
+        Environment,
+        surfaces::{Provider, Surface},
+    },
 };
+use std::collections::BTreeMap;
 use supertag_worker_host::LaneState;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -48,6 +52,15 @@ const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_APP_ID",
     "SUPERTAG_GITHUB_INSTALLATION_ID",
     "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+];
+/// The credential vault selection the Gateway's Surface connectors use.
+pub(crate) const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
+    "SUPERTAG_CREDENTIAL_VAULT",
+    "VAULT_ADDR",
+    "VAULT_TOKEN",
+    "SUPERTAG_VAULT_MOUNT",
+    "SUPERTAG_VAULT_PATH_PREFIX",
+    "VAULT_NAMESPACE",
 ];
 /// TLS files a Worker Host uses to reach a remote Gateway. The supervisor's own enrollment reads
 /// the same process variables, so these never come from `env_file`.
@@ -223,6 +236,14 @@ pub fn connection(state_directory: &Path) -> Result<(String, String)> {
     Ok((endpoint.to_owned(), Credentials::load(&directory)?.operator))
 }
 
+/// What the local Gateway serves beyond its gRPC API.
+struct GatewayExtras<'a> {
+    /// Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
+    workspace: Option<&'a Environment>,
+    /// Configured Surface connectors and the environment their credential vault comes from.
+    surfaces: Option<(&'a BTreeMap<String, Surface>, &'a Environment)>,
+}
+
 struct Children {
     logs: Logs,
     control_plane: Option<Service>,
@@ -258,10 +279,13 @@ impl Children {
         directory: &Path,
         credentials: &Credentials,
         gateway_listen: SocketAddr,
-        // Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
-        gateway_workspace: Option<&Environment>,
+        extras: GatewayExtras<'_>,
         bootstrap_host: bool,
     ) -> Result<String> {
+        let GatewayExtras {
+            workspace: gateway_workspace,
+            surfaces,
+        } = extras;
         let database = directory.join("runtime.sqlite3");
         open_private_file(&database, true)?;
         let database_url = sqlite_url(&database)?;
@@ -324,6 +348,42 @@ impl Children {
                 }
             }
         }
+        // Configured Surface connectors read their secrets from the credential vault that
+        // `supertag setup surface` wrote: this state directory's file, unless Vault is selected.
+        if let Some((surfaces, environment)) = surfaces {
+            // Both read the same SUPERTAG_GITHUB_* variables in one Gateway process.
+            ensure!(
+                gateway_workspace.is_none()
+                    || !surfaces.values().any(|surface| {
+                        surface.provider == Provider::Github && surface.location.is_some()
+                    }),
+                "a GitHub surface location cannot share the local Gateway with a Gateway Workspace; remove the location with supertag update tag TAG --remove-location github"
+            );
+            let mut connected = false;
+            for (name, surface) in surfaces {
+                if let Some((args, variables)) = surface.gateway(name, directory)? {
+                    gateway.args(args).envs(variables);
+                    connected = true;
+                }
+            }
+            if connected {
+                gateway
+                    .env("SUPERTAG_STATE_DIR", directory)
+                    .envs(environment.selected(CREDENTIAL_VAULT_ENVIRONMENT));
+                #[cfg(feature = "test-fixtures")]
+                for name in [
+                    "SUPERTAG_TEST_SLACK_API_URL",
+                    "SUPERTAG_TEST_GITHUB_API_URL",
+                    "SUPERTAG_TEST_LINEAR_API_URL",
+                    "SUPERTAG_TEST_LARK_ORIGIN",
+                    "SUPERTAG_TEST_MICROSOFT_TEAMS_ORIGIN",
+                ] {
+                    if let Some(value) = std::env::var_os(name) {
+                        gateway.env(name, value);
+                    }
+                }
+            }
+        }
         let address = start_child(
             &mut self.gateway,
             &mut gateway,
@@ -350,10 +410,13 @@ impl Children {
                 directory,
                 credentials,
                 options.gateway_listen,
-                options
-                    .adapter
-                    .uses_gateway_workspace()
-                    .then_some(&Environment::default()),
+                GatewayExtras {
+                    workspace: options
+                        .adapter
+                        .uses_gateway_workspace()
+                        .then_some(&Environment::default()),
+                    surfaces: None,
+                },
                 true,
             )
             .await?;
@@ -1236,11 +1299,14 @@ pub async fn configured(
                     &directory,
                     credentials.as_ref().expect("local credentials"),
                     listen,
-                    config
-                        .hosts
-                        .iter()
-                        .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
-                        .then_some(&*environment),
+                    GatewayExtras {
+                        workspace: config
+                            .hosts
+                            .iter()
+                            .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
+                            .then_some(&*environment),
+                        surfaces: Some((&config.surfaces, &*environment)),
+                    },
                     false,
                 )
                 .await?;

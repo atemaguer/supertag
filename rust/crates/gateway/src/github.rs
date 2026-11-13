@@ -8,6 +8,7 @@ pub mod workspaces;
 
 use crate::delivery_journal::Journal;
 use anyhow::{Context, Result, ensure};
+pub(crate) use auth::setup_app_jwt;
 pub use auth::{GithubAppConfig, GithubAuthentication};
 use axum::{
     Router,
