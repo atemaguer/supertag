@@ -44,6 +44,7 @@ use supertag_protocol::{
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
+        attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
 };
@@ -100,10 +101,7 @@ pub(crate) struct CoordinationClients {
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
     artifact_source: Option<artifact_direct::SourceStorage>,
     artifact_peers: ArtifactPeers,
-    workspace_mounts:
-        supertag_protocol::v2::attempt_workspace_mounts_client::AttemptWorkspaceMountsClient<
-            InterceptedService<Channel, HostHeaders>,
-        >,
+    workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
     artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -367,6 +365,12 @@ pub async fn run(
         mcp_effects: AttemptMcpEffectsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        workspace_mounts: AttemptWorkspaceMountsClient::with_interceptor(
+            channel.clone(),
+            headers.clone(),
+        )
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES),
     };
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
@@ -1271,7 +1275,10 @@ async fn run_assignment(
             let current = coordination
                 .workspace_mounts
                 .clone()
-                .preflight(request(attempt.inspect(), token)?)
+                .preflight(
+                    request(attempt.inspect(), token)
+                        .map_err(|_| Status::internal("Workspace Volume request failed"))?,
+                )
                 .await?
                 .into_inner();
             mappings.preflight(&mount_pins, current).map_err(|_| {

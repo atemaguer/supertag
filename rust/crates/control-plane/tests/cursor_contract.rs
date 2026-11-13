@@ -357,6 +357,7 @@ async fn contract(url: &str) {
         version: 1,
     }];
     let profile = HarnessExecutionProfile {
+        workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: vec!["fixture-model".into()],
         default_model: Some("fixture-model".into()),

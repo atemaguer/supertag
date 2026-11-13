@@ -666,6 +666,7 @@ mod tests {
                 mcp_servers: vec![],
                 shared_execution: None,
                 task_artifact_inputs: false,
+                workspace_mounts: vec![],
             }),
             ..Default::default()
         };

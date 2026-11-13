@@ -207,6 +207,7 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
             "Coordinate the review",
             vec!["files:read".into(), "mailbox:send".into()],
             Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
                 github_source: None,
@@ -607,6 +608,7 @@ async fn restore_owner_binding(store: &Store) {
             "Coordinate the review",
             vec!["files:read".into(), "mailbox:send".into()],
             Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
                 github_source: None,
@@ -997,6 +999,7 @@ async fn prepare_gated_reports(
             instructions: "Only review this child".into(),
             allowed_actions: vec!["files:read".into(), "mailbox:send".into()],
             workspace: Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
                 github_source: None,
@@ -1114,6 +1117,7 @@ async fn approve_scoped_request(
                 "files:write".into(),
             ],
             workspace: Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
                 github_source: None,
