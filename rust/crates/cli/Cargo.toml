@@ -71,6 +71,11 @@ path = "tests/split_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "replicas_runtime"
+path = "tests/replicas_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "redaction_runtime"
 path = "tests/redaction_runtime.rs"
 required-features = ["test-fixtures"]

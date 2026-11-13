@@ -71,11 +71,15 @@ pub struct Store {
     execution_clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
     /// When this process first swept ephemeral Worker Hosts.
     ephemeral_watch_since: Arc<std::sync::OnceLock<i64>>,
+    /// Keeps a second process off a SQLite database while this Store lives.
+    _process_lock: Option<Arc<std::fs::File>>,
 }
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 68;
+        const SCHEMA_VERSION: i64 = 69;
+        /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
+        const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -91,20 +95,42 @@ impl Store {
             .acquire_timeout(Duration::from_secs(10))
             .connect_with(options)
             .await?;
+        let process_lock = if sqlite {
+            match sqlite_files::lock_single_process(url) {
+                Ok(lock) => lock,
+                Err(error) => {
+                    pool.close().await;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        // One transaction reads and migrates the schema. On PostgreSQL a transaction-scoped
+        // advisory lock serializes Control Plane replicas that start together: each rereads the
+        // schema only after any concurrent migration committed.
+        let mut transaction = pool.begin().await?;
+        if !sqlite {
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(SCHEMA_LOCK)
+                .execute(&mut *transaction)
+                .await?;
+        }
         let tables: Vec<String> = if sqlite {
             sqlx::query_scalar(
                 "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
             )
-            .fetch_all(&pool)
+            .fetch_all(&mut *transaction)
             .await?
         } else {
             sqlx::query_scalar("SELECT CAST(table_name AS TEXT) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")
-                .fetch_all(&pool).await?
+                .fetch_all(&mut *transaction).await?
         };
         if tables
             .iter()
             .any(|table| !table.starts_with("supertag_v2_"))
         {
+            drop(transaction);
             pool.close().await;
             anyhow::bail!(
                 "Rust services require a fresh database; existing non-Rust tables were found"
@@ -114,14 +140,16 @@ impl Store {
         // newer schema must not be modified by an older executable.
         let version = if tables.iter().any(|table| table == "supertag_v2_schema") {
             let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
-                .fetch_all(&pool)
+                .fetch_all(&mut *transaction)
                 .await?;
             if !matches!(versions.as_slice(), [version] if (1..=SCHEMA_VERSION).contains(version)) {
+                drop(transaction);
                 pool.close().await;
                 anyhow::bail!("unsupported Rust database schema");
             }
             versions[0]
         } else if !tables.is_empty() {
+            drop(transaction);
             pool.close().await;
             anyhow::bail!("Rust schema marker is missing; refusing to initialize existing tables");
         } else {
@@ -197,6 +225,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/sqlite/0067_coordination_safety.sql"),
                 include_str!("../migrations/sqlite/0068_operator_notifications.sql"),
+                include_str!("../migrations/sqlite/0200_maintenance_ticks.sql"),
             ]
         } else {
             [
@@ -270,10 +299,10 @@ impl Store {
                 include_str!("../migrations/postgresql/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/postgresql/0067_coordination_safety.sql"),
                 include_str!("../migrations/postgresql/0068_operator_notifications.sql"),
+                include_str!("../migrations/postgresql/0200_maintenance_ticks.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
-            let mut transaction = pool.begin().await?;
             for migration in &migrations[version as usize..] {
                 sqlx::raw_sql(migration).execute(&mut *transaction).await?;
             }
@@ -289,8 +318,8 @@ impl Store {
                     .execute(&mut *transaction)
                     .await?;
             }
-            transaction.commit().await?;
         }
+        transaction.commit().await?;
         let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
             .fetch_all(&pool)
             .await?;
@@ -302,11 +331,32 @@ impl Store {
             pool,
             execution_clock: None,
             ephemeral_watch_since: Arc::default(),
+            _process_lock: process_lock,
         })
     }
 
     pub async fn close(&self) {
         self.pool.close().await;
+    }
+
+    /// Claims the maintenance pass due now. Each sweep is correct on any replica at any time; the
+    /// claim only keeps replicas from repeating the same pass. A claim further ahead than
+    /// this replica's clock allows is clock skew, so this replica takes it over.
+    pub async fn claim_maintenance(&self, interval: Duration) -> Result<bool> {
+        let interval = i64::try_from(interval.as_millis()).unwrap_or(i64::MAX);
+        let now = self.execution_now_ms();
+        // A tick that fires a little early must still find its pass due.
+        let next = now.saturating_add(interval - interval / 10);
+        let claimed = sqlx::query(
+            "UPDATE supertag_v2_maintenance_ticks SET due_at_ms=$1
+             WHERE singleton=1 AND (due_at_ms<=$2 OR due_at_ms>$3)",
+        )
+        .bind(next)
+        .bind(now)
+        .bind(now.saturating_add(interval.saturating_mul(2)))
+        .execute(&self.pool)
+        .await?;
+        Ok(claimed.rows_affected() == 1)
     }
 
     pub(crate) async fn write(&self) -> Result<(Transaction<'_, Any>, i64)> {

@@ -93,6 +93,16 @@ impl ControlPlane {
         Ok(HostAuthority::new(principal, host_generation(request)?)?)
     }
 
+    /// Runs the periodic maintenance pass when this replica claims the current tick. Replicas
+    /// sharing one database run one pass per `interval` between them.
+    pub async fn maintain(&self, interval: std::time::Duration) -> anyhow::Result<bool> {
+        if !self.store.claim_maintenance(interval).await? {
+            return Ok(false);
+        }
+        self.sweep().await?;
+        Ok(true)
+    }
+
     pub async fn sweep(&self) -> anyhow::Result<()> {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;

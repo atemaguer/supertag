@@ -115,6 +115,7 @@ jobs:
           # Ignored database/language/tmux fixtures run here; real provider calls stay opt-in.
           # Split-process tests run as NAME::sqlite and NAME::postgres; each PostgreSQL case
           # creates and drops its own database through the URL file.
+          # replicas_runtime runs three Control Plane processes on one PostgreSQL database.
           cargo test --locked --workspace --all-features -- --include-ignored \
             --skip installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint \
             --skip installed_native_objective_question_and_pinned_tool_resume

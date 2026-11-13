@@ -233,205 +233,215 @@ impl Store {
         principal: &str,
         input: &ListInboxItemsRequest,
     ) -> Result<ListInboxItemsResponse> {
-        operator(principal)?;
-        if !input.objective_id.is_empty() {
-            name("Objective ID", &input.objective_id)?;
-        }
-        let kind =
-            InboxItemKind::try_from(input.kind).map_err(|_| invalid("unknown Inbox kind"))?;
-        let scope = format!("{:x}", Sha256::digest(principal.as_bytes()));
         // All Control Plane mutations use this lock. Rolling it back leaves this
         // projection read-only while keeping its component reads consistent.
         let (mut tx, order) = self.write().await?;
-        let now = self.execution_now_ms();
-        let cursor = if input.cursor.is_empty() {
-            Cursor {
-                version: 1,
-                scope: scope.clone(),
-                objective_id: input.objective_id.clone(),
-                kind: kind as i32,
-                as_of_ms: now,
-                upper_order: order - 1,
-                at: i64::MIN,
-                key: String::new(),
+        let page = inbox_page_in(&mut tx, order, self.execution_now_ms(), principal, input).await?;
+        tx.rollback().await?;
+        Ok(page)
+    }
+}
+
+/// One Inbox page, read in the caller's write-locked transaction taken at `order`.
+pub(crate) async fn inbox_page_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    now: i64,
+    principal: &str,
+    input: &ListInboxItemsRequest,
+) -> Result<ListInboxItemsResponse> {
+    operator(principal)?;
+    if !input.objective_id.is_empty() {
+        name("Objective ID", &input.objective_id)?;
+    }
+    let kind = InboxItemKind::try_from(input.kind).map_err(|_| invalid("unknown Inbox kind"))?;
+    let scope = format!("{:x}", Sha256::digest(principal.as_bytes()));
+    let cursor = if input.cursor.is_empty() {
+        Cursor {
+            version: 1,
+            scope: scope.clone(),
+            objective_id: input.objective_id.clone(),
+            kind: kind as i32,
+            as_of_ms: now,
+            upper_order: order - 1,
+            at: i64::MIN,
+            key: String::new(),
+        }
+    } else {
+        if input.cursor.len() > 4096 {
+            return Err(invalid("invalid Inbox cursor"));
+        }
+        let cursor: Cursor =
+            serde_json::from_str(&input.cursor).map_err(|_| invalid("invalid Inbox cursor"))?;
+        if cursor.version != 1
+            || cursor.scope != scope
+            || cursor.as_of_ms > now
+            || cursor.upper_order > order - 1
+            || cursor.upper_order < 0
+            || InboxItemKind::try_from(cursor.kind).is_err()
+            || (!input.objective_id.is_empty() && input.objective_id != cursor.objective_id)
+            || (kind != InboxItemKind::Unspecified && input.kind != cursor.kind)
+        {
+            return Err(invalid("Inbox cursor does not match this request"));
+        }
+        cursor
+    };
+    let mut items = vec![];
+    let mut truncated = vec![];
+    if wants(&cursor, InboxItemKind::Question) {
+        let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
+            .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
+        if rows.len() > SCAN {
+            truncated.push(InboxItemKind::Question as i32);
+        }
+        for row in rows.iter().take(SCAN) {
+            let question = question_row(row)?;
+            let key = format!("question:{}", question.task_id);
+            let preview: String = question.text.chars().take(PREVIEW).collect();
+            items.push(InboxItem {
+                key: key.clone(),
+                occurrence: format!("{key}:{}", question.attempt_id),
+                kind: InboxItemKind::Question as i32,
+                objective_id: question.objective_id,
+                task_id: question.task_id,
+                attempt_id: Some(question.attempt_id),
+                operator_eligible: true,
+                actionable_since_ms: question.published_at_ms.unwrap_or(question.asked_at_ms),
+                reason: "The Objective owner finished a turn and waits for your answer.".into(),
+                question: Some(InboxQuestion {
+                    truncated: preview.len() < question.text.len(),
+                    text: preview,
+                    asked_at_ms: question.asked_at_ms,
+                }),
+                approval: None,
+            });
+        }
+    }
+    if wants(&cursor, InboxItemKind::ObjectiveBudget)
+        || wants(&cursor, InboxItemKind::ObjectiveLimit)
+    {
+        let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND EXISTS (SELECT 1 FROM supertag_v2_attempt_usage usage JOIN supertag_v2_objective_tasks ot ON ot.task_id=usage.task_id WHERE ot.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
+            .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(cursor.as_of_ms).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
+        if rows.len() > SCAN {
+            for kind in [
+                InboxItemKind::ObjectiveBudget,
+                InboxItemKind::ObjectiveLimit,
+            ] {
+                if wants(&cursor, kind) {
+                    truncated.push(kind as i32);
+                }
             }
-        } else {
-            if input.cursor.len() > 4096 {
-                return Err(invalid("invalid Inbox cursor"));
-            }
-            let cursor: Cursor =
-                serde_json::from_str(&input.cursor).map_err(|_| invalid("invalid Inbox cursor"))?;
-            if cursor.version != 1
-                || cursor.scope != scope
-                || cursor.as_of_ms > now
-                || cursor.upper_order > order - 1
-                || cursor.upper_order < 0
-                || InboxItemKind::try_from(cursor.kind).is_err()
-                || (!input.objective_id.is_empty() && input.objective_id != cursor.objective_id)
-                || (kind != InboxItemKind::Unspecified && input.kind != cursor.kind)
-            {
-                return Err(invalid("Inbox cursor does not match this request"));
-            }
-            cursor
-        };
-        let mut items = vec![];
-        let mut truncated = vec![];
-        if wants(&cursor, InboxItemKind::Question) {
-            let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
-                .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut *tx).await?;
-            if rows.len() > SCAN {
-                truncated.push(InboxItemKind::Question as i32);
-            }
-            for row in rows.iter().take(SCAN) {
-                let question = question_row(row)?;
-                let key = format!("question:{}", question.task_id);
-                let preview: String = question.text.chars().take(PREVIEW).collect();
+        }
+        for row in rows.iter().take(SCAN) {
+            let limits = crate::objectives::inbox_limits_row(row)?;
+            for event in limits::limit_events(&limits) {
+                let kind = if event.kind == limits::NoticeKind::ObjectiveBudgetExhausted {
+                    InboxItemKind::ObjectiveBudget
+                } else {
+                    InboxItemKind::ObjectiveLimit
+                };
+                if !wants(&cursor, kind) || event.at.as_millis() > cursor.as_of_ms {
+                    continue;
+                }
+                let objective: String = row.try_get("objective_id")?;
+                let key = format!(
+                    "{}:{objective}:{}",
+                    if kind == InboxItemKind::ObjectiveBudget {
+                        "objective_budget"
+                    } else {
+                        "objective_limit"
+                    },
+                    event.key
+                );
+                let reason = if matches!(
+                    event.kind,
+                    limits::NoticeKind::ObjectiveDeadlineApproaching
+                        | limits::NoticeKind::DeadlinePassed
+                ) {
+                    deadline_reason(limits.deadline, cursor.as_of_ms)
+                } else {
+                    event.message
+                };
                 items.push(InboxItem {
                     key: key.clone(),
-                    occurrence: format!("{key}:{}", question.attempt_id),
-                    kind: InboxItemKind::Question as i32,
-                    objective_id: question.objective_id,
-                    task_id: question.task_id,
-                    attempt_id: Some(question.attempt_id),
+                    occurrence: format!("{key}:{}", event.at.as_millis()),
+                    kind: kind as i32,
+                    objective_id: objective,
+                    task_id: String::new(),
+                    attempt_id: None,
                     operator_eligible: true,
-                    actionable_since_ms: question.published_at_ms.unwrap_or(question.asked_at_ms),
-                    reason: "The Objective owner finished a turn and waits for your answer.".into(),
-                    question: Some(InboxQuestion {
-                        truncated: preview.len() < question.text.len(),
-                        text: preview,
-                        asked_at_ms: question.asked_at_ms,
-                    }),
+                    actionable_since_ms: event.at.as_millis(),
+                    reason,
+                    question: None,
                     approval: None,
                 });
             }
         }
-        if wants(&cursor, InboxItemKind::ObjectiveBudget)
-            || wants(&cursor, InboxItemKind::ObjectiveLimit)
-        {
-            let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND EXISTS (SELECT 1 FROM supertag_v2_attempt_usage usage JOIN supertag_v2_objective_tasks ot ON ot.task_id=usage.task_id WHERE ot.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
-                .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(cursor.as_of_ms).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut *tx).await?;
-            if rows.len() > SCAN {
-                for kind in [
-                    InboxItemKind::ObjectiveBudget,
-                    InboxItemKind::ObjectiveLimit,
-                ] {
-                    if wants(&cursor, kind) {
-                        truncated.push(kind as i32);
-                    }
-                }
-            }
-            for row in rows.iter().take(SCAN) {
-                let limits = crate::objectives::inbox_limits_row(row)?;
-                for event in limits::limit_events(&limits) {
-                    let kind = if event.kind == limits::NoticeKind::ObjectiveBudgetExhausted {
-                        InboxItemKind::ObjectiveBudget
-                    } else {
-                        InboxItemKind::ObjectiveLimit
-                    };
-                    if !wants(&cursor, kind) || event.at.as_millis() > cursor.as_of_ms {
-                        continue;
-                    }
-                    let objective: String = row.try_get("objective_id")?;
-                    let key = format!(
-                        "{}:{objective}:{}",
-                        if kind == InboxItemKind::ObjectiveBudget {
-                            "objective_budget"
-                        } else {
-                            "objective_limit"
-                        },
-                        event.key
-                    );
-                    let reason = if matches!(
-                        event.kind,
-                        limits::NoticeKind::ObjectiveDeadlineApproaching
-                            | limits::NoticeKind::DeadlinePassed
-                    ) {
-                        deadline_reason(limits.deadline, cursor.as_of_ms)
-                    } else {
-                        event.message
-                    };
-                    items.push(InboxItem {
-                        key: key.clone(),
-                        occurrence: format!("{key}:{}", event.at.as_millis()),
-                        kind: kind as i32,
-                        objective_id: objective,
-                        task_id: String::new(),
-                        attempt_id: None,
-                        operator_eligible: true,
-                        actionable_since_ms: event.at.as_millis(),
-                        reason,
-                        question: None,
-                        approval: None,
-                    });
-                }
-            }
-        }
-        if wants(&cursor, InboxItemKind::TaskAttention) {
-            // Preserve the legacy Objective scope; personal conversation text and
-            // another operator's private Sessions never enter this projection.
-            let rows = sqlx::query("SELECT t.task_id,t.attempt_id,t.lease_expires_at_ms,t.host_principal,o.objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) AND t.lease_expires_at_ms<=$5 ORDER BY t.lease_expires_at_ms,t.task_id LIMIT $6")
-                .bind(TaskState::Uncertain as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind(cursor.as_of_ms).bind((SCAN + 1) as i64).fetch_all(&mut *tx).await?;
-            if rows.len() > SCAN {
-                truncated.push(InboxItemKind::TaskAttention as i32);
-            }
-            for row in rows.iter().take(SCAN) {
-                let task_id: String = row.try_get("task_id")?;
-                let attempt_id: Option<String> = row.try_get("attempt_id")?;
-                let key = format!("task_attention:{task_id}");
-                items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None });
-            }
-        }
-        if wants(&cursor, InboxItemKind::Approval) {
-            let pending = crate::approvals::pending_in(
-                &mut tx,
-                principal,
-                &cursor.objective_id,
-                cursor.as_of_ms,
-                cursor.upper_order,
-                SCAN + 1,
-            )
-            .await?;
-            if pending.len() > SCAN {
-                truncated.push(InboxItemKind::Approval as i32);
-            }
-            items.extend(pending.into_iter().take(SCAN));
-        }
-        if wants(&cursor, InboxItemKind::McpLogin) {
-            let (logins, more) = mcp_logins_in(&mut tx, &cursor).await?;
-            if more {
-                truncated.push(InboxItemKind::McpLogin as i32);
-            }
-            items.extend(logins);
-        }
-        items.sort_by(|a, b| (a.actionable_since_ms, &a.key).cmp(&(b.actionable_since_ms, &b.key)));
-        items.retain(|item| {
-            (item.actionable_since_ms, item.key.as_str()) > (cursor.at, cursor.key.as_str())
-        });
-        let limit = if input.page_size == 0 {
-            50
-        } else {
-            input.page_size.min(100)
-        } as usize;
-        let more = items.len() > limit;
-        items.truncate(limit);
-        let next_cursor = if more {
-            let last = items.last().expect("nonempty bounded page");
-            serde_json::to_string(&Cursor {
-                at: last.actionable_since_ms,
-                key: last.key.clone(),
-                ..cursor
-            })?
-        } else {
-            String::new()
-        };
-        tx.rollback().await?;
-        Ok(ListInboxItemsResponse {
-            as_of_ms: cursor.as_of_ms,
-            items,
-            next_cursor,
-            truncated_kinds: truncated,
-        })
     }
+    if wants(&cursor, InboxItemKind::TaskAttention) {
+        // Preserve the legacy Objective scope; personal conversation text and
+        // another operator's private Sessions never enter this projection.
+        let rows = sqlx::query("SELECT t.task_id,t.attempt_id,t.lease_expires_at_ms,t.host_principal,o.objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) AND t.lease_expires_at_ms<=$5 ORDER BY t.lease_expires_at_ms,t.task_id LIMIT $6")
+            .bind(TaskState::Uncertain as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind(cursor.as_of_ms).bind((SCAN + 1) as i64).fetch_all(&mut **tx).await?;
+        if rows.len() > SCAN {
+            truncated.push(InboxItemKind::TaskAttention as i32);
+        }
+        for row in rows.iter().take(SCAN) {
+            let task_id: String = row.try_get("task_id")?;
+            let attempt_id: Option<String> = row.try_get("attempt_id")?;
+            let key = format!("task_attention:{task_id}");
+            items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None });
+        }
+    }
+    if wants(&cursor, InboxItemKind::Approval) {
+        let pending = crate::approvals::pending_in(
+            tx,
+            principal,
+            &cursor.objective_id,
+            cursor.as_of_ms,
+            cursor.upper_order,
+            SCAN + 1,
+        )
+        .await?;
+        if pending.len() > SCAN {
+            truncated.push(InboxItemKind::Approval as i32);
+        }
+        items.extend(pending.into_iter().take(SCAN));
+    }
+    if wants(&cursor, InboxItemKind::McpLogin) {
+        let (logins, more) = mcp_logins_in(tx, &cursor).await?;
+        if more {
+            truncated.push(InboxItemKind::McpLogin as i32);
+        }
+        items.extend(logins);
+    }
+    items.sort_by(|a, b| (a.actionable_since_ms, &a.key).cmp(&(b.actionable_since_ms, &b.key)));
+    items.retain(|item| {
+        (item.actionable_since_ms, item.key.as_str()) > (cursor.at, cursor.key.as_str())
+    });
+    let limit = if input.page_size == 0 {
+        50
+    } else {
+        input.page_size.min(100)
+    } as usize;
+    let more = items.len() > limit;
+    items.truncate(limit);
+    let next_cursor = if more {
+        let last = items.last().expect("nonempty bounded page");
+        serde_json::to_string(&Cursor {
+            at: last.actionable_since_ms,
+            key: last.key.clone(),
+            ..cursor
+        })?
+    } else {
+        String::new()
+    };
+    Ok(ListInboxItemsResponse {
+        as_of_ms: cursor.as_of_ms,
+        items,
+        next_cursor,
+        truncated_kinds: truncated,
+    })
 }
 
 /// Queued Objective Tasks that wait for an OAuth MCP server whose login lapsed: no live
