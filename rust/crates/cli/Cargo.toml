@@ -75,6 +75,11 @@ path = "tests/audit_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "metrics_runtime"
+path = "tests/metrics_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "enrolled_runtime"
 path = "tests/enrolled_runtime.rs"
 required-features = ["test-fixtures"]

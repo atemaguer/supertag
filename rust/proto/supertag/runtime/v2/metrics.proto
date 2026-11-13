@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+import "supertag/runtime/v2/spend.proto";
+
+// An operational snapshot for monitoring, read with database aggregates so it
+// stays complete as tables grow and never inherits a list API's page limit.
+service Metrics {
+  rpc GetMetrics(GetMetricsRequest) returns (MetricSnapshot);
+}
+
+message GetMetricsRequest {}
+
+message MetricSnapshot {
+  // When the Control Plane read the records.
+  int64 captured_at_ms = 1;
+  MetricResources resources = 2;
+  MetricTaskCounts tasks = 3;
+  MetricUsage usage = 4;
+  MetricScheduling scheduling = 5;
+  // Mailbox messages no inbox turn has taken yet.
+  MetricBacklog mailbox = 6;
+  // Replies waiting to reach collaboration surfaces.
+  MetricReplyDelivery reply_delivery = 7;
+}
+
+message MetricResources {
+  // Tags that are not retired.
+  int64 tags = 1;
+  int64 roles = 2;
+  int64 role_assignments = 3;
+  int64 surface_accounts = 4;
+  int64 permission_sets = 5;
+  int64 context_sets = 6;
+  // Distinct Sessions that have received a Task.
+  int64 sessions = 7;
+}
+
+// Tasks by state.
+message MetricTaskCounts {
+  int64 total = 1;
+  int64 queued = 2;
+  int64 claimed = 3;
+  int64 running = 4;
+  int64 uncertain = 5;
+  int64 succeeded = 6;
+  int64 failed = 7;
+  int64 cancelled = 8;
+}
+
+// Claimed Attempts and their recorded usage, counted as `Spend.GetSpend` counts
+// them: each Attempt once, with its latest native usage and cumulative cost.
+message MetricUsage {
+  int64 attempts = 1;
+  // Absent when no Attempt reported tokens.
+  optional uint64 reported_tokens = 2;
+  int64 unknown_token_attempts = 3;
+  // Sorted by currency. Separate currencies are never combined.
+  repeated SpendAmount reported_cost = 4;
+  int64 unknown_cost_attempts = 5;
+  int64 estimated_cost_attempts = 6;
+}
+
+message MetricScheduling {
+  // Tasks waiting for a Worker Host.
+  int64 queued = 1;
+  // Every Worker Host that is not removed, by ID.
+  repeated MetricWorkerHost worker_hosts = 2;
+}
+
+// One Worker Host's capacity, from its latest report.
+message MetricWorkerHost {
+  string host_id = 1;
+  HostPhase phase = 2;
+  bool draining = 3;
+  uint32 capacity = 4;
+  uint32 available_slots = 5;
+  uint32 active_attempts = 6;
+}
+
+message MetricBacklog {
+  int64 pending = 1;
+  // When the oldest arrived. Absent when none waits.
+  optional int64 oldest_pending_at_ms = 2;
+}
+
+message MetricReplyDelivery {
+  // Replies not yet delivered: pending, claimed by a connector, or uncertain.
+  int64 backlog = 1;
+  // Replies that will not be retried.
+  int64 failed = 2;
+}

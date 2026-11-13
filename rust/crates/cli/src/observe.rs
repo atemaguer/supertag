@@ -1,4 +1,4 @@
-//! Operator observation commands: `spend`, `describe`, and `watch`.
+//! Operator observation commands: `spend`, `metrics`, `describe`, and `watch`.
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -8,15 +8,16 @@ use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        GetArtifactVolumeRequest, GetGithubWorkspaceRequest, GetHostRequest, GetObjectiveRequest,
-        GetPolicyResourceRequest, GetSpendRequest, GetTagRequest, GetTaskRequest, GetTeamRequest,
-        GetWorkSessionRequest, GetWorkspaceVolumeRequest, SpendGrouping, SpendReport, WatchEvent,
-        WatchKind, WatchRequest, artifact_volumes_client::ArtifactVolumesClient,
-        github_workspaces_client::GithubWorkspacesClient, objectives_client::ObjectivesClient,
-        operator_client::OperatorClient, operator_events_client::OperatorEventsClient,
-        policy_catalog_client::PolicyCatalogClient, spend_client::SpendClient,
-        teams_client::TeamsClient, watch_event::Update, work_sessions_client::WorkSessionsClient,
-        workspace_volumes_client::WorkspaceVolumesClient,
+        GetArtifactVolumeRequest, GetGithubWorkspaceRequest, GetHostRequest, GetMetricsRequest,
+        GetObjectiveRequest, GetPolicyResourceRequest, GetSpendRequest, GetTagRequest,
+        GetTaskRequest, GetTeamRequest, GetWorkSessionRequest, GetWorkspaceVolumeRequest,
+        HostPhase, MetricSnapshot, SpendGrouping, SpendReport, WatchEvent, WatchKind, WatchRequest,
+        artifact_volumes_client::ArtifactVolumesClient,
+        github_workspaces_client::GithubWorkspacesClient, metrics_client::MetricsClient,
+        objectives_client::ObjectivesClient, operator_client::OperatorClient,
+        operator_events_client::OperatorEventsClient, policy_catalog_client::PolicyCatalogClient,
+        spend_client::SpendClient, teams_client::TeamsClient, watch_event::Update,
+        work_sessions_client::WorkSessionsClient, workspace_volumes_client::WorkspaceVolumesClient,
     },
 };
 use tonic::{Code, transport::Channel};
@@ -82,6 +83,158 @@ pub async fn spend(connection: Connection, args: SpendArgs) -> Result<()> {
         Output::Text => print!("{}", spend_text(&report)),
     }
     Ok(())
+}
+
+#[derive(Args)]
+pub struct MetricsArgs {
+    #[arg(long, value_enum, default_value = "text")]
+    output: Output,
+}
+
+pub async fn metrics(connection: Connection, args: MetricsArgs) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let snapshot = MetricsClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+        .get_metrics(request(GetMetricsRequest {}, &token)?)
+        .await?
+        .into_inner();
+    match args.output {
+        Output::Json => println!("{}", metrics_json(&snapshot)),
+        Output::Text => print!("{}", metrics_text(&snapshot)),
+    }
+    Ok(())
+}
+
+fn metrics_json(snapshot: &MetricSnapshot) -> Value {
+    let resources = snapshot.resources.unwrap_or_default();
+    let tasks = snapshot.tasks.unwrap_or_default();
+    let usage = snapshot.usage.clone().unwrap_or_default();
+    let scheduling = snapshot.scheduling.clone().unwrap_or_default();
+    let mailbox = snapshot.mailbox.unwrap_or_default();
+    let replies = snapshot.reply_delivery.unwrap_or_default();
+    json!({
+        "captured_at": Timestamp::from_millis(snapshot.captured_at_ms).map(|at| at.to_string()),
+        "tags": resources.tags,
+        "roles": resources.roles,
+        "role_assignments": resources.role_assignments,
+        "surface_accounts": resources.surface_accounts,
+        "permission_sets": resources.permission_sets,
+        "context_sets": resources.context_sets,
+        "sessions": resources.sessions,
+        "tasks": {
+            "total": tasks.total,
+            "queued": tasks.queued,
+            "claimed": tasks.claimed,
+            "running": tasks.running,
+            "uncertain": tasks.uncertain,
+            "succeeded": tasks.succeeded,
+            "failed": tasks.failed,
+            "cancelled": tasks.cancelled,
+        },
+        "usage": {
+            "attempts": usage.attempts,
+            "reported_tokens": usage.reported_tokens,
+            "unknown_token_attempts": usage.unknown_token_attempts,
+            "reported_cost": usage.reported_cost.iter().map(|amount| json!({
+                "currency": amount.currency,
+                "amount_minor": amount.amount_minor,
+            })).collect::<Vec<_>>(),
+            "unknown_cost_attempts": usage.unknown_cost_attempts,
+            "estimated_cost_attempts": usage.estimated_cost_attempts,
+        },
+        "scheduling": {
+            "queued": scheduling.queued,
+            "worker_hosts": scheduling.worker_hosts.iter().map(|host| json!({
+                "id": host.host_id,
+                "phase": host_phase(host.phase()),
+                "draining": host.draining,
+                "capacity": host.capacity,
+                "available_slots": host.available_slots,
+                "active_attempts": host.active_attempts,
+            })).collect::<Vec<_>>(),
+        },
+        "mailbox": {
+            "pending": mailbox.pending,
+            "oldest_pending_at": mailbox
+                .oldest_pending_at_ms
+                .and_then(Timestamp::from_millis)
+                .map(|at| at.to_string()),
+        },
+        "reply_delivery": {
+            "backlog": replies.backlog,
+            "failed": replies.failed,
+        },
+    })
+}
+
+fn host_phase(phase: HostPhase) -> &'static str {
+    match phase {
+        HostPhase::Unspecified => "unknown",
+        other => other
+            .as_str_name()
+            .strip_prefix("HOST_PHASE_")
+            .unwrap_or("unknown"),
+    }
+}
+
+fn metrics_text(snapshot: &MetricSnapshot) -> String {
+    let resources = snapshot.resources.unwrap_or_default();
+    let tasks = snapshot.tasks.unwrap_or_default();
+    let usage = snapshot.usage.clone().unwrap_or_default();
+    let scheduling = snapshot.scheduling.clone().unwrap_or_default();
+    let mailbox = snapshot.mailbox.unwrap_or_default();
+    let replies = snapshot.reply_delivery.unwrap_or_default();
+    let cost = usage
+        .reported_cost
+        .iter()
+        .map(|amount| format!("{} {}", amount.amount_minor, amount.currency))
+        .collect::<Vec<_>>();
+    format!(
+        "Tags {}, Sessions {}, Roles {}, Role assignments {}, Surface Accounts {}, Permission Sets {}, Context Sets {}\n\
+         Tasks {}: {} queued, {} claimed, {} running, {} uncertain, {} succeeded, {} failed, {} cancelled\n\
+         Attempts {}: tokens {}, cost {}\n\
+         Worker Hosts {}: {} active of {} slots\n\
+         Mailbox backlog {}, reply backlog {}, failed replies {}\n",
+        resources.tags,
+        resources.sessions,
+        resources.roles,
+        resources.role_assignments,
+        resources.surface_accounts,
+        resources.permission_sets,
+        resources.context_sets,
+        tasks.total,
+        tasks.queued,
+        tasks.claimed,
+        tasks.running,
+        tasks.uncertain,
+        tasks.succeeded,
+        tasks.failed,
+        tasks.cancelled,
+        usage.attempts,
+        usage
+            .reported_tokens
+            .map_or_else(|| "unknown".into(), |tokens| tokens.to_string()),
+        if cost.is_empty() {
+            "none reported".into()
+        } else {
+            cost.join(", ")
+        },
+        scheduling.worker_hosts.len(),
+        scheduling
+            .worker_hosts
+            .iter()
+            .map(|host| u64::from(host.active_attempts))
+            .sum::<u64>(),
+        scheduling
+            .worker_hosts
+            .iter()
+            .map(|host| u64::from(host.capacity))
+            .sum::<u64>(),
+        mailbox.pending,
+        replies.backlog,
+        replies.failed,
+    )
 }
 
 fn spend_json(report: &SpendReport) -> Value {

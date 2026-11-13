@@ -22,6 +22,7 @@ mod inputs;
 mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
+mod metrics;
 pub mod objective_limits;
 mod objectives;
 mod operator_access;

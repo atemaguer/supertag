@@ -711,6 +711,14 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         args: observe::SpendArgs,
     },
+    /// Read an operational snapshot: resource and Task counts, usage, Worker Host capacity, and
+    /// Mailbox and reply backlogs.
+    Metrics {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: observe::MetricsArgs,
+    },
     /// Describe one resource in readable text.
     Describe {
         #[command(flatten)]
@@ -782,6 +790,7 @@ async fn run(command: Command) -> Result<()> {
     match command {
         Command::Health(args) => health::run(args).await?,
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
+        Command::Metrics { connection, args } => observe::metrics(connection, args).await?,
         Command::Describe { connection, args } => observe::describe(connection, args).await?,
         Command::Watch { connection, args } => observe::watch(connection, args).await?,
         Command::Diff(args) => manifests::run(args, false).await?,
@@ -1754,6 +1763,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health
         .set_serving::<supertag_protocol::v2::spend_server::SpendServer<ControlPlane>>()
         .await;
+    health
+        .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<ControlPlane>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
@@ -1857,6 +1869,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.spend_service())
+        .add_service(plane.metrics_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
@@ -2037,6 +2050,9 @@ async fn gateway(
     health
         .set_serving::<supertag_protocol::v2::spend_server::SpendServer<Gateway>>()
         .await;
+    health
+        .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<Gateway>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -2087,6 +2103,7 @@ async fn gateway(
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.attempt_mcp_effects_service())
         .add_service(gateway.spend_service())
+        .add_service(gateway.metrics_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router
