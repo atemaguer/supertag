@@ -265,7 +265,7 @@ enum Command {
         #[arg(long)]
         state_directory: PathBuf,
         #[command(flatten)]
-        adapter: AdapterOptions,
+        adapter: Box<AdapterOptions>,
         /// Listen for authorized artifact reads from other Worker Hosts.
         #[arg(long, requires = "artifact_source_directory")]
         artifact_transfer_listen: Option<SocketAddr>,
