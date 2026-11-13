@@ -20,6 +20,41 @@ fn mount(destination: &str) -> WorkspaceCopyMount {
         destination: destination.into(),
         max_bytes: 1024 * 1024,
         volume: None,
+        read_write: false,
+    }
+}
+
+fn writable(destination: &str) -> WorkspaceCopyMount {
+    WorkspaceCopyMount {
+        read_write: true,
+        ..mount(destination)
+    }
+}
+
+fn written(destination: &str) -> WorkspaceMountWrite {
+    WorkspaceMountWrite {
+        volume_id: "data".into(),
+        destination: destination.into(),
+        status: WorkspaceMountWriteStatus::Complete.into(),
+        files: vec![WorkspaceMountWrittenFile {
+            key: "reports/summary.md".into(),
+            size: 12,
+            sha256: "ab".repeat(32),
+        }],
+        skipped: 3,
+        ..Default::default()
+    }
+}
+
+fn record(
+    assignment: &Assignment,
+    writes: Vec<WorkspaceMountWrite>,
+) -> RecordWorkspaceMountWritesRequest {
+    RecordWorkspaceMountWritesRequest {
+        task_id: assignment.task.as_ref().unwrap().task_id.clone(),
+        attempt_id: assignment.attempt_id.clone(),
+        lease_token: assignment.lease_token.clone(),
+        writes,
     }
 }
 
@@ -61,6 +96,7 @@ fn profile(source: &str, root: &str) -> HarnessExecutionProfile {
             volume_id: "data".into(),
             source: source.into(),
             destination_root: root.into(),
+            credential: String::new(),
         }],
         ..Default::default()
     }
@@ -114,6 +150,7 @@ async fn put_volume(
                 volume_id: "data".into(),
                 source: source.into(),
                 expected_revision: expected,
+                credential: String::new(),
             },
         )
         .await
@@ -139,6 +176,7 @@ async fn exercise(url: &str) {
         volume_id: "data".into(),
         source: DATA.into(),
         expected_revision: 0,
+        credential: String::new(),
     };
     for principal in ["host:intruder", "tag:research", "operator:"] {
         assert!(matches!(
@@ -146,16 +184,25 @@ async fn exercise(url: &str) {
             Err(StoreError::PermissionDenied)
         ));
     }
-    for (id, source) in [
-        ("Data", DATA),
-        ("data", "file://host/srv/data"),
-        ("data", "file:///srv/data?x=1"),
-        ("data", "s3://bucket/data"),
+    for (id, source, credential) in [
+        ("Data", DATA, ""),
+        ("data", "file://host/srv/data", ""),
+        ("data", "file:///srv/data?x=1", ""),
+        // A file Volume's host mapping is its consent; it names no credential.
+        ("data", DATA, "team-data"),
+        // An object-store Volume names the credential its hosts map, and nothing else.
+        ("data", "s3://bucket/data", ""),
+        ("data", "s3://bucket/data", "Team"),
+        ("data", "s3://bucket/data?region=us-east-1", "team-data"),
+        ("data", "s3://user:secret@bucket/data", "team-data"),
+        ("data", "gs://bucket/data", "team-data"),
+        ("data", "modal-volume://training", "team-data"),
     ] {
         let request = PutWorkspaceVolumeRequest {
             volume_id: id.into(),
             source: source.into(),
             expected_revision: 0,
+            credential: credential.into(),
         };
         assert!(matches!(
             store.put_workspace_volume(OPERATOR, &request).await,
@@ -215,6 +262,85 @@ async fn exercise(url: &str) {
             Err(StoreError::FailedPrecondition(_))
         ));
     }
+
+    // S3 Workspace data is disjoint from S3 artifact storage by bucket and prefix.
+    store
+        .put_artifact_volume(
+            OPERATOR,
+            &PutArtifactVolumeRequest {
+                operation_id: "s3-artifacts".into(),
+                volume_id: "s3-artifacts".into(),
+                source: "s3://shared-bucket/artifacts".into(),
+                expected_revision: 0,
+            },
+        )
+        .await
+        .unwrap();
+    let s3 = |id: &str, source: &str| PutWorkspaceVolumeRequest {
+        volume_id: id.into(),
+        source: source.into(),
+        expected_revision: 0,
+        credential: "team-data".into(),
+    };
+    for source in [
+        "s3://shared-bucket/artifacts",
+        "s3://shared-bucket/artifacts/inner",
+    ] {
+        assert!(matches!(
+            store
+                .put_workspace_volume(OPERATOR, &s3("s3-data", source))
+                .await,
+            Err(StoreError::FailedPrecondition(_))
+        ));
+    }
+    let bucket = store
+        .put_workspace_volume(
+            OPERATOR,
+            &s3("s3-data", "s3://shared-bucket/artifacts-next"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bucket.credential, "team-data");
+    assert_eq!(
+        store
+            .get_workspace_volume(OPERATOR, "s3-data")
+            .await
+            .unwrap(),
+        bucket
+    );
+    // Renaming the credential is a new revision; an equal put is a no-op.
+    let mut renamed = s3("s3-data", "s3://shared-bucket/artifacts-next");
+    renamed.expected_revision = 1;
+    assert_eq!(
+        store
+            .put_workspace_volume(OPERATOR, &renamed)
+            .await
+            .unwrap(),
+        bucket
+    );
+    renamed.credential = "other-data".into();
+    assert_eq!(
+        store
+            .put_workspace_volume(OPERATOR, &renamed)
+            .await
+            .unwrap()
+            .revision,
+        2
+    );
+    assert!(matches!(
+        store
+            .put_artifact_volume(
+                OPERATOR,
+                &PutArtifactVolumeRequest {
+                    operation_id: "s3-overlap".into(),
+                    volume_id: "s3-overlap".into(),
+                    source: "s3://shared-bucket/artifacts-next/copies".into(),
+                    expected_revision: 0,
+                },
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
 
     // Tag configuration validates destinations and never accepts a pin.
     let destination = format!("{ROOT}/data");
@@ -299,13 +425,32 @@ async fn exercise(url: &str) {
     assert_eq!(configured.len(), 1);
     assert!(configured[0].volume.is_none());
 
-    // Only read-only local Codex policy may admit mounted Tasks.
+    // Only local Codex or Claude Code Tasks that read files, write files for
+    // every read-write copy, and neither run commands nor fetch may be admitted.
+    let mut unwritable = tag(
+        "unwritable",
+        HarnessKind::Codex,
+        &["files:read"],
+        vec![writable(&destination)],
+    );
+    store.put_tag_spec(unwritable.clone()).await.unwrap();
+    assert!(matches!(
+        store
+            .submit_task(OPERATOR, &submit("unwritable", "s", "unwritable"))
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    unwritable.allowed_actions.push("files:write".into());
+    store.put_tag_spec(unwritable).await.unwrap();
+    for id in ["unwritable"] {
+        let admitted = store
+            .submit_task(OPERATOR, &submit(id, "s", &format!("{id}-ok")))
+            .await
+            .unwrap();
+        assert!(admitted.workspace.unwrap().mounts[0].read_write);
+        store.cancel_task(&admitted.task_id).await.unwrap();
+    }
     for (id, harness, actions) in [
-        (
-            "writer",
-            HarnessKind::Codex,
-            &["files:read", "files:write"][..],
-        ),
         (
             "runner",
             HarnessKind::Codex,
@@ -317,8 +462,8 @@ async fn exercise(url: &str) {
             &["files:read", "web:fetch"][..],
         ),
         ("blind", HarnessKind::Codex, &[][..]),
-        ("claude", HarnessKind::ClaudeCode, &["files:read"][..]),
         ("cursor", HarnessKind::Cursor, &["files:read"][..]),
+        ("opencode", HarnessKind::Opencode, &["files:read"][..]),
     ] {
         store
             .put_tag_spec(tag(id, harness, actions, vec![mount(&destination)]))
@@ -442,6 +587,126 @@ async fn exercise(url: &str) {
             .workspace_mount_preflight(&host, &stale)
             .await
             .is_err()
+    );
+
+    // A read-only copy records no writes.
+    assert!(matches!(
+        store
+            .record_workspace_mount_writes(&host, &record(&first, vec![written(&destination)]))
+            .await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+
+    // A Claude Code Task's read-write copy records its write-back summary once.
+    let out = format!("{ROOT}/out");
+    store
+        .put_tag_spec(tag(
+            "editor",
+            HarnessKind::ClaudeCode,
+            &["files:read", "files:write"],
+            vec![writable(&out)],
+        ))
+        .await
+        .unwrap();
+    let edit = store
+        .submit_task(OPERATOR, &submit("editor", "edit", "edit"))
+        .await
+        .unwrap();
+    let editor_host = support::register_host(&store, "editor-host").await;
+    assert!(
+        claim(
+            &store,
+            &editor_host,
+            "edit-codex",
+            HarnessKind::Codex,
+            &profile(DATA, ROOT)
+        )
+        .await
+        .is_none()
+    );
+    let editing = claim(
+        &store,
+        &editor_host,
+        "edit",
+        HarnessKind::ClaudeCode,
+        &profile(DATA, ROOT),
+    )
+    .await
+    .unwrap();
+    assert_eq!(editing.task.as_ref().unwrap().task_id, edit.task_id);
+    let summary = written(&out);
+    // Only the owning Host of a running Attempt records writes.
+    assert!(
+        store
+            .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+            .await
+            .is_err()
+    );
+    store
+        .start_task(&editor_host, &start(&editing))
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .record_workspace_mount_writes(&other, &record(&editing, vec![summary.clone()]))
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    let mut partial = summary.clone();
+    partial.status = WorkspaceMountWriteStatus::Partial.into();
+    let mut wrong_volume = summary.clone();
+    wrong_volume.volume_id = "s3-data".into();
+    let mut traversal = summary.clone();
+    traversal.files[0].key = "../escape".into();
+    for invalid in [
+        vec![written(&destination)],
+        vec![summary.clone(), summary.clone()],
+        vec![partial],
+        vec![wrong_volume],
+        vec![traversal],
+    ] {
+        assert!(matches!(
+            store
+                .record_workspace_mount_writes(&editor_host, &record(&editing, invalid))
+                .await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    store
+        .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+        .await
+        .unwrap();
+    // A retry of the same summary succeeds; a different one is refused.
+    store
+        .record_workspace_mount_writes(&editor_host, &record(&editing, vec![summary.clone()]))
+        .await
+        .unwrap();
+    let mut changed = summary.clone();
+    changed.skipped = 4;
+    assert!(matches!(
+        store
+            .record_workspace_mount_writes(&editor_host, &record(&editing, vec![changed]))
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    assert_eq!(
+        store
+            .get_task(&edit.task_id)
+            .await
+            .unwrap()
+            .workspace_mount_writes,
+        [AttemptWorkspaceMountWrites {
+            attempt_id: editing.attempt_id.clone(),
+            writes: vec![summary],
+        }]
+    );
+    assert!(
+        store
+            .get_task(&task.task_id)
+            .await
+            .unwrap()
+            .workspace_mount_writes
+            .is_empty()
     );
 
     // A Task without mounts gets no disclosure.

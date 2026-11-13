@@ -75,7 +75,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 68;
+        const SCHEMA_VERSION: i64 = 69;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -197,6 +197,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/sqlite/0067_coordination_safety.sql"),
                 include_str!("../migrations/sqlite/0068_operator_notifications.sql"),
+                include_str!("../migrations/sqlite/0310_workspace_mount_writes.sql"),
             ]
         } else {
             [
@@ -270,6 +271,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/postgresql/0067_coordination_safety.sql"),
                 include_str!("../migrations/postgresql/0068_operator_notifications.sql"),
+                include_str!("../migrations/postgresql/0310_workspace_mount_writes.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -558,7 +560,10 @@ impl Store {
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
-        task_row(&row)
+        let mut task = task_row(&row)?;
+        task.workspace_mount_writes =
+            crate::workspace_mounts::writes_for(&self.pool, task_id).await?;
+        Ok(task)
     }
 
     pub async fn cancel_task(&self, task_id: &str) -> Result<Task> {
@@ -2029,6 +2034,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         output_policy: output_policy_from_row(row)?,
         input_artifacts: crate::task_artifact_inputs::from_row(row)?,
         workspace_selection: row.try_get("workspace_selection")?,
+        workspace_mount_writes: vec![],
     })
 }
 

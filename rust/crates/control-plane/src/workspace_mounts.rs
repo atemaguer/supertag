@@ -7,8 +7,11 @@ use prost::Message;
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{
     v2::*,
-    volumes::file_volume_path,
-    workspace_mounts::{normalize_mounts, overlaps, volume_id},
+    volumes::{file_volume_path, s3_volume_source},
+    workspace_mounts::{
+        mount_actions, mount_harness, normalize_mounts, overlaps, validate_volume, validate_writes,
+        volume_id,
+    },
 };
 use tonic::{Request, Response, Status};
 
@@ -40,29 +43,53 @@ fn missing() -> StoreError {
 }
 
 async fn volume_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<WorkspaceVolume> {
-    let row =
-        sqlx::query("SELECT source,revision FROM supertag_v2_workspace_volumes WHERE volume_id=$1")
-            .bind(id)
-            .fetch_optional(&mut **tx)
-            .await?
-            .ok_or_else(missing)?;
+    let row = sqlx::query(
+        "SELECT source,revision,credential FROM supertag_v2_workspace_volumes WHERE volume_id=$1",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(missing)?;
     Ok(WorkspaceVolume {
         volume_id: id.into(),
         source: row.try_get("source")?,
         revision: row.try_get::<i64, _>("revision")? as u64,
+        credential: row.try_get("credential")?,
     })
 }
 
+/// Whether two Volume sources can reach the same data: file paths by
+/// component (and on macOS by case and Unicode form), S3 sources by bucket
+/// name and nested prefix on any endpoint.
+fn sources_overlap(a: &str, b: &str) -> Result<bool> {
+    let error = |status: tonic::Status| invalid(status.message());
+    match (a.starts_with("s3://"), b.starts_with("s3://")) {
+        (true, true) => {
+            let (a_bucket, a_prefix) = s3_volume_source(a).map_err(error)?;
+            let (b_bucket, b_prefix) = s3_volume_source(b).map_err(error)?;
+            let within = |path: &str, base: &str| {
+                path == base
+                    || path
+                        .strip_prefix(base)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            };
+            Ok(a_bucket == b_bucket && (within(a_prefix, b_prefix) || within(b_prefix, a_prefix)))
+        }
+        (false, false) => Ok(overlaps(
+            &file_volume_path(a).map_err(error)?,
+            &file_volume_path(b).map_err(error)?,
+        )),
+        _ => Ok(false),
+    }
+}
+
 pub(crate) async fn source_allowed(tx: &mut Transaction<'_, Any>, source: &str) -> Result<bool> {
-    let path = file_volume_path(source).map_err(|error| invalid(error.message()))?;
-    let sources: Vec<String> = sqlx::query_scalar(
-        "SELECT source FROM supertag_v2_artifact_volumes WHERE deleted=0 AND source LIKE 'file:%'",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
+    let sources: Vec<String> =
+        sqlx::query_scalar("SELECT source FROM supertag_v2_artifact_volumes WHERE deleted=0")
+            .fetch_all(&mut **tx)
+            .await?;
     for artifact in sources {
-        let artifact = file_volume_path(&artifact).map_err(|error| invalid(error.message()))?;
-        if overlaps(&path, &artifact) {
+        if sources_overlap(source, &artifact)? {
             return Ok(false);
         }
     }
@@ -73,17 +100,12 @@ pub(crate) async fn allow_artifact_registration(
     tx: &mut Transaction<'_, Any>,
     source: &str,
 ) -> Result<()> {
-    if !source.starts_with("file://") {
-        return Ok(());
-    }
-    let artifact = file_volume_path(source).map_err(|error| invalid(error.message()))?;
     let sources: Vec<String> =
         sqlx::query_scalar("SELECT source FROM supertag_v2_workspace_volumes")
             .fetch_all(&mut **tx)
             .await?;
-    for source in sources {
-        let source = file_volume_path(&source).map_err(|error| invalid(error.message()))?;
-        if overlaps(&source, &artifact) {
+    for workspace in sources {
+        if sources_overlap(&workspace, source)? {
             return Err(StoreError::FailedPrecondition(
                 "artifact Volume overlaps a Workspace data Volume".into(),
             ));
@@ -131,20 +153,12 @@ pub(crate) async fn admission_in(
         return Ok(());
     };
     if spec.github_source.is_some()
-        || !matches!(
-            HarnessKind::try_from(harness),
-            Ok(HarnessKind::Codex | HarnessKind::Unspecified)
-        )
-        || !allowed.iter().any(|action| action == "files:read")
-        || allowed.iter().any(|action| {
-            matches!(
-                action.as_str(),
-                "commands:execute" | "files:write" | "web:fetch"
-            )
-        })
+        || !HarnessKind::try_from(harness)
+            .is_ok_and(|kind| kind == HarnessKind::Unspecified || mount_harness(kind))
+        || !mount_actions(&spec.mounts, allowed)
     {
         return Err(StoreError::FailedPrecondition(
-            "Workspace mounts require local read-only Codex execution".into(),
+            "Workspace mounts require local Codex or Claude Code execution that reads files, writes files for every read-write copy, and neither runs commands nor fetches from the web".into(),
         ));
     }
     for mount in &mut spec.mounts {
@@ -196,7 +210,8 @@ impl Store {
         if !volume_id(&input.volume_id) {
             return Err(invalid("invalid Workspace Volume ID"));
         }
-        file_volume_path(&input.source).map_err(|error| invalid(error.message()))?;
+        validate_volume(&input.source, &input.credential)
+            .map_err(|error| invalid(error.message()))?;
         let (mut tx, _) = self.write().await?;
         if !source_allowed(&mut tx, &input.source).await? {
             return Err(StoreError::FailedPrecondition(
@@ -214,20 +229,23 @@ impl Store {
                 "Workspace Volume revision changed".into(),
             ));
         }
-        if let Some(old) = old.filter(|old| old.source == input.source) {
+        if let Some(old) =
+            old.filter(|old| old.source == input.source && old.credential == input.credential)
+        {
             return Ok(old);
         }
         let revision = revision
             .checked_add(1)
             .and_then(|n| i64::try_from(n).ok())
             .ok_or_else(|| invalid("Workspace Volume revision exhausted"))?;
-        sqlx::query("INSERT INTO supertag_v2_workspace_volumes (volume_id,source,revision) VALUES ($1,$2,$3) ON CONFLICT(volume_id) DO UPDATE SET source=excluded.source, revision=excluded.revision")
-            .bind(&input.volume_id).bind(&input.source).bind(revision).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_workspace_volumes (volume_id,source,revision,credential) VALUES ($1,$2,$3,$4) ON CONFLICT(volume_id) DO UPDATE SET source=excluded.source, revision=excluded.revision, credential=excluded.credential")
+            .bind(&input.volume_id).bind(&input.source).bind(revision).bind(&input.credential).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(WorkspaceVolume {
             volume_id: input.volume_id.clone(),
             source: input.source.clone(),
             revision: revision as u64,
+            credential: input.credential.clone(),
         })
     }
 
@@ -283,6 +301,86 @@ impl Store {
             protected_file_sources: sources,
         })
     }
+
+    /// Record what a running Attempt's read-write copies wrote back. The
+    /// first record stands; an equal retry succeeds and a different one is
+    /// refused.
+    pub async fn record_workspace_mount_writes(
+        &self,
+        host: &HostAuthority,
+        request: &RecordWorkspaceMountWritesRequest,
+    ) -> Result<()> {
+        let (mut tx, order) = self.write().await?;
+        let row = crate::store::owned(
+            &mut tx,
+            host,
+            &request.task_id,
+            &request.attempt_id,
+            &request.lease_token,
+        )
+        .await?;
+        crate::artifact_captures::running(&row, self.execution_now_ms())?;
+        let task = crate::store::task_row(&row)?;
+        let mounts = task
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.mounts.as_slice())
+            .unwrap_or_default();
+        validate_writes(&request.writes, mounts).map_err(|error| invalid(error.message()))?;
+        let bytes = Writes {
+            entries: request.writes.clone(),
+        }
+        .encode_to_vec();
+        sqlx::query("INSERT INTO supertag_v2_workspace_mount_writes (task_id,attempt_id,recorded_order,writes) VALUES ($1,$2,$3,$4) ON CONFLICT(task_id,attempt_id) DO NOTHING")
+            .bind(&request.task_id)
+            .bind(&request.attempt_id)
+            .bind(order)
+            .bind(&bytes)
+            .execute(&mut *tx)
+            .await?;
+        let stored: Vec<u8> = sqlx::query_scalar(
+            "SELECT writes FROM supertag_v2_workspace_mount_writes WHERE task_id=$1 AND attempt_id=$2",
+        )
+        .bind(&request.task_id)
+        .bind(&request.attempt_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if stored != bytes {
+            return Err(StoreError::Conflict(
+                "Workspace mount writes were already recorded differently".into(),
+            ));
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+#[derive(Message)]
+struct Writes {
+    #[prost(message, repeated, tag = "1")]
+    entries: Vec<WorkspaceMountWrite>,
+}
+
+/// Every Attempt's recorded write summaries, oldest first.
+pub(crate) async fn writes_for(
+    pool: &sqlx::Pool<Any>,
+    task_id: &str,
+) -> Result<Vec<AttemptWorkspaceMountWrites>> {
+    let rows = sqlx::query(
+        "SELECT attempt_id,writes FROM supertag_v2_workspace_mount_writes WHERE task_id=$1 ORDER BY recorded_order",
+    )
+    .bind(task_id)
+    .fetch_all(pool)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(AttemptWorkspaceMountWrites {
+                attempt_id: row.try_get("attempt_id")?,
+                writes: crate::policy::decode::<Writes>(&row.try_get::<Vec<u8>, _>("writes")?)?
+                    .entries,
+            })
+        })
+        .collect()
 }
 
 #[tonic::async_trait]
@@ -324,5 +422,16 @@ impl attempt_workspace_mounts_server::AttemptWorkspaceMounts for ControlPlane {
                 .workspace_mount_preflight(&host, request.get_ref())
                 .await?,
         ))
+    }
+
+    async fn record_writes(
+        &self,
+        request: Request<RecordWorkspaceMountWritesRequest>,
+    ) -> std::result::Result<Response<RecordWorkspaceMountWritesResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        self.store
+            .record_workspace_mount_writes(&host, request.get_ref())
+            .await?;
+        Ok(Response::new(RecordWorkspaceMountWritesResponse {}))
     }
 }

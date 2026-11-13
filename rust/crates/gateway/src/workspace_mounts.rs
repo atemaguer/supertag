@@ -50,4 +50,16 @@ impl AttemptWorkspaceMounts for Gateway {
         })
         .await
     }
+
+    async fn record_writes(
+        &self,
+        request: Request<RecordWorkspaceMountWritesRequest>,
+    ) -> Result<Response<RecordWorkspaceMountWritesResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async move {
+            AttemptWorkspaceMountsClient::new(channel)
+                .record_writes(request)
+                .await
+        })
+        .await
+    }
 }
