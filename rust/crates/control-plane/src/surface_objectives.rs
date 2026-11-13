@@ -5,7 +5,9 @@
 //! `@SuperTag objective <outcome>` makes the thread the new Objective's home.
 //! In a home thread, `@SuperTag approve`, `pause`, and `resume` act on that
 //! Objective, and any other message is the Objective's next turn. Every
-//! Objective turn answers in the home thread.
+//! Objective turn answers in the home thread. Each action on an Objective is
+//! audited under the person who wrote the message, in the transaction that
+//! accepts the message.
 use sqlx::{Acquire, Any, Row, Transaction};
 use supertag_protocol::v2::{
     ObjectiveActionRequest, ObjectiveStatus, ReviewObjectiveRequest, Task, TaskState,
@@ -97,6 +99,28 @@ pub(crate) struct Message<'a> {
     /// The verified person who wrote it, as `<provider>:<user ID>`. Objective
     /// actions are recorded and receipted under this principal.
     pub actor: &'a str,
+    /// The connector RPC that accepted the message, recorded with its audit entries.
+    pub method: &'a str,
+}
+
+/// Records a person's action on an Objective in the transaction that accepts it.
+async fn audit_in(
+    tx: &mut Transaction<'_, Any>,
+    message: &Message<'_>,
+    action: &str,
+    objective_id: &str,
+    failure: Option<&str>,
+    now_ms: i64,
+) -> Result<()> {
+    let record = crate::operator_access::AuditRecord {
+        actor: message.actor.into(),
+        action: format!("objective.{action}"),
+        target: format!("Objective/{objective_id}"),
+        succeeded: failure.is_none(),
+        code: failure.unwrap_or("OK").into(),
+        method: message.method.into(),
+    };
+    crate::audit::insert_in(tx, None, now_ms, record, "Objective").await
 }
 
 pub(crate) enum Handled {
@@ -198,10 +222,15 @@ pub(crate) async fn handle_in(
             {
                 Ok(task) => {
                     savepoint.commit().await?;
+                    if task.is_some() {
+                        audit_in(tx, &message, "message", id, None, now_ms).await?;
+                    }
                     return Ok(Handled::Work(task));
                 }
                 Err(StoreError::FailedPrecondition(reason)) => {
                     savepoint.rollback().await?;
+                    let code = Some("FAILED_PRECONDITION");
+                    audit_in(tx, &message, "message", id, code, now_ms).await?;
                     format!("Objective {id} did not accept this message: {reason}")
                 }
                 Err(error) => return Err(error),
@@ -309,13 +338,21 @@ async fn directive_in(
     };
     let after = match result {
         Ok(after) => after,
-        Err(StoreError::FailedPrecondition(reason) | StoreError::InvalidArgument(reason)) => {
+        Err(error @ (StoreError::FailedPrecondition(_) | StoreError::InvalidArgument(_))) => {
             savepoint.rollback().await?;
+            let code = if matches!(error, StoreError::FailedPrecondition(_)) {
+                "FAILED_PRECONDITION"
+            } else {
+                "INVALID_ARGUMENT"
+            };
+            let reason = error.to_string();
+            audit_in(tx, message, action, id, Some(code), now_ms).await?;
             return Ok(format!("Objective {id} was not changed: {reason}."));
         }
         Err(error) => return Err(error),
     };
     savepoint.commit().await?;
+    audit_in(tx, message, action, id, None, now_ms).await?;
     let changed = after.revision != before.revision;
     Ok(match action {
         "pause" if changed => format!(

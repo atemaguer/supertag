@@ -13,7 +13,7 @@ use supertag_protocol::{
 use tokio::time::{self, Instant};
 use tonic::{Request, Response, Status};
 
-use super::Bridge;
+use super::{Bridge, bounded};
 use crate::artifact_snapshots::Capture;
 
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(65);
@@ -59,8 +59,19 @@ impl HarnessArtifacts for Bridge {
     ) -> Result<Response<CapturedArtifact>, Status> {
         self.authenticate(&request)?;
         self.require_attached()?;
-        let input = request.into_inner();
+        let mut input = request.into_inner();
         validate_capture_request(&input)?;
+        // The description is harness text the Control Plane stores and shows, so it is redacted
+        // like every other text a harness sends upstream (`redactDiagnostics` on
+        // `artifact.created` in packages/runtime/sdk/src/event-redaction.ts). Redaction can lengthen
+        // a short secret, so each field is kept within the limit the harness was held to.
+        if let Some(description) = input.description.as_mut() {
+            description.title = bounded(self.redact(&description.title), 200);
+            description.kind = bounded(self.redact(&description.kind), 64);
+            if let Some(summary) = description.summary.as_mut() {
+                *summary = bounded(self.redact(summary), 4096);
+            }
+        }
         let accepted = self.assignment.task.as_ref().expect("validated assignment");
         if !accepted
             .allowed_actions

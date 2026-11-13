@@ -15,6 +15,7 @@ mod workspace_tools;
 pub use workspace_tools::{MAX_WORKSPACE_TOOL_OUTPUT_BYTES, validate_workspace_operation};
 pub mod mcp;
 pub mod negotiation;
+pub mod redaction;
 pub mod shared_execution;
 
 pub mod v2 {

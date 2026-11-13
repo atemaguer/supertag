@@ -18,9 +18,11 @@ pub async fn exercise(bootstrap: &AdapterBootstrap, run: &HarnessRun) -> Result<
                 HarnessCaptureArtifactRequest {
                     operation_id: "source-capture".into(),
                     description: Some(ArtifactDescription {
-                        title: "Reusable evidence".into(),
+                        // Credentials in the description are redacted before it leaves the
+                        // Worker Host.
+                        title: "Reusable evidence from https://bot:url-password-77@git.example/repo.git".into(),
                         kind: "report".into(),
-                        summary: None,
+                        summary: Some("auth Basic dXNlcjpwYXNzd29yZA==".into()),
                     }),
                     paths: vec!["evidence.txt".into(), "not-selected.txt".into()],
                     native_session_id: None,

@@ -93,7 +93,7 @@ impl HarnessWorkstreams for Bridge {
         let upstream = PostAttemptWorkstreamRequest {
             attempt: Some(self.attempt()),
             operation_id: input.operation_id,
-            body: input.body,
+            body: self.redact(&input.body),
             to_tag_ids: input.to_tag_ids,
         };
         let post = self
@@ -132,7 +132,7 @@ impl HarnessMailbox for Bridge {
             attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             recipient_tag_id: input.recipient_tag_id,
-            text: input.text,
+            text: self.redact(&input.text),
             review: input.review,
         };
         let sent = self

@@ -38,7 +38,7 @@ impl HarnessWorkSessions for Bridge {
             attempt: Some(self.attempt()),
             operation_id: input.operation_id,
             work_session_id: input.work_session_id,
-            message: input.message,
+            message: self.redact(&input.message),
         };
         let response = self
             .retry(upstream, |request| {
@@ -64,7 +64,7 @@ impl HarnessWorkSessions for Bridge {
         let upstream = AskWorkSessionQuestionRequest {
             attempt: Some(self.attempt()),
             operation_id: input.operation_id,
-            text: input.text,
+            text: self.redact(&input.text),
         };
         let response = self
             .retry(upstream, |request| {
@@ -92,8 +92,8 @@ impl HarnessWorkSessions for Bridge {
         let upstream = StartWorkSessionRequest {
             attempt: Some(self.attempt()),
             operation_id: input.operation_id,
-            title: input.title,
-            instruction: input.instruction,
+            title: self.redact(&input.title),
+            instruction: self.redact(&input.instruction),
             workspace_id: input.workspace_id,
             target_tag_id: input.target_tag_id,
         };

@@ -15,6 +15,7 @@ pub mod linear;
 mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
+mod metrics;
 pub mod microsoft_teams;
 mod operator_access;
 mod ownership;
