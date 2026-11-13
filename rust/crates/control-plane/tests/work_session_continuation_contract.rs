@@ -545,18 +545,43 @@ async fn terminal_and_role_boundaries(url: &str) {
     store.close().await;
 }
 
-#[tokio::test]
-async fn sqlite_work_session_continuation() {
-    let directory = tempfile::tempdir().unwrap();
-    contract(format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("continue.db").display()
-    ))
-    .await;
+/// Runs `test` on its own thread with an 8 MiB stack. Debug builds of this contract nest the
+/// store's largest futures (claims, admission, Objective sweeps) deeper than a test thread's
+/// default 2 MiB allows.
+fn on_large_stack<F: std::future::Future<Output = ()>>(test: impl FnOnce() -> F + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(test());
+        })
+        .unwrap()
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 }
-#[tokio::test]
+
+#[test]
+fn sqlite_work_session_continuation() {
+    on_large_stack(|| async {
+        let directory = tempfile::tempdir().unwrap();
+        contract(format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("continue.db").display()
+        ))
+        .await;
+    });
+}
+
+#[test]
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_work_session_continuation() {
+fn postgres_work_session_continuation() {
+    on_large_stack(postgres_contract);
+}
+
+async fn postgres_contract() {
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .expect("dedicated PostgreSQL URL file required");
     let admin_url = std::fs::read_to_string(path).unwrap();
