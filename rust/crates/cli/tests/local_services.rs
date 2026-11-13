@@ -1802,3 +1802,189 @@ async fn sqlite_replaced_shared_host_generation_fences_every_lane() -> Result<()
 async fn postgres_replaced_shared_host_generation_fences_every_lane() -> Result<()> {
     with_database(true, replaced_shared_host_fences_every_lane).await
 }
+
+/// One recorded webhook POST: its Authorization header and JSON body.
+async fn webhook_mock() -> Result<(
+    String,
+    std::sync::Arc<tokio::sync::Mutex<Vec<(String, Value)>>>,
+)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/hook", listener.local_addr()?);
+    let requests = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let parsed = loop {
+                let Ok(count) = stream.read(&mut buffer).await else {
+                    break None;
+                };
+                if count == 0 {
+                    break None;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+                let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
+                let head = String::from_utf8_lossy(&bytes[..end]).to_string();
+                let header = |name: &str| {
+                    head.lines().find_map(|line| {
+                        let (key, value) = line.split_once(':')?;
+                        key.eq_ignore_ascii_case(name)
+                            .then(|| value.trim().to_owned())
+                    })
+                };
+                let length: usize = header("content-length")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                if bytes.len() >= end + 4 + length {
+                    break Some((
+                        header("authorization").unwrap_or_default(),
+                        serde_json::from_slice(&bytes[end + 4..end + 4 + length])
+                            .unwrap_or(Value::Null),
+                    ));
+                }
+            };
+            if let Some(request) = parsed {
+                recorded.lock().await.push(request);
+            }
+            let _ = stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .await;
+        }
+    });
+    Ok((url, requests))
+}
+
+/// TypeScript parity: `notify` on the Control Plane service of `supertag.yaml`
+/// (`apps/cli/src/notification-command.ts`, `tests/operator-channel-runtime.test.ts`).
+// The webhook mock must answer while this test blocks on CLI processes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_notify_destinations_tell_the_operator_about_a_question() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    let file = temp.path().join("supertag.yaml");
+    let (url, hooks) = webhook_mock().await?;
+    let desktop = temp.path().join("desktop.log");
+    let notifier = temp.path().join("desktop-notifier");
+    fs::write(
+        &notifier,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s\\n--\\n' \"$1\" \"$2\" >> '{}'\n",
+            desktop.display()
+        ),
+    )?;
+    fs::set_permissions(&notifier, fs::Permissions::from_mode(0o700))?;
+    yaml(
+        &file,
+        &serde_json::json!({"version":1,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],
+                "notify":[format!("webhook:{url}#hook-token"),"desktop"]},
+            "builder":{"type":"host","adapter":ADAPTER,"adapter-args":["--objective-question"],"concurrency":1}
+        },"secrets":{"hook-token":{"environment":"FIXTURE_HOOK_SECRET"}}}),
+    )?;
+    // An invalid destination stops startup without echoing the webhook URL.
+    let invalid = temp.path().join("invalid.yaml");
+    yaml(
+        &invalid,
+        &serde_json::json!({"version":1,"services":{
+            "control-plane":{"type":"control-plane","notify":"webhook:http://hooks.example/private-token"}
+        }}),
+    )?;
+    let output = Command::new(BIN)
+        .args(["up", "--foreground", "--state-directory"])
+        .arg(temp.path().join("invalid-state"))
+        .arg("--file")
+        .arg(&invalid)
+        .env_clear()
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    ensure!(!output.status.success() && stderr.contains("notify webhook must contain"));
+    ensure!(!stderr.contains("private-token"), "{stderr}");
+
+    let notifier_path = notifier.to_str().context("notifier path")?;
+    let mut supervisor = Process::spawn(
+        &state,
+        Some(&file),
+        &[
+            ("FIXTURE_HOOK_SECRET", "synthetic-hook-secret"),
+            ("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1"),
+            ("SUPERTAG_TEST_DESKTOP_NOTIFIER", notifier_path),
+        ],
+    )?;
+    supervisor.ready()?;
+    let cli = |args: &[&str]| -> Result<String> {
+        let output = Command::new(BIN)
+            .arg(args[0])
+            .arg("--state-directory")
+            .arg(&state)
+            .args(&args[1..])
+            .env_clear()
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(String::from_utf8(output.stdout)?)
+    };
+    // `test` takes the connection after its subcommand.
+    let output = Command::new(BIN)
+        .args(["test", "notification", "--state-directory"])
+        .arg(&state)
+        .env_clear()
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)?,
+        "webhook: delivered\ndesktop: delivered\n"
+    );
+    cli(&[
+        "put-tag",
+        "engineer",
+        "--instructions",
+        "Release engineering",
+    ])?;
+    cli(&[
+        "objective",
+        "create",
+        "release",
+        "--owner",
+        "engineer",
+        "Ask which branch to release",
+    ])?;
+    let message = "Objective release needs you: Objective release waits on your answer\n`supertag describe objective release`";
+    timeout(WAIT, async {
+        loop {
+            let lines = fs::read_to_string(&desktop).unwrap_or_default();
+            if hooks.lock().await.len() == 2 && lines.matches("\n--\n").count() == 2 {
+                break;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .context("configured destinations were not notified")?;
+    let hooks = hooks.lock().await;
+    assert!(
+        hooks
+            .iter()
+            .all(|(auth, _)| auth == "Bearer synthetic-hook-secret")
+    );
+    assert_eq!(
+        hooks[0].1["text"],
+        "SuperTag test notification\n`supertag inbox list`"
+    );
+    assert_eq!(hooks[1].1["text"], message);
+    assert_eq!(hooks[1].1["kinds"], serde_json::json!(["question"]));
+    assert!(
+        fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
+    );
+    supervisor.stop().await
+}

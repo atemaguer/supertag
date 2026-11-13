@@ -222,6 +222,8 @@ impl Children {
         // Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
         gateway_workspace: Option<&Environment>,
         bootstrap_host: bool,
+        notify: &crate::local_config::Notifications,
+        environment: &Environment,
     ) -> Result<String> {
         let database = directory.join("runtime.sqlite3");
         open_private_file(&database, true)?;
@@ -257,6 +259,24 @@ impl Children {
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+        for destination in &notify.destinations {
+            gateway.arg("--notify").arg(destination);
+        }
+        for (name, secret) in &notify.secrets {
+            // A missing secret fails only its own destination when it sends.
+            if let Ok(value) = secret.read(environment) {
+                gateway.env(crate::notify_secret_variable(name), value);
+            }
+        }
+        #[cfg(feature = "test-fixtures")]
+        for name in [
+            "SUPERTAG_TEST_DESKTOP_NOTIFIER",
+            "SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP",
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                gateway.env(name, value);
+            }
+        }
         if let Some(environment) = gateway_workspace {
             gateway
                 .arg("--github-workspace-directory")
@@ -303,6 +323,8 @@ impl Children {
                     .uses_gateway_workspace()
                     .then_some(&Environment::default()),
                 true,
+                &crate::local_config::Notifications::default(),
+                &Environment::default(),
             )
             .await?;
         let mut host = command(executable, "worker-host");
@@ -1182,6 +1204,8 @@ pub async fn configured(
                         .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
                         .then_some(&*environment),
                     false,
+                    &plane.notify,
+                    &environment,
                 )
                 .await?;
             write_private(

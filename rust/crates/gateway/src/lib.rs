@@ -16,6 +16,7 @@ mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
 pub mod microsoft_teams;
+pub mod notifications;
 mod operator_access;
 mod ownership;
 mod placement;
