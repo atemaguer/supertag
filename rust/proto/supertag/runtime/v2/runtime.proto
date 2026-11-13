@@ -1317,6 +1317,7 @@ message HarnessExecutionProfile {
   SharedExecutionCapability shared_execution = 6;
   bool declared_task_outputs = 7;
   bool task_artifact_inputs = 8;
+  repeated WorkspaceMountCapability workspace_mounts = 9;
 }
 
 enum SharedExecutionTool {
@@ -1664,6 +1665,27 @@ message WorkspaceSpec {
   string base_commit = 2;
   // Set by admission from the catalog, never accepted from PutTag input.
   GithubWorkspace github_source = 3;
+  repeated WorkspaceCopyMount mounts = 4;
+}
+
+message WorkspaceCopyMount {
+  string volume_id = 1;
+  string destination = 2;
+  uint64 max_bytes = 3;
+  // Resolved and frozen by the Control Plane at Task admission.
+  WorkspaceVolume volume = 4;
+}
+
+message WorkspaceMountCapability {
+  string volume_id = 1;
+  string source = 2;
+  string destination_root = 3;
+}
+
+message WorkspaceVolume {
+  string volume_id = 1;
+  string source = 2;
+  uint64 revision = 3;
 }
 
 message GithubWorkspaceBundle {

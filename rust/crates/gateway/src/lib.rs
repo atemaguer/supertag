@@ -24,6 +24,7 @@ mod teams;
 pub mod transfers;
 mod watch;
 mod work_sessions;
+mod workspace_mounts;
 
 pub use watch::GatewayWatch;
 

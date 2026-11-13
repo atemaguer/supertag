@@ -218,6 +218,7 @@ pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> 
             workspace_id,
             base_commit,
             github_source,
+            mounts: crate::workspace_mounts::decode(row.try_get("workspace_mounts")?)?,
         })),
         (None, None) => Ok(None),
         _ => Err(sqlx::Error::Protocol("incomplete stored workspace policy".into()).into()),

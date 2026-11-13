@@ -15,6 +15,7 @@ mod remote_provider;
 mod shared_execution;
 mod task_artifact_inputs;
 mod task_outputs;
+mod workspace_mounts;
 mod workspaces;
 
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
@@ -24,6 +25,7 @@ pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::McpCatalog;
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
+pub use workspace_mounts::WorkspaceMounts;
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
@@ -75,6 +77,7 @@ pub struct HostOptions {
     pub mcp_catalog: McpCatalog,
     pub artifact_source: Option<ArtifactSourceConfig>,
     pub artifact_peers: ArtifactPeers,
+    pub workspace_mounts: WorkspaceMounts,
 }
 
 #[derive(Clone)]
@@ -97,6 +100,10 @@ pub(crate) struct CoordinationClients {
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
     artifact_source: Option<artifact_direct::SourceStorage>,
     artifact_peers: ArtifactPeers,
+    workspace_mounts:
+        supertag_protocol::v2::attempt_workspace_mounts_client::AttemptWorkspaceMountsClient<
+            InterceptedService<Channel, HostHeaders>,
+        >,
     artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -228,6 +235,30 @@ pub async fn run(
     );
     let shutdown = shutdown.child_token();
     let journal = Arc::new(Journal::open(&options.state_directory)?);
+    if !options.workspace_mounts.capabilities().is_empty() {
+        ensure!(
+            options.harness == HarnessKind::Codex
+                && options
+                    .workspace
+                    .as_ref()
+                    .and_then(workspaces::WorkspaceMapping::local_root)
+                    .is_some()
+                && options.remote_provider.is_none()
+                && options.shared_execution.is_none(),
+            "Workspace copy mounts require a local Codex Worker Host"
+        );
+        options.workspace_mounts.validate_protected(
+            &options.state_directory,
+            options
+                .workspace
+                .as_ref()
+                .and_then(workspaces::WorkspaceMapping::local_root),
+            options
+                .artifact_source
+                .as_ref()
+                .map(|source| source.directory.as_path()),
+        )?;
+    }
     let workspaces =
         workspaces::Workspaces::new(&options.state_directory, options.workspace.clone())?;
     // Terminal proof is durable; finishing local cleanup needs neither the source
@@ -846,6 +877,7 @@ fn cleanup_terminal(
     attempt: &Attempt,
     prepared: Option<&workspaces::PreparedWorkspace>,
 ) -> Result<()> {
+    workspace_mounts::cleanup(state_directory, &attempt.attempt_id)?;
     if let Some(prepared) = prepared {
         workspaces.discard(prepared)?;
     }
@@ -1063,6 +1095,35 @@ async fn run_assignment(
             adapter::failed("Worker Host cannot materialize accepted Task artifact inputs"),
         );
     }
+    let mount_pins = task
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.mounts.clone())
+        .unwrap_or_default();
+    if !mount_pins.is_empty() {
+        let check = coordination
+            .workspace_mounts
+            .clone()
+            .preflight(request(attempt.inspect(), token)?)
+            .await;
+        let permitted = supertag_protocol::workspace_mounts::supports(
+            &task,
+            options.harness,
+            &options.execution_profile,
+        ) && check.ok().is_some_and(|response| {
+            options
+                .workspace_mounts
+                .preflight(&mount_pins, response.into_inner())
+                .is_ok()
+        });
+        if !permitted {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Workspace Volume path admission failed"),
+            );
+        }
+    }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
     {
         Ok(Ok(checkpoint)) => checkpoint,
@@ -1190,6 +1251,59 @@ async fn run_assignment(
             }
         }
     }
+    let mounted = if mount_pins.is_empty() {
+        None
+    } else {
+        let checkout = workspace
+            .as_ref()
+            .context("Workspace mount checkout is missing")?;
+        journal.save(&Entry::PreparingInputs {
+            attempt: attempt.clone(),
+            prepared: Box::new(checkout.clone()),
+        })?;
+        let state = options.state_directory.clone();
+        let checkout = checkout.checkout.path.clone();
+        let attempt_id = attempt.attempt_id.clone();
+        let mappings = options.workspace_mounts.clone();
+        let cancel = shutdown.child_token();
+        let copy_cancel = cancel.clone();
+        let operation = async {
+            let current = coordination
+                .workspace_mounts
+                .clone()
+                .preflight(request(attempt.inspect(), token)?)
+                .await?
+                .into_inner();
+            mappings.preflight(&mount_pins, current).map_err(|_| {
+                Status::failed_precondition("Workspace Volume path admission failed")
+            })?;
+            tokio::task::spawn_blocking(move || {
+                mappings.stage(&state, &attempt_id, &checkout, &mount_pins, &copy_cancel)
+            })
+            .await
+            .map_err(|_| Status::internal("Workspace Volume staging failed"))?
+            .map_err(|_| Status::failed_precondition("Workspace Volume staging failed"))
+        };
+        match Box::pin(with_authority(
+            host, &attempt, token, shutdown, &cancel, operation,
+        ))
+        .await
+        {
+            Ok((mounted, expires)) => {
+                task.instructions.push_str(&mounted.instructions()?);
+                valid_until = expires;
+                Some(mounted)
+            }
+            Err(_) if shutdown.is_cancelled() => return Ok(()),
+            Err(_) => {
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed("Workspace Volume staging failed"),
+                );
+            }
+        }
+    };
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
         prepared: workspace
@@ -1409,6 +1523,7 @@ async fn run_assignment(
             attempt.task_id, attempt.attempt_id
         )
     });
+    drop(mounted);
     if let Some(mcp) = mcp {
         mcp.close().await;
     }

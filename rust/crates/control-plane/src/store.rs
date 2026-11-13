@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 54;
+        const SCHEMA_VERSION: i64 = 55;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -176,6 +176,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0052_artifact_volume_fallback.sql"),
                 include_str!("../migrations/sqlite/0053_manifest_relationships.sql"),
                 include_str!("../migrations/sqlite/0054_direct_artifact_transfer.sql"),
+                include_str!("../migrations/sqlite/0055_workspace_volume_mounts.sql"),
             ]
         } else {
             [
@@ -233,6 +234,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0052_artifact_volume_fallback.sql"),
                 include_str!("../migrations/postgresql/0053_manifest_relationships.sql"),
                 include_str!("../migrations/postgresql/0054_direct_artifact_transfer.sql"),
+                include_str!("../migrations/postgresql/0055_workspace_volume_mounts.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -342,7 +344,7 @@ impl Store {
             tag_id,
             instructions,
             mut allowed_actions,
-            workspace,
+            mut workspace,
             harness_kind,
             approval_rules,
             execution,
@@ -397,9 +399,10 @@ impl Store {
             }
         }
         crate::github_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
+        crate::workspace_mounts::configure_in(transaction, &mut workspace).await?;
         let display_name =
             crate::tags::active_name_in(transaction, tag_id, display_name.as_deref()).await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name RETURNING revision")
+        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -407,6 +410,7 @@ impl Store {
             .bind(stored_rules)
             .bind(execution.as_ref().map(Message::encode_to_vec))
             .bind(&display_name)
+            .bind(crate::workspace_mounts::encode(workspace.as_ref()))
             .fetch_one(&mut **transaction).await?;
         Ok(Tag {
             tag_id: tag_id.into(),
@@ -785,6 +789,11 @@ impl Store {
             ));
         }
         if state == TaskState::Claimed as i64 {
+            if !crate::workspace_mounts::current_in(&mut transaction, &task_row(&row)?).await? {
+                return Err(StoreError::FailedPrecondition(
+                    "accepted Workspace Volume changed before start".into(),
+                ));
+            }
             if !crate::objectives::objective_task_can_start_in(
                 &mut transaction,
                 &task_row(&row)?,
@@ -1260,7 +1269,7 @@ async fn insert_task_options(
             "declared Task outputs require a Workspace and accepted file read access".into(),
         ));
     }
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,workspace_mounts,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await? {
         let prior_policy = previous.try_get::<Option<Vec<u8>>,_>("policy_snapshot")?.as_deref()
             .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
@@ -1372,6 +1381,13 @@ async fn tag_policy_in(
     )
     .await?;
     crate::github_workspaces::admission_in(transaction, &mut workspace, &policy.snapshot).await?;
+    crate::workspace_mounts::admission_in(
+        transaction,
+        &mut workspace,
+        &policy.allowed_actions,
+        policy.harness_kind,
+    )
+    .await?;
     let accepted = AcceptedTag {
         revision: tag.try_get("revision")?,
         workspace,
@@ -1556,7 +1572,7 @@ async fn insert_accepted_task(
     } = accepted;
     let selection = execution::select(&policy.snapshot, requested_execution)?;
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection,workspace_github_source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection,workspace_github_source,workspace_mounts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
         .bind(revision).bind(TaskState::Queued as i64).bind(order)
@@ -1568,6 +1584,7 @@ async fn insert_accepted_task(
         .bind(policy.effective_digest)
         .bind(selection.encode_to_vec())
         .bind(workspace.as_ref().and_then(|spec| spec.github_source.as_ref()).map(Message::encode_to_vec).unwrap_or_default())
+        .bind(crate::workspace_mounts::encode(workspace.as_ref()))
         .execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
 }
@@ -1585,9 +1602,9 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)

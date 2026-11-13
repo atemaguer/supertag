@@ -199,6 +199,7 @@ impl AdapterOptions {
                 HarnessKind::Codex | HarnessKind::ClaudeCode
             ),
             task_artifact_inputs: false,
+            workspace_mounts: vec![],
         })
     }
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {
