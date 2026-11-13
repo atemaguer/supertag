@@ -8,6 +8,8 @@ pub(crate) struct Policy {
     pub(crate) commands: bool,
     pub(crate) search: bool,
     pub(crate) network: bool,
+    /// Read-write Workspace copies outside the checkout the Task may change.
+    pub(crate) writable_roots: Vec<PathBuf>,
 }
 
 impl Policy {
@@ -35,6 +37,7 @@ impl Policy {
             commands: has("commands:execute"),
             search: has("web:search"),
             network: has("web:fetch"),
+            writable_roots: vec![],
         };
         ensure!(
             !policy.write || disposable,
@@ -146,17 +149,24 @@ pub(crate) fn arguments(
                 .map(str::to_owned),
             );
         }
-        if let Some(directory) = protected_git_directory(workspace)? {
-            let directory = serde_json::to_string(
-                directory
-                    .to_str()
-                    .context("common Git path must be UTF-8")?,
-            )?;
+        let entries = filesystem(workspace, policy)?;
+        if !entries.is_empty() {
+            let entries = entries
+                .iter()
+                .map(|(path, access)| {
+                    Ok(format!("{} = \"{access}\"", serde_json::to_string(path)?))
+                })
+                .collect::<Result<Vec<_>>>()?;
             configuration.push(format!(
-                "permissions.supertag.filesystem={{ {directory} = \"read\" }}"
+                "permissions.supertag.filesystem={{ {} }}",
+                entries.join(", ")
             ));
         }
     } else {
+        ensure!(
+            policy.writable_roots.is_empty(),
+            "Codex read-write Workspace copies require files:write"
+        );
         configuration.push("sandbox_mode=\"read-only\"".into());
     }
     for value in configuration {
@@ -167,16 +177,28 @@ pub(crate) fn arguments(
 
 /// Reapply the current Task's policy when resuming a native thread. Native
 /// history cannot select the new Attempt's model, tools, or sandbox.
-pub(crate) fn thread_parameters(workspace: &Path, args: &[String]) -> Result<serde_json::Value> {
+pub(crate) fn thread_parameters(
+    workspace: &Path,
+    policy: &Policy,
+    args: &[String],
+) -> Result<serde_json::Value> {
     let mut configuration = serde_json::Map::new();
     for pair in args.windows(2).filter(|pair| pair[0] == "--config") {
         let (key, raw) = pair[1]
             .split_once('=')
             .context("invalid owned Codex configuration")?;
         let value = if key == "permissions.supertag.filesystem" {
-            let path = protected_git_directory(workspace)?
-                .context("protected Git directory is unavailable")?;
-            serde_json::json!({path.to_str().context("common Git path must be UTF-8")?: "read"})
+            let entries = filesystem(workspace, policy)?;
+            ensure!(
+                !entries.is_empty(),
+                "protected Git directory is unavailable"
+            );
+            serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(path, access)| (path, serde_json::Value::from(access)))
+                    .collect(),
+            )
         } else {
             serde_json::from_str(raw).context("invalid owned Codex configuration")?
         };
@@ -194,6 +216,31 @@ pub(crate) fn thread_parameters(workspace: &Path, args: &[String]) -> Result<ser
         params["sandbox"] = sandbox.clone();
     }
     Ok(params)
+}
+
+/// Extra filesystem grants: the Git common directory read-only and each
+/// read-write Workspace copy writable.
+fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static str)>> {
+    let mut entries = vec![];
+    if let Some(directory) = protected_git_directory(workspace)? {
+        entries.push((
+            directory
+                .to_str()
+                .context("common Git path must be UTF-8")?
+                .to_owned(),
+            "read",
+        ));
+    }
+    for root in &policy.writable_roots {
+        ensure!(root.is_absolute(), "Workspace copy path must be absolute");
+        entries.push((
+            root.to_str()
+                .context("Workspace copy path must be UTF-8")?
+                .to_owned(),
+            "write",
+        ));
+    }
+    Ok(entries)
 }
 
 fn protected_git_directory(workspace: &Path) -> Result<Option<PathBuf>> {
@@ -229,4 +276,43 @@ fn protected_git_directory(workspace: &Path) -> Result<Option<PathBuf>> {
             .canonicalize()
             .context("could not resolve common Git directory")?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn actions(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn read_write_copies_are_the_only_extra_writable_roots() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let mut policy = Policy::from_actions(&actions(&["files:read", "files:write"]), true)?;
+        policy.writable_roots = vec![PathBuf::from("/mnt/data \"quoted\"")];
+        let args = arguments(workspace.path(), None, None, &policy)?;
+        assert!(args.contains(
+            &"permissions.supertag.filesystem={ \"/mnt/data \\\"quoted\\\"\" = \"write\" }".into()
+        ));
+        assert!(args.contains(&"permissions.supertag.extends=\":workspace\"".into()));
+        let params = thread_parameters(workspace.path(), &policy, &args)?;
+        assert_eq!(
+            params["config"]["permissions.supertag.filesystem"],
+            serde_json::json!({"/mnt/data \"quoted\"": "write"})
+        );
+        // A read-only Task cannot be given a writable copy.
+        let mut read_only = Policy::from_actions(&actions(&["files:read"]), false)?;
+        read_only.writable_roots = policy.writable_roots.clone();
+        assert!(arguments(workspace.path(), None, None, &read_only).is_err());
+        read_only.writable_roots.clear();
+        let args = arguments(workspace.path(), None, None, &read_only)?;
+        assert!(args.contains(&"sandbox_mode=\"read-only\"".into()));
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.starts_with("permissions.supertag.filesystem"))
+        );
+        Ok(())
+    }
 }

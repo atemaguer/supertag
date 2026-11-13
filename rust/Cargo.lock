@@ -2847,6 +2847,9 @@ name = "supertag-worker-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aws-credential-types",
+ "aws-sigv4",
+ "axum",
  "base64 0.22.1",
  "hmac 0.12.1",
  "libc",
@@ -2864,6 +2867,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tracing",
  "uuid",
 ]
 

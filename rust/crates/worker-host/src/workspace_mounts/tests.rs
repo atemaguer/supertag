@@ -1,6 +1,6 @@
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
-use supertag_protocol::v2::WorkspaceVolume;
+use supertag_protocol::v2::{WorkspaceMountWrite, WorkspaceMountWriteStatus, WorkspaceVolume};
 
 struct Fixture {
     _scratch: tempfile::TempDir,
@@ -78,7 +78,17 @@ impl Fixture {
                 volume_id: "data".into(),
                 source: source_url(&self.source),
                 revision: 1,
+                credential: String::new(),
             }),
+            read_write: false,
+        }
+    }
+
+    fn writable(&self, name: &str, max_bytes: u64) -> WorkspaceCopyMount {
+        WorkspaceCopyMount {
+            read_write: true,
+            max_bytes,
+            ..self.pin(name)
         }
     }
 
@@ -466,6 +476,10 @@ fn recovers_from_crashes_before_and_during_the_ownership_marker() {
             token: token.clone(),
             root_device: identity(&root).unwrap().0,
             root_inode: identity(&root).unwrap().1,
+            volume_id: "data".into(),
+            source: source_url(&fixture.source),
+            read_write: false,
+            max_bytes: 1,
         };
         save_receipt(&receipts.join("0.json"), &entry).unwrap();
         // Also leave the temporary file an interrupted receipt write creates.
@@ -490,6 +504,10 @@ fn recovers_from_crashes_before_and_during_the_ownership_marker() {
         token: uuid::Uuid::new_v4().to_string(),
         root_device: identity(&root).unwrap().0,
         root_inode: identity(&root).unwrap().1,
+        volume_id: "data".into(),
+        source: source_url(&fixture.source),
+        read_write: false,
+        max_bytes: 1,
     };
     save_receipt(&receipts.join("0.json"), &entry).unwrap();
     let staging = fixture.root.join(&entry.staging);
@@ -526,4 +544,408 @@ fn a_restarted_attempt_restages_and_cancellation_leaves_nothing() {
     );
     cleanup(&fixture.state, "cancelled").unwrap();
     assert!(fixture.root_names().is_empty());
+}
+
+fn status(write: &WorkspaceMountWrite) -> WorkspaceMountWriteStatus {
+    WorkspaceMountWriteStatus::try_from(write.status).unwrap()
+}
+
+fn keys(write: &WorkspaceMountWrite) -> Vec<&str> {
+    write.files.iter().map(|file| file.key.as_str()).collect()
+}
+
+#[test]
+fn read_write_copies_write_changed_and_created_files_back_once() {
+    let fixture = fixture();
+    let mounted = fixture
+        .stage("attempt", &[fixture.writable("data", 1024 * 1024)])
+        .unwrap();
+    let copy = fixture.root.join("data");
+    assert!(
+        mounted
+            .instructions()
+            .unwrap()
+            .contains("Read-write Workspace data")
+    );
+    assert_eq!(mode(&copy), 0o700);
+    assert_eq!(mode(&copy.join("nested")), 0o700);
+    assert_eq!(mode(&copy.join("rows.csv")), 0o600);
+    // The Task changes one file, creates two, deletes one, adds a link,
+    // and even removes the ownership marker.
+    fs::write(copy.join("rows.csv"), "a,b\n1,3\n").unwrap();
+    fs::create_dir_all(copy.join("deep/er")).unwrap();
+    fs::write(copy.join("deep/er/new.txt"), "new").unwrap();
+    fs::write(copy.join("nested/added.txt"), "added").unwrap();
+    fs::remove_file(copy.join("nested/notes.txt")).unwrap();
+    symlink("/etc/hosts", copy.join("link")).unwrap();
+    fs::remove_file(copy.join(MARKER)).unwrap();
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "attempt",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(writes.len(), 1);
+    let write = &writes[0];
+    assert_eq!(status(write), WorkspaceMountWriteStatus::Complete);
+    assert_eq!(write.volume_id, "data");
+    assert_eq!(write.destination, copy.to_str().unwrap());
+    let mut written = keys(write);
+    written.sort();
+    assert_eq!(written, ["deep/er/new.txt", "nested/added.txt", "rows.csv"]);
+    assert_eq!(write.skipped, 1, "the link is skipped");
+    assert_eq!(
+        write
+            .files
+            .iter()
+            .find(|file| file.key == "rows.csv")
+            .unwrap()
+            .sha256,
+        format!("{:x}", Sha256::digest(b"a,b\n1,3\n"))
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("rows.csv")).unwrap(),
+        "a,b\n1,3\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("deep/er/new.txt")).unwrap(),
+        "new"
+    );
+    // Deletions and links are never written back.
+    assert!(fixture.source.join("nested/notes.txt").exists());
+    assert!(!fixture.source.join("link").exists());
+    // A retry after a restart reports the journaled summary without writing.
+    fs::write(fixture.source.join("rows.csv"), "operator edit").unwrap();
+    let again = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "attempt",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(again, writes);
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("rows.csv")).unwrap(),
+        "operator edit"
+    );
+    // Cleanup recognizes the copy by identity even without its marker.
+    cleanup(&fixture.state, "attempt").unwrap();
+    assert!(fixture.root_names().is_empty());
+}
+
+#[test]
+fn write_back_refuses_over_bounds_and_stops_at_the_first_failure() {
+    let fixture = fixture();
+    // Read-only copies are never written back.
+    fixture.stage("read-only", &[fixture.pin("data")]).unwrap();
+    assert!(
+        write_back(
+            &fixture.mounts,
+            &fixture.state,
+            "read-only",
+            &CancellationToken::new()
+        )
+        .unwrap()
+        .is_empty()
+    );
+    cleanup(&fixture.state, "read-only").unwrap();
+
+    fixture
+        .stage("refused", &[fixture.writable("data", 64)])
+        .unwrap();
+    let copy = fixture.root.join("data");
+    fs::write(copy.join("big.bin"), vec![b'x'; 65]).unwrap();
+    let refused = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "refused",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&refused[0]), WorkspaceMountWriteStatus::Refused);
+    assert_eq!(refused[0].error_key, "big.bin");
+    assert_eq!(refused[0].not_attempted, ["big.bin"]);
+    assert!(refused[0].files.is_empty());
+    assert!(!fixture.source.join("big.bin").exists());
+    cleanup(&fixture.state, "refused").unwrap();
+
+    fixture
+        .stage("partial", &[fixture.writable("data", 1024)])
+        .unwrap();
+    fs::write(copy.join("a.txt"), "a").unwrap();
+    fs::create_dir(copy.join("blocked")).unwrap();
+    fs::write(copy.join("blocked/x.txt"), "x").unwrap();
+    fs::write(copy.join("c.txt"), "c").unwrap();
+    // A file in the Volume is in the way of the new directory.
+    fs::write(fixture.source.join("blocked"), "file").unwrap();
+    let partial = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "partial",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let write = &partial[0];
+    assert_eq!(status(write), WorkspaceMountWriteStatus::Partial);
+    assert_eq!(keys(write), ["a.txt"]);
+    assert_eq!(write.error_key, "blocked/x.txt");
+    assert_eq!(write.not_attempted, ["blocked/x.txt", "c.txt"]);
+    assert!(!fixture.source.join("c.txt").exists());
+    assert!(
+        supertag_protocol::workspace_mounts::validate_writes(
+            &partial,
+            &[fixture.writable("data", 1024)]
+        )
+        .is_ok()
+    );
+    cleanup(&fixture.state, "partial").unwrap();
+}
+
+#[test]
+fn write_back_never_follows_a_link_in_the_volume() {
+    let fixture = fixture();
+    fixture
+        .stage("attempt", &[fixture.writable("data", 1024)])
+        .unwrap();
+    let outside = fixture.base.join("outside");
+    fs::create_dir(&outside).unwrap();
+    // The Volume's directory is swapped for a link after the copy.
+    fs::remove_dir_all(fixture.source.join("nested")).unwrap();
+    symlink(&outside, fixture.source.join("nested")).unwrap();
+    fs::write(fixture.root.join("data/nested/escape.txt"), "x").unwrap();
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "attempt",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Partial);
+    assert_eq!(writes[0].error_key, "nested/escape.txt");
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+    cleanup(&fixture.state, "attempt").unwrap();
+}
+
+mod object_store {
+    use super::*;
+    use crate::workspace_mounts::s3::fake;
+
+    struct S3Fixture {
+        _scratch: tempfile::TempDir,
+        root: PathBuf,
+        state: PathBuf,
+        checkout: PathBuf,
+        mounts: WorkspaceMounts,
+        store: fake::Store,
+    }
+
+    async fn s3_fixture() -> S3Fixture {
+        let scratch = tempfile::tempdir().unwrap();
+        let base = scratch.path().canonicalize().unwrap();
+        let root = base.join("root");
+        let state = base.join("state");
+        let checkout = base.join("checkout");
+        private_dir(&root);
+        private_dir(&state);
+        fs::create_dir_all(&checkout).unwrap();
+        let store = fake::Store::default();
+        {
+            let mut objects = store.objects.lock().unwrap();
+            for (key, value) in [
+                ("bucket-a/data/rows.csv", "a,b\n1,2\n"),
+                ("bucket-a/data/nested/notes.txt", "notes"),
+                ("bucket-a/data/nested/more/deep.txt", "deep"),
+                ("bucket-a/data/folder/", ""),
+                ("bucket-a/database/outside.txt", "not under the prefix"),
+            ] {
+                objects.insert(key.into(), value.as_bytes().to_vec());
+            }
+        }
+        let endpoint = fake::start(store.clone()).await;
+        // SAFETY: the variables are unique to this test module.
+        unsafe {
+            std::env::set_var("WSMOUNT_TEST_ACCESS_KEY_ID", "FIXTUREKEY");
+            std::env::set_var("WSMOUNT_TEST_SECRET_ACCESS_KEY", "fixture-secret");
+        }
+        let config = base.join("mappings.json");
+        fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!([{
+                "volumeId": "data",
+                "source": "s3://bucket-a/data",
+                "credential": "team-data",
+                "endpoint": endpoint,
+                "region": "us-east-1",
+                "credentialEnvPrefix": "WSMOUNT_TEST",
+                "destinationRoot": root,
+            }]))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut mounts = WorkspaceMounts::load(&config).unwrap();
+        mounts.protect(&state, &[&checkout], None).unwrap();
+        assert_eq!(mounts.capabilities()[0].credential, "team-data");
+        S3Fixture {
+            _scratch: scratch,
+            root,
+            state,
+            checkout,
+            mounts,
+            store,
+        }
+    }
+
+    impl S3Fixture {
+        fn pin(&self, read_write: bool, credential: &str) -> WorkspaceCopyMount {
+            WorkspaceCopyMount {
+                volume_id: "data".into(),
+                destination: self.root.join("data").to_str().unwrap().into(),
+                max_bytes: 1024,
+                volume: Some(WorkspaceVolume {
+                    volume_id: "data".into(),
+                    source: "s3://bucket-a/data".into(),
+                    revision: 1,
+                    credential: credential.into(),
+                }),
+                read_write,
+            }
+        }
+
+        async fn stage(&self, attempt: &str, pin: WorkspaceCopyMount) -> Result<()> {
+            let mounts = self.mounts.clone();
+            let (state, checkout, attempt) = (
+                self.state.clone(),
+                self.checkout.clone(),
+                attempt.to_owned(),
+            );
+            tokio::task::spawn_blocking(move || {
+                mounts
+                    .stage(
+                        &state,
+                        &attempt,
+                        &checkout,
+                        &[pin],
+                        &[],
+                        &CancellationToken::new(),
+                    )
+                    .map(|_| ())
+            })
+            .await
+            .unwrap()
+        }
+
+        async fn write_back(&self, attempt: &str) -> Vec<WorkspaceMountWrite> {
+            let mounts = self.mounts.clone();
+            let (state, attempt) = (self.state.clone(), attempt.to_owned());
+            tokio::task::spawn_blocking(move || {
+                write_back(&mounts, &state, &attempt, &CancellationToken::new())
+            })
+            .await
+            .unwrap()
+            .unwrap()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn s3_copies_list_every_page_and_write_changes_back() {
+        let fixture = s3_fixture().await;
+        let copy = fixture.root.join("data");
+        // The pin must name the mapped credential.
+        assert!(
+            fixture
+                .stage("wrong", fixture.pin(false, "other"))
+                .await
+                .is_err()
+        );
+        cleanup(&fixture.state, "wrong").unwrap();
+
+        fixture
+            .stage("read", fixture.pin(false, "team-data"))
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(copy.join("rows.csv")).unwrap(),
+            "a,b\n1,2\n"
+        );
+        assert_eq!(
+            fs::read_to_string(copy.join("nested/more/deep.txt")).unwrap(),
+            "deep"
+        );
+        assert!(!copy.join("folder").exists() && !copy.join("outside.txt").exists());
+        assert_eq!(mode(&copy), 0o500);
+        assert_eq!(mode(&copy.join("nested/more")), 0o500);
+        assert_eq!(mode(&copy.join("rows.csv")), 0o400);
+        assert!(fixture.write_back("read").await.is_empty());
+        cleanup(&fixture.state, "read").unwrap();
+        assert!(!copy.exists());
+
+        fixture
+            .stage("write", fixture.pin(true, "team-data"))
+            .await
+            .unwrap();
+        fs::write(copy.join("rows.csv"), "changed").unwrap();
+        fs::write(copy.join("nested/new.txt"), "created").unwrap();
+        fs::write(copy.join("bad name.txt"), "unsupported key").unwrap();
+        let writes = fixture.write_back("write").await;
+        assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
+        let mut written = keys(&writes[0]);
+        written.sort();
+        assert_eq!(written, ["nested/new.txt", "rows.csv"]);
+        assert_eq!(
+            writes[0].skipped, 3,
+            "two unchanged files and one unsupported key"
+        );
+        {
+            let objects = fixture.store.objects.lock().unwrap();
+            assert_eq!(objects["bucket-a/data/rows.csv"], b"changed");
+            assert_eq!(objects["bucket-a/data/nested/new.txt"], b"created");
+            assert!(!objects.keys().any(|key| key.contains("bad")));
+        }
+        cleanup(&fixture.state, "write").unwrap();
+
+        // A refused PUT stops the write-back as partial.
+        fixture
+            .stage("fail", fixture.pin(true, "team-data"))
+            .await
+            .unwrap();
+        fs::write(copy.join("a.txt"), "a").unwrap();
+        fs::write(copy.join("z.txt"), "z").unwrap();
+        fixture
+            .store
+            .fail_puts
+            .lock()
+            .unwrap()
+            .push("bucket-a/data/a.txt".into());
+        let writes = fixture.write_back("fail").await;
+        assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Partial);
+        assert_eq!(writes[0].error_key, "a.txt");
+        assert_eq!(writes[0].not_attempted, ["a.txt", "z.txt"]);
+        assert!(
+            !fixture
+                .store
+                .objects
+                .lock()
+                .unwrap()
+                .contains_key("bucket-a/data/z.txt")
+        );
+        cleanup(&fixture.state, "fail").unwrap();
+    }
+
+    #[test]
+    fn s3_mappings_need_their_connection_and_file_mappings_take_none() {
+        let scratch = tempfile::tempdir().unwrap();
+        let base = scratch.path().canonicalize().unwrap();
+        let root = base.join("root");
+        private_dir(&root);
+        let config = base.join("mappings.json");
+        for entry in [
+            serde_json::json!({"volumeId":"data","source":"s3://bucket-a/data","credential":"team","destinationRoot":root}),
+            serde_json::json!({"volumeId":"data","source":"s3://bucket-a/data","destinationRoot":root,"endpoint":"https://s3.example.com","region":"us-east-1","credentialEnvPrefix":"WSMOUNT_MISSING"}),
+            serde_json::json!({"volumeId":"data","source":format!("file://{}", base.display()),"destinationRoot":root,"endpoint":"https://s3.example.com","region":"us-east-1","credentialEnvPrefix":"WSMOUNT_TEST"}),
+        ] {
+            fs::write(&config, serde_json::to_vec(&[entry]).unwrap()).unwrap();
+            assert!(WorkspaceMounts::load(&config).is_err());
+        }
+    }
 }

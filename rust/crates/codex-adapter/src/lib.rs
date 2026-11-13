@@ -236,15 +236,22 @@ async fn execute(
             .map(String::as_str)
             .or(options.model.as_deref()),
     };
-    let policy =
+    let mut policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
+    policy.writable_roots = task
+        .workspace
+        .iter()
+        .flat_map(|workspace| &workspace.mounts)
+        .filter(|mount| mount.read_write)
+        .map(|mount| PathBuf::from(&mount.destination))
+        .collect();
     let effort = task
         .attempt_execution
         .as_ref()
         .and_then(|attempt| attempt.selection.as_ref())
         .and_then(|selection| selection.effort.as_deref());
     let arguments = config::arguments(&workspace, model, effort, &policy)?;
-    let thread_parameters = config::thread_parameters(&workspace, &arguments)?;
+    let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
     if let Some(checkpoint) = previous_checkpoint {

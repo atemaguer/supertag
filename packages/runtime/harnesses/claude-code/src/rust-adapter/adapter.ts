@@ -106,6 +106,22 @@ async function withinRoots(cwd: string, path: unknown, roots: readonly string[])
   }
 }
 
+/** Workspace copies the Worker Host staged: readable, and writable when read-write. */
+export interface MountRoots {
+  readonly read: readonly string[];
+  readonly write: readonly string[];
+}
+
+/** The staged Workspace copy paths of an accepted Task. */
+export function mountRoots(
+  mounts: readonly { readonly destination: string; readonly readWrite: boolean }[] = [],
+): MountRoots {
+  return {
+    read: mounts.filter((mount) => !mount.readWrite).map((mount) => mount.destination),
+    write: mounts.filter((mount) => mount.readWrite).map((mount) => mount.destination),
+  };
+}
+
 export function permissionHook(
   tools: readonly string[],
   cwd: string,
@@ -113,6 +129,7 @@ export function permissionHook(
   skills: ReadonlySet<string> = new Set(),
   skillRoots: readonly string[] = [],
   mcpToolServers: ReadonlyMap<string, string> = new Map(),
+  mounts: MountRoots = { read: [], write: [] },
 ): HookCallback {
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
@@ -144,7 +161,11 @@ export function permissionHook(
         ? input["file_path"]
         : (input["path"] ?? cwd);
       const writes = hook.tool_name === "Write" || hook.tool_name === "Edit";
-      allowed = await withinRoots(cwd, path, writes ? [cwd] : [cwd, ...skillRoots]);
+      allowed = await withinRoots(
+        cwd,
+        path,
+        writes ? [cwd, ...mounts.write] : [cwd, ...skillRoots, ...mounts.read, ...mounts.write],
+      );
       if (allowed && ["Glob", "Grep"].includes(hook.tool_name)) {
         const pattern = input[hook.tool_name === "Glob" ? "pattern" : "glob"];
         if (
@@ -290,6 +311,7 @@ export async function runAdapter(
     );
     if (names.size > 0) tools.push("Skill");
     const allowedTools = [...tools, ...coordination.tools, ...mcp.toolServers.keys()];
+    const mounts = mountRoots(task.workspace?.mounts);
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
@@ -328,6 +350,7 @@ export async function runAdapter(
       cwd,
       tools,
       allowedTools,
+      additionalDirectories: [...mounts.read, ...mounts.write],
       disallowedTools: [
         "Agent",
         "Task",
@@ -356,7 +379,15 @@ export async function runAdapter(
         PreToolUse: [
           {
             hooks: [
-              permissionHook(allowedTools, cwd, controller.signal, names, roots, mcp.toolServers),
+              permissionHook(
+                allowedTools,
+                cwd,
+                controller.signal,
+                names,
+                roots,
+                mcp.toolServers,
+                mounts,
+              ),
             ],
           },
         ],

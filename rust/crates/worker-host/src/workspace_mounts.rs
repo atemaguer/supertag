@@ -1,4 +1,4 @@
-//! Owner-fenced local read-only Workspace copies.
+//! Owner-fenced local Workspace copies of file and S3 Volumes.
 //!
 //! The Worker Host owner maps each Workspace Volume to a canonical source and a
 //! private destination root. Every write is relative to a descriptor for that
@@ -7,12 +7,17 @@
 //! ownership marker. Publication uses an exclusive rename, so a competing
 //! Attempt can never replace an existing destination. Cleanup removes only
 //! trees that prove ownership through the marker.
+//!
+//! A read-write copy records the SHA-256 of every file it staged. After a
+//! successful Attempt the Worker Host writes changed and created regular
+//! files back to the Volume directly (`writes`), and the Control Plane
+//! records only the summary.
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    ffi::CString,
+    ffi::{CStr, CString},
     fs::{self, DirBuilder, File},
     io::{Read, Write},
     os::{
@@ -24,7 +29,7 @@ use std::{
 use supertag_protocol::{
     v2::{WorkspaceCopyMount, WorkspaceMountCapability, WorkspaceMountPreflight},
     volumes::file_volume_path,
-    workspace_mounts::{absolute_path, normalize_capabilities, overlaps},
+    workspace_mounts::{absolute_path, normalize_capabilities, overlaps, volume_key},
 };
 use supertag_workspaces::packages::{directory_names, open_directory, read_regular_at};
 use tokio_util::sync::CancellationToken;
@@ -34,6 +39,10 @@ const MAX_DEPTH: usize = 32;
 const MARKER: &str = ".supertag-workspace-mount-owner";
 const STAGING_PREFIX: &str = ".supertag-stage-";
 const STATE: &str = "workspace-mounts";
+
+mod s3;
+mod writes;
+pub(crate) use writes::write_back;
 
 type Identity = (u64, u64);
 
@@ -48,9 +57,41 @@ pub struct WorkspaceMounts {
 #[derive(Clone)]
 struct Mapping {
     capability: WorkspaceMountCapability,
-    source: PathBuf,
+    source: Source,
     destination_root: PathBuf,
     root: Identity,
+}
+
+#[derive(Clone)]
+enum Source {
+    File(PathBuf),
+    S3(s3::S3Source),
+}
+
+impl Mapping {
+    /// The host paths this mapping reaches: the file source, if any, and the destination root.
+    fn paths(&self) -> Vec<&Path> {
+        match &self.source {
+            Source::File(source) => vec![source, &self.destination_root],
+            Source::S3(_) => vec![&self.destination_root],
+        }
+    }
+
+    fn file_source(&self) -> Option<&Path> {
+        match &self.source {
+            Source::File(source) => Some(source),
+            Source::S3(_) => None,
+        }
+    }
+}
+
+impl Source {
+    fn file(&self) -> Option<&Path> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::S3(_) => None,
+        }
+    }
 }
 
 impl WorkspaceMounts {
@@ -61,6 +102,15 @@ impl WorkspaceMounts {
             volume_id: String,
             source: String,
             destination_root: String,
+            /// S3 only: the Volume's credential name, the endpoint and region
+            /// it maps to, and the prefix of the environment variables that
+            /// hold its keys (`PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
+            /// optional `PREFIX_SESSION_TOKEN`).
+            #[serde(default)]
+            credential: String,
+            endpoint: Option<String>,
+            region: Option<String>,
+            credential_env_prefix: Option<String>,
         }
         let mut bytes = Vec::new();
         File::open(path)?
@@ -72,35 +122,69 @@ impl WorkspaceMounts {
         );
         let entries: Vec<Raw> =
             serde_json::from_slice(&bytes).context("invalid Workspace mount mappings")?;
-        let mut capabilities: Vec<_> = entries
-            .into_iter()
-            .map(|entry| WorkspaceMountCapability {
+        let mut connections = BTreeMap::new();
+        let mut capabilities = Vec::new();
+        for entry in entries {
+            connections.insert(
+                entry.volume_id.clone(),
+                (entry.endpoint, entry.region, entry.credential_env_prefix),
+            );
+            capabilities.push(WorkspaceMountCapability {
                 volume_id: entry.volume_id,
                 source: entry.source,
                 destination_root: entry.destination_root,
-            })
-            .collect();
+                credential: entry.credential,
+            });
+        }
         normalize_capabilities(&mut capabilities)?;
         let mut mappings: BTreeMap<String, Mapping> = BTreeMap::new();
         for capability in capabilities {
-            let source = file_volume_path(&capability.source)?;
             let destination_root = PathBuf::from(&capability.destination_root);
             ensure!(
-                source.canonicalize()? == source
-                    && destination_root.canonicalize()? == destination_root,
+                destination_root.canonicalize()? == destination_root,
                 "Workspace mount mappings require canonical local paths"
             );
-            open_directory(&source)?;
+            let source = match connections.remove(&capability.volume_id) {
+                Some((Some(endpoint), Some(region), Some(prefix)))
+                    if capability.source.starts_with("s3://") =>
+                {
+                    Source::S3(s3::S3Source::configure(
+                        &capability.source,
+                        &endpoint,
+                        &region,
+                        &prefix,
+                        |name| std::env::var(name).ok(),
+                    )?)
+                }
+                Some((None, None, None)) if !capability.source.starts_with("s3://") => {
+                    let source = file_volume_path(&capability.source)?;
+                    ensure!(
+                        source.canonicalize()? == source,
+                        "Workspace mount mappings require canonical local paths"
+                    );
+                    open_directory(&source)?;
+                    Source::File(source)
+                }
+                _ => bail!(
+                    "an S3 Workspace mount mapping needs endpoint, region, and credentialEnvPrefix; a file mapping takes none"
+                ),
+            };
             let root = open_directory(&destination_root)?;
             private(&root)?;
-            ensure!(
-                !overlaps(&source, &destination_root),
-                "Workspace mount source and destination overlap"
-            );
+            if let Source::File(source) = &source {
+                ensure!(
+                    !overlaps(source, &destination_root),
+                    "Workspace mount source and destination overlap"
+                );
+            }
             ensure!(
                 mappings.values().all(|prior| {
-                    !overlaps(&source, &prior.destination_root)
-                        && !overlaps(&destination_root, &prior.source)
+                    source
+                        .file()
+                        .is_none_or(|path| !overlaps(path, &prior.destination_root))
+                        && prior
+                            .file_source()
+                            .is_none_or(|path| !overlaps(&destination_root, path))
                 }),
                 "Workspace mount mappings cross a source and destination root"
             );
@@ -150,7 +234,7 @@ impl WorkspaceMounts {
             protected.push(home.join(".ssh"));
             protected.push(home.join(".supertag"));
             for mapping in self.mappings.values() {
-                for path in [&mapping.source, &mapping.destination_root] {
+                for path in mapping.paths() {
                     if let Ok(relative) = path.strip_prefix(home) {
                         ensure!(
                             relative.components().next().is_some_and(|part| {
@@ -179,7 +263,7 @@ impl WorkspaceMounts {
             }
         }
         for mapping in self.mappings.values() {
-            for path in [&mapping.source, &mapping.destination_root] {
+            for path in mapping.paths() {
                 for ancestor in path.ancestors() {
                     let found = identity(&open_directory(ancestor)?)?;
                     ensure!(
@@ -197,11 +281,9 @@ impl WorkspaceMounts {
 
     fn reject_overlaps(&self, paths: &[PathBuf]) -> Result<()> {
         ensure!(
-            self.mappings
-                .values()
-                .all(|mapping| paths.iter().all(|path| {
-                    !overlaps(&mapping.source, path) && !overlaps(&mapping.destination_root, path)
-                })),
+            self.mappings.values().all(|mapping| paths
+                .iter()
+                .all(|path| mapping.paths().iter().all(|own| !overlaps(own, path)))),
             "Workspace mount mapping overlaps Worker Host, repository, or artifact storage"
         );
         Ok(())
@@ -239,6 +321,7 @@ impl WorkspaceMounts {
         ensure!(
             pin.volume_id == mount.volume_id
                 && pin.source == mapping.capability.source
+                && pin.credential == mapping.capability.credential
                 && path.parent() == Some(&mapping.destination_root),
             "Workspace Volume does not match the exact host mapping"
         );
@@ -275,14 +358,14 @@ impl WorkspaceMounts {
             }
         }
         let mut paths = vec![];
+        let mut writable = vec![];
         for (index, mount) in mounts.iter().enumerate() {
             ensure!(!cancel.is_cancelled(), "Workspace copy cancelled");
             let mapping = self.mapping(mount)?;
             let destination = PathBuf::from(&mount.destination);
             ensure!(
                 !overlaps(checkout, &destination)
-                    && !overlaps(checkout, &mapping.source)
-                    && !overlaps(checkout, &mapping.destination_root),
+                    && mapping.paths().iter().all(|path| !overlaps(checkout, path)),
                 "Workspace mount overlaps the Attempt checkout"
             );
             let name = file_name(&destination)?;
@@ -302,26 +385,44 @@ impl WorkspaceMounts {
                 token: uuid::Uuid::new_v4().to_string(),
                 root_device: mapping.root.0,
                 root_inode: mapping.root.1,
+                volume_id: mount.volume_id.clone(),
+                source: mapping.capability.source.clone(),
+                read_write: mount.read_write,
+                max_bytes: mount.max_bytes,
             };
             save_receipt(&receipts.join(&receipt), &entry)?;
             mkdir_at(&root, &entry.staging)?;
             root.sync_all()?;
             let staging = open_dir_at(&root, &entry.staging)?;
             private(&staging)?;
-            let mut marker = create_at(&staging, MARKER)?;
+            // A read-write copy's marker is the Task's to delete, so cleanup
+            // also recognizes the tree by its directory identity.
+            save_tree(&receipts, index, identity(&staging)?)?;
+            let mut marker = create_at(&staging, MARKER, 0o400)?;
             marker.write_all(entry.token.as_bytes())?;
             marker.sync_all()?;
             staging.sync_all()?;
-            let source = open_directory(&mapping.source)?;
-            CopyBudget {
+            let mut budget = CopyBudget {
                 bytes: mount.max_bytes,
                 entries: MAX_ENTRIES,
-                device: source.metadata()?.dev(),
+                device: 0,
                 protected: &protected,
                 cancel,
+                writable: mount.read_write,
+                copied: Vec::new(),
+            };
+            match &mapping.source {
+                Source::File(path) => {
+                    let source = open_directory(path)?;
+                    budget.device = source.metadata()?.dev();
+                    budget.copy(&source, &staging, 0, "")?;
+                }
+                Source::S3(source) => budget.download(source, &staging)?,
             }
-            .copy(&source, &staging, 0)?;
             ensure!(!cancel.is_cancelled(), "Workspace copy cancelled");
+            if mount.read_write {
+                save_copied(&receipts, index, &budget.copied)?;
+            }
             rename_new(&root, &entry.staging, name)?;
             root.sync_all()?;
             // Prove the published path is the staged tree in the configured root.
@@ -330,9 +431,13 @@ impl WorkspaceMounts {
                     && identity(&open_directory(&mapping.destination_root)?)? == mapping.root,
                 "Workspace mount root changed while staging"
             );
-            paths.push(destination);
+            if mount.read_write {
+                writable.push(destination);
+            } else {
+                paths.push(destination);
+            }
         }
-        Ok(Mounted { paths })
+        Ok(Mounted { paths, writable })
     }
 }
 
@@ -350,14 +455,25 @@ impl Mapping {
 
 pub(crate) struct Mounted {
     paths: Vec<PathBuf>,
+    writable: Vec<PathBuf>,
 }
 
 impl Mounted {
     pub(crate) fn instructions(&self) -> Result<String> {
-        Ok(format!(
-            "\n\nRead-only Workspace data is available at these paths: {}.",
-            serde_json::to_string(&self.paths)?
-        ))
+        let mut text = String::new();
+        if !self.paths.is_empty() {
+            text.push_str(&format!(
+                "\n\nRead-only Workspace data is available at these paths: {}.",
+                serde_json::to_string(&self.paths)?
+            ));
+        }
+        if !self.writable.is_empty() {
+            text.push_str(&format!(
+                "\n\nRead-write Workspace data is available at these paths: {}. Files you change or create there are written back to their Volume when the Task succeeds; deletions and links are not.",
+                serde_json::to_string(&self.writable)?
+            ));
+        }
+        Ok(text)
     }
 }
 
@@ -369,6 +485,52 @@ struct Receipt {
     token: String,
     root_device: u64,
     root_inode: u64,
+    volume_id: String,
+    source: String,
+    read_write: bool,
+    max_bytes: u64,
+}
+
+/// One staged file of a read-write copy: its Volume-relative key, size and
+/// lowercase hex SHA-256.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+struct Copied {
+    key: String,
+    size: u64,
+    sha256: String,
+}
+
+fn tree_name(receipt: &str) -> Option<String> {
+    receipt
+        .strip_suffix(".json")
+        .map(|stem| format!("{stem}.tree"))
+}
+
+fn save_tree(receipts: &Path, index: usize, tree: Identity) -> Result<()> {
+    let mut temp = tempfile::NamedTempFile::new_in(receipts)?;
+    serde_json::to_writer(&mut temp, &tree)?;
+    temp.as_file().sync_all()?;
+    temp.persist(receipts.join(format!("{index}.tree")))?;
+    File::open(receipts)?.sync_all()?;
+    Ok(())
+}
+
+fn read_tree(directory: &File, receipt: &str) -> Option<Identity> {
+    let name = tree_name(receipt)?;
+    serde_json::from_slice(&read_regular_at(directory, &name, 128).ok()?).ok()
+}
+
+fn copied_name(index: usize) -> String {
+    format!("{index}.copied")
+}
+
+fn save_copied(receipts: &Path, index: usize, copied: &[Copied]) -> Result<()> {
+    let mut temp = tempfile::NamedTempFile::new_in(receipts)?;
+    serde_json::to_writer(&mut temp, copied)?;
+    temp.as_file().sync_all()?;
+    temp.persist(receipts.join(copied_name(index)))?;
+    File::open(receipts)?.sync_all()?;
+    Ok(())
 }
 
 fn journal_directory(state: &Path, attempt: &str) -> Result<PathBuf> {
@@ -446,6 +608,7 @@ pub(crate) fn cleanup(state: &Path, attempt: &str) -> Result<()> {
 
 fn clear_receipt(directory: &File, name: &str) -> Result<()> {
     let entry = read_receipt(directory, name)?;
+    let tree = read_tree(directory, name);
     let parent = entry
         .destination
         .parent()
@@ -459,8 +622,8 @@ fn clear_receipt(directory: &File, name: &str) -> Result<()> {
                 (file_name(&entry.destination)?, false),
                 (&*entry.staging, true),
             ] {
-                if owned(&root, entry_name, &entry.token, staging)? {
-                    remove_tree_at(&root, entry_name, 0)?;
+                if owned(&root, entry_name, &entry.token, staging, tree)? {
+                    remove_tree_at(&root, &c_name(entry_name)?, 0)?;
                     root.sync_all()?;
                 }
             }
@@ -480,7 +643,13 @@ fn clear_receipt(directory: &File, name: &str) -> Result<()> {
 /// lack a complete marker after a crash between creating it and syncing the
 /// marker, so an otherwise empty staging directory is ours by its journaled
 /// random name.
-fn owned(root: &File, name: &str, token: &str, staging: bool) -> Result<bool> {
+fn owned(
+    root: &File,
+    name: &str,
+    token: &str,
+    staging: bool,
+    tree: Option<Identity>,
+) -> Result<bool> {
     let directory = match open_dir_at(root, name) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -489,6 +658,9 @@ fn owned(root: &File, name: &str, token: &str, staging: bool) -> Result<bool> {
         }
         Err(error) => return Err(error.into()),
     };
+    if tree.is_some_and(|tree| identity(&directory).is_ok_and(|found| found == tree)) {
+        return Ok(true);
+    }
     if private(&directory).is_err() {
         return Ok(false);
     }
@@ -506,18 +678,70 @@ fn owned(root: &File, name: &str, token: &str, staging: bool) -> Result<bool> {
     })
 }
 
-fn remove_tree_at(parent: &File, name: &str, depth: usize) -> Result<()> {
-    ensure!(depth <= MAX_DEPTH + 1, "Workspace mount tree is too deep");
-    let directory = open_dir_at(parent, name)?;
+/// Remove a tree without following links. A read-write copy holds whatever
+/// the Task made there, so names are raw bytes and counts are unbounded.
+fn remove_tree_at(parent: &File, name: &CStr, depth: usize) -> Result<()> {
+    ensure!(
+        depth <= MAX_REMOVE_DEPTH,
+        "Workspace mount tree is too deep"
+    );
+    let directory = open_dir_at_c(parent, name)?;
     directory.set_permissions(fs::Permissions::from_mode(0o700))?;
-    for child in directory_names(&directory, MAX_ENTRIES + 1)? {
-        match stat_at(&directory, &child)? {
-            Some(mode) if is_directory(mode) => remove_tree_at(&directory, &child, depth + 1)?,
-            Some(_) => unlink_at(&directory, &child, 0)?,
-            None => {}
+    loop {
+        let children = raw_names(&directory, MAX_ENTRIES)?;
+        if children.is_empty() {
+            break;
+        }
+        for child in children {
+            match stat_at_c(&directory, &child)? {
+                Some(mode) if is_directory(mode) => remove_tree_at(&directory, &child, depth + 1)?,
+                Some(_) => unlink_at_c(&directory, &child, 0)?,
+                None => {}
+            }
         }
     }
-    unlink_at(parent, name, libc::AT_REMOVEDIR)
+    unlink_at_c(parent, name, libc::AT_REMOVEDIR)
+}
+
+const MAX_REMOVE_DEPTH: usize = 256;
+
+/// Up to `maximum` entry names of `directory` as raw bytes, without `.` and `..`.
+fn raw_names(directory: &File, maximum: usize) -> Result<Vec<CString>> {
+    let dot = c".";
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            dot.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let raw = unsafe { libc::fdopendir(fd) };
+    if raw.is_null() {
+        unsafe { libc::close(fd) };
+        return Err(std::io::Error::last_os_error().into());
+    }
+    struct Closing(*mut libc::DIR);
+    impl Drop for Closing {
+        fn drop(&mut self) {
+            unsafe { libc::closedir(self.0) };
+        }
+    }
+    let stream = Closing(raw);
+    let mut names = Vec::new();
+    while names.len() < maximum {
+        let entry = unsafe { libc::readdir(stream.0) };
+        if entry.is_null() {
+            break;
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+        if !matches!(name.to_bytes(), b"." | b"..") {
+            names.push(name.to_owned());
+        }
+    }
+    Ok(names)
 }
 
 fn file_name(path: &Path) -> Result<&str> {
@@ -551,7 +775,10 @@ fn c_name(name: &str) -> std::io::Result<CString> {
 }
 
 fn open_dir_at(parent: &File, name: &str) -> std::io::Result<File> {
-    let name = c_name(name)?;
+    open_dir_at_c(parent, &c_name(name)?)
+}
+
+fn open_dir_at_c(parent: &File, name: &CStr) -> std::io::Result<File> {
     let fd = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -573,14 +800,14 @@ fn mkdir_at(parent: &File, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn create_at(parent: &File, name: &str) -> Result<File> {
+fn create_at(parent: &File, name: &str, mode: libc::c_uint) -> Result<File> {
     let name = c_name(name)?;
     let fd = unsafe {
         libc::openat(
             parent.as_raw_fd(),
             name.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o400 as libc::c_uint,
+            mode,
         )
     };
     if fd < 0 {
@@ -596,8 +823,16 @@ fn is_directory(mode: u32) -> bool {
     mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32
 }
 
+#[allow(clippy::unnecessary_cast)]
+fn is_regular(mode: u32) -> bool {
+    mode & libc::S_IFMT as u32 == libc::S_IFREG as u32
+}
+
 fn stat_at(parent: &File, name: &str) -> Result<Option<u32>> {
-    let name = c_name(name)?;
+    stat_at_c(parent, &c_name(name)?)
+}
+
+fn stat_at_c(parent: &File, name: &CStr) -> Result<Option<u32>> {
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
     if unsafe {
         libc::fstatat(
@@ -619,7 +854,10 @@ fn stat_at(parent: &File, name: &str) -> Result<Option<u32>> {
 }
 
 fn unlink_at(parent: &File, name: &str, flags: libc::c_int) -> Result<()> {
-    let name = c_name(name)?;
+    unlink_at_c(parent, &c_name(name)?, flags)
+}
+
+fn unlink_at_c(parent: &File, name: &CStr, flags: libc::c_int) -> Result<()> {
     if unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) } != 0 {
         let error = std::io::Error::last_os_error();
         if error.kind() != std::io::ErrorKind::NotFound {
@@ -659,10 +897,79 @@ struct CopyBudget<'a> {
     device: u64,
     protected: &'a [Identity],
     cancel: &'a CancellationToken,
+    /// Read-write copies stay owner-writable and record what they staged.
+    writable: bool,
+    copied: Vec<Copied>,
 }
 
 impl CopyBudget<'_> {
-    fn copy(&mut self, source: &File, target: &File, depth: usize) -> Result<()> {
+    fn directory_mode(&self) -> u32 {
+        if self.writable { 0o700 } else { 0o500 }
+    }
+
+    fn file_mode(&self) -> libc::c_uint {
+        if self.writable { 0o600 } else { 0o400 }
+    }
+
+    /// Download every listed object under the S3 prefix into `target`.
+    fn download(&mut self, source: &s3::S3Source, target: &File) -> Result<()> {
+        let runtime = tokio::runtime::Handle::current();
+        let listed = runtime.block_on(source.list(self.entries))?;
+        let total = listed.iter().map(|object| object.size).sum::<u64>();
+        ensure!(
+            total <= self.bytes,
+            "Workspace Volume exceeds its byte limit"
+        );
+        let mut directories: Vec<String> = Vec::new();
+        for object in listed {
+            ensure!(!self.cancel.is_cancelled(), "Workspace copy cancelled");
+            let parts: Vec<&str> = object.key.split('/').collect();
+            ensure!(
+                parts.len() <= MAX_DEPTH,
+                "Workspace Volume exceeds its depth limit"
+            );
+            let mut directory = target.try_clone()?;
+            for (depth, part) in parts[..parts.len() - 1].iter().enumerate() {
+                let path = parts[..=depth].join("/");
+                if !directories.contains(&path) {
+                    mkdir_at(&directory, part)?;
+                    directories.push(path);
+                }
+                directory = open_dir_at(&directory, part)?;
+            }
+            let name = parts[parts.len() - 1];
+            let mut output = create_at(&directory, name, self.file_mode())?;
+            let sha256 = runtime.block_on(source.read(
+                &object.key,
+                object.size,
+                &mut output,
+                self.cancel,
+            ))?;
+            output.sync_all()?;
+            if self.writable {
+                self.copied.push(Copied {
+                    key: object.key,
+                    size: object.size,
+                    sha256,
+                });
+            }
+        }
+        // Seal directories deepest first, so a read-only copy cannot gain entries.
+        directories.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+        for path in directories {
+            let mut directory = target.try_clone()?;
+            for part in path.split('/') {
+                directory = open_dir_at(&directory, part)?;
+            }
+            directory.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
+            directory.sync_all()?;
+        }
+        target.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
+        target.sync_all()?;
+        Ok(())
+    }
+
+    fn copy(&mut self, source: &File, target: &File, depth: usize, prefix: &str) -> Result<()> {
         ensure!(
             depth <= MAX_DEPTH && !self.cancel.is_cancelled(),
             "Workspace copy exceeded depth or was cancelled"
@@ -695,10 +1002,15 @@ impl CopyBudget<'_> {
             }
             let mut file = unsafe { File::from_raw_fd(fd) };
             let metadata = file.metadata()?;
+            let key = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
             if metadata.is_dir() {
                 mkdir_at(target, &name)?;
                 let output = open_dir_at(target, &name)?;
-                self.copy(&file, &output, depth + 1)?;
+                self.copy(&file, &output, depth + 1, &key)?;
             } else {
                 ensure!(
                     metadata.is_file()
@@ -707,9 +1019,10 @@ impl CopyBudget<'_> {
                         && metadata.len() <= self.bytes,
                     "Workspace Volume entry is unsafe or exceeds its byte limit"
                 );
-                let mut output = create_at(target, &name)?;
+                let mut output = create_at(target, &name, self.file_mode())?;
                 let mut buffer = vec![0u8; 64 * 1024];
                 let mut total = 0;
+                let mut hash = Sha256::new();
                 loop {
                     ensure!(!self.cancel.is_cancelled(), "Workspace copy cancelled");
                     let count = file.read(&mut buffer)?;
@@ -718,6 +1031,7 @@ impl CopyBudget<'_> {
                     }
                     total += count as u64;
                     ensure!(total <= metadata.len(), "Workspace Volume file changed");
+                    hash.update(&buffer[..count]);
                     output.write_all(&buffer[..count])?;
                 }
                 let after = file.metadata()?;
@@ -727,13 +1041,24 @@ impl CopyBudget<'_> {
                 );
                 self.bytes -= total;
                 output.sync_all()?;
+                if self.writable {
+                    ensure!(
+                        volume_key(&key),
+                        "Workspace Volume holds an unsupported file name"
+                    );
+                    self.copied.push(Copied {
+                        key,
+                        size: total,
+                        sha256: format!("{:x}", hash.finalize()),
+                    });
+                }
             }
         }
         ensure!(
             unchanged(&before, &source.metadata()?),
             "Workspace Volume directory changed"
         );
-        target.set_permissions(fs::Permissions::from_mode(0o500))?;
+        target.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
         target.sync_all()?;
         Ok(())
     }
