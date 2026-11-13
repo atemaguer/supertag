@@ -54,6 +54,7 @@ export function GatewaySelector({
           className="connection"
           data-connected={connected}
           aria-label={connected ? "Switch Gateway" : "Select Gateway"}
+          aria-description={selected ? `Current Gateway is ${selected.name}` : undefined}
           title={selected?.origin}
           disabled={busy || switching}
         >
