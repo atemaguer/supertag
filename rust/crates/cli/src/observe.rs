@@ -1,7 +1,7 @@
 //! Operator observation commands: `spend`, `describe`, and `watch`.
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
@@ -581,7 +581,11 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
     let mut resume = args.resume_token.unwrap_or_default();
     let mut changes = 0_u64;
     let mut announced = false;
+    // The reconnect window starts at the first failure after a notice was
+    // last received, so a stream that opens and fails at once, again and
+    // again, still ends when the window does.
     let mut disconnected_at: Option<tokio::time::Instant> = None;
+    let mut delay = Duration::from_millis(250);
     loop {
         let result = async {
             // Streams are long lived: no per-request deadline applies.
@@ -601,8 +605,9 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            disconnected_at = None;
             while let Some(event) = stream.message().await? {
+                disconnected_at = None;
+                delay = Duration::from_millis(250);
                 resume.clone_from(&event.resume_token);
                 if print_event(&event, args.output, &mut announced) {
                     changes += 1;
@@ -614,29 +619,35 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
             Ok(false)
         }
         .await;
-        match result {
+        let error = match result {
             Ok(true) => return Ok(()),
-            Ok(false) => {}
+            Ok(false) => None,
             Err(error) => {
+                // Errors a retry cannot fix end the command at once.
                 if let Some(status) = error.downcast_ref::<tonic::Status>()
                     && matches!(
                         status.code(),
-                        Code::InvalidArgument | Code::PermissionDenied | Code::Unauthenticated
+                        Code::InvalidArgument
+                            | Code::PermissionDenied
+                            | Code::Unauthenticated
+                            | Code::Unimplemented
                     )
                 {
                     return Err(error);
                 }
-                let since = *disconnected_at.get_or_insert_with(tokio::time::Instant::now);
-                if since.elapsed() >= Duration::from_secs(args.reconnect_seconds) {
-                    return Err(error.context("Watch disconnected"));
-                }
+                Some(error)
             }
+        };
+        let since = *disconnected_at.get_or_insert_with(tokio::time::Instant::now);
+        if since.elapsed() >= Duration::from_secs(args.reconnect_seconds) {
+            let message = format!("Watch disconnected; resume with --resume-token {resume}");
+            return Err(match error {
+                Some(error) => error.context(message),
+                None => anyhow::anyhow!(message),
+            });
         }
-        ensure!(
-            args.reconnect_seconds > 0,
-            "Watch ended; resume with --resume-token {resume}"
-        );
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(Duration::from_secs(5));
     }
 }
 

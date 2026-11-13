@@ -103,6 +103,20 @@ async fn next_json(lines: &mut Lines<BufReader<ChildStdout>>) -> Result<Value> {
     Ok(serde_json::from_str(&line)?)
 }
 
+/// The next change notice, skipping heartbeats, within one overall wait.
+async fn next_change(lines: &mut Lines<BufReader<ChildStdout>>) -> Result<Value> {
+    timeout(WAIT, async {
+        loop {
+            let event = next_json(lines).await?;
+            if event["type"] == "change" {
+                return Ok(event);
+            }
+        }
+    })
+    .await
+    .context("no change notice arrived")?
+}
+
 struct Services {
     home: PathBuf,
     gateway_token: String,
@@ -162,8 +176,34 @@ impl Services {
         })
     }
 
-    async fn restart_gateway(&mut self) -> Result<()> {
+    /// A second Gateway on another port, sharing the Control Plane.
+    async fn extra_gateway(&self, extra: &[(&str, &Path)]) -> Result<(Child, String)> {
+        let mut gateway = command(
+            &self.home,
+            &[
+                "gateway",
+                "--control-plane",
+                &self.private,
+                "--listen",
+                "127.0.0.1:0",
+            ],
+        );
+        gateway
+            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
+        for (name, value) in extra {
+            gateway.env(name, value);
+        }
+        service(gateway).await
+    }
+
+    async fn stop_gateway(&mut self) -> Result<()> {
         self.gateway.kill().await?;
+        self.gateway.wait().await?;
+        Ok(())
+    }
+
+    async fn start_gateway(&mut self) -> Result<()> {
         let listen = self.public.trim_start_matches("http://").to_owned();
         let (gateway, public) = launch_gateway(
             &self.home,
@@ -182,6 +222,112 @@ impl Services {
         self.gateway.kill().await?;
         self.plane.kill().await?;
         Ok(())
+    }
+}
+
+/// A throwaway CA with a 127.0.0.1 server certificate and a client
+/// certificate, made with the openssl command.
+struct Certificates {
+    ca: PathBuf,
+    server_cert: PathBuf,
+    server_key: PathBuf,
+    client_cert: PathBuf,
+    client_key: PathBuf,
+}
+
+impl Certificates {
+    fn create(directory: &Path) -> Result<Self> {
+        std::fs::create_dir_all(directory)?;
+        let openssl = |args: &[&str]| -> Result<()> {
+            let output = std::process::Command::new("openssl")
+                .args(args)
+                .current_dir(directory)
+                .stdin(Stdio::null())
+                .output()
+                .context("run openssl")?;
+            ensure!(
+                output.status.success(),
+                "openssl {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        };
+        let key = [
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:P-256",
+            "-nodes",
+        ];
+        openssl(
+            &[
+                &["req", "-x509"][..],
+                &key,
+                &[
+                    "-keyout",
+                    "ca.key",
+                    "-out",
+                    "ca.pem",
+                    "-days",
+                    "1",
+                    "-subj",
+                    "/CN=observe-test-ca",
+                    "-addext",
+                    "basicConstraints=critical,CA:TRUE",
+                    "-addext",
+                    "keyUsage=critical,keyCertSign",
+                ],
+            ]
+            .concat(),
+        )?;
+        for (name, extensions) in [
+            (
+                "server",
+                "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n",
+            ),
+            ("client", "extendedKeyUsage=clientAuth\n"),
+        ] {
+            std::fs::write(directory.join(format!("{name}.ext")), extensions)?;
+            openssl(
+                &[
+                    &["req"][..],
+                    &key,
+                    &[
+                        "-keyout",
+                        &format!("{name}.key"),
+                        "-out",
+                        &format!("{name}.csr"),
+                        "-subj",
+                        &format!("/CN={name}"),
+                    ],
+                ]
+                .concat(),
+            )?;
+            openssl(&[
+                "x509",
+                "-req",
+                "-in",
+                &format!("{name}.csr"),
+                "-CA",
+                "ca.pem",
+                "-CAkey",
+                "ca.key",
+                "-CAcreateserial",
+                "-days",
+                "1",
+                "-out",
+                &format!("{name}.pem"),
+                "-extfile",
+                &format!("{name}.ext"),
+            ])?;
+        }
+        Ok(Self {
+            ca: directory.join("ca.pem"),
+            server_cert: directory.join("server.pem"),
+            server_key: directory.join("server.key"),
+            client_cert: directory.join("client.pem"),
+            client_key: directory.join("client.key"),
+        })
     }
 }
 
@@ -272,7 +418,10 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     std::fs::set_permissions(&tui_store, std::fs::Permissions::from_mode(0o600))?;
 
-    // Watch continues across a Gateway restart from its last resume token.
+    // Watch continues across a Gateway restart from its last resume token:
+    // a Tag created while the watcher is disconnected arrives exactly once
+    // after it reconnects. A watcher that reconnected without its token would
+    // start at the feed head and never see it.
     let mut watcher = command(
         &home,
         &[
@@ -284,7 +433,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             "--output",
             "json",
             "--limit",
-            "2",
+            "3",
         ],
     )
     .stdout(Stdio::piped())
@@ -292,9 +441,8 @@ async fn exercise(database_url: &str) -> Result<()> {
     let mut lines = BufReader::new(watcher.stdout.take().context("watch stdout")?).lines();
     let opened = next_json(&mut lines).await?;
     assert_eq!(opened["type"], "heartbeat");
-    let put = |id: &'static str| {
+    let put = |gateway: String, id: &'static str| {
         let home = home.clone();
-        let public = public.clone();
         let operator = operator.clone();
         async move {
             ok(
@@ -302,7 +450,7 @@ async fn exercise(database_url: &str) -> Result<()> {
                 &[
                     "put-tag",
                     "--gateway",
-                    &public,
+                    &gateway,
                     id,
                     "--instructions",
                     "Watch me",
@@ -312,28 +460,33 @@ async fn exercise(database_url: &str) -> Result<()> {
             .await
         }
     };
-    put("first").await?;
-    let first = loop {
-        let event = next_json(&mut lines).await?;
-        if event["type"] == "change" {
-            break event;
-        }
-    };
+    let mut changes = Vec::new();
+    put(public.clone(), "first").await?;
+    let first = next_change(&mut lines).await?;
     assert_eq!(first["kind"], "tag");
     assert_eq!(first["id"], "first");
     assert_eq!(first["reason"], "created");
-    services.restart_gateway().await?;
-    put("second").await?;
-    let second = loop {
-        let event = next_json(&mut lines).await?;
-        if event["type"] == "change" {
-            break event;
-        }
-    };
-    assert_eq!(second["id"], "second");
+    changes.push(first.clone());
+    services.stop_gateway().await?;
+    {
+        let (mut other, other_url) = services.extra_gateway(&[]).await?;
+        put(other_url, "missed").await?;
+        other.kill().await?;
+    }
+    services.start_gateway().await?;
+    put(public.clone(), "second").await?;
+    changes.push(next_change(&mut lines).await?);
+    changes.push(next_change(&mut lines).await?);
+    assert_eq!(
+        changes
+            .iter()
+            .map(|event| event["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!("first"), json!("missed"), json!("second")]
+    );
     let status = timeout(WAIT, watcher.wait()).await??;
     ensure!(status.success(), "watch exited with {status}");
-    // Resuming from the first notice yields the second and nothing earlier.
+    // Resuming from the first notice yields the next one and nothing earlier.
     let resumed = ok(
         &home,
         &[
@@ -360,7 +513,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         .filter(|event| event["type"] == "change")
         .collect::<Vec<_>>();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0]["id"], "second");
+    assert_eq!(changes[0]["id"], "missed");
     let (success, _, stderr) = run(
         &home,
         &[
@@ -394,7 +547,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
     ensure!(
-        text.starts_with("created tag second (resume token v1."),
+        text.starts_with("created tag missed (resume token v1."),
         "{text}"
     );
 
@@ -442,8 +595,14 @@ async fn exercise(database_url: &str) -> Result<()> {
         .await?
         .into_inner();
     let mut attempts = Vec::new();
-    for operation in ["claim-objective", "claim-unassigned"] {
-        if operation == "claim-unassigned" {
+    // The objective Attempt and a plain Attempt run on an unspecified
+    // harness; the Codex Attempt runs on a harness that prices its usage.
+    for (operation, session, harness) in [
+        ("claim-objective", None, HarnessKind::Unspecified),
+        ("claim-codex", Some("side"), HarnessKind::Codex),
+        ("claim-plain", Some("plain"), HarnessKind::Unspecified),
+    ] {
+        if let Some(session) = session {
             ok(
                 &home,
                 &[
@@ -453,7 +612,7 @@ async fn exercise(database_url: &str) -> Result<()> {
                     "--tag",
                     "builder",
                     "--session",
-                    "side",
+                    session,
                     "Tidy the docs",
                 ],
                 None,
@@ -464,6 +623,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             .claim_task(host_request(
                 ClaimTaskRequest {
                     operation_id: operation.into(),
+                    harness_kind: harness as i32,
                     ..Default::default()
                 },
                 &host_token,
@@ -522,6 +682,13 @@ async fn exercise(database_url: &str) -> Result<()> {
             host.generation,
         )?)
         .await?;
+    worker
+        .report_attempt_usage(host_request(
+            usage(&attempts[2], "plain-model", None),
+            &host_token,
+            host.generation,
+        )?)
+        .await?;
 
     let by_objective = json_of(
         &home,
@@ -542,11 +709,11 @@ async fn exercise(database_url: &str) -> Result<()> {
                 "budget": {"limit_minor": 500, "currency": "USD"},
             },
             {
-                "key": "unassigned", "name": null, "attempts": 1,
+                "key": "unassigned", "name": null, "attempts": 2,
                 "reported_cost_by_currency": null,
-                "unknown_cost_attempts": 1, "estimated_cost_attempts": 0,
+                "unknown_cost_attempts": 2, "estimated_cost_attempts": 0,
                 "unpriced_models": {"mystery-model": 1}, "unpriced_tokens": 120,
-                "reported_tokens": 120, "unknown_token_attempts": 0,
+                "reported_tokens": 240, "unknown_token_attempts": 0,
                 "budget": null,
             },
         ])
@@ -555,7 +722,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     assert_eq!(
         text,
         "launch | 1 Attempt(s) | cost $0.42; 1 estimated-cost Attempt(s) | tokens 120 | budget $5.00\n\
-         unassigned | 1 Attempt(s) | cost unpriced; 1 unknown-cost Attempt(s): unpriced: no reported or estimated cost for mystery-model in 1; tokens recorded | tokens 120 | budget none\n"
+         unassigned | 2 Attempt(s) | cost unpriced; 2 unknown-cost Attempt(s): unpriced: no reported or estimated cost for mystery-model in 1; tokens recorded; no cost reported in 1 | tokens 240 | budget none\n"
     );
     let by_tag = json_of(
         &home,
@@ -574,8 +741,8 @@ async fn exercise(database_url: &str) -> Result<()> {
     assert_eq!(by_tag["groups"].as_array().map(Vec::len), Some(1));
     assert_eq!(by_tag["groups"][0]["key"], "builder");
     assert_eq!(by_tag["groups"][0]["name"], "Builder");
-    assert_eq!(by_tag["groups"][0]["attempts"], 2);
-    assert_eq!(by_tag["groups"][0]["reported_tokens"], 240);
+    assert_eq!(by_tag["groups"][0]["attempts"], 3);
+    assert_eq!(by_tag["groups"][0]["reported_tokens"], 360);
     let by_day = json_of(
         &home,
         &[
@@ -596,7 +763,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         .format("%Y-%m-%d")
         .to_string();
     assert_eq!(by_day["groups"][0]["key"], today);
-    assert_eq!(by_day["groups"][0]["attempts"], 2);
+    assert_eq!(by_day["groups"][0]["attempts"], 3);
     let future = json_of(
         &home,
         &[
@@ -702,6 +869,306 @@ async fn exercise(database_url: &str) -> Result<()> {
         !success && stderr.contains("Tag nobody was not found"),
         "{stderr}"
     );
+
+    // Every other kind: readable text under its title, and JSON that is the
+    // same record the kind's own get command prints.
+    let files = temporary.path().join("specs");
+    std::fs::create_dir(&files)?;
+    let spec = |name: &str, value: Value| -> Result<String> {
+        let path = files.join(name);
+        std::fs::write(&path, serde_json::to_vec(&value)?)?;
+        Ok(path.to_str().context("spec path")?.to_owned())
+    };
+    let permission = spec(
+        "permission.json",
+        json!({"set_id":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}),
+    )?;
+    let context = spec(
+        "context.json",
+        json!({"set_id":"notes","name":"notes","items":[{"item_key":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}),
+    )?;
+    let role = spec(
+        "role.json",
+        json!({"role_id":"review","name":"review","purpose":"Review changes","permission_set_ids":["edit"],"context_set_ids":["notes"]}),
+    )?;
+    for (kind, file) in [
+        ("permission-set", &permission),
+        ("context-set", &context),
+        ("role", &role),
+    ] {
+        ok(
+            &home,
+            &["--gateway", "local", "policy", "put", kind, file],
+            None,
+        )
+        .await?;
+    }
+    ok(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "team",
+            "create",
+            "crew",
+            "--name",
+            "Crew",
+            "--member",
+            "builder",
+        ],
+        None,
+    )
+    .await?;
+    ok(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "volume",
+            "put",
+            "shared",
+            "--source",
+            "s3://fixture-bucket/release",
+            "--operation-id",
+            "shared-volume",
+        ],
+        None,
+    )
+    .await?;
+    let data = temporary.path().join("data");
+    std::fs::create_dir(&data)?;
+    let data_url = format!(
+        "file://{}",
+        data.canonicalize()?.to_str().context("data path")?
+    );
+    ok(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "workspace-volume",
+            "put",
+            "data",
+            "--source",
+            &data_url,
+        ],
+        None,
+    )
+    .await?;
+    let account = spec(
+        "account.json",
+        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
+    )?;
+    ok(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "surface-policy",
+            "put",
+            "account",
+            &account,
+        ],
+        None,
+    )
+    .await?;
+    ok(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "github-workspace",
+            "put",
+            "project",
+            "--account",
+            "github-source",
+            "--repository-id",
+            "123",
+            "--repository",
+            "acme/project",
+            "--commit",
+            &"a".repeat(40),
+            "--operation-id",
+            "project-source",
+        ],
+        None,
+    )
+    .await?;
+    let session = attempt_work_sessions_client::AttemptWorkSessionsClient::new(
+        Channel::from_shared(public.clone())?
+            .timeout(WAIT)
+            .connect()
+            .await?,
+    )
+    .start(host_request(
+        StartWorkSessionRequest {
+            attempt: Some(attempts[0].clone()),
+            operation_id: "describe-session".into(),
+            title: "Check the docs".into(),
+            instruction: "Read the docs and report.".into(),
+            workspace_id: None,
+            target_tag_id: None,
+        },
+        &host_token,
+        host.generation,
+    )?)
+    .await?
+    .into_inner();
+    for (kind, id, title, get) in [
+        ("team", "crew", "Team", vec!["team", "get", "crew"]),
+        (
+            "session",
+            session.work_session_id.as_str(),
+            "Work Session",
+            vec!["work-sessions", "get", session.work_session_id.as_str()],
+        ),
+        (
+            "role",
+            "review",
+            "Role",
+            vec!["policy", "show", "role", "review"],
+        ),
+        (
+            "permission-set",
+            "edit",
+            "Permission Set",
+            vec!["policy", "show", "permission-set", "edit"],
+        ),
+        (
+            "context-set",
+            "notes",
+            "Context Set",
+            vec!["policy", "show", "context-set", "notes"],
+        ),
+        (
+            "volume",
+            "shared",
+            "Volume",
+            vec!["volume", "get", "shared"],
+        ),
+        (
+            "workspace-volume",
+            "data",
+            "Workspace Volume",
+            vec!["workspace-volume", "get", "data"],
+        ),
+        (
+            "workspace",
+            "project",
+            "Workspace",
+            vec!["github-workspace", "get", "project"],
+        ),
+    ] {
+        let text = ok(&home, &["--gateway", "local", "describe", kind, id], None).await?;
+        ensure!(text.starts_with(&format!("{title}\n")), "{kind}: {text}");
+        ensure!(text.contains(id), "{kind}: {text}");
+        let described = json_of(
+            &home,
+            &[
+                "--gateway",
+                "local",
+                "describe",
+                kind,
+                id,
+                "--output",
+                "json",
+            ],
+            None,
+        )
+        .await?;
+        let mut args = vec!["--gateway", "local"];
+        args.extend(get);
+        assert_eq!(described, json_of(&home, &args, None).await?, "{kind}");
+    }
+
+    // Each client's store directory rule applies: the terminal UI's must be
+    // private, the desktop app's only owner-writable.
+    let tui_directory = tui_store.parent().context("store directory")?;
+    std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o750))?;
+    let (success, _, stderr) =
+        run(&home, &["--gateway", "local", "get-tag", "builder"], None).await?;
+    ensure!(
+        !success && stderr.contains("saved Gateway directory"),
+        "{stderr}"
+    );
+    std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o700))?;
+    let desktop_directory = desktop_store.parent().context("store directory")?;
+    std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o755))?;
+    json_of(&home, &["--gateway", "desk", "get-tag", "builder"], None).await?;
+    std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o775))?;
+    let (success, _, stderr) =
+        run(&home, &["--gateway", "desk", "get-tag", "builder"], None).await?;
+    ensure!(
+        !success && stderr.contains("saved Gateway directory"),
+        "{stderr}"
+    );
+    std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o700))?;
+
+    // A saved profile's TLS files reach both operator commands and the
+    // terminal UI handover, with no TLS environment variables set.
+    let tls = Certificates::create(&temporary.path().join("tls"))?;
+    let (mut secure, secure_url) = services
+        .extra_gateway(&[
+            ("SUPERTAG_TLS_CERT_FILE", &tls.server_cert),
+            ("SUPERTAG_TLS_KEY_FILE", &tls.server_key),
+            ("SUPERTAG_TLS_CLIENT_CA_FILE", &tls.ca),
+        ])
+        .await?;
+    let secure_url = secure_url.replacen("http://", "https://", 1);
+    let path = |path: &Path| path.to_str().map(str::to_owned).context("TLS path");
+    write_private(
+        &tui_store,
+        &json!({"version":1,"active":"local","gateways":[
+            {"url":public,"token":operator,"name":"local"},
+            {"url":secure_url,"token":operator,"name":"secure",
+             "server_ca_file":path(&tls.ca)?,"client_cert_file":path(&tls.client_cert)?,
+             "client_key_file":path(&tls.client_key)?},
+            {"url":secure_url,"token":operator,"name":"no-client",
+             "server_ca_file":path(&tls.ca)?},
+            {"url":secure_url,"token":operator,"name":"no-trust"},
+        ]}),
+    )?;
+    let tag = json_of(&home, &["--gateway", "secure", "get-tag", "builder"], None).await?;
+    assert_eq!(tag["tag_id"], "builder");
+    for name in ["no-client", "no-trust"] {
+        let (success, _, stderr) =
+            run(&home, &["--gateway", name, "get-tag", "builder"], None).await?;
+        ensure!(!success, "{name} connected without its TLS files: {stderr}");
+    }
+    let fixture = temporary.path().join("tui-fixture");
+    std::fs::write(
+        &fixture,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%s\\n' '{}'; exit 0; fi\nexec cat <&3\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    )?;
+    std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755))?;
+    let handover = json_of(
+        &home,
+        &[
+            "tui",
+            "--gateway",
+            "secure",
+            "--binary",
+            path(&fixture)?.as_str(),
+        ],
+        None,
+    )
+    .await?;
+    let context = &handover["contexts"][0];
+    assert_eq!(context["url"], secure_url);
+    assert_eq!(context["token"], operator);
+    assert_eq!(context["server_ca_file"], path(&tls.ca.canonicalize()?)?);
+    assert_eq!(
+        context["client_cert_file"],
+        path(&tls.client_cert.canonicalize()?)?
+    );
+    assert_eq!(
+        context["client_key_file"],
+        path(&tls.client_key.canonicalize()?)?
+    );
+    secure.kill().await?;
 
     services.stop().await
 }

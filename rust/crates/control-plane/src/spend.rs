@@ -110,15 +110,23 @@ impl Store {
                 }
                 None => {
                     group.unknown_cost += 1;
-                    if let Some(usage) = &native {
-                        let selected = row
-                            .try_get::<Option<Vec<u8>>, _>("attempt_execution")?
-                            .and_then(|bytes| {
-                                AttemptExecutionSelection::decode(bytes.as_slice()).ok()
-                            })
+                    // Like TypeScript, only a harness that estimates cost from a
+                    // price table (Codex, Cursor) leaves an unpriced model; any other
+                    // harness simply reported no cost.
+                    let execution = row
+                        .try_get::<Option<Vec<u8>>, _>("attempt_execution")?
+                        .and_then(|bytes| AttemptExecutionSelection::decode(bytes.as_slice()).ok());
+                    let priced_harness = execution.as_ref().is_some_and(|execution| {
+                        matches!(
+                            execution.harness_kind(),
+                            HarnessKind::Codex | HarnessKind::Cursor
+                        )
+                    });
+                    if let Some(usage) = native.as_ref().filter(|_| priced_harness) {
+                        let selected = execution
                             .and_then(|execution| execution.selection)
                             .and_then(|selection| selection.model);
-                        if let Some(model) = usage.observed_model.clone().or(selected) {
+                        if let Some(model) = selected.or_else(|| usage.observed_model.clone()) {
                             *group.unpriced.entry(model).or_default() += 1;
                             group.unpriced_tokens = group
                                 .unpriced_tokens

@@ -88,8 +88,34 @@ pub fn desktop_store() -> Result<PathBuf> {
     Ok(config_directory()?.join("ai.supertag.desktop/gateways.json"))
 }
 
-/// Reads an owner-only regular file without following links. A missing store is empty.
-fn read_private(path: &Path) -> Result<Option<Vec<u8>>> {
+/// Group or other permission bits each client refuses on its store directory:
+/// the terminal UI requires a private directory (`gatewayStore.directory`),
+/// the desktop app one that only its owner can write (`lock_profiles`).
+const TUI_DIRECTORY_MASK: u32 = 0o077;
+const DESKTOP_DIRECTORY_MASK: u32 = 0o022;
+
+/// Reads an owner-only regular file without following links from a directory
+/// that is not a link, is owned by this user, and has none of `directory_mask`.
+/// A missing store or directory is empty.
+fn read_private(path: &Path, directory_mask: u32) -> Result<Option<Vec<u8>>> {
+    let directory = path
+        .parent()
+        .context("saved Gateway store has no directory")?;
+    let metadata = match std::fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => bail!(
+            "could not safely read the saved Gateway directory {}",
+            directory.display()
+        ),
+    };
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    ensure!(
+        metadata.is_dir() && metadata.uid() == uid && metadata.mode() & directory_mask == 0,
+        "saved Gateway directory {} must be private and owned by this user",
+        directory.display()
+    );
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
@@ -187,10 +213,10 @@ pub fn resolve(name: &str) -> Result<SavedGateway> {
         "enter a saved Gateway name or a Gateway URL"
     );
     let mut found = Vec::new();
-    if let Some(bytes) = read_private(&tui_store()?)? {
+    if let Some(bytes) = read_private(&tui_store()?, TUI_DIRECTORY_MASK)? {
         found.extend(tui_matches(&bytes, name)?);
     }
-    if let Some(bytes) = read_private(&desktop_store()?)? {
+    if let Some(bytes) = read_private(&desktop_store()?, DESKTOP_DIRECTORY_MASK)? {
         found.extend(desktop_matches(&bytes, name)?);
     }
     let Some(first) = found.first().cloned() else {
