@@ -3,8 +3,10 @@
 //! This runs on the operator's machine, never in a Worker Host. Before it touches the repository,
 //! it checks the bundle's size and digest against the Control Plane's receipt, that the bundle
 //! names exactly one ref, `refs/heads/supertag-deliveries/<delivery-id>`, at the delivered commit,
-//! and has no prerequisites. It then adds only that ref's objects, confirms the commit descends
-//! from the Task's base and start commits, and moves only `refs/heads/<branch>`. Hooks and
+//! and has no prerequisites. It then unbundles only that ref's objects into a private quarantine,
+//! checks them strictly, and confirms the commit descends from the Task's base and start commits.
+//! Only a delivery that passes every check reaches the repository's objects, and only
+//! `refs/heads/<branch>` moves. Hooks and
 //! filesystem monitors are disabled and nothing is checked out, so no working tree filter runs.
 //!
 //! The branch moves only forward. It is created when missing, left alone when it already
@@ -142,8 +144,30 @@ pub async fn import(
     let copy = copy.to_str().context("bundle path is not UTF-8")?;
     check_cancelled(cancel)?;
     output(repository, &["bundle", "verify", "--quiet", copy], cancel).await?;
-    let unbundled = output(
+
+    // Every check runs on a quarantined copy of the delivered objects: Git writes them to a
+    // private object directory and reads the repository's own objects through an alternate, so
+    // a refused delivery leaves nothing behind in the repository.
+    let objects = output(
         repository,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "objects",
+        ],
+        cancel,
+    )
+    .await?;
+    let quarantine = staging.path().join("objects");
+    std::fs::create_dir_all(quarantine.join("pack"))?;
+    let isolated: &[(&str, &OsStr)] = &[
+        ("GIT_OBJECT_DIRECTORY", quarantine.as_os_str()),
+        ("GIT_ALTERNATE_OBJECT_DIRECTORIES", OsStr::new(&objects)),
+    ];
+    let unbundled = output_in(
+        repository,
+        isolated,
         &["bundle", "unbundle", copy, &reference],
         cancel,
     )
@@ -152,9 +176,11 @@ pub async fn import(
         unbundled == format!("{} {reference}", delivery.head_commit),
         "bundle did not add exactly the delivered commit"
     );
+    strict_check(repository, isolated, &quarantine, staging.path(), cancel).await?;
     ensure!(
-        output(
+        output_in(
             repository,
+            isolated,
             &["cat-file", "-t", &delivery.head_commit],
             cancel
         )
@@ -167,10 +193,30 @@ pub async fn import(
         (&delivery.start_commit, "start"),
     ] {
         ensure!(
-            is_ancestor(repository, ancestor, &delivery.head_commit, cancel).await?,
+            is_ancestor(
+                repository,
+                isolated,
+                ancestor,
+                &delivery.head_commit,
+                cancel
+            )
+            .await?,
             "delivered commit does not descend from the Task's {what} commit"
         );
     }
+
+    // Verified: add the same bytes to the repository itself.
+    check_cancelled(cancel)?;
+    let unbundled = output(
+        repository,
+        &["bundle", "unbundle", copy, &reference],
+        cancel,
+    )
+    .await?;
+    ensure!(
+        unbundled == format!("{} {reference}", delivery.head_commit),
+        "bundle did not add exactly the delivered commit"
+    );
 
     let full = format!("refs/heads/{}", delivery.branch);
     let current = status(repository, &["rev-parse", "-q", "--verify", &full], cancel)
@@ -180,7 +226,7 @@ pub async fn import(
     let (outcome, old) = match &current {
         None => (Imported::Created, "0".repeat(length)),
         Some(current) if current == head => return Ok(Imported::Current),
-        Some(current) if is_ancestor(repository, head, current, cancel).await? => {
+        Some(current) if is_ancestor(repository, &[], head, current, cancel).await? => {
             return Ok(Imported::Current);
         }
         // Only an earlier commit of this Session moves forward: one after the base that the
@@ -188,8 +234,8 @@ pub async fn import(
         // person, and stays where they put it.
         Some(current)
             if current != &delivery.base_commit
-                && is_ancestor(repository, &delivery.base_commit, current, cancel).await?
-                && is_ancestor(repository, current, head, cancel).await? =>
+                && is_ancestor(repository, &[], &delivery.base_commit, current, cancel).await?
+                && is_ancestor(repository, &[], current, head, cancel).await? =>
         {
             (Imported::Advanced, current.clone())
         }
@@ -310,14 +356,57 @@ fn validate(delivery: &SessionDelivery) -> Result<()> {
     Ok(())
 }
 
+/// Strictly check every object the quarantined unbundle wrote, including the links between them.
+/// `git bundle unbundle` indexes the pack without checking objects, so this is the only check.
+async fn strict_check(
+    repository: &Path,
+    isolated: &[(&str, &OsStr)],
+    quarantine: &Path,
+    scratch: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    // The unbundle always writes one pack; any loose object or other file is unexpected.
+    for entry in std::fs::read_dir(quarantine)? {
+        let entry = entry?;
+        ensure!(
+            entry.file_name() == "pack" || entry.file_name() == "info",
+            "delivery bundle wrote unexpected objects"
+        );
+    }
+    let mut packs = 0;
+    for entry in std::fs::read_dir(quarantine.join("pack"))? {
+        let path = entry?.path();
+        if path.extension() != Some(OsStr::new("pack")) {
+            continue;
+        }
+        packs += 1;
+        let index = scratch.join(format!("strict-{packs}.idx"));
+        let (Some(pack), Some(index)) = (path.to_str(), index.to_str()) else {
+            bail!("pack path is not UTF-8");
+        };
+        output_in(
+            repository,
+            isolated,
+            &["index-pack", "--strict", "-o", index, pack],
+            cancel,
+        )
+        .await
+        .context("delivery bundle contains malformed objects")?;
+    }
+    ensure!(packs == 1, "delivery bundle did not unbundle to one pack");
+    Ok(())
+}
+
 async fn is_ancestor(
     repository: &Path,
+    environment: &[(&str, &OsStr)],
     ancestor: &str,
     descendant: &str,
     cancel: &CancellationToken,
 ) -> Result<bool> {
-    Ok(status(
+    Ok(status_in(
         repository,
+        environment,
         &["merge-base", "--is-ancestor", ancestor, descendant],
         cancel,
     )
@@ -354,8 +443,18 @@ async fn status(
     args: &[&str],
     cancel: &CancellationToken,
 ) -> Result<Option<String>> {
+    status_in(repository, &[], args, cancel).await
+}
+
+/// Like [`status`], with extra environment for Git.
+async fn status_in(
+    repository: &Path,
+    environment: &[(&str, &OsStr)],
+    args: &[&str],
+    cancel: &CancellationToken,
+) -> Result<Option<String>> {
     match git::run(
-        command(repository, args),
+        command(repository, environment, args),
         &[],
         cancel,
         MAX_GIT_OUTPUT,
@@ -376,8 +475,18 @@ async fn status(
 }
 
 async fn output(repository: &Path, args: &[&str], cancel: &CancellationToken) -> Result<String> {
+    output_in(repository, &[], args, cancel).await
+}
+
+/// Like [`output`], with extra environment for Git.
+async fn output_in(
+    repository: &Path,
+    environment: &[(&str, &OsStr)],
+    args: &[&str],
+    cancel: &CancellationToken,
+) -> Result<String> {
     let bytes = git::run(
-        command(repository, args),
+        command(repository, environment, args),
         &[],
         cancel,
         MAX_GIT_OUTPUT,
@@ -387,7 +496,7 @@ async fn output(repository: &Path, args: &[&str], cancel: &CancellationToken) ->
     Ok(String::from_utf8(bytes)?.trim_end_matches('\n').to_owned())
 }
 
-fn command(repository: &Path, args: &[&str]) -> Command {
+fn command(repository: &Path, environment: &[(&str, &OsStr)], args: &[&str]) -> Command {
     let mut command = Command::new("/usr/bin/git");
     command
         .env_clear()
@@ -403,6 +512,7 @@ fn command(repository: &Path, args: &[&str]) -> Command {
         // Names the branch's reflog entry; no commit is made.
         .env("GIT_COMMITTER_NAME", "SuperTag")
         .env("GIT_COMMITTER_EMAIL", "supertag@localhost")
+        .envs(environment.iter().copied())
         .arg("-C")
         .arg(repository);
     for value in [
@@ -411,8 +521,6 @@ fn command(repository: &Path, args: &[&str]) -> Command {
         "core.untrackedCache=false",
         "gc.auto=0",
         "maintenance.auto=false",
-        "fetch.fsckObjects=true",
-        "transfer.fsckObjects=true",
         "protocol.allow=never",
         "core.pager=cat",
     ] {

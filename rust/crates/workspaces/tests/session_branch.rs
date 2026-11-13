@@ -426,3 +426,109 @@ async fn repository_hooks_do_not_run_during_an_import() {
     );
     assert!(!marker.exists(), "a repository hook ran during the import");
 }
+
+/// The packs and object counts in the operator's repository.
+fn objects(fixture: &Fixture) -> (String, Vec<String>) {
+    let counts = git(&fixture.operator, &["count-objects", "-v"]);
+    let mut packs: Vec<String> = fs::read_dir(fixture.operator.join(".git/objects/pack"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    packs.sort();
+    (counts, packs)
+}
+
+/// Bundle `head` from `repository` as a delivery whose receipt matches the bundle's bytes.
+fn bundle_of(
+    fixture: &Fixture,
+    repository: &Path,
+    head: &str,
+    id: &str,
+    name: &str,
+) -> (SessionDelivery, PathBuf) {
+    let reference = format!("refs/heads/supertag-deliveries/{id}");
+    git(repository, &["update-ref", &reference, head]);
+    let bundle = fixture.root.path().join(name);
+    git(
+        repository,
+        &["bundle", "create", bundle.to_str().unwrap(), &reference],
+    );
+    let bytes = fs::read(&bundle).unwrap();
+    (
+        SessionDelivery {
+            branch: BRANCH.into(),
+            delivery_id: id.into(),
+            base_commit: fixture.base.clone(),
+            start_commit: fixture.base.clone(),
+            head_commit: head.into(),
+            bundle_sha256: format!("{:x}", Sha256::digest(&bytes)),
+            bundle_byte_length: bytes.len() as u64,
+        },
+        bundle,
+    )
+}
+
+#[tokio::test]
+async fn a_refused_delivery_leaves_no_objects_in_the_repository() {
+    let fixture = Fixture::new();
+    let unrelated = fixture.root.path().join("unrelated");
+    fs::create_dir(&unrelated).unwrap();
+    git(&unrelated, &["init", "--quiet"]);
+    fs::write(unrelated.join("x.txt"), "unrelated\n").unwrap();
+    git(&unrelated, &["add", "-A"]);
+    git(&unrelated, &["commit", "--quiet", "-m", "Unrelated"]);
+    let head = git(&unrelated, &["rev-parse", "HEAD"]);
+    let blob = git(&unrelated, &["rev-parse", "HEAD:x.txt"]);
+    let (delivery, bundle) = bundle_of(&fixture, &unrelated, &head, &"d".repeat(64), "u.bundle");
+
+    let before = objects(&fixture);
+    let error = run(&fixture, &delivery, &bundle).await.unwrap_err();
+    assert!(error.to_string().contains("does not descend"), "{error:#}");
+    assert_eq!(objects(&fixture), before);
+    assert!(!fixture.has(&head));
+    assert!(!fixture.has(&blob));
+    assert!(fixture.branch().is_none());
+}
+
+#[tokio::test]
+async fn a_bundle_with_a_malformed_object_is_refused() {
+    let mut fixture = Fixture::new();
+    let base = fixture.base.clone();
+    let (good, _) = fixture.deliver(&base, "a.txt");
+    // The delivered commit, rewritten with an author line Git's strict checks reject.
+    let text = git(&fixture.worker, &["cat-file", "commit", &good.head_commit]);
+    let broken: String = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("author ") {
+                "author no email or date".to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let file = fixture.root.path().join("broken-commit");
+    fs::write(&file, broken).unwrap();
+    let head = git(
+        &fixture.worker,
+        &[
+            "hash-object",
+            "-t",
+            "commit",
+            "-w",
+            "--literally",
+            file.to_str().unwrap(),
+        ],
+    );
+    let worker = fixture.worker.clone();
+    let (delivery, bundle) = bundle_of(&fixture, &worker, &head, &"c".repeat(64), "m.bundle");
+
+    let before = objects(&fixture);
+    let error = run(&fixture, &delivery, &bundle).await.unwrap_err();
+    assert!(error.to_string().contains("malformed objects"), "{error:#}");
+    assert_eq!(objects(&fixture), before);
+    assert!(!fixture.has(&head));
+    assert!(fixture.branch().is_none());
+}
