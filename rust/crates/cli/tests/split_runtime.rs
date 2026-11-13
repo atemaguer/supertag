@@ -571,6 +571,8 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     operator_notifications_reach_slack_webhook_and_desktop_once;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    native_codex_plan_replaces_the_slack_acknowledgement_in_place;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "exercises the real 30-second execution authority deadline"]
     gateway_partition_expires_execution_and_requires_audited_retry_before_replay;
 }
@@ -1400,6 +1402,16 @@ async fn slack_gateway(
     directory: &Path,
     mock: &MockSlackApi,
 ) -> Result<(Process, String, String)> {
+    slack_gateway_with(credentials, private_endpoint, directory, mock, &[]).await
+}
+
+async fn slack_gateway_with(
+    credentials: &Credentials,
+    private_endpoint: &str,
+    directory: &Path,
+    mock: &MockSlackApi,
+    extra: &[&std::ffi::OsStr],
+) -> Result<(Process, String, String)> {
     let mut command = credentials.command();
     command
         .args([
@@ -1418,7 +1430,8 @@ async fn slack_gateway(
         .env("SUPERTAG_SLACK_ALLOWED_USERS", SLACK_USER)
         .env("SUPERTAG_SLACK_SIGNING_SECRET", SLACK_SIGNING_SECRET)
         .env("SUPERTAG_SLACK_BOT_TOKEN", SLACK_BOT_TOKEN)
-        .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint);
+        .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint)
+        .args(extra);
     let mut gateway = Process::spawn(command, directory, "slack-gateway", true)?;
     let endpoints = gateway.endpoints(2).await?;
     Ok((gateway, endpoints[0].clone(), endpoints[1].clone()))
@@ -1798,27 +1811,13 @@ async fn signed_slack_mention(
 
 /// TypeScript parity: the acknowledgement, `progress.updated` replacement, and in-place final
 /// result of `packages/control-plane/src/index.ts`, through real services and a mock Slack API.
-async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Result<()> {
+/// The `slack-engineer` Tag and the Slack Surface Account and Location the mock workspace uses.
+async fn configure_slack_surface(services: &Services, credentials: &Credentials) -> Result<()> {
     use supertag_protocol::v2::{
         PutSurfaceAccountRequest, PutSurfaceLocationRequest, SlackSurfaceChannel,
         SlackSurfaceIdentity, SurfaceAccount, SurfaceAccountIdentity, SurfaceLocation,
         SurfaceLocationScope, surface_account_identity, surface_location_scope,
         surface_policy_catalog_client::SurfacePolicyCatalogClient,
-    };
-    let credentials = Credentials::new();
-    let mock = MockSlackApi::start().await?;
-    let mut command = credentials.command();
-    command
-        .arg("control-plane")
-        .env("SUPERTAG_DATABASE_URL", database);
-    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
-    let private_endpoint = control_plane.endpoint().await?;
-    let (gateway, endpoint, http) =
-        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
-    let mut services = Services {
-        gateway,
-        control_plane,
-        endpoint,
     };
     let mut operator = services.client().await?;
     operator
@@ -1874,6 +1873,26 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
             expected_revision: None,
         })?)
         .await?;
+    Ok(())
+}
+
+async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Result<()> {
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private_endpoint = control_plane.endpoint().await?;
+    let (gateway, endpoint, http) =
+        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
+    let mut services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+    configure_slack_surface(&services, &credentials).await?;
     let body = |method: &str, target: (&str, &str), text: &str| {
         let mut body = serde_json::json!({
             "channel": SLACK_CHANNEL, "text": text,
@@ -2875,6 +2894,124 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     assert_eq!(
         std::fs::read_to_string(&desktop)?.matches("\n--\n").count(),
         2
+    );
+    Ok(())
+}
+
+/// A real harness path for `progress.updated`: the native Codex adapter forwards the model's
+/// plan, and Slack shows it in place of the acknowledgement until the final reply replaces it.
+async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
+    database: String,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = TempDir::new()?;
+    let directory = directory.path();
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private = control_plane.endpoint().await?;
+    // Codex Session checkpoints are stored through the Gateway.
+    let checkpoints = directory.join("checkpoints");
+    let (gateway, endpoint, http) = slack_gateway_with(
+        &credentials,
+        &private,
+        directory,
+        &mock,
+        &["--checkpoint-directory".as_ref(), checkpoints.as_os_str()],
+    )
+    .await?;
+    let services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+    configure_slack_surface(&services, &credentials).await?;
+    let home = directory.join("fixture-home");
+    let codex_home = home.join(".codex");
+    std::fs::create_dir_all(&codex_home)?;
+    let auth = codex_home.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{"tokens":{"access_token":"fixture-native-sign-in","refresh_token":"fixture-native-refresh"}}"#,
+    )?;
+    std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
+    let fake = directory.join("codex-fixture");
+    std::fs::write(
+        &fake,
+        include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
+    let release = directory.join("plan-release");
+    let thread = "1794470400.000001";
+    assert_eq!(
+        signed_slack_mention(
+            &http,
+            "EvPLAN1",
+            thread,
+            &format!("Show the plan and wait for {} first", release.display()),
+        )
+        .await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(1).await?;
+    mock.responses.add_permits(1);
+    let mut command = credentials.command();
+    command
+        .args(["worker-host", "--gateway", &services.endpoint, "--once"])
+        .args(["--harness", "codex", "--codex-model", "fixture-model"])
+        .arg("--codex-path")
+        .arg(&fake)
+        .arg("--state-directory")
+        .arg(directory.join("codex-host"))
+        .env("HOME", &home);
+    let mut host = Process::spawn(command, directory, "codex-host", false)?;
+    if let Err(error) = mock.wait_for_requests(2).await {
+        let log = std::fs::read_to_string(&host.log).unwrap_or_default();
+        return Err(error.context(format!("Codex Worker Host log: {log}")));
+    }
+    mock.responses.add_permits(1);
+    std::fs::write(&release, b"")?;
+    mock.wait_for_requests(3).await?;
+    mock.responses.add_permits(1);
+    host.successful_exit().await?;
+    let requests: Vec<_> = mock
+        .requests
+        .lock()
+        .await
+        .iter()
+        .map(|request| (request.path.clone(), request.body.clone()))
+        .collect();
+    let body = |target: (&str, &str), text: &str| {
+        let mut body = serde_json::json!({
+            "channel": SLACK_CHANNEL, "text": text,
+            "unfurl_links": false, "unfurl_media": false, "mrkdwn": true,
+        });
+        body[target.0] = target.1.into();
+        body
+    };
+    assert_eq!(
+        requests,
+        [
+            (
+                "/chat.postMessage".to_owned(),
+                body(("thread_ts", thread), "Got it. I’m looking into this now.")
+            ),
+            (
+                "/chat.update".to_owned(),
+                body(
+                    ("ts", SLACK_RECEIPT),
+                    "Working through the plan\n\n✓ Read the fixture\n• Report back"
+                )
+            ),
+            (
+                "/chat.update".to_owned(),
+                body(("ts", SLACK_RECEIPT), "Native plan done")
+            ),
+        ]
     );
     Ok(())
 }

@@ -134,9 +134,13 @@ def finish_events():
             completed = True
         elif kind in ("turn.failed", "error"):
             notify("turn/completed", {"threadId": thread, "turn": {"id": turn, "status": "failed", "items": [], "error": {"message": "synthetic-codex-provider-secret"}}})
+        elif kind in ("item.started", "item.updated", "item.completed") and event.get("item", {}).get("type") == "todo_list":
+            # The App Server reports the model's plan as a turn notification.
+            plan = [{"step": entry["text"], "status": "completed" if entry["completed"] else "pending"} for entry in event["item"]["items"]]
+            notify("turn/plan/updated", {"threadId": thread, "turnId": turn, "explanation": None, "plan": plan})
         elif kind in ("item.started", "item.updated", "item.completed"):
             item = dict(event.get("item", {}))
-            item["type"] = {"agent_message": "agentMessage", "command_execution": "commandExecution", "file_change": "fileChange", "web_search": "webSearch", "todo_list": "plan"}.get(item.get("type"), item.get("type"))
+            item["type"] = {"agent_message": "agentMessage", "command_execution": "commandExecution", "file_change": "fileChange", "web_search": "webSearch"}.get(item.get("type"), item.get("type"))
             if "aggregated_output" in item:
                 item["aggregatedOutput"] = item.pop("aggregated_output")
             if item.get("status") == "in_progress":
