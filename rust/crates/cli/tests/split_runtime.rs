@@ -614,7 +614,9 @@ database_tests! {
     #[tokio::test]
     native_codex_records_usage_and_restores_session_after_services_restart;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning;
+    killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    attempt_time_limit_stops_the_adapter_and_fails_the_task;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -809,7 +811,71 @@ impl Drop for DescendantCleanup {
     }
 }
 
-async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning(
+async fn attempt_time_limit_stops_the_adapter_and_fails_the_task(database: String) -> Result<()> {
+    let directory = TempDir::new()?;
+    let credentials = Credentials::new();
+    let services = Services::start(&database, directory.path(), &credentials).await?;
+    let mut client = services.client().await?;
+    client
+        .put_tag(credentials.request(PutTagRequest {
+            name: None,
+            expected_revision: None,
+            approval_rules: vec![],
+            harness_kind: 0,
+            workspace: None,
+            tag_id: "engineer".into(),
+            instructions: "Run past the time limit".into(),
+            execution: None,
+            allowed_actions: vec!["files:read".into()],
+        })?)
+        .await?;
+    let accepted = client
+        .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: "engineer".into(),
+            session_id: "slow".into(),
+            operation_id: "time-limit".into(),
+            prompt: "wait longer than allowed".into(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    let (adapter, launches) = recording_adapter(directory.path())?;
+    let mut command = credentials.command();
+    command
+        .args([
+            "worker-host",
+            "--control-plane",
+            &services.endpoint,
+            "--once",
+            "--attempt-timeout-seconds",
+            "2",
+            "--state-directory",
+        ])
+        .arg(directory.path().join("host"))
+        .arg("--adapter")
+        .arg(&adapter)
+        .arg("--adapter-arg=--wait-for-cancel");
+    let started = Instant::now();
+    let mut host = Process::spawn(command, directory.path(), "time-limited-host", false)?;
+    assert!(host.exited().await?.success(), "{}", host.logs());
+    let failed = task(&mut client, &credentials, &accepted.task_id).await?;
+    assert_eq!(failed.state(), TaskState::Failed);
+    assert_eq!(
+        failed.result.as_deref(),
+        Some("Harness execution timed out")
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the adapter waits 60 seconds; the 2-second limit stopped it"
+    );
+    let pid = std::fs::read_to_string(&launches)?.trim().parse::<u32>()?;
+    assert!(!process_exists(pid)?, "the timed-out adapter was reaped");
+    Ok(())
+}
+
+async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning(
     database: String,
 ) -> Result<()> {
     use std::os::unix::process::ExitStatusExt;
@@ -845,23 +911,19 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
         .into_inner();
     let (adapter, launches) = recording_adapter(directory.path())?;
     let state = directory.path().join("host");
-    let host_command = || {
+    let host_command = |once: bool| {
         let mut command = credentials.command();
         command
-            .args([
-                "worker-host",
-                "--control-plane",
-                &services.endpoint,
-                "--once",
-                "--state-directory",
-            ])
+            .args(["worker-host", "--control-plane", &services.endpoint])
+            .args(once.then_some("--once"))
+            .arg("--state-directory")
             .arg(&state)
             .arg("--adapter")
             .arg(&adapter)
             .arg("--adapter-arg=--wait-for-cancel");
         command
     };
-    let mut host = Process::spawn(host_command(), directory.path(), "killed-host", false)?;
+    let mut host = Process::spawn(host_command(true), directory.path(), "killed-host", false)?;
     let running = wait_for_state(
         &mut client,
         &credentials,
@@ -925,37 +987,86 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
         })?)
         .await?
         .into_inner();
-    let mut restarted = Process::spawn(host_command(), directory.path(), "restarted-host", false)?;
+    // A process the host may have started without recording its group is no proof: the
+    // restart fails closed and waits for an operator.
+    let pending = state
+        .join("attempt-processes")
+        .join("process-unrecorded.json");
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&pending)?;
+        std::io::Write::write_all(&mut file, br#"{"state":"pending"}"#)?;
+    }
+    let mut refused = Process::spawn(host_command(true), directory.path(), "refused-host", false)?;
     assert!(
-        !restarted.exited().await?.success(),
-        "uncertain host restart must fail closed"
+        !refused.exited().await?.success(),
+        "an unproven restart must fail closed"
     );
     assert!(
-        restarted
+        refused
             .logs()
             .contains("needs recovery before this host can claim work")
-    );
-    assert_eq!(
-        std::fs::read_to_string(&launches)?.lines().count(),
-        1,
-        "restart must not launch the adapter again"
     );
     assert_eq!(std::fs::read(&journal_path)?, journal);
     assert_eq!(
         task(&mut client, &credentials, &accepted.task_id).await?,
         running,
-        "host death must not invent a recovered or completed outcome"
+        "an unproven restart must not invent an outcome"
     );
+
+    // With every recorded process group gone, the restarted host reclaims the Attempt as
+    // failed with an unknown outcome, never reruns it, and claims new work.
+    std::fs::remove_file(&pending)?;
+    // Without --once, the restarted host goes on to claim new work.
+    let mut restarted = Process::spawn(
+        host_command(false),
+        directory.path(),
+        "restarted-host",
+        false,
+    )?;
+    let reclaimed = wait_for_state(
+        &mut client,
+        &credentials,
+        &accepted.task_id,
+        TaskState::Failed,
+    )
+    .await?;
+    assert!(
+        reclaimed
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("outcome is unknown")),
+        "{reclaimed:?}"
+    );
+    assert_eq!(reclaimed.attempt_id, running.attempt_id);
     assert_eq!(
         events(&mut client, &credentials, &accepted.task_id, 0).await?,
         recorded
     );
+    wait_for_state(
+        &mut client,
+        &credentials,
+        &queued.task_id,
+        TaskState::Running,
+    )
+    .await?;
+    let deadline = Instant::now() + WAIT;
+    while std::fs::read_to_string(&launches)?.lines().count() < 2 {
+        ensure!(Instant::now() < deadline, "the queued Task never launched");
+        sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(
-        task(&mut client, &credentials, &queued.task_id)
-            .await?
-            .state(),
-        TaskState::Queued
+        std::fs::read_to_string(&launches)?.lines().count(),
+        2,
+        "only the queued Task launches an adapter after the restart"
     );
+    let mut cleanup = DescendantCleanup(self::descendants(restarted.child.id())?);
+    restarted.crash()?;
+    cleanup.wait_and_disarm().await?;
     Ok(())
 }
 

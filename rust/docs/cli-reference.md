@@ -1746,6 +1746,9 @@ Options:
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
+      --workspace-setup <ID=COMMAND>
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+
       --workspace-from-control-plane
           Retrieve each Workspace's accepted GitHub source from the Control Plane
 
@@ -2170,6 +2173,9 @@ Options:
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
+      --workspace-setup <ID=COMMAND>
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+
       --workspace-from-control-plane
           Retrieve each Workspace's accepted GitHub source from the Control Plane
 
@@ -2235,9 +2241,9 @@ Options:
           Private host allowlist of Skill packages
 
       --attempt-timeout-seconds <ATTEMPT_TIMEOUT_SECONDS>
-          Seconds a Task Attempt may run before this host stops it
+          Seconds a Task Attempt may run before this host stops it, from 1 through 86400
           
-          [default: 120]
+          [default: 3600]
 
       --once
           Exit after running one Task Attempt

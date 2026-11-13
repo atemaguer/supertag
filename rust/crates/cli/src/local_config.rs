@@ -92,6 +92,8 @@ enum Service {
         depends_on: Vec<String>,
         #[serde(default)]
         concurrency: Option<u32>,
+        #[serde(default, rename = "attempt-timeout-seconds")]
+        attempt_timeout_seconds: Option<u64>,
     },
 }
 #[derive(Deserialize)]
@@ -117,6 +119,9 @@ enum WorkspaceMapping {
         path: PathBuf,
         #[serde(default)]
         delivery: Delivery,
+        /// Shell command that prepares each new Task checkout; see `--workspace-setup`.
+        #[serde(default)]
+        setup: Option<String>,
     },
 }
 /// `branch` imports each delivered Task into the repository as its Session branch; `patch`
@@ -129,10 +134,14 @@ enum Delivery {
     Patch,
 }
 impl WorkspaceMapping {
-    fn parts(&self) -> (&Path, Delivery) {
+    fn parts(&self) -> (&Path, Delivery, Option<&str>) {
         match self {
-            Self::Path(path) => (path, Delivery::Branch),
-            Self::Detailed { path, delivery } => (path, *delivery),
+            Self::Path(path) => (path, Delivery::Branch, None),
+            Self::Detailed {
+                path,
+                delivery,
+                setup,
+            } => (path, *delivery, setup.as_deref()),
         }
     }
 }
@@ -247,6 +256,8 @@ pub struct Host {
     pub harnesses: Vec<AdapterOptions>,
     /// Attempts each harness runs at once; each is a separate execution lane.
     pub concurrency: u32,
+    /// Seconds each Task Attempt may run before the host stops it.
+    pub attempt_timeout_seconds: u64,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
     /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
@@ -256,6 +267,12 @@ pub struct Host {
 }
 /// The largest per-harness concurrency a Worker Host may declare.
 const MAX_CONCURRENCY: u32 = 16;
+/// A Task Attempt may run for 60 minutes unless its host service says otherwise, as in
+/// TypeScript's `DEFAULT_ATTEMPT_TIMEOUT_MS`.
+pub const DEFAULT_ATTEMPT_TIMEOUT_SECONDS: u64 = 60 * 60;
+/// The longest Attempt time limit a host service may declare: one day, the longest lease a
+/// shared execution provider grants.
+pub const MAX_ATTEMPT_TIMEOUT_SECONDS: u64 = 24 * 60 * 60;
 /// Distinct built-in harnesses one named Host may serve.
 const MAX_HARNESSES: usize = 5;
 #[derive(Parser)]
@@ -551,6 +568,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             depends_on,
             concurrency,
+            attempt_timeout_seconds,
         } = service
         else {
             continue;
@@ -578,6 +596,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             // Plane polling even when idle. More than one Attempt per harness is opt-in.
             None => 1,
         };
+        let attempt_timeout_seconds =
+            attempt_timeout_seconds.unwrap_or(DEFAULT_ATTEMPT_TIMEOUT_SECONDS);
+        ensure!(
+            (1..=MAX_ATTEMPT_TIMEOUT_SECONDS).contains(&attempt_timeout_seconds),
+            "attempt-timeout-seconds must be a whole number from 1 through {MAX_ATTEMPT_TIMEOUT_SECONDS}"
+        );
         let target = control_plane
             .as_deref()
             .or(plane_name.as_deref())
@@ -629,10 +653,11 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             "a named Worker Host maps at most 128 Workspaces"
         );
         let mut mapping = Vec::new();
+        let mut setups = Vec::new();
         let mut session_branches = BTreeMap::new();
         for (id, workspace) in &workspaces {
             identifier(id)?;
-            let (path, delivery) = workspace.parts();
+            let (path, delivery, setup) = workspace.parts();
             let path = resolve_path(base, path)?;
             if delivery == Delivery::Branch && remote.is_none() {
                 session_branches.insert(id.clone(), path.clone());
@@ -643,7 +668,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 "--workspace-source".into(),
                 path.into_os_string(),
             ]);
+            if let Some(setup) = setup {
+                supertag_workspaces::setup::validate_command(setup)?;
+                setups.push(OsString::from(format!("--workspace-setup={id}={setup}")));
+            }
         }
+        mapping.extend(setups);
         let mut selections = Vec::new();
         if let Some(adapter) = adapter {
             ensure!(
@@ -712,6 +742,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             key,
             harnesses: selected,
             concurrency,
+            attempt_timeout_seconds,
             skills,
             restart,
             session_branches,
@@ -1202,6 +1233,7 @@ secrets:
     type: host
     harnesses: [codex, cursor, openai-agents]
     concurrency: 3
+    attempt-timeout-seconds: 5400
     models: {codex: [model-a], cursor: cursor-model}
     allow-unsandboxed-commands: [cursor]
     workspaces: {repo: ./source}
@@ -1243,9 +1275,11 @@ secrets:
                 .iter()
                 .all(|h| h.worker_args().iter().any(|v| v == "/trusted/./source"))
         );
-        // An unset concurrency runs one Attempt per harness.
+        // An unset concurrency runs one Attempt per harness, each for up to 60 minutes.
         let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
         assert_eq!(default.concurrency, 1);
+        assert_eq!(default.attempt_timeout_seconds, 3600);
+        assert_eq!(shared.attempt_timeout_seconds, 5400);
         assert_eq!(default.harnesses.len(), 1);
     }
     #[test]
@@ -1254,7 +1288,7 @@ secrets:
             br#"services:
   control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
   branch: {type: host, adapter: ./adapter, workspaces: {app: ./app}}
-  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch}}}
+  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch, setup: npm ci}}}
   patch: {type: host, adapter: ./adapter, workspaces: {docs: {path: ./docs, delivery: patch}}}
   remote: {type: host, control-plane: "https://plane.example", adapter: ./adapter, workspaces: {api: ./api}}
 "#,
@@ -1277,6 +1311,16 @@ secrets:
         assert_eq!(
             branches("explicit"),
             [("web".to_owned(), PathBuf::from("/trusted/./web"))].into()
+        );
+        // A Workspace's setup command reaches its host's Workers.
+        let explicit = c.hosts.iter().find(|h| h.name == "explicit").unwrap();
+        let mappings = explicit.harnesses[0].workspace_mappings().unwrap();
+        assert_eq!(mappings[0].setup.as_deref(), Some("npm ci"));
+        assert!(
+            explicit.harnesses[0]
+                .worker_args()
+                .iter()
+                .any(|v| v == "web=npm ci")
         );
         // The repository is still the host's source; only the import is off.
         assert!(branches("patch").is_empty());
@@ -1529,6 +1573,8 @@ secrets:
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, codex]}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 0}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 17}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 0}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], attempt-timeout-seconds: 86401}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], models: {cursor: [m]}}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, cursor], allow-unsandboxed-commands: [codex]}}",
             "services: {control-plane: {type: control-plane, ports: ['0.0.0.0:3434']}}",

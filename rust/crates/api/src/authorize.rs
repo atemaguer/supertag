@@ -205,6 +205,10 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("Inbox", "DecideApproval", OC),
     // Execution.
     ("WorkerHost", "*", HOST),
+    // A restarted host reclaiming an Attempt it proved stopped, and the limits its adapter
+    // confirmed: only the Worker Host that holds the Attempt.
+    ("WorkerHost", "ReclaimAttempt", HOST),
+    ("WorkerHost", "ReportAppliedLimits", HOST),
     ("AttemptInputs", "*", HOST),
     ("AttemptWorkstreams", "*", HOST),
     ("AttemptMailbox", "*", HOST),
@@ -592,6 +596,8 @@ mod tests {
         assert_eq!(roles("Objectives/SetLimits"), ["operator"]);
         assert_eq!(roles("Inbox/DecideApproval"), ["operator", "client"]);
         assert_eq!(roles("WorkerHost/ClaimTask"), ["host"]);
+        assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
+        assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
         assert_eq!(roles("Transfers/UploadCheckpoint"), ["host"]);
         assert_eq!(
             roles("Transfers/DownloadWorkspaceArtifact"),

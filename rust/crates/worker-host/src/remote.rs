@@ -7,6 +7,7 @@ use supertag_protocol::{
     v2::{HostRecord, RemoteWorkspaceEnvironment, Task},
 };
 use supertag_workspaces::{TransferArtifact, devcontainer::RemoteDevcontainer};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
@@ -20,6 +21,22 @@ use crate::{
     workspaces::{PreparedWorkspace, Workspaces},
 };
 
+/// The longest sandbox lifetime the E2B and Modal provider sessions grant.
+pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
+/// Sandbox life kept after the harness stops, for capture and cleanup.
+const SANDBOX_CLEANUP_MARGIN: Duration = Duration::from_secs(180);
+
+/// The Attempt time limit must be positive, and a remote sandbox must outlive it.
+pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
+    ensure!(!limit.is_zero(), "attempt timeout must be positive");
+    ensure!(
+        !remote || limit <= MAX_SANDBOX_LIFETIME,
+        "a remote Workspace sandbox lives at most {} seconds, so the attempt timeout cannot exceed it",
+        MAX_SANDBOX_LIFETIME.as_secs()
+    );
+    Ok(())
+}
+
 pub(crate) const CAPTURE_FAILED: &str = "Remote Workspace output could not be captured safely";
 pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured safely";
 
@@ -31,7 +48,7 @@ pub(crate) async fn prepare(
     (mcp_commit, environment): (Option<&str>, Option<RemoteDevcontainer>),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
-) -> Result<(RemoteProvider, Option<String>)> {
+) -> Result<(RemoteProvider, Option<String>, Instant)> {
     let config = options
         .remote_provider
         .as_ref()
@@ -66,8 +83,11 @@ pub(crate) async fn prepare(
     )?;
     let timeout = options
         .attempt_timeout
-        .saturating_add(Duration::from_secs(180))
-        .min(Duration::from_secs(3600));
+        .saturating_add(SANDBOX_CLEANUP_MARGIN)
+        .min(MAX_SANDBOX_LIFETIME);
+    // The sandbox's clock starts no earlier than this request, so the harness stops in time
+    // to leave the cleanup margin even when preparation took part of the lifetime.
+    let execution_ends = Instant::now() + timeout - SANDBOX_CLEANUP_MARGIN;
     let environment = environment.map(|environment| RemoteWorkspaceEnvironment {
         image: environment.image,
         dockerfile_commands: environment.dockerfile_commands,
@@ -98,7 +118,7 @@ pub(crate) async fn prepare(
         )
         .await?;
     let instructions = inputs.delivered(&acquisition, cancel).await?;
-    Ok((provider, instructions))
+    Ok((provider, instructions, execution_ends))
 }
 
 pub(crate) async fn capture(
@@ -194,4 +214,17 @@ pub(crate) async fn ensure_stopped(
     let stopped = stopped?.context("sandbox termination could not be confirmed")?;
     journal.record_sandbox_stopped(&record, stopped)?;
     closed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_sandbox_must_outlive_the_attempt_time_limit() {
+        assert!(validate_time_limit(Duration::ZERO, false).is_err());
+        assert!(validate_time_limit(Duration::from_secs(86_400), false).is_ok());
+        assert!(validate_time_limit(MAX_SANDBOX_LIFETIME, true).is_ok());
+        assert!(validate_time_limit(MAX_SANDBOX_LIFETIME + Duration::from_secs(1), true).is_err());
+    }
 }

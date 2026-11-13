@@ -10,6 +10,7 @@ mod lock;
 pub mod packages;
 mod paths;
 pub mod session_branch;
+pub mod setup;
 pub mod source;
 mod transfer;
 pub use lock::ExclusiveLock;
@@ -166,6 +167,9 @@ pub struct PrepareRequest {
     pub session_id: String,
     /// Explicit Control Plane continuation pin. Required after a Session's first Task.
     pub expected_head: Option<String>,
+    /// The Workspace's operator-chosen setup command; see [`setup`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -236,6 +240,9 @@ struct Preparation {
     checkout: Checkout,
     commit_seconds: u64,
     ready: bool,
+    /// Setup outputs copied into the checkout. Git ignores them, so finalization skips them.
+    #[serde(default)]
+    setup_outputs: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -385,6 +392,7 @@ impl Workspace {
                 checkout: checkout.clone(),
                 commit_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
                 ready: false,
+                setup_outputs: Vec::new(),
             },
         };
         atomic_json(&record_path, &preparation)?;
@@ -399,9 +407,44 @@ impl Workspace {
                 "submodules require an explicit workspace implementation"
             );
         }
+        // Setup runs in this checkout on the base commit, so its outputs keep their paths.
+        let held = match &request.setup {
+            None => None,
+            Some(command) => Some(
+                setup::run(
+                    &repository,
+                    &checkout.path,
+                    &self.inner.config.base_commit,
+                    command,
+                    &record_dir.join("setup"),
+                    cancel,
+                )
+                .await?,
+            ),
+        };
         repository
             .checkout(&checkout.path, &start, &entries, cancel)
             .await?;
+        preparation.setup_outputs = match held {
+            None => Vec::new(),
+            Some(held) => {
+                let copied = held.restore(&checkout.path, cancel)?;
+                // Only what Git ignores at the Task's commit stays, so setup never changes a
+                // delivery.
+                let ignored = repository
+                    .ignored(&checkout.path, &start, &copied, cancel)
+                    .await?;
+                for output in copied.iter().filter(|output| !ignored.contains(*output)) {
+                    let path = checkout.path.join(output);
+                    if fs::symlink_metadata(&path)?.is_dir() {
+                        paths::remove_owned_directory(&path)?;
+                    } else {
+                        fs::remove_file(&path)?;
+                    }
+                }
+                ignored.into_iter().collect()
+            }
+        };
         paths::sync_tree(&checkout.path)?;
         File::open(checkout.path.parent().expect("checkout parent"))?.sync_all()?;
         check_cancelled(cancel)?;
@@ -446,7 +489,7 @@ impl Workspace {
         paths::verify_directory(&checkout.path)?;
         let repository = self.repository(cancel).await?;
         let base_tree = repository.tree(&checkout.start_commit, cancel).await?;
-        let all_files = paths::scan(&checkout.path, cancel)?;
+        let all_files = paths::scan_skipping(&checkout.path, &prior.setup_outputs, cancel)?;
         let output_prefix = request
             .output_directory
             .as_ref()

@@ -861,6 +861,28 @@ impl WorkerHost for Api {
         .await
     }
 
+    async fn reclaim_attempt(
+        &self,
+        request: Request<ReclaimAttemptRequest>,
+    ) -> Result<Response<AttemptResolution>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).reclaim_attempt(request).await
+        })
+        .await
+    }
+
+    async fn report_applied_limits(
+        &self,
+        request: Request<ReportAppliedLimitsRequest>,
+    ) -> Result<Response<ReportAppliedLimitsResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .report_applied_limits(request)
+                .await
+        })
+        .await
+    }
+
     async fn report_attempt_usage(
         &self,
         request: Request<ReportAttemptUsageRequest>,

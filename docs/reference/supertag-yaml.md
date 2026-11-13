@@ -791,6 +791,25 @@ above. It differs in these ways:
 - For credentials, a blank process value counts as unset, so `env_file` fills it. Interpolation
   still uses a set but empty process value.
 - Error messages name the variable, never its value.
+- A host service's `attempt-timeout-seconds`, from 1 through 86400, sets how long each Task
+  Attempt may run; it defaults to 3600, the same 60 minutes. A host whose Workspace files live in
+  an E2B or Modal sandbox accepts at most 3600, the longest sandbox those providers grant, and
+  stops the harness early enough to leave the sandbox 3 minutes for capture and cleanup.
+- A Workspace's `setup` command belongs to the host's checkout:
+  `workspaces: { app: { path: ~/code/app, setup: npm ci } }`. It works as described in
+  [Prepare each worktree with setup](../guides/workspaces.md#prepare-each-worktree-with-setup),
+  with these differences: setup gets `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, and the locale
+  variables, and no provider credentials; it runs again in each Task Attempt's new checkout, so
+  a retried Attempt reinstalls its dependencies; a host with an `environment` sandbox refuses it;
+  and a failed Task's result starts with `Workspace setup failed` instead of recording
+  `failureKind`.
+- A host restarted after it was killed checks the processes it recorded for an interrupted Task
+  Attempt. When all of them are gone, it records the Task Attempt as failed with an unknown
+  outcome, never runs it again, and takes new work. Otherwise, and always for an Attempt that
+  used an E2B or Modal sandbox or shared execution (as in TypeScript, the record proves only
+  processes on the host), it waits until you run
+  `supertag task resolve-attempt TASK ATTEMPT --decision failed|retry --confirmed-stopped --evidence TEXT`.
+  The Rust CLI has no `supertag recover worklet`.
 
 Each service process starts with an empty environment. It gets `PATH`, `HOME`, `USER`, `LOGNAME`,
 `TMPDIR`, `LANG`, `LC_ALL`, and `LC_CTYPE` from the shell, plus what its role needs:

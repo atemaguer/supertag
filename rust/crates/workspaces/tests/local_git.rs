@@ -81,6 +81,7 @@ fn request(task: &str, attempt: &str, head: Option<String>) -> PrepareRequest {
         attempt_id: attempt.into(),
         session_id: "session".into(),
         expected_head: head,
+        setup: None,
     }
 }
 fn complete() -> FinalizeRequest {
@@ -671,4 +672,131 @@ fn supertag_protocol_path(path: &str) -> bool {
         && path
             .split('/')
             .all(|part| !matches!(part, "" | "." | ".." | ".git"))
+}
+
+fn setup_request(task: &str, attempt: &str, command: &str) -> PrepareRequest {
+    PrepareRequest {
+        setup: Some(command.into()),
+        session_id: task.into(),
+        ..request(task, attempt, None)
+    }
+}
+
+#[tokio::test]
+async fn setup_runs_in_each_checkout_and_leaves_private_ignored_outputs() {
+    use std::os::unix::fs::MetadataExt;
+
+    let fixture = Fixture::new();
+    let outside = fixture.state.parent().unwrap().join("store");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("shared.js"), "store\n").unwrap();
+    let runs = outside.join("runs");
+    let quote = |path: &Path| format!("'{}'", path.display());
+    let command = format!(
+        "echo run >> {runs} && mkdir -p node_modules/dep node_modules/.bin && \
+         echo dep > node_modules/dep/index.js && ln {store} node_modules/dep/shared.js && \
+         ln -s ../dep/index.js node_modules/.bin/dep && ln -s /usr/bin/env node_modules/.bin/env && \
+         pwd -P > node_modules/where && echo \"$TMPDIR\" > node_modules/tmpdir && \
+         echo stray > stray.txt && echo changed > README.md && \
+         test -z \"$SUPERTAG_SECRET_FIXTURE\"",
+        runs = quote(&runs),
+        store = quote(&outside.join("shared.js")),
+    );
+    let workspace = fixture.workspace();
+    let cancel = CancellationToken::new();
+    // SAFETY: the test sets a variable before any thread reads it.
+    unsafe { std::env::set_var("SUPERTAG_SECRET_FIXTURE", "withheld") };
+    let checkout = workspace
+        .prepare(setup_request("task-1", "attempt-1", &command), &cancel)
+        .await
+        .unwrap();
+    let modules = checkout.path.join("node_modules");
+    assert_eq!(
+        fs::read_to_string(modules.join("dep/index.js")).unwrap(),
+        "dep\n"
+    );
+    assert_eq!(
+        fs::read_link(modules.join(".bin/dep")).unwrap(),
+        Path::new("../dep/index.js")
+    );
+    // An absolute link, such as a virtualenv's interpreter, stays as setup made it.
+    assert_eq!(
+        fs::read_link(modules.join(".bin/env")).unwrap(),
+        Path::new("/usr/bin/env")
+    );
+    // Setup ran in the Task checkout itself, so outputs that embed their path keep working.
+    assert_eq!(
+        Path::new(fs::read_to_string(modules.join("where")).unwrap().trim()),
+        checkout.path.canonicalize().unwrap()
+    );
+    // Setup's tracked edits and unignored files never reach the Task.
+    assert_eq!(
+        fs::read_to_string(checkout.path.join("README.md")).unwrap(),
+        "original\n"
+    );
+    assert!(!checkout.path.join("stray.txt").exists());
+    // A hard link into a store becomes a private copy.
+    let copied = fs::metadata(modules.join("dep/shared.js")).unwrap();
+    assert_eq!(copied.nlink(), 1);
+    assert_ne!(
+        copied.ino(),
+        fs::metadata(outside.join("shared.js")).unwrap().ino()
+    );
+    fs::write(modules.join("dep/shared.js"), "task edit\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(outside.join("shared.js")).unwrap(),
+        "store\n"
+    );
+    // Setup had its own temporary directory, removed when it finished.
+    let temporary = fs::read_to_string(modules.join("tmpdir")).unwrap();
+    assert!(!Path::new(temporary.trim()).exists(), "{temporary}");
+    assert!(!temporary.trim().is_empty());
+
+    // Like TypeScript, each new checkout runs setup again.
+    let second = workspace
+        .prepare(setup_request("task-2", "attempt-2", &command), &cancel)
+        .await
+        .unwrap();
+    assert!(second.path.join("node_modules/dep/index.js").exists());
+    assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 2);
+
+    // Delivery ignores setup outputs; only the Task's own change is captured.
+    fs::write(checkout.path.join("README.md"), "task change\n").unwrap();
+    let delivery = workspace
+        .finalize(&checkout, complete(), &cancel)
+        .await
+        .unwrap();
+    assert!(delivery.committed);
+    assert_eq!(delivery.changed_files, 1);
+}
+
+#[tokio::test]
+async fn failed_setup_fails_preparation_with_its_untrusted_output() {
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let cancel = CancellationToken::new();
+    let error = workspace
+        .prepare(
+            setup_request(
+                "task-1",
+                "attempt-1",
+                "echo installing; echo broken >&2; exit 3",
+            ),
+            &cancel,
+        )
+        .await
+        .unwrap_err();
+    let failed = error
+        .downcast_ref::<supertag_workspaces::setup::SetupFailed>()
+        .expect("a setup failure");
+    assert!(
+        failed.0.starts_with("Workspace setup failed"),
+        "{}",
+        failed.0
+    );
+    assert!(
+        failed.0.contains("installing") && failed.0.contains("broken"),
+        "{}",
+        failed.0
+    );
 }

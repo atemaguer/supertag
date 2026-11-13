@@ -3,11 +3,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use prost::Message;
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
     AttemptAuthority, AttemptDecision, AttemptExecutionSelection, AttemptResolution,
-    HarnessExecutionProfile, HarnessKind, InspectAttemptRequest, ResolveAttemptRequest, Task,
-    TaskState,
+    HarnessExecutionProfile, HarnessKind, InspectAttemptRequest, ReclaimAttemptRequest,
+    ReportAppliedLimitsRequest, ResolveAttemptRequest, Task, TaskState,
 };
 
 use super::{
@@ -16,6 +17,9 @@ use super::{
 };
 
 const LEASE_MS: i64 = 30_000;
+/// The result a reclaimed Attempt's Task records when it has none, as TypeScript's
+/// `InterruptedExecutionOutcomeUnknown` failure says.
+const RECLAIMED_RESULT: &str = "Execution was interrupted when its Worker Host stopped. The host confirmed that every process it started for this Attempt is gone. The outcome is unknown, and the Task does not run again automatically.";
 
 impl Store {
     /// Supply the Control Plane's clock for deterministic state transition tests.
@@ -132,14 +136,19 @@ impl Store {
             return Ok(resolution);
         }
         let already_resolved: Option<String> = sqlx::query_scalar(
-            "SELECT attempt_id FROM supertag_v2_attempt_resolutions WHERE attempt_id = $1",
+            "SELECT operator_principal FROM supertag_v2_attempt_resolutions WHERE attempt_id = $1",
         )
         .bind(&input.attempt_id)
         .fetch_optional(&mut *transaction)
         .await?;
-        if already_resolved.is_some() {
+        if let Some(principal) = already_resolved {
             return Err(StoreError::Conflict(
-                "Task Attempt already has a recovery decision".into(),
+                match principal.strip_prefix("host:") {
+                    Some(host) => format!(
+                        "Worker Host {host} reclaimed this Task Attempt as failed after it proved the Attempt's processes stopped"
+                    ),
+                    None => "Task Attempt already has a recovery decision".into(),
+                },
             ));
         }
 
@@ -202,7 +211,167 @@ impl Store {
             operator_id: operator_id.into(),
             evidence: input.evidence.clone(),
             resolved_at_ms: now,
+            worker_host_id: String::new(),
         })
+    }
+
+    /// The Attempt's own Worker Host, restarted after it was killed, proves every process it
+    /// recorded for the Attempt has stopped. Like TypeScript's automatic reclaim, this records a
+    /// failed Attempt whose outcome remains unknown: the Task never runs again on its own, and
+    /// effects the Attempt left in doubt keep their own resolution. An operator's decision, or a
+    /// Task another Attempt already owns, wins.
+    pub async fn reclaim_attempt(
+        &self,
+        host: &HostAuthority,
+        input: &ReclaimAttemptRequest,
+    ) -> Result<AttemptResolution> {
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Task Attempt is required"))?;
+        name("Task ID", &attempt.task_id)?;
+        name("Task Attempt ID", &attempt.attempt_id)?;
+        name("lease token", &attempt.lease_token)?;
+        text("recovery evidence", &input.evidence, 16_384)?;
+        if input.evidence.trim().is_empty() {
+            return Err(invalid("recovery evidence is required"));
+        }
+        let (mut transaction, _) = self.write().await?;
+        current_scope_in(&mut transaction, host).await?;
+        // Only the host that claimed this Attempt, holding its lease token, may reclaim it.
+        let claimed: Option<String> = sqlx::query_scalar("SELECT attempt_id FROM supertag_v2_claims WHERE task_id = $1 AND attempt_id = $2 AND principal = $3 AND lease_token = $4")
+            .bind(&attempt.task_id).bind(&attempt.attempt_id).bind(&host.principal).bind(&attempt.lease_token)
+            .fetch_optional(&mut *transaction).await?;
+        if claimed.is_none() {
+            return Err(StoreError::PermissionDenied);
+        }
+        let prior =
+            sqlx::query("SELECT * FROM supertag_v2_attempt_resolutions WHERE attempt_id = $1")
+                .bind(&attempt.attempt_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        if let Some(prior) = prior {
+            let resolution = resolution_row(&prior)?;
+            if prior.try_get::<String, _>("operator_principal")? == host.principal
+                && resolution.evidence == input.evidence
+            {
+                transaction.rollback().await?;
+                return Ok(resolution);
+            }
+            return Err(StoreError::Conflict(
+                "Task Attempt already has a recovery decision".into(),
+            ));
+        }
+        let now = self.execution_now_ms();
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        let row = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id = $1")
+            .bind(&attempt.task_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
+        let task = task_row(&row)?;
+        if task.attempt_id.as_deref() != Some(attempt.attempt_id.as_str()) {
+            return Err(StoreError::FailedPrecondition(
+                "Task Attempt no longer owns this Task".into(),
+            ));
+        }
+        if row
+            .try_get::<Option<String>, _>("host_principal")?
+            .as_deref()
+            != Some(host.principal.as_str())
+            || row
+                .try_get::<Option<i64>, _>("host_generation")?
+                .is_none_or(|generation| generation > host.generation)
+            || row.try_get::<Option<String>, _>("lease_token")?.as_deref()
+                != Some(attempt.lease_token.as_str())
+        {
+            return Err(StoreError::PermissionDenied);
+        }
+        let cleanup_pending = row.try_get::<i64, _>("cleanup_pending")? == 1;
+        let state = match task.state() {
+            TaskState::Running | TaskState::Uncertain => TaskState::Failed,
+            TaskState::Cancelled if cleanup_pending => TaskState::Cancelled,
+            _ => {
+                return Err(StoreError::FailedPrecondition(
+                    "Task Attempt does not require recovery".into(),
+                ));
+            }
+        };
+        sqlx::query("INSERT INTO supertag_v2_attempt_resolutions (attempt_id, task_id, operator_principal, operation_id, decision, evidence, confirmed_stopped, resolved_at_ms) VALUES ($1,$2,$3,$4,$5,$6,1,$7)")
+            .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(&host.principal).bind(&attempt.attempt_id)
+            .bind(AttemptDecision::Failed as i64).bind(&input.evidence).bind(now)
+            .execute(&mut *transaction).await?;
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1 WHERE task_id = $3")
+            // A cancelled Task keeps its cancellation as its result.
+            .bind(state as i64).bind((state == TaskState::Failed).then_some(RECLAIMED_RESULT)).bind(&attempt.task_id)
+            .execute(&mut *transaction).await?;
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        transaction.commit().await?;
+        Ok(AttemptResolution {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            decision: AttemptDecision::Failed as i32,
+            operator_id: String::new(),
+            evidence: input.evidence.clone(),
+            resolved_at_ms: now,
+            worker_host_id: host.id().into(),
+        })
+    }
+
+    /// Records the limits the running Attempt's adapter confirmed it applies, for the Task
+    /// execution report. A repeated report must match the first.
+    pub async fn report_applied_limits(
+        &self,
+        host: &HostAuthority,
+        input: &ReportAppliedLimitsRequest,
+    ) -> Result<()> {
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Task Attempt is required"))?;
+        let applied = input
+            .applied
+            .as_ref()
+            .filter(|applied| applied.limits.is_some() && applied.encoded_len() <= 4096)
+            .ok_or_else(|| invalid("applied execution limits are required"))?
+            .encode_to_vec();
+        let (mut transaction, _) = self.write().await?;
+        let row = owned(
+            &mut transaction,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        let task = task_row(&row)?;
+        if task.execution_limits.is_none() {
+            return Err(invalid("Task has no execution limits"));
+        }
+        match row.try_get::<Option<Vec<u8>>, _>("applied_execution_limits")? {
+            Some(prior) if prior == applied => {
+                transaction.rollback().await?;
+                return Ok(());
+            }
+            Some(_) => {
+                return Err(StoreError::Conflict(
+                    "Task Attempt already reported different applied limits".into(),
+                ));
+            }
+            None if task.state() != TaskState::Running => {
+                return Err(StoreError::FailedPrecondition("Task is not running".into()));
+            }
+            None => {}
+        }
+        sqlx::query(
+            "UPDATE supertag_v2_tasks SET applied_execution_limits = $1 WHERE task_id = $2",
+        )
+        .bind(applied)
+        .bind(&attempt.task_id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn get_attempt_resolution(
@@ -398,9 +567,14 @@ fn system_now_ms() -> i64 {
 
 fn resolution_row(row: &AnyRow) -> Result<AttemptResolution> {
     let principal: String = row.try_get("operator_principal")?;
-    let operator_id = principal
-        .strip_prefix("operator:")
-        .ok_or(StoreError::PermissionDenied)?;
+    let (operator_id, worker_host_id) = match (
+        principal.strip_prefix("operator:"),
+        principal.strip_prefix("host:"),
+    ) {
+        (Some(operator), _) => (operator, ""),
+        (None, Some(host)) => ("", host),
+        (None, None) => return Err(StoreError::PermissionDenied),
+    };
     Ok(AttemptResolution {
         task_id: row.try_get("task_id")?,
         attempt_id: row.try_get("attempt_id")?,
@@ -408,5 +582,6 @@ fn resolution_row(row: &AnyRow) -> Result<AttemptResolution> {
         operator_id: operator_id.into(),
         evidence: row.try_get("evidence")?,
         resolved_at_ms: row.try_get("resolved_at_ms")?,
+        worker_host_id: worker_host_id.into(),
     })
 }

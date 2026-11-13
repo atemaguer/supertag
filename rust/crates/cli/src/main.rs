@@ -525,8 +525,8 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
-        /// Seconds a Task Attempt may run before this host stops it.
-        #[arg(long, default_value_t = 120)]
+        /// Seconds a Task Attempt may run before this host stops it, from 1 through 86400.
+        #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]
         attempt_timeout_seconds: u64,
         /// Exit after running one Task Attempt.
         #[arg(long)]
@@ -1120,6 +1120,11 @@ async fn run(command: Command) -> Result<()> {
             } else {
                 None
             };
+            ensure!(
+                (remote_provider.is_none() && shared_execution_endpoint.is_none())
+                    || workspaces.iter().all(|mapping| mapping.setup.is_none()),
+                "Workspace setup prepares local checkouts; remote Workspaces and shared execution cannot use it"
+            );
             if remote_provider.is_some() {
                 ensure!(
                     harness == HarnessKind::Cursor
@@ -2592,13 +2597,37 @@ fn task_json(task: &Task) -> serde_json::Value {
                 })),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
-            "max_reported_tokens": limits.max_reported_tokens,
-            "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
-                "amount_minor": limit.amount_minor, "currency": limit.currency,
-            })),
-            "max_native_agents": limits.max_native_agents,
+        "execution_limits": task.execution_limits.as_ref().map(limits_json),
+        "applied_execution_limits": task.applied_execution_limits.as_ref().map(|applied| {
+            let method = |value: i32, present: bool| {
+                present.then(|| {
+                    supertag_protocol::v2::ExecutionLimitEnforcement::try_from(value)
+                        .unwrap_or_default()
+                        .as_str_name()
+                        .trim_start_matches("EXECUTION_LIMIT_ENFORCEMENT_")
+                        .to_ascii_lowercase()
+                })
+            };
+            let limits = applied.limits.clone().unwrap_or_default();
+            json!({
+                "limits": limits_json(&limits),
+                "enforcement": {
+                    "max_reported_tokens": method(applied.reported_tokens, limits.max_reported_tokens.is_some()),
+                    "max_reported_cost": method(applied.reported_cost, limits.max_reported_cost.is_some()),
+                    "max_native_agents": method(applied.native_agents, limits.max_native_agents.is_some()),
+                },
+            })
+        }),
+    })
+}
+
+fn limits_json(limits: &supertag_protocol::v2::ExecutionLimits) -> serde_json::Value {
+    json!({
+        "max_reported_tokens": limits.max_reported_tokens,
+        "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
+            "amount_minor": limit.amount_minor, "currency": limit.currency,
         })),
+        "max_native_agents": limits.max_native_agents,
     })
 }
 

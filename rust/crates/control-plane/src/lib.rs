@@ -581,6 +581,29 @@ impl worker_host_server::WorkerHost for ControlPlane {
         }))
     }
 
+    async fn reclaim_attempt(
+        &self,
+        request: Request<ReclaimAttemptRequest>,
+    ) -> Result<Response<AttemptResolution>, Status> {
+        let principal = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .reclaim_attempt(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn report_applied_limits(
+        &self,
+        request: Request<ReportAppliedLimitsRequest>,
+    ) -> Result<Response<ReportAppliedLimitsResponse>, Status> {
+        let principal = self.host_authority(&request)?;
+        self.store
+            .report_applied_limits(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReportAppliedLimitsResponse {}))
+    }
+
     async fn report_attempt_usage(
         &self,
         request: Request<ReportAttemptUsageRequest>,

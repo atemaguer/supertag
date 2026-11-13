@@ -275,6 +275,12 @@ const (
 	WorkerHostAskQuestionProcedure = "/supertag.runtime.v2.WorkerHost/AskQuestion"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
 	WorkerHostFinishTaskProcedure = "/supertag.runtime.v2.WorkerHost/FinishTask"
+	// WorkerHostReclaimAttemptProcedure is the fully-qualified name of the WorkerHost's ReclaimAttempt
+	// RPC.
+	WorkerHostReclaimAttemptProcedure = "/supertag.runtime.v2.WorkerHost/ReclaimAttempt"
+	// WorkerHostReportAppliedLimitsProcedure is the fully-qualified name of the WorkerHost's
+	// ReportAppliedLimits RPC.
+	WorkerHostReportAppliedLimitsProcedure = "/supertag.runtime.v2.WorkerHost/ReportAppliedLimits"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -2606,6 +2612,11 @@ type WorkerHostClient interface {
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// The restarted host of an interrupted Attempt proves every process it recorded for the
+	// Attempt has stopped. Records a failed Attempt whose outcome stays unknown; never a retry.
+	ReclaimAttempt(context.Context, *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	// Limits the Attempt's adapter confirmed it applies, for the Task execution report.
+	ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2709,6 +2720,18 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("FinishTask")),
 			connect.WithClientOptions(opts...),
 		),
+		reclaimAttempt: connect.NewClient[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution](
+			httpClient,
+			baseURL+WorkerHostReclaimAttemptProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReclaimAttempt")),
+			connect.WithClientOptions(opts...),
+		),
+		reportAppliedLimits: connect.NewClient[runtimev2.ReportAppliedLimitsRequest, runtimev2.ReportAppliedLimitsResponse](
+			httpClient,
+			baseURL+WorkerHostReportAppliedLimitsProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportAppliedLimits")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2729,6 +2752,8 @@ type workerHostClient struct {
 	appendEvent             *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
 	askQuestion             *connect.Client[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion]
 	finishTask              *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
+	reclaimAttempt          *connect.Client[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution]
+	reportAppliedLimits     *connect.Client[runtimev2.ReportAppliedLimitsRequest, runtimev2.ReportAppliedLimitsResponse]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -2806,6 +2831,16 @@ func (c *workerHostClient) FinishTask(ctx context.Context, req *connect.Request[
 	return c.finishTask.CallUnary(ctx, req)
 }
 
+// ReclaimAttempt calls supertag.runtime.v2.WorkerHost.ReclaimAttempt.
+func (c *workerHostClient) ReclaimAttempt(ctx context.Context, req *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
+	return c.reclaimAttempt.CallUnary(ctx, req)
+}
+
+// ReportAppliedLimits calls supertag.runtime.v2.WorkerHost.ReportAppliedLimits.
+func (c *workerHostClient) ReportAppliedLimits(ctx context.Context, req *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error) {
+	return c.reportAppliedLimits.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -2823,6 +2858,11 @@ type WorkerHostHandler interface {
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// The restarted host of an interrupted Attempt proves every process it recorded for the
+	// Attempt has stopped. Records a failed Attempt whose outcome stays unknown; never a retry.
+	ReclaimAttempt(context.Context, *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	// Limits the Attempt's adapter confirmed it applies, for the Task execution report.
+	ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -2922,6 +2962,18 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("FinishTask")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostReclaimAttemptHandler := connect.NewUnaryHandler(
+		WorkerHostReclaimAttemptProcedure,
+		svc.ReclaimAttempt,
+		connect.WithSchema(workerHostMethods.ByName("ReclaimAttempt")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostReportAppliedLimitsHandler := connect.NewUnaryHandler(
+		WorkerHostReportAppliedLimitsProcedure,
+		svc.ReportAppliedLimits,
+		connect.WithSchema(workerHostMethods.ByName("ReportAppliedLimits")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -2954,6 +3006,10 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostAskQuestionHandler.ServeHTTP(w, r)
 		case WorkerHostFinishTaskProcedure:
 			workerHostFinishTaskHandler.ServeHTTP(w, r)
+		case WorkerHostReclaimAttemptProcedure:
+			workerHostReclaimAttemptHandler.ServeHTTP(w, r)
+		case WorkerHostReportAppliedLimitsProcedure:
+			workerHostReportAppliedLimitsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3021,6 +3077,14 @@ func (UnimplementedWorkerHostHandler) AskQuestion(context.Context, *connect.Requ
 
 func (UnimplementedWorkerHostHandler) FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.FinishTask is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReclaimAttempt(context.Context, *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReclaimAttempt is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportAppliedLimits is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.

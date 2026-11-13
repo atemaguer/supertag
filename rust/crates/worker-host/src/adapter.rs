@@ -38,8 +38,9 @@ use supertag_protocol::{
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
         HarnessRun, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
         HarnessUsageRequest, InspectAttemptRequest, LiveInput, ObjectiveSignal,
-        ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill,
-        SessionCheckpoint, TakeInputResponse, TaskEvent, TaskState,
+        ReportAppliedLimitsRequest, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
+        ReportedCostLimit, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
+        TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -223,19 +224,43 @@ impl Harness for Bridge {
     ) -> Result<Response<ConfirmExecutionLimitsResponse>, Status> {
         self.authenticate(&request)?;
         self.require_attached()?;
-        let mut state = self.state.lock().await;
         let applied = request.into_inner();
-        if let Some(previous) = &state.applied_limits {
-            if previous != &applied {
-                return Err(Status::already_exists(
-                    "adapter already confirmed different execution limits",
-                ));
+        // The check runs again after the report, which runs without the bridge lock so other
+        // bridge calls never wait on the Control Plane.
+        let check = |state: &RunState| -> Result<bool, Status> {
+            if let Some(previous) = &state.applied_limits {
+                if previous != &applied {
+                    return Err(Status::already_exists(
+                        "adapter already confirmed different execution limits",
+                    ));
+                }
+                return Ok(true);
             }
-        } else {
             if state.outcome.is_some() {
                 return Err(Status::failed_precondition("execution is complete"));
             }
-            limits::verify_confirmation(self.harness, self.execution_limits(), &applied)?;
+            Ok(false)
+        };
+        if check(&*self.state.lock().await)? {
+            return Ok(Response::new(ConfirmExecutionLimitsResponse {}));
+        }
+        limits::verify_confirmation(self.harness, self.execution_limits(), &applied)?;
+        // The Task execution report shows what the adapter applied. The Control Plane accepts
+        // a repeated report of the same limits and refuses different ones.
+        let report = ReportAppliedLimitsRequest {
+            attempt: Some(InspectAttemptRequest {
+                task_id: self.task_id().into(),
+                attempt_id: self.assignment.attempt_id.clone(),
+                lease_token: self.assignment.lease_token.clone(),
+            }),
+            applied: Some(applied.clone()),
+        };
+        self.retry_upstream(report, |mut host, request| async move {
+            host.report_applied_limits(request).await
+        })
+        .await?;
+        let mut state = self.state.lock().await;
+        if !check(&state)? {
             state.applied_limits = Some(applied);
         }
         Ok(Response::new(ConfirmExecutionLimitsResponse {}))
@@ -429,6 +454,10 @@ pub(crate) struct ExecutionInputs<'a> {
     pub resolved_skills: Vec<ResolvedSkill>,
     pub remote_workspace: Option<workspace::RemoteWorkspace>,
     pub mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+    /// Where the adapter's process group is recorded before it starts.
+    pub processes: crate::journal::Processes,
+    /// When a remote sandbox's harness must stop to leave its cleanup margin.
+    pub sandbox_execution_ends: Option<Instant>,
 }
 
 pub(crate) async fn execute(
@@ -441,6 +470,8 @@ pub(crate) async fn execute(
         resolved_skills,
         remote_workspace,
         mcp,
+        processes,
+        sandbox_execution_ends,
     }: ExecutionInputs<'_>,
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
@@ -521,14 +552,17 @@ pub(crate) async fn execute(
                 stop_server.clone().cancelled_owned(),
             ),
     );
+    // A remote sandbox's harness also stops in time to leave the sandbox's cleanup margin.
+    let attempt_ends = Instant::now() + options.attempt_timeout;
+    let execution_ends = sandbox_execution_ends.map_or(attempt_ends, |ends| ends.min(attempt_ends));
     let result = supervise(
         options,
         &bridge,
         bootstrap,
-        valid_until,
+        (valid_until, execution_ends),
         shutdown,
-        workspace,
-        output_directory,
+        (workspace, output_directory),
+        &processes,
     )
     .await;
     bridge.inputs.close();
@@ -553,10 +587,10 @@ async fn supervise(
     options: &HostOptions,
     bridge: &Bridge,
     bootstrap: AdapterBootstrap,
-    valid_until: Instant,
+    (valid_until, execution_ends): (Instant, Instant),
     shutdown: &CancellationToken,
-    workspace: Option<&Path>,
-    output_directory: Option<&Path>,
+    (workspace, output_directory): (Option<&Path>, Option<&Path>),
+    processes: &crate::journal::Processes,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(failed("Worker Host is shutting down"));
@@ -612,12 +646,17 @@ async fn supervise(
             .iter()
             .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
     );
-    let mut child = match command.spawn() {
+    // Record the spawn before it happens, so a host killed at any point leaves either no
+    // adapter or a record a restart can check.
+    let pending = processes.prepare()?;
+    let spawned = command.spawn();
+    pending.record(spawned.as_ref().ok().and_then(Child::id))?;
+    let mut child = match spawned {
         Ok(child) => child,
         Err(_) => return Ok(failed("Harness adapter could not start")),
     };
     let group = child.id().context("adapter process has no PID")?;
-    let outcome = time::timeout(options.attempt_timeout, async {
+    let outcome = time::timeout_at(execution_ends, async {
         let mut input = child
             .stdin
             .take()

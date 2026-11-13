@@ -1174,6 +1174,8 @@ impl ManagedHost {
             .arg(&lane.directory)
             .arg("--wait-for-recovery")
             .args(["--supervised-lane", incarnation])
+            .arg("--attempt-timeout-seconds")
+            .arg(self.definition.attempt_timeout_seconds.to_string())
             .args(adapter.worker_args());
         if let Some(path) = &self.definition.skills
             && loads_skills(adapter.harness_kind())

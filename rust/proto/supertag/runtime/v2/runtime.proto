@@ -633,6 +633,11 @@ service WorkerHost {
   rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
   rpc AskQuestion(AskQuestionRequest) returns (ObjectiveQuestion);
   rpc FinishTask(FinishTaskRequest) returns (Task);
+  // The restarted host of an interrupted Attempt proves every process it recorded for the
+  // Attempt has stopped. Records a failed Attempt whose outcome stays unknown; never a retry.
+  rpc ReclaimAttempt(ReclaimAttemptRequest) returns (AttemptResolution);
+  // Limits the Attempt's adapter confirmed it applies, for the Task execution report.
+  rpc ReportAppliedLimits(ReportAppliedLimitsRequest) returns (ReportAppliedLimitsResponse);
 }
 
 enum HostPhase {
@@ -1416,6 +1421,8 @@ message Task {
   // How a surface message selected this Task's GitHub Workspace: request, origin or default.
   // Absent when the Tag's configured Workspace (or none) was used.
   optional string workspace_selection = 3500;
+  // Limits the current Attempt's adapter confirmed it applies, and how; absent until it does.
+  AppliedExecutionLimits applied_execution_limits = 5001;
 }
 
 message TaskArtifactInputSelection {
@@ -1664,10 +1671,26 @@ message AttemptResolution {
   string task_id = 1;
   string attempt_id = 2;
   AttemptDecision decision = 3;
+  // Empty when the Attempt's own Worker Host reclaimed it; see worker_host_id.
   string operator_id = 4;
   string evidence = 5;
   int64 resolved_at_ms = 6;
+  // Set when the Attempt's restarted Worker Host proved its execution stopped.
+  string worker_host_id = 5000;
 }
+
+message ReclaimAttemptRequest {
+  InspectAttemptRequest attempt = 1;
+  // What the host checked, such as the recorded process groups it found gone.
+  string evidence = 2;
+}
+
+message ReportAppliedLimitsRequest {
+  InspectAttemptRequest attempt = 1;
+  AppliedExecutionLimits applied = 2;
+}
+
+message ReportAppliedLimitsResponse {}
 
 message GetAttemptResolutionResponse {
   AttemptResolution resolution = 1;

@@ -505,6 +505,11 @@ async fn scenario(
                 "project",
                 "--workspace-from-control-plane",
             ]);
+            // Setup also prepares checkouts of a Control Plane-sourced Workspace.
+            host.arg(format!(
+                "--workspace-setup=project=echo run >> '{}'",
+                root.join("setup-runs").display()
+            ));
         }
         host
     };
@@ -534,6 +539,7 @@ async fn scenario(
     success(worker("host-one", true)).await?;
     let first = json(cli(&["get", "task", first_id])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
+    assert!(fs::read_to_string(root.join("setup-runs"))?.lines().count() >= 1);
     assert_eq!(first["result"], "Change: first\nWorkspace before:\nbase\n");
     let first_head = field(&first["workspace_delivery"], "head_commit")?.to_owned();
     let first_publication = if publication {

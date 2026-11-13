@@ -287,6 +287,7 @@ async fn loopback_source_fetch_keeps_credentials_at_gateway_and_imports_exact_co
                 attempt_id: "attempt".into(),
                 session_id: "session".into(),
                 expected_head: None,
+                setup: None,
             },
             &CancellationToken::new(),
         )
