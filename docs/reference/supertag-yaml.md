@@ -807,9 +807,10 @@ above. It differs in these ways:
   Attempt. When all of them are gone, it records the Task Attempt as failed with an unknown
   outcome, never runs it again, and takes new work. Otherwise, and always for an Attempt that
   used an E2B or Modal sandbox or shared execution (as in TypeScript, the record proves only
-  processes on the host), it waits until you run
-  `supertag task resolve-attempt TASK ATTEMPT --decision failed|retry --confirmed-stopped --evidence TEXT`.
-  The Rust CLI has no `supertag recover worklet`.
+  processes on the host), it waits until you record a decision with the Rust CLI's
+  `task resolve-attempt` command (`--decision failed|retry --confirmed-stopped`; see the
+  [Rust CLI reference](../../rust/docs/cli-reference.md)). The Rust CLI has no
+  `supertag recover worklet`.
 
 Each service process starts with an empty environment. It gets `PATH`, `HOME`, `USER`, `LOGNAME`,
 `TMPDIR`, `LANG`, `LC_ALL`, and `LC_CTYPE` from the shell, plus what its role needs:
