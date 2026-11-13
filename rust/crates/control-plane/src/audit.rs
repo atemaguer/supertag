@@ -556,7 +556,9 @@ pub(crate) struct AuditCall {
 
 struct CallState {
     actor: String,
-    /// Set by a handler that refuses a caller it cannot attribute, which is not recorded.
+    /// Set while the call has no one to attribute it to, which is not recorded. A call made with
+    /// an Auth Key starts unattributed and stays so until the handler finds the key, so a refusal
+    /// of an unknown key, or of a request checked before its key is looked up, writes nothing.
     skip: bool,
 }
 
@@ -613,22 +615,14 @@ fn current_call() -> Option<Arc<AuditCall>> {
     CALL.try_with(Arc::clone).ok()
 }
 
-/// Names who the running audited call acts as, such as the Auth Key a Worker Host presented.
+/// Names who the running audited call acts as, such as the Auth Key a Worker Host presented, and
+/// so lets the call be recorded.
 pub(crate) fn note_actor(actor: &str) {
     if let Some(call) = current_call()
         && let Ok(mut state) = call.state.lock()
     {
         state.actor = actor.into();
-    }
-}
-
-/// Leaves the running audited call out of the log, as for a credential the Control Plane does
-/// not know.
-pub(crate) fn skip_call() {
-    if let Some(call) = current_call()
-        && let Ok(mut state) = call.state.lock()
-    {
-        state.skip = true;
+        state.skip = false;
     }
 }
 
@@ -861,7 +855,10 @@ where
                 method: request.uri().path().to_owned(),
                 decode: rule.decode,
                 copy: copy.clone(),
-                state: Mutex::new(CallState { actor, skip: false }),
+                state: Mutex::new(CallState {
+                    actor,
+                    skip: matches!(rule.caller, Caller::AuthKey),
+                }),
             });
             let (parts, body) = request.into_parts();
             let body = Body::new(Recording { inner: body, copy });

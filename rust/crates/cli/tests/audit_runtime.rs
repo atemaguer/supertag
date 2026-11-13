@@ -210,8 +210,9 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
     Ok(())
 }
 
-/// A join with a key the Control Plane does not know is not recorded; a join with a known key is
-/// recorded under `auth-key:KEY_ID`, whether it succeeds or is refused.
+/// A join with a key the Control Plane does not know is not recorded, nor is a join refused before
+/// its key is looked up; a join with a known key is recorded under `auth-key:KEY_ID`, whether it
+/// succeeds or is refused.
 async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     services
@@ -240,6 +241,15 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .await?
         .unwrap_err();
     assert_eq!(unknown.code(), Code::Unauthenticated, "{unknown:?}");
+    // The key is looked up before the request is checked, so an unknown caller cannot write
+    // entries by sending invalid joins.
+    for _ in 0..3 {
+        let invalid = join("unissued-test-key", "", "invalid").await?.unwrap_err();
+        assert_eq!(invalid.code(), Code::Unauthenticated, "{invalid:?}");
+    }
+    // A known key's invalid join is recorded under the key.
+    let invalid = join(auth_key, "", "invalid").await?.unwrap_err();
+    assert_eq!(invalid.code(), Code::InvalidArgument, "{invalid:?}");
     join(auth_key, "review-host", "join").await??;
     // A one-time key designates its host; another host may not use it.
     let refused = join(auth_key, "other-host", "other").await?.unwrap_err();
@@ -252,9 +262,19 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .into_iter()
         .filter(|entry| entry[1] == "worker-host.join")
         .collect::<Vec<_>>();
-    assert_eq!(joins.len(), 2, "{joins:?}");
+    assert_eq!(joins.len(), 3, "{joins:?}");
     assert_eq!(
         joins[0],
+        entry(
+            &actor,
+            "worker-host.join",
+            "WorkerHost",
+            "failed",
+            "INVALID_ARGUMENT"
+        )
+    );
+    assert_eq!(
+        joins[1],
         entry(
             &actor,
             "worker-host.join",
@@ -264,10 +284,15 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         )
     );
     assert_eq!(
-        joins[1][..4],
-        entry(&actor, "worker-host.join", "WorkerHost", "failed", "")[..4]
+        joins[2],
+        entry(
+            &actor,
+            "worker-host.join",
+            "WorkerHost",
+            "failed",
+            "PERMISSION_DENIED"
+        )
     );
-    assert_eq!(joins[1][4], "PERMISSION_DENIED");
     services.stop().await?;
     Ok(())
 }
@@ -339,8 +364,35 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
 
     let (saved, stderr) = connect(&token, "prod", &services.public, false).await?;
     ensure!(!saved && stderr.contains("--replace"), "{stderr}");
+    // Replacing a connection keeps the Workspace the terminal UI chose for it.
+    let mut profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    profiles["gateways"][0]["workspace"] = "project".into();
+    std::fs::write(&store, serde_json::to_vec(&profiles)?)?;
     let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
     ensure!(saved, "{stderr}");
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["gateways"][0]["workspace"], "project");
+    // A URL that cannot be saved is refused before the token is sent anywhere.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let port = listener.local_addr()?.port();
+    for url in [
+        format!("http://user:secret@127.0.0.1:{port}"),
+        format!("http://127.0.0.1:{port}/path"),
+        format!("http://127.0.0.1:{port}/?query=1"),
+    ] {
+        let (saved, stderr) = connect(&token, "other", &url, false).await?;
+        ensure!(
+            !saved && stderr.contains("without credentials, path, query or fragment"),
+            "{stderr}"
+        );
+    }
+    let refused = listener.accept().map(|_| ()).unwrap_err();
+    assert_eq!(
+        refused.kind(),
+        std::io::ErrorKind::WouldBlock,
+        "the token was sent"
+    );
     let (saved, stderr) = connect(&token, "prod", "http://127.0.0.2:1", true).await?;
     ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;

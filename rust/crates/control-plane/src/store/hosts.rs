@@ -194,9 +194,20 @@ impl Store {
         input: &EnrollHostRequest,
         key_digest: &[u8],
     ) -> Result<HostRecord> {
+        // The key is looked up before the request is checked, as the TypeScript request gate
+        // refuses an unknown Auth Key before anything else: a join with a key the Control Plane
+        // does not know names no one to record, whatever else is wrong with it.
+        let key = credential_digest(key_digest)?;
+        let key_id: String =
+            sqlx::query_scalar("SELECT key_id FROM supertag_v2_auth_keys WHERE key_digest=$1")
+                .bind(&key)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(StoreError::PermissionDenied)?;
+        let actor = format!("auth-key:{key_id}");
+        crate::audit::note_actor(&actor);
         host_id(&input.host_id)?;
         name("operation ID", &input.operation_id)?;
-        let key = credential_digest(key_digest)?;
         let token = credential_digest(&input.token_digest)?;
         if key == token {
             return Err(invalid(
@@ -210,12 +221,9 @@ impl Store {
             .fetch_optional(&mut *transaction)
             .await?
         else {
-            // A join with a key the Control Plane does not know names no one to record.
-            crate::audit::skip_call();
             return Err(StoreError::PermissionDenied);
         };
-        let key_id: String = row.try_get("key_id")?;
-        crate::audit::note_actor_in(&mut transaction, &format!("auth-key:{key_id}")).await?;
+        crate::audit::note_actor_in(&mut transaction, &actor).await?;
         // Revocation also refuses replays, as packages/store/src/auth-key-store.ts does.
         if row.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some() {
             return Err(StoreError::PermissionDenied);

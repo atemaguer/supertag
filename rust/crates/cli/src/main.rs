@@ -2650,6 +2650,8 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
         !gateway.token.is_empty(),
         "the operator token must not be empty"
     );
+    // The token goes only to the origin that would be saved.
+    gateway.url = profiles::checked_origin(&gateway)?;
     let target = OperatorTarget {
         url: gateway.url.clone(),
         token: gateway.token.clone(),

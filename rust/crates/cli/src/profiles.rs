@@ -302,9 +302,15 @@ fn path_text(path: &Option<PathBuf>) -> Result<String> {
     Ok(text.to_owned())
 }
 
-/// Saves `gateway` in the terminal UI's store and makes it active. A name already saved for
-/// this origin is replaced only with `replace`; a name saved for another origin is refused.
-pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
+/// A Gateway connection in the form the terminal UI stores.
+struct Checked {
+    url: String,
+    server_ca: String,
+    client_cert: String,
+    client_key: String,
+}
+
+fn check(gateway: &NewGateway) -> Result<Checked> {
     let name = gateway.name.as_str();
     ensure!(
         !name.trim().is_empty() && name.len() <= 64 && !name.chars().any(char::is_control),
@@ -327,6 +333,31 @@ pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
         url.starts_with("https:") || (server_ca.is_empty() && client_cert.is_empty()),
         "TLS files require an HTTPS Gateway"
     );
+    Ok(Checked {
+        url,
+        server_ca,
+        client_cert,
+        client_key,
+    })
+}
+
+/// The origin `gateway` would be saved under, refusing anything `save` refuses about the
+/// connection itself, so a token is never sent to a URL that cannot be saved.
+pub fn checked_origin(gateway: &NewGateway) -> Result<String> {
+    Ok(check(gateway)?.url)
+}
+
+/// Saves `gateway` in the terminal UI's store and makes it active. A name already saved for
+/// this origin is replaced only with `replace`, keeping the Workspace the terminal UI chose for
+/// it; a name saved for another origin is refused.
+pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
+    let name = gateway.name.as_str();
+    let Checked {
+        url,
+        server_ca,
+        client_cert,
+        client_key,
+    } = check(gateway)?;
     let path = tui_store()?;
     let directory = path
         .parent()
@@ -395,6 +426,9 @@ pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
                 replace,
                 "Gateway {name:?} is already saved; pass --replace to replace it"
             );
+            if let Some(workspace) = saved.get("workspace").filter(|value| value.is_string()) {
+                entry["workspace"] = workspace.clone();
+            }
             *saved = entry;
         }
         None => gateways.push(entry),
