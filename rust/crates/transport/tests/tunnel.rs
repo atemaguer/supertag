@@ -741,9 +741,12 @@ async fn a_dropped_tunnel_fails_calls_as_retryable_and_the_channel_recovers() ->
 /// An HTTP proxy that answers `CONNECT gateway.test:PORT` by relaying to the loopback
 /// port, so the client only reaches the service through it. It records each request
 /// line and `Proxy-Authorization` value, and refuses everything when `refuse` is set.
+/// Each `CONNECT` request line and its `Proxy-Authorization` value.
+type ProxyRequests = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
 struct ConnectProxy {
     address: SocketAddr,
-    requests: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    requests: ProxyRequests,
     task: JoinHandle<()>,
 }
 
@@ -751,7 +754,7 @@ impl ConnectProxy {
     async fn start(refuse: bool) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let requests: Arc<Mutex<Vec<(String, Option<String>)>>> = Arc::default();
+        let requests: ProxyRequests = Arc::default();
         let seen = requests.clone();
         let task = tokio::spawn(async move {
             while let Ok((mut downstream, _)) = listener.accept().await {
