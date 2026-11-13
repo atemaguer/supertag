@@ -727,9 +727,20 @@ impl Repository {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let file = file.to_str().context("bundle path is not UTF-8")?;
-        self.command(&["bundle", "verify", file], &[], &[], cancel)
-            .await?;
-        let heads = self
+        // A delivery bundle is complete: it is unpacked into an empty quarantine repository, so
+        // a prerequisite, a thin delta, or a tree or parent naming an object the bundle does not
+        // carry fails there instead of borrowing that object from this host's repository.
+        let temporary = self.root.join("temporary");
+        paths::create_private_root(&temporary)?;
+        let quarantine = tempfile::Builder::new()
+            .prefix("import-")
+            .tempdir_in(&temporary)?;
+        let isolated = Self::empty(quarantine.path(), self.oid_length)?;
+        isolated
+            .command(&["bundle", "verify", file], &[], &[], cancel)
+            .await
+            .context("delivery bundle is incomplete or damaged")?;
+        let heads = isolated
             .command(&["bundle", "list-heads", file], &[], &[], cancel)
             .await?;
         let advertised = String::from_utf8(heads)?;
@@ -739,7 +750,50 @@ impl Repository {
                 .any(|line| line.split_once(' ').is_some_and(|(oid, _)| oid == head)),
             "approved commit is not an advertised bundle head"
         );
-        self.command(&["bundle", "unbundle", file], &[], &[], cancel)
+        isolated
+            .command(&["bundle", "unbundle", file], &[], &[], cancel)
+            .await
+            .context("delivery bundle pack is damaged or incomplete")?;
+        isolated.verify_commit(head, cancel).await?;
+        let reachable = isolated
+            .command(&["rev-list", "--objects", head], &[], &[], cancel)
+            .await
+            .context("delivery bundle history is incomplete")?;
+        let stored = isolated
+            .command(
+                &[
+                    "cat-file",
+                    "--batch-all-objects",
+                    "--batch-check=%(objectname)",
+                ],
+                &[],
+                &[],
+                cancel,
+            )
+            .await?;
+        let names = |bytes: &[u8]| -> Result<BTreeSet<String>> {
+            Ok(std::str::from_utf8(bytes)?
+                .lines()
+                .filter_map(|line| line.split(' ').next())
+                .map(str::to_owned)
+                .collect())
+        };
+        ensure!(
+            names(&reachable)? == names(&stored)?,
+            "delivery bundle pack carries objects outside the delivered history"
+        );
+        let pack = self
+            .command(
+                &["pack-objects", "--stdout", "--revs"],
+                format!("{head}\n").as_bytes(),
+                &[(
+                    "GIT_OBJECT_DIRECTORY",
+                    isolated.git_dir.join("objects").into_os_string(),
+                )],
+                cancel,
+            )
+            .await?;
+        self.command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
             .await?;
         self.verify_commit(head, cancel).await
     }
