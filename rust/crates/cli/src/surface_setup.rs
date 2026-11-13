@@ -39,6 +39,7 @@ use uuid::Uuid;
 
 use crate::{
     Connection,
+    local::CREDENTIAL_VAULT_ENVIRONMENT,
     local_config::{
         self,
         surfaces::{Location, Provider, Surface},
@@ -259,7 +260,7 @@ pub struct UpdateTag {
     remove_location: Option<Provider>,
     #[command(flatten)]
     scope: ScopeArgs,
-    /// Provider user ID allowed to ask the Tag for work there. Repeat for more users.
+    /// Provider user ID allowed to ask the Tag for work there (numeric on GitHub). Repeat for more users.
     #[arg(long = "allowed-user")]
     allowed_users: Vec<String>,
     #[command(flatten)]
@@ -322,16 +323,47 @@ impl Local {
         ))
     }
 
-    /// The vault the local Gateway reads: Vault when selected, else this state directory's file.
+    /// The vault the Gateway that serves these accounts reads.
+    ///
+    /// With a local Control Plane, that is the vault `supertag up` gives its Gateway: the
+    /// selection from this shell or else `env_file`, falling back to this state directory's
+    /// file. Without one, the Gateway runs elsewhere and cannot read this machine's file, so
+    /// only a shared HashiCorp Vault is accepted.
     fn vault(&self) -> Result<CredentialVault> {
+        let Some(config) = self.services_file() else {
+            ensure!(
+                std::env::var("SUPERTAG_CREDENTIAL_VAULT")
+                    .is_ok_and(|selected| selected.trim() == "vault"),
+                "{} has no control-plane service, so the Gateway that serves this account cannot read this machine's credential file. Run setup where the Control Plane runs, or select the HashiCorp Vault that Gateway reads with SUPERTAG_CREDENTIAL_VAULT=vault, VAULT_ADDR, and VAULT_TOKEN.",
+                self.services_path().display()
+            );
+            return CredentialVault::from_environment(|key| {
+                CREDENTIAL_VAULT_ENVIRONMENT
+                    .contains(&key)
+                    .then(|| std::env::var(key).ok())
+                    .flatten()
+            });
+        };
         let state = self.state.to_string_lossy().into_owned();
         CredentialVault::from_environment(|key| {
             if key == "SUPERTAG_STATE_DIR" {
                 Some(state.clone())
+            } else if CREDENTIAL_VAULT_ENVIRONMENT.contains(&key) {
+                config
+                    .environment
+                    .variable(key)
+                    .and_then(|value| value.into_string().ok())
             } else {
-                std::env::var(key).ok()
+                None
             }
         })
+    }
+
+    fn services_path(&self) -> PathBuf {
+        self.target
+            .file
+            .clone()
+            .unwrap_or_else(|| self.state.join("supertag.yaml"))
     }
 
     /// The services file that can hold surfaces: one with a control-plane service.
@@ -343,11 +375,7 @@ impl Local {
         self.services_file().with_context(|| {
             format!(
                 "{} has no control-plane service; set up surfaces where the local Control Plane runs",
-                self.target
-                    .file
-                    .clone()
-                    .unwrap_or_else(|| self.state.join("supertag.yaml"))
-                    .display()
+                self.services_path().display()
             )
         })
     }
@@ -802,8 +830,10 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
         );
     }
 
+    // Choose where the secrets go before asking for them.
+    let vault = context.vault()?;
     let verified = verify(&kind, &prompter, &endpoints).await?;
-    finish(context, name, provider, listen, prior, verified).await
+    finish(context, vault, name, provider, listen, prior, verified).await
 }
 
 /// The verification arguments of each provider.
@@ -921,6 +951,7 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
 
 async fn finish(
     context: Local,
+    vault: CredentialVault,
     name: String,
     provider: Provider,
     listen: Option<SocketAddr>,
@@ -991,10 +1022,7 @@ async fn finish(
         .await?
         .into_inner();
     let credential = entry.credential_id(&name);
-    context
-        .vault()?
-        .store(&credential, &verified.secrets)
-        .await?;
+    vault.store(&credential, &verified.secrets).await?;
     let recorded = match edit {
         Some(edit) => {
             let path = edit.path.clone();
@@ -1017,7 +1045,7 @@ async fn finish(
             path.display()
         ),
         None => println!(
-            "Saved Surface Account {} with credentials in {credential}. No local Control Plane is configured, so configure its Gateway with SUPERTAG_*_CREDENTIAL_ID={credential}.",
+            "Saved Surface Account {} with credentials in Vault at {credential}. No local Control Plane is configured, so configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=vault and SUPERTAG_*_CREDENTIAL_ID={credential}.",
             account.account_id
         ),
     }
@@ -1165,6 +1193,11 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
                 context.edit(&name, Some(&surface))
             })
             .transpose()?;
+        // supertag.yaml first: if the Control Plane delete then fails, no connector serves the
+        // location and rerunning the command deletes it.
+        if let Some(edit) = edit {
+            edit.write()?;
+        }
         if let Some(current) = current {
             policy
                 .delete_surface_location(request(
@@ -1176,9 +1209,6 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
                     &token,
                 )?)
                 .await?;
-        }
-        if let Some(edit) = edit {
-            edit.write()?;
         }
         println!(
             "Removed {} from {} {place} on {display}.",

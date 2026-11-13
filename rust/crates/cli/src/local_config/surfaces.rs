@@ -232,6 +232,11 @@ impl Surface {
                         .all(|user| !user.trim().is_empty() && !user.contains(',')),
                 "surface {name}: location requires allowed-users"
             );
+            ensure!(
+                self.provider != Provider::Github
+                    || location.allowed_users.iter().all(|user| numeric(user)),
+                "surface {name}: GitHub allowed-users must be numeric user IDs, not logins"
+            );
             let used: &[&str] = match self.provider {
                 Provider::Slack => &["channel-id"],
                 Provider::Github => &["repository", "repository-id"],

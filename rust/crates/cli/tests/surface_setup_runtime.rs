@@ -209,6 +209,73 @@ async fn provider_fixture() -> Result<(Provider, String)> {
     Ok((state, format!("http://{address}")))
 }
 
+const VAULT_TOKEN: &str = "synthetic-vault-token";
+
+/// A loopback HashiCorp Vault KV v2 endpoint: `/v1/<mount>/{data,metadata}/<path>`, keyed by
+/// `<mount>/<path>`.
+#[derive(Clone, Default)]
+struct FakeVault {
+    entries: Arc<Mutex<BTreeMap<String, Value>>>,
+}
+
+impl FakeVault {
+    fn get(&self, key: &str) -> Option<Value> {
+        self.entries.lock().unwrap().get(key).cloned()
+    }
+}
+
+async fn fake_vault_kv(
+    State(vault): State<FakeVault>,
+    method: axum::http::Method,
+    headers: HeaderMap,
+    UrlPath(path): UrlPath<String>,
+    body: String,
+) -> Response {
+    if headers.get("x-vault-token").and_then(|v| v.to_str().ok()) != Some(VAULT_TOKEN) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some((mount, rest)) = path.split_once('/') else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some((area, key)) = rest.split_once('/') else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let key = format!("{mount}/{key}");
+    let mut entries = vault.entries.lock().unwrap();
+    match (method.as_str(), area) {
+        ("GET", "data") => match entries.get(&key) {
+            Some(value) => Json(json!({"data": {"data": value}})).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
+        ("POST", "data") => {
+            let Ok(body) = serde_json::from_str::<Value>(&body) else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            if body["options"]["cas"] == json!(0) && entries.contains_key(&key) {
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+            entries.insert(key, body["data"].clone());
+            Json(json!({"data": {"version": 1}})).into_response()
+        }
+        ("DELETE", "metadata") => {
+            entries.remove(&key);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
+    }
+}
+
+async fn fake_vault() -> Result<(FakeVault, String)> {
+    let vault = FakeVault::default();
+    let app = Router::new()
+        .route("/v1/{*path}", axum::routing::any(fake_vault_kv))
+        .with_state(vault.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Ok((vault, format!("http://{address}")))
+}
+
 struct Process {
     child: Child,
     log: PathBuf,
@@ -411,10 +478,21 @@ impl Services {
 
     /// Runs the CLI against the operator Gateway with only the given environment.
     fn cli(&self, args: &[&str], environment: &[(&str, &str)], input: &str) -> Result<Output> {
+        self.cli_in(&self.state, args, environment, input)
+    }
+
+    /// Runs the CLI with another state directory.
+    fn cli_in(
+        &self,
+        state: &Path,
+        args: &[&str],
+        environment: &[(&str, &str)],
+        input: &str,
+    ) -> Result<Output> {
         let mut child = Command::new(BINARY)
             .args(args)
             .args(["--gateway", &self.public, "--state-directory"])
-            .arg(&self.state)
+            .arg(state)
             .env_clear()
             .env("HOME", self.directory.path())
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token)
@@ -866,6 +944,28 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     );
     drop(gateway);
 
+    // supertag.yaml is written before the Control Plane location is deleted, so a failed write
+    // leaves the location in both places and the command can be rerun.
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&services.state)?.permissions().mode();
+        std::fs::set_permissions(&services.state, std::fs::Permissions::from_mode(0o500))?;
+        let output = services.cli(
+            &["update", "tag", "builder", "--remove-location", "slack"],
+            &[],
+            "",
+        );
+        std::fs::set_permissions(&services.state, std::fs::Permissions::from_mode(mode))?;
+        let output = output?;
+        ensure!(!output.status.success(), "{output:?}");
+    }
+    ensure!(services.surfaces()?["acme"]["location"]["tag"] == "builder");
+    let locations = services.json(&["surface-policy", "list", "location", "--account", "acme"])?;
+    ensure!(
+        locations["locations"].as_array().map(Vec::len) == Some(1),
+        "{locations}"
+    );
+
     // Removing the location stops new work there and clears it from supertag.yaml.
     let stdout = services.succeed(
         &["update", "tag", "builder", "--remove-location", "slack"],
@@ -1083,6 +1183,35 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
         services.credential("surface/teams/teams").await? == field(&[("appSecret", TEAMS_SECRET)])
     );
 
+    // A GitHub location admits numeric user IDs; a login would stop the Gateway from starting.
+    let before = std::fs::read(services.state.join("supertag.yaml"))?;
+    let stderr = services.fail(
+        &[
+            "update",
+            "tag",
+            "builder",
+            "--add-location",
+            "github",
+            "--account",
+            "gh",
+            "--repo",
+            "acme/app",
+            "--repo-id",
+            "77",
+            "--allowed-user",
+            "octocat",
+        ],
+        &[],
+        "",
+    )?;
+    ensure!(
+        stderr.contains("GitHub allowed-users must be numeric user IDs, not logins"),
+        "{stderr}"
+    );
+    ensure!(std::fs::read(services.state.join("supertag.yaml"))? == before);
+    let locations = services.json(&["surface-policy", "list", "location", "--account", "gh"])?;
+    ensure!(locations["locations"] == json!([]), "{locations}");
+
     // GitHub: the vault's webhook secret authenticates deliveries; its token is used for replies.
     let mut github = services.connector(
         &[
@@ -1262,7 +1391,77 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
     Ok(())
 }
 
+/// Without a local Control Plane the account's Gateway runs elsewhere and cannot read this
+/// machine's credential file, so setup accepts only a shared HashiCorp Vault, and refuses the
+/// file vault before any credential is read or sent to the provider.
+async fn setup_without_a_local_control_plane_requires_a_shared_vault(
+    database: String,
+) -> Result<()> {
+    let services = Services::start(&database).await?;
+    let (vault, address) = fake_vault().await?;
+    let remote = services.directory.path().join("remote");
+    std::fs::create_dir(&remote)?;
+    let args = ["setup", "surface", "slack", "--name", "remote"];
+    let tokens = [
+        ("SLACK_BOT_TOKEN", SLACK_BOT),
+        ("SLACK_SIGNING_SECRET", SLACK_SIGNING),
+    ];
+    let output = services.cli_in(&remote, &args, &tokens, "")?;
+    let stderr = String::from_utf8(output.stderr)?;
+    ensure!(!output.status.success(), "{stderr}");
+    no_secrets(&stderr)?;
+    ensure!(
+        stderr.contains("has no control-plane service, so the Gateway that serves this account cannot read this machine's credential file"),
+        "{stderr}"
+    );
+    ensure!(!services.provider.saw("/auth.test", SLACK_BOT));
+    let home_vault = services.directory.path().join(".supertag");
+    ensure!(!remote.join("gateway-credentials.json").exists() && !home_vault.exists());
+    let accounts = services.json(&["surface-policy", "list", "account"])?;
+    ensure!(accounts["accounts"] == json!([]), "{accounts}");
+
+    let output = services.cli_in(
+        &remote,
+        &args,
+        &[
+            &tokens[..],
+            &[
+                ("SUPERTAG_CREDENTIAL_VAULT", "vault"),
+                ("VAULT_ADDR", address.as_str()),
+                ("VAULT_TOKEN", VAULT_TOKEN),
+            ],
+        ]
+        .concat(),
+        "",
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let stderr = String::from_utf8(output.stderr)?;
+    ensure!(output.status.success(), "{stdout}{stderr}");
+    no_secrets(&format!("{stdout}{stderr}"))?;
+    ensure!(
+        stdout.contains("configure its Gateway with SUPERTAG_CREDENTIAL_VAULT=vault and SUPERTAG_*_CREDENTIAL_ID=surface/slack/remote"),
+        "{stdout}"
+    );
+    ensure!(
+        vault.get("secret/supertag/surface/slack/remote")
+            == Some(json!({"botToken": SLACK_BOT, "signingSecret": SLACK_SIGNING}))
+    );
+    ensure!(
+        !remote.join("gateway-credentials.json").exists()
+            && !remote.join("supertag.yaml").exists()
+            && !home_vault.exists()
+    );
+    let account = services.json(&["surface-policy", "show", "account", "remote"])?;
+    ensure!(
+        account["identity"] == json!({"provider": "slack", "team_id": SLACK_TEAM}),
+        "{account}"
+    );
+    Ok(())
+}
+
 database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    setup_without_a_local_control_plane_requires_a_shared_vault;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     slack_setup_binds_policy_and_admits_through_the_vault;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1273,7 +1472,18 @@ database_tests! {
 /// `--add-location` wrote, with the Slack secrets from this state directory's vault. Local
 /// services always use SQLite.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn local_up_serves_the_configured_surface_from_the_vault() -> Result<()> {
+async fn local_up_serves_the_configured_surface_from_the_file_vault() -> Result<()> {
+    local_up_serves_the_configured_surface(false).await
+}
+
+/// The same with HashiCorp Vault selected only in `env_file`, which is all a service unit sees:
+/// setup stores the secrets where the supervised Gateway reads them, and nothing in the file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_up_serves_the_configured_surface_from_an_env_file_vault() -> Result<()> {
+    local_up_serves_the_configured_surface(true).await
+}
+
+async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let state = directory.path().join("state");
     std::fs::create_dir(&state)?;
@@ -1285,6 +1495,18 @@ async fn local_up_serves_the_configured_surface_from_the_vault() -> Result<()> {
         state.join("supertag.yaml"),
         "services:\n  control-plane:\n    type: control-plane\n    ports: [\"127.0.0.1:0\"]\n",
     )?;
+    let vault = if hashicorp {
+        let (vault, address) = fake_vault().await?;
+        std::fs::write(
+            state.join(".env"),
+            format!(
+                "SUPERTAG_CREDENTIAL_VAULT=vault\nVAULT_ADDR={address}\nVAULT_TOKEN={VAULT_TOKEN}\n"
+            ),
+        )?;
+        Some(vault)
+    } else {
+        None
+    };
     let (_provider, origin) = provider_fixture().await?;
     let slack_api = format!("{origin}/chat.postMessage");
     let environment = [
@@ -1374,6 +1596,18 @@ async fn local_up_serves_the_configured_surface_from_the_vault() -> Result<()> {
         config.contains("surfaces:") && config.contains(SLACK_CHANNEL),
         "{config}"
     );
+    let file = state.join("gateway-credentials.json");
+    match &vault {
+        Some(vault) => ensure!(
+            !file.exists()
+                && vault.get("secret/supertag/surface/slack/slack")
+                    == Some(json!({"botToken": SLACK_BOT, "signingSecret": SLACK_SIGNING})),
+            "file {} vault {:?}",
+            file.exists(),
+            vault.entries.lock().unwrap().keys().collect::<Vec<_>>()
+        ),
+        None => ensure!(file.exists()),
+    }
     stop(supervisor)?;
 
     let (supervisor, ready) = up()?;
@@ -1401,5 +1635,30 @@ async fn local_up_serves_the_configured_surface_from_the_vault() -> Result<()> {
         "{response:?}"
     );
     stop(supervisor)?;
+    Ok(())
+}
+
+/// A GitHub Workspace and a GitHub Surface connector read the same `SUPERTAG_GITHUB_*`
+/// variables, so one Gateway refuses to run both rather than cross their credentials.
+#[test]
+fn gateway_refuses_a_github_workspace_beside_a_github_connector() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let output = Command::new(BINARY)
+        .args(["gateway", "--control-plane", "http://127.0.0.1:9"])
+        .arg("--github-workspace-directory")
+        .arg(directory.path().join("sources"))
+        .args(["--github-listen", "127.0.0.1:0", "--github-state-directory"])
+        .arg(directory.path().join("github"))
+        .env_clear()
+        .env("SUPERTAG_GATEWAY_TOKEN", Uuid::new_v4().to_string())
+        .env("SUPERTAG_OPERATOR_TOKEN", Uuid::new_v4().to_string())
+        .stdin(Stdio::null())
+        .output()?;
+    let stderr = String::from_utf8(output.stderr)?;
+    ensure!(!output.status.success(), "{stderr}");
+    ensure!(
+        stderr.contains("'--github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>' cannot be used with '--github-listen <GITHUB_LISTEN>'"),
+        "{stderr}"
+    );
     Ok(())
 }

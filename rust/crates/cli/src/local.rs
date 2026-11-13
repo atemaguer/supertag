@@ -16,7 +16,10 @@ use std::{
 
 use crate::{
     lifecycle::{self, ServiceStatus},
-    local_config::{Environment, surfaces::Surface},
+    local_config::{
+        Environment,
+        surfaces::{Provider, Surface},
+    },
 };
 use std::collections::BTreeMap;
 use supertag_worker_host::LaneState;
@@ -51,7 +54,7 @@ const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
 ];
 /// The credential vault selection the Gateway's Surface connectors use.
-const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
+pub(crate) const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
     "VAULT_TOKEN",
@@ -296,6 +299,14 @@ impl Children {
         // Configured Surface connectors read their secrets from the credential vault that
         // `supertag setup surface` wrote: this state directory's file, unless Vault is selected.
         if let Some((surfaces, environment)) = surfaces {
+            // Both read the same SUPERTAG_GITHUB_* variables in one Gateway process.
+            ensure!(
+                gateway_workspace.is_none()
+                    || !surfaces.values().any(|surface| {
+                        surface.provider == Provider::Github && surface.location.is_some()
+                    }),
+                "a GitHub surface location cannot share the local Gateway with a Gateway Workspace; remove the location with supertag update tag TAG --remove-location github"
+            );
             let mut connected = false;
             for (name, surface) in surfaces {
                 if let Some((args, variables)) = surface.gateway(name, directory)? {

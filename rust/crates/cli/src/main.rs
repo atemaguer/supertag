@@ -327,7 +327,9 @@ enum Command {
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
         /// Private scratch for GitHub source bundles, using the configured GitHub account.
-        #[arg(long)]
+        /// The GitHub Surface connector reads the same `SUPERTAG_GITHUB_*` variables, so one
+        /// Gateway serves either a GitHub Workspace or a GitHub location, not both.
+        #[arg(long, conflicts_with = "github_listen")]
         github_workspace_directory: Option<PathBuf>,
         #[arg(long, requires = "linear_state_directory")]
         linear_listen: Option<SocketAddr>,
