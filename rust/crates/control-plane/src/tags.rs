@@ -82,6 +82,7 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         approval_rules: crate::store::approval_rules_from_row(row)?,
         execution: crate::store::tag_execution_from_row(row)?,
         retired_at_ms: row.try_get("retired_at_ms")?,
+        runs_on: serde_json::from_str(&row.try_get::<String, _>("runs_on")?)?,
     })
 }
 

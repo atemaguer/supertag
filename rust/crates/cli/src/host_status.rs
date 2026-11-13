@@ -85,5 +85,9 @@ fn status_json(host: WorkerHostStatus) -> Value {
         "last_seen_at_ms": host.last_seen_at_ms,
         "presence_expires_at_ms": host.presence_expires_at_ms,
         "revoked_at_ms": host.revoked_at_ms,
+        "labels": host.labels,
+        "granted_labels": host.granted_labels,
+        "ephemeral": host.ephemeral,
+        "removed_at_ms": host.removed_at_ms,
     })
 }

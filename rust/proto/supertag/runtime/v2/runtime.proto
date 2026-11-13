@@ -658,6 +658,8 @@ message ReportHostRequest {
   HarnessKind harness_kind = 6;
   repeated string workspace_ids = 7;
   HarnessExecutionProfile execution_profile = 8;
+  // Operating system, architecture and operator-declared placement labels.
+  repeated string labels = 1400;
 }
 
 message WorkerHostStatus {
@@ -676,6 +678,12 @@ message WorkerHostStatus {
   optional int64 presence_expires_at_ms = 13;
   optional int64 revoked_at_ms = 14;
   HarnessExecutionProfile execution_profile = 15;
+  // Every placement label: reported, derived, and granted by the Auth Key.
+  repeated string labels = 1400;
+  repeated string granted_labels = 1401;
+  bool ephemeral = 1402;
+  // Set when an offline ephemeral host was removed.
+  optional int64 removed_at_ms = 1403;
 }
 
 message ListHostsRequest {
@@ -1082,6 +1090,12 @@ message CreateAuthKeyRequest {
   uint64 expires_in_ms = 4;
   repeated string allowed_tag_ids = 5;
   bool all_tags = 6;
+  // A reusable key leaves host_id empty and enrolls any number of hosts.
+  bool reusable = 1400;
+  // Hosts that join with an ephemeral key are removed once they go offline.
+  bool ephemeral = 1401;
+  // Labels granted to every host that joins with the key.
+  repeated string labels = 1402;
 }
 
 message AuthKey {
@@ -1089,6 +1103,9 @@ message AuthKey {
   int64 expires_at_ms = 2;
   repeated string allowed_tag_ids = 3;
   bool all_tags = 4;
+  bool reusable = 1400;
+  bool ephemeral = 1401;
+  repeated string labels = 1402;
 }
 
 message RevokeHostRequest {
@@ -1165,6 +1182,8 @@ message Tag {
   PolicyExecutionSettings execution = 8;
   string name = 9;
   optional int64 retired_at_ms = 10;
+  // Labels a bound Worker Host must carry to run this Tag's Tasks.
+  repeated string runs_on = 1400;
 }
 
 message ListTagsRequest {

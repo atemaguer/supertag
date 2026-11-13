@@ -82,6 +82,7 @@ async fn host_enrollment_contract(url: &str) {
         expires_in_ms: 1_000,
         allowed_tag_ids: vec!["engineering".into(), "engineering".into()],
         all_tags: false,
+        ..Default::default()
     };
     let issued = store.create_auth_key("operator:alice", &key).await.unwrap();
     assert_eq!(issued.allowed_tag_ids, ["engineering"]);
@@ -106,6 +107,7 @@ async fn host_enrollment_contract(url: &str) {
         expires_in_ms: 1,
         allowed_tag_ids: vec![],
         all_tags: true,
+        ..Default::default()
     };
     store
         .create_auth_key("operator:alice", &expired)

@@ -306,6 +306,16 @@ pub(super) async fn claim_candidate(
     } else {
         context_contracts
     };
+    // Labels narrow the bound hosts; they never add a Tag to this host's scope.
+    let labels = crate::placement::claim_labels_in(
+        transaction,
+        host_id,
+        harness,
+        &[workspace_ids, gateway_workspace_ids].concat(),
+        profile,
+    )
+    .await?;
+    let mut runs_on = crate::placement::RunsOnCache::default();
     let mut after = 0_i64;
     loop {
         let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
@@ -326,6 +336,7 @@ pub(super) async fn claim_candidate(
             });
             if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
                 && has_workspace
+                && runs_on.admits(transaction, &task.tag_id, &labels).await?
                 && crate::workspace_mounts::current_in(transaction, &task).await?
                 && task
                     .workspace

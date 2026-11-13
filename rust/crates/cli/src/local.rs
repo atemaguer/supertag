@@ -788,6 +788,7 @@ async fn enroll_configured(
                     expires_in_ms: 600_000,
                     allowed_tag_ids: vec![],
                     all_tags: true,
+                    ..Default::default()
                 },
                 &credentials.operator,
             )?)

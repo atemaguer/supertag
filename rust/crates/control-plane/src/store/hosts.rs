@@ -5,6 +5,12 @@ use supertag_protocol::v2::{
 };
 
 use super::{Result, Store, StoreError, invalid, name};
+use crate::placement::{LabelField, parse_labels};
+
+/// An ephemeral host that joined but never came online is removed after this window.
+const EPHEMERAL_JOIN_TIMEOUT_MS: i64 = 10 * 60_000;
+/// A registered ephemeral host that has not reported yet stays for one presence window.
+const EPHEMERAL_REGISTRATION_GRACE_MS: i64 = 30_000;
 
 #[derive(Clone, Debug)]
 pub struct HostAuthority {
@@ -47,7 +53,16 @@ impl Store {
                 .strip_prefix("operator:")
                 .ok_or(StoreError::PermissionDenied)?,
         )?;
-        host_id(&input.host_id)?;
+        if input.reusable {
+            if !input.host_id.is_empty() {
+                return Err(invalid(
+                    "a reusable Auth Key enrolls any Worker Host ID; omit the host ID",
+                ));
+            }
+        } else {
+            host_id(&input.host_id)?;
+        }
+        let labels = parse_labels(&input.labels, LabelField::AuthKey)?;
         name("operation ID", &input.operation_id)?;
         let key = credential_digest(&input.key_digest)?;
         let expires_in_ms = i64::try_from(input.expires_in_ms)
@@ -64,8 +79,10 @@ impl Store {
         tags.sort_unstable();
         tags.dedup();
         let scope = serde_json::to_string(&tags)?;
-        let fingerprint =
-            fingerprint(&(&input.host_id, &key, expires_in_ms, &tags, input.all_tags))?;
+        let fingerprint = fingerprint(&(
+            (&input.host_id, &key, expires_in_ms, &tags, input.all_tags),
+            (input.reusable, input.ephemeral, &labels),
+        ))?;
         let (mut transaction, _) = self.write().await?;
         let prior = sqlx::query("SELECT request_digest, expires_at_ms FROM supertag_v2_auth_keys WHERE operator_principal=$1 AND operation_id=$2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *transaction).await?;
@@ -77,7 +94,7 @@ impl Store {
             }
             prior.try_get("expires_at_ms")?
         } else {
-            if host_in(&mut transaction, &input.host_id).await?.is_some() {
+            if !input.reusable && host_in(&mut transaction, &input.host_id).await?.is_some() {
                 return Err(StoreError::Conflict(
                     "Worker Host ID is already enrolled".into(),
                 ));
@@ -97,9 +114,10 @@ impl Store {
                 .execution_now_ms()
                 .checked_add(expires_in_ms)
                 .ok_or_else(|| invalid("Auth Key expiry is out of range"))?;
-            let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,host_id,allowed_tag_ids,all_tags,expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(key_digest) DO NOTHING")
+            let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,host_id,allowed_tag_ids,all_tags,expires_at_ms,reusable,ephemeral,labels) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(key_digest) DO NOTHING")
                 .bind(key).bind(principal).bind(&input.operation_id).bind(fingerprint).bind(&input.host_id)
                 .bind(scope).bind(i64::from(input.all_tags)).bind(expires_at_ms)
+                .bind(i64::from(input.reusable)).bind(i64::from(input.ephemeral)).bind(serde_json::to_string(&labels)?)
                 .execute(&mut *transaction).await?;
             if inserted.rows_affected() != 1 {
                 return Err(StoreError::Conflict(
@@ -114,6 +132,9 @@ impl Store {
             expires_at_ms,
             allowed_tag_ids: tags,
             all_tags: input.all_tags,
+            reusable: input.reusable,
+            ephemeral: input.ephemeral,
+            labels,
         })
     }
 
@@ -138,10 +159,17 @@ impl Store {
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or(StoreError::PermissionDenied)?;
-        if row.try_get::<String, _>("host_id")? != input.host_id {
+        let reusable = row.try_get::<i64, _>("reusable")? == 1;
+        if !reusable && row.try_get::<String, _>("host_id")? != input.host_id {
             return Err(StoreError::PermissionDenied);
         }
-        if let Some(prior) = row.try_get::<Option<String>, _>("enrollment_digest")? {
+        let prior = if reusable {
+            sqlx::query_scalar("SELECT enrollment_digest FROM supertag_v2_auth_key_enrollments WHERE key_digest=$1 AND host_id=$2")
+                .bind(&key).bind(&input.host_id).fetch_optional(&mut *transaction).await?
+        } else {
+            row.try_get::<Option<String>, _>("enrollment_digest")?
+        };
+        if let Some(prior) = prior {
             if prior != fingerprint {
                 return Err(StoreError::PermissionDenied);
             }
@@ -167,7 +195,18 @@ impl Store {
                 Err(error) => return Err(error),
             }
         }
+        if reusable && host_in(&mut transaction, &input.host_id).await?.is_some() {
+            return Err(StoreError::Conflict(
+                "Worker Host ID is already enrolled".into(),
+            ));
+        }
         let host = insert_host_in(&mut transaction, &input.host_id, &token, all_tags, now).await?;
+        sqlx::query("UPDATE supertag_v2_hosts SET ephemeral=$1,granted_labels=$2 WHERE host_id=$3")
+            .bind(row.try_get::<i64, _>("ephemeral")?)
+            .bind(row.try_get::<String, _>("labels")?)
+            .bind(&input.host_id)
+            .execute(&mut *transaction)
+            .await?;
         for tag in tags {
             sqlx::query("INSERT INTO supertag_v2_host_tags (host_id,tag_id) VALUES ($1,$2)")
                 .bind(&input.host_id)
@@ -175,8 +214,18 @@ impl Store {
                 .execute(&mut *transaction)
                 .await?;
         }
-        sqlx::query("UPDATE supertag_v2_auth_keys SET consumed_at_ms=$1,enrollment_digest=$2 WHERE key_digest=$3")
-            .bind(now).bind(fingerprint).bind(key).execute(&mut *transaction).await?;
+        if reusable {
+            sqlx::query("INSERT INTO supertag_v2_auth_key_enrollments (key_digest,host_id,enrollment_digest,enrolled_at_ms) VALUES ($1,$2,$3,$4)")
+                .bind(&key).bind(&input.host_id).bind(&fingerprint).bind(now).execute(&mut *transaction).await?;
+            sqlx::query("UPDATE supertag_v2_auth_keys SET consumed_at_ms=$1 WHERE key_digest=$2")
+                .bind(now)
+                .bind(key)
+                .execute(&mut *transaction)
+                .await?;
+        } else {
+            sqlx::query("UPDATE supertag_v2_auth_keys SET consumed_at_ms=$1,enrollment_digest=$2 WHERE key_digest=$3")
+                .bind(now).bind(fingerprint).bind(key).execute(&mut *transaction).await?;
+        }
         transaction.commit().await?;
         Ok(host)
     }
@@ -275,6 +324,62 @@ impl Store {
             revoked: true,
             ..record
         })
+    }
+}
+
+impl Store {
+    /// Removes ephemeral Worker Hosts that went offline, or that joined and never
+    /// came online. Removal revokes the host, fences its execution, unbinds its
+    /// Tags, and hides it from the host list.
+    pub async fn sweep_ephemeral_hosts(&self) -> Result<Vec<String>> {
+        let now = self.execution_now_ms();
+        let due = |row: &AnyRow| -> Result<bool> {
+            let registered: Option<i64> = row.try_get("registered_at_ms")?;
+            let deadline = match row.try_get::<Option<i64>, _>("presence_expires_at_ms")? {
+                Some(presence) => presence,
+                None => row
+                    .try_get::<i64, _>("enrolled_at_ms")?
+                    .saturating_add(EPHEMERAL_JOIN_TIMEOUT_MS),
+            };
+            let deadline = registered.map_or(deadline, |registered| {
+                deadline.max(registered.saturating_add(EPHEMERAL_REGISTRATION_GRACE_MS))
+            });
+            Ok(now >= deadline)
+        };
+        let query = "SELECT h.host_id, h.enrolled_at_ms, r.presence_expires_at_ms, (SELECT MAX(i.registered_at_ms) FROM supertag_v2_host_incarnations i WHERE i.host_id=h.host_id) AS registered_at_ms FROM supertag_v2_hosts h LEFT JOIN supertag_v2_host_readiness r ON r.host_id=h.host_id WHERE h.ephemeral=1 AND h.revoked_at_ms IS NULL ORDER BY h.host_id";
+        let mut candidates = vec![];
+        for row in sqlx::query(query).fetch_all(&self.pool).await? {
+            if due(&row)? {
+                candidates.push(row.try_get::<String, _>("host_id")?);
+            }
+        }
+        if candidates.is_empty() {
+            return Ok(candidates);
+        }
+        let (mut transaction, _) = self.write().await?;
+        let mut removed = vec![];
+        // Recheck under the write lock: a report may have arrived meanwhile.
+        for row in sqlx::query(query).fetch_all(&mut *transaction).await? {
+            let id: String = row.try_get("host_id")?;
+            if !candidates.contains(&id) || !due(&row)? {
+                continue;
+            }
+            let generation: i64 = host_in(&mut transaction, &id)
+                .await?
+                .ok_or(StoreError::PermissionDenied)?
+                .try_get("generation")?;
+            fence_execution_in(&mut transaction, &id, generation, now).await?;
+            sqlx::query("UPDATE supertag_v2_hosts SET generation=$1,revoked_at_ms=$2,removed_at_ms=$2,all_tags=0 WHERE host_id=$3")
+                .bind(next_generation(generation)?).bind(now).bind(&id)
+                .execute(&mut *transaction).await?;
+            sqlx::query("DELETE FROM supertag_v2_host_tags WHERE host_id=$1")
+                .bind(&id)
+                .execute(&mut *transaction)
+                .await?;
+            removed.push(id);
+        }
+        transaction.commit().await?;
+        Ok(removed)
     }
 }
 

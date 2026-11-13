@@ -5789,8 +5789,10 @@ type ReportHostRequest struct {
 	HarnessKind      HarnessKind              `protobuf:"varint,6,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
 	WorkspaceIds     []string                 `protobuf:"bytes,7,rep,name=workspace_ids,json=workspaceIds,proto3" json:"workspace_ids,omitempty"`
 	ExecutionProfile *HarnessExecutionProfile `protobuf:"bytes,8,opt,name=execution_profile,json=executionProfile,proto3" json:"execution_profile,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Operating system, architecture and operator-declared placement labels.
+	Labels        []string `protobuf:"bytes,1400,rep,name=labels,proto3" json:"labels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReportHostRequest) Reset() {
@@ -5879,6 +5881,13 @@ func (x *ReportHostRequest) GetExecutionProfile() *HarnessExecutionProfile {
 	return nil
 }
 
+func (x *ReportHostRequest) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
 type WorkerHostStatus struct {
 	state               protoimpl.MessageState   `protogen:"open.v1"`
 	HostId              string                   `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
@@ -5896,8 +5905,14 @@ type WorkerHostStatus struct {
 	PresenceExpiresAtMs *int64                   `protobuf:"varint,13,opt,name=presence_expires_at_ms,json=presenceExpiresAtMs,proto3,oneof" json:"presence_expires_at_ms,omitempty"`
 	RevokedAtMs         *int64                   `protobuf:"varint,14,opt,name=revoked_at_ms,json=revokedAtMs,proto3,oneof" json:"revoked_at_ms,omitempty"`
 	ExecutionProfile    *HarnessExecutionProfile `protobuf:"bytes,15,opt,name=execution_profile,json=executionProfile,proto3" json:"execution_profile,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Every placement label: reported, derived, and granted by the Auth Key.
+	Labels        []string `protobuf:"bytes,1400,rep,name=labels,proto3" json:"labels,omitempty"`
+	GrantedLabels []string `protobuf:"bytes,1401,rep,name=granted_labels,json=grantedLabels,proto3" json:"granted_labels,omitempty"`
+	Ephemeral     bool     `protobuf:"varint,1402,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// Set when an offline ephemeral host was removed.
+	RemovedAtMs   *int64 `protobuf:"varint,1403,opt,name=removed_at_ms,json=removedAtMs,proto3,oneof" json:"removed_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkerHostStatus) Reset() {
@@ -6033,6 +6048,34 @@ func (x *WorkerHostStatus) GetExecutionProfile() *HarnessExecutionProfile {
 		return x.ExecutionProfile
 	}
 	return nil
+}
+
+func (x *WorkerHostStatus) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *WorkerHostStatus) GetGrantedLabels() []string {
+	if x != nil {
+		return x.GrantedLabels
+	}
+	return nil
+}
+
+func (x *WorkerHostStatus) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
+func (x *WorkerHostStatus) GetRemovedAtMs() int64 {
+	if x != nil && x.RemovedAtMs != nil {
+		return *x.RemovedAtMs
+	}
+	return 0
 }
 
 type ListHostsRequest struct {
@@ -8612,6 +8655,12 @@ type CreateAuthKeyRequest struct {
 	ExpiresInMs   uint64                 `protobuf:"varint,4,opt,name=expires_in_ms,json=expiresInMs,proto3" json:"expires_in_ms,omitempty"`
 	AllowedTagIds []string               `protobuf:"bytes,5,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
 	AllTags       bool                   `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	// A reusable key leaves host_id empty and enrolls any number of hosts.
+	Reusable bool `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
+	// Hosts that join with an ephemeral key are removed once they go offline.
+	Ephemeral bool `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// Labels granted to every host that joins with the key.
+	Labels        []string `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8688,12 +8737,36 @@ func (x *CreateAuthKeyRequest) GetAllTags() bool {
 	return false
 }
 
+func (x *CreateAuthKeyRequest) GetReusable() bool {
+	if x != nil {
+		return x.Reusable
+	}
+	return false
+}
+
+func (x *CreateAuthKeyRequest) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
+func (x *CreateAuthKeyRequest) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
 type AuthKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HostId        string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	ExpiresAtMs   int64                  `protobuf:"varint,2,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
 	AllowedTagIds []string               `protobuf:"bytes,3,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
 	AllTags       bool                   `protobuf:"varint,4,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	Reusable      bool                   `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
+	Ephemeral     bool                   `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	Labels        []string               `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8754,6 +8827,27 @@ func (x *AuthKey) GetAllTags() bool {
 		return x.AllTags
 	}
 	return false
+}
+
+func (x *AuthKey) GetReusable() bool {
+	if x != nil {
+		return x.Reusable
+	}
+	return false
+}
+
+func (x *AuthKey) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
+func (x *AuthKey) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
 }
 
 type RevokeHostRequest struct {
@@ -9182,8 +9276,10 @@ type Tag struct {
 	Execution      *PolicyExecutionSettings `protobuf:"bytes,8,opt,name=execution,proto3" json:"execution,omitempty"`
 	Name           string                   `protobuf:"bytes,9,opt,name=name,proto3" json:"name,omitempty"`
 	RetiredAtMs    *int64                   `protobuf:"varint,10,opt,name=retired_at_ms,json=retiredAtMs,proto3,oneof" json:"retired_at_ms,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Labels a bound Worker Host must carry to run this Tag's Tasks.
+	RunsOn        []string `protobuf:"bytes,1400,rep,name=runs_on,json=runsOn,proto3" json:"runs_on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Tag) Reset() {
@@ -9284,6 +9380,13 @@ func (x *Tag) GetRetiredAtMs() int64 {
 		return *x.RetiredAtMs
 	}
 	return 0
+}
+
+func (x *Tag) GetRunsOn() []string {
+	if x != nil {
+		return x.RunsOn
+	}
+	return nil
 }
 
 type ListTagsRequest struct {
@@ -19572,7 +19675,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12ReadMailboxRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"\xbd\x03\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"\xd6\x03\n" +
 	"\x11ReportHostRequest\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x1a\n" +
 	"\bcapacity\x18\x02 \x01(\rR\bcapacity\x12'\n" +
@@ -19581,7 +19684,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06reason\x18\x05 \x01(\x0e2(.supertag.runtime.v2.HostReadinessReasonR\x06reason\x12C\n" +
 	"\fharness_kind\x18\x06 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12#\n" +
 	"\rworkspace_ids\x18\a \x03(\tR\fworkspaceIds\x12Y\n" +
-	"\x11execution_profile\x18\b \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\"\x88\x06\n" +
+	"\x11execution_profile\x18\b \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\x12\x17\n" +
+	"\x06labels\x18\xf8\n" +
+	" \x03(\tR\x06labels\"\xa4\a\n" +
 	"\x10WorkerHostStatus\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1e\n" +
 	"\n" +
@@ -19600,10 +19705,19 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0flast_seen_at_ms\x18\f \x01(\x03H\x00R\flastSeenAtMs\x88\x01\x01\x128\n" +
 	"\x16presence_expires_at_ms\x18\r \x01(\x03H\x01R\x13presenceExpiresAtMs\x88\x01\x01\x12'\n" +
 	"\rrevoked_at_ms\x18\x0e \x01(\x03H\x02R\vrevokedAtMs\x88\x01\x01\x12Y\n" +
-	"\x11execution_profile\x18\x0f \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfileB\x12\n" +
+	"\x11execution_profile\x18\x0f \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\x12\x17\n" +
+	"\x06labels\x18\xf8\n" +
+	" \x03(\tR\x06labels\x12&\n" +
+	"\x0egranted_labels\x18\xf9\n" +
+	" \x03(\tR\rgrantedLabels\x12\x1d\n" +
+	"\tephemeral\x18\xfa\n" +
+	" \x01(\bR\tephemeral\x12(\n" +
+	"\rremoved_at_ms\x18\xfb\n" +
+	" \x01(\x03H\x03R\vremovedAtMs\x88\x01\x01B\x12\n" +
 	"\x10_last_seen_at_msB\x19\n" +
 	"\x17_presence_expires_at_msB\x10\n" +
-	"\x0e_revoked_at_ms\"@\n" +
+	"\x0e_revoked_at_msB\x10\n" +
+	"\x0e_removed_at_ms\"@\n" +
 	"\x10ListHostsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"q\n" +
@@ -19789,7 +19903,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12SettleInputRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x19\n" +
 	"\binput_id\x18\x02 \x01(\tR\ainputId\x12?\n" +
-	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceipt\"\xd8\x01\n" +
+	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceipt\"\xad\x02\n" +
 	"\x14CreateAuthKeyRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1d\n" +
@@ -19797,12 +19911,24 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"key_digest\x18\x03 \x01(\fR\tkeyDigest\x12\"\n" +
 	"\rexpires_in_ms\x18\x04 \x01(\x04R\vexpiresInMs\x12&\n" +
 	"\x0fallowed_tag_ids\x18\x05 \x03(\tR\rallowedTagIds\x12\x19\n" +
-	"\ball_tags\x18\x06 \x01(\bR\aallTags\"\x89\x01\n" +
+	"\ball_tags\x18\x06 \x01(\bR\aallTags\x12\x1b\n" +
+	"\breusable\x18\xf8\n" +
+	" \x01(\bR\breusable\x12\x1d\n" +
+	"\tephemeral\x18\xf9\n" +
+	" \x01(\bR\tephemeral\x12\x17\n" +
+	"\x06labels\x18\xfa\n" +
+	" \x03(\tR\x06labels\"\xde\x01\n" +
 	"\aAuthKey\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\"\n" +
 	"\rexpires_at_ms\x18\x02 \x01(\x03R\vexpiresAtMs\x12&\n" +
 	"\x0fallowed_tag_ids\x18\x03 \x03(\tR\rallowedTagIds\x12\x19\n" +
-	"\ball_tags\x18\x04 \x01(\bR\aallTags\",\n" +
+	"\ball_tags\x18\x04 \x01(\bR\aallTags\x12\x1b\n" +
+	"\breusable\x18\xf8\n" +
+	" \x01(\bR\breusable\x12\x1d\n" +
+	"\tephemeral\x18\xf9\n" +
+	" \x01(\bR\tephemeral\x12\x17\n" +
+	"\x06labels\x18\xfa\n" +
+	" \x03(\tR\x06labels\",\n" +
 	"\x11RevokeHostRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\"<\n" +
 	"\x13RegisterHostRequest\x12%\n" +
@@ -19837,7 +19963,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x04name\x18\b \x01(\tH\x00R\x04name\x88\x01\x01\x120\n" +
 	"\x11expected_revision\x18\t \x01(\x04H\x01R\x10expectedRevision\x88\x01\x01B\a\n" +
 	"\x05_nameB\x14\n" +
-	"\x12_expected_revision\"\xf1\x03\n" +
+	"\x12_expected_revision\"\x8b\x04\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -19849,7 +19975,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\texecution\x18\b \x01(\v2,.supertag.runtime.v2.PolicyExecutionSettingsR\texecution\x12\x12\n" +
 	"\x04name\x18\t \x01(\tR\x04name\x12'\n" +
 	"\rretired_at_ms\x18\n" +
-	" \x01(\x03H\x00R\vretiredAtMs\x88\x01\x01B\x10\n" +
+	" \x01(\x03H\x00R\vretiredAtMs\x88\x01\x01\x12\x18\n" +
+	"\aruns_on\x18\xf8\n" +
+	" \x03(\tR\x06runsOnB\x10\n" +
 	"\x0e_retired_at_ms\"h\n" +
 	"\x0fListTagsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +

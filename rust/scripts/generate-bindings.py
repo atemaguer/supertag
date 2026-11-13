@@ -20,7 +20,7 @@ from tempfile import TemporaryDirectory
 RUST = Path(__file__).resolve().parents[1]
 REPO = RUST.parent
 PROTO_ROOT = RUST / "proto"
-MODULES = ("runtime", "policy", "github_workspaces", "github_publications", "mcp", "artifact", "workspace_volume")
+MODULES = ("runtime", "policy", "github_workspaces", "github_publications", "mcp", "artifact", "workspace_volume", "placement")
 PROTO_FILES = tuple(f"supertag/runtime/v2/{module}.proto" for module in MODULES)
 BINDINGS = RUST / "bindings"
 PYTHON_SDK = REPO / "sdks" / "python" / "src" / "supertag" / "_runtime_v2"

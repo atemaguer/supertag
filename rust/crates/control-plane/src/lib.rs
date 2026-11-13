@@ -22,6 +22,7 @@ mod manifest_relationships;
 mod mcp_effects;
 pub mod objective_limits;
 mod objectives;
+mod placement;
 mod policy;
 mod replies;
 mod review_artifacts;
@@ -90,6 +91,7 @@ impl ControlPlane {
         self.store.sweep_commit_reviews().await?;
         self.store.sweep_replies().await?;
         self.store.sweep_github_publications().await?;
+        self.store.sweep_ephemeral_hosts().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

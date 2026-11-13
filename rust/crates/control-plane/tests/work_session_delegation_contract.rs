@@ -35,6 +35,7 @@ async fn enroll_scoped(store: &Store, host: &str, tag: &str) {
                 expires_in_ms: 30_000,
                 allowed_tag_ids: vec![tag.into()],
                 all_tags: false,
+                ..Default::default()
             },
         )
         .await

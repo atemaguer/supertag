@@ -79,6 +79,9 @@ pub struct HostOptions {
     pub artifact_source: Option<ArtifactSourceConfig>,
     pub artifact_peers: ArtifactPeers,
     pub workspace_mounts: WorkspaceMounts,
+    /// Operator-declared placement labels. The host adds its operating system
+    /// and architecture; the Control Plane derives harness and Workspace labels.
+    pub labels: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -390,7 +393,10 @@ pub async fn run(
             .into_iter()
             .chain(workspaces.gateway_ids())
             .collect(),
-        options.execution_profile.clone(),
+        (
+            options.execution_profile.clone(),
+            readiness::host_labels(&options.labels),
+        ),
         shutdown.clone(),
     );
     let outcome = async {
@@ -429,6 +435,7 @@ pub async fn run(
                     journal.clear()?;
                     continue;
                 }
+                presence.first_report(Duration::from_secs(5)).await;
                 let response = host
                     .claim_task(request(claim, &token)?)
                     .await;

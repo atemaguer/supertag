@@ -20,6 +20,7 @@ mod readiness;
 mod slack_threads;
 pub(crate) use authority::lease_is_live;
 pub use hosts::HostAuthority;
+pub(crate) use readiness::status_in as host_status_in;
 
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
@@ -71,7 +72,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 56;
+        const SCHEMA_VERSION: i64 = 64;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -178,6 +179,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0054_direct_artifact_transfer.sql"),
                 include_str!("../migrations/sqlite/0055_workspace_volume_mounts.sql"),
                 include_str!("../migrations/sqlite/0056_apply_set_members.sql"),
+                include_str!("../migrations/sqlite/0064_placement_auth_keys.sql"),
             ]
         } else {
             [
@@ -237,6 +239,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0054_direct_artifact_transfer.sql"),
                 include_str!("../migrations/postgresql/0055_workspace_volume_mounts.sql"),
                 include_str!("../migrations/postgresql/0056_apply_set_members.sql"),
+                include_str!("../migrations/postgresql/0064_placement_auth_keys.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -425,6 +428,7 @@ impl Store {
             execution,
             name: display_name,
             retired_at_ms: None,
+            runs_on: crate::placement::runs_on_in(transaction, tag_id).await?,
         })
     }
 

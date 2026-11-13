@@ -1,0 +1,47 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+
+// Worker Host placement. Labels narrow the hosts bound to a Tag; they never
+// grant access, and a Task that no bound host can take waits.
+service Placement {
+  // Replaces a Tag's runsOn labels. An empty list means any bound host.
+  rpc SetTagRunsOn(SetTagRunsOnRequest) returns (Tag);
+  // Explains which bound Worker Hosts can take a Task, and why the others cannot.
+  rpc DiagnoseTask(DiagnoseTaskPlacementRequest) returns (TaskPlacementDiagnosis);
+}
+
+message SetTagRunsOnRequest {
+  string tag_id = 1;
+  repeated string runs_on = 2;
+}
+
+message DiagnoseTaskPlacementRequest { string task_id = 1; }
+
+message HostPlacement {
+  string host_id = 1;
+  HostPhase phase = 2;
+  repeated string labels = 3;
+  // Required labels this host does not carry.
+  repeated string missing_labels = 4;
+  // Carries every required label. Readiness, capacity and harness still apply.
+  bool eligible = 5;
+}
+
+message TaskPlacementDiagnosis {
+  string task_id = 1;
+  string tag_id = 2;
+  TaskState state = 3;
+  // The Tag's runsOn, plus workspace:NAME for a Task in a Workspace.
+  repeated string required_labels = 4;
+  // Labels no bound host carries; every required label when each exists on
+  // some bound host but none carries them all.
+  repeated string missing_labels = 5;
+  // A scheduling requirement such as labels:macos,gpu. Empty when a bound
+  // host carries every required label.
+  string requirement = 6;
+  // A readable explanation, or empty when a bound host carries every label.
+  string summary = 7;
+  // Bound, unrevoked Worker Hosts in host ID order.
+  repeated HostPlacement hosts = 8;
+}

@@ -27,6 +27,7 @@ impl State {
         harness: i32,
         workspaces: &[String],
         profile: &HarnessExecutionProfile,
+        labels: &[String],
     ) -> ReportHostRequest {
         let (readiness, reason, available_slots) = match self {
             Self::Pending => (HostReadiness::Pending, HostReadinessReason::Starting, 0),
@@ -48,6 +49,7 @@ impl State {
             harness_kind: harness,
             workspace_ids: workspaces.to_vec(),
             execution_profile: Some(profile.clone()),
+            labels: labels.to_vec(),
         }
     }
 }
@@ -62,6 +64,31 @@ pub(crate) struct Presence {
     harness: i32,
     workspaces: Vec<String>,
     profile: HarnessExecutionProfile,
+    labels: Vec<String>,
+    reported: watch::Receiver<bool>,
+}
+
+/// Declared labels plus this machine's operating system and architecture.
+pub(crate) fn host_labels(declared: &[String]) -> Vec<String> {
+    let os = match std::env::consts::OS {
+        "macos" => Some("macos"),
+        "linux" => Some("linux"),
+        "windows" => Some("windows"),
+        _ => None,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => Some("x64"),
+        "aarch64" => Some("arm64"),
+        _ => None,
+    };
+    let mut labels: Vec<String> = declared
+        .iter()
+        .map(|label| label.trim().to_ascii_lowercase())
+        .chain(os.into_iter().chain(arch).map(str::to_owned))
+        .collect();
+    labels.sort_unstable();
+    labels.dedup();
+    labels
 }
 
 impl Presence {
@@ -71,11 +98,12 @@ impl Presence {
         token: String,
         harness: i32,
         workspaces: Vec<String>,
-        profile: HarnessExecutionProfile,
+        (profile, labels): (HarnessExecutionProfile, Vec<String>),
         shutdown: CancellationToken,
     ) -> Self {
         let cancel = shutdown.child_token();
         let (state, mut receiver) = watch::channel(State::Pending);
+        let (reported_sender, reported) = watch::channel(false);
         let mut reporter = Self {
             state,
             cancel: cancel.clone(),
@@ -86,6 +114,8 @@ impl Presence {
             harness,
             workspaces: workspaces.clone(),
             profile: profile.clone(),
+            labels: labels.clone(),
+            reported,
         };
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
@@ -106,11 +136,14 @@ impl Presence {
                         return Err(error);
                     }
                 };
-                let report = state.report(sequence, harness, &workspaces, &profile);
+                let report = state.report(sequence, harness, &workspaces, &profile, &labels);
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
                 };
+                if response.is_ok() {
+                    reported_sender.send_replace(true);
+                }
                 if let Err(error) = response
                     && !retryable(&error)
                 {
@@ -122,6 +155,13 @@ impl Presence {
             }
         }));
         reporter
+    }
+
+    /// Waits briefly for the first accepted report, so the Control Plane knows
+    /// this host's labels before it places work on it.
+    pub(crate) async fn first_report(&self, wait: Duration) {
+        let mut reported = self.reported.clone();
+        let _ = tokio::time::timeout(wait, reported.wait_for(|reported| *reported)).await;
     }
 
     pub(crate) fn set(&self, state: State) {
@@ -146,6 +186,7 @@ impl Presence {
             self.harness,
             &self.workspaces,
             &self.profile,
+            &self.labels,
         );
         // Best effort: on a partition the last observation naturally expires. Never
         // prevent journal cleanup or treat a presence reply as execution authority.

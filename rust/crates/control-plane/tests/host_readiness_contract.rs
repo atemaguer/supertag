@@ -41,6 +41,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             shared_execution: None,
             task_artifact_inputs: false,
         }),
+        ..Default::default()
     }
 }
 
