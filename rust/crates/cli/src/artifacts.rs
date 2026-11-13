@@ -33,6 +33,7 @@ pub enum ArtifactKind {
 pub enum CaptureCommand {
     /// List artifacts captured by a Task.
     List {
+        /// Task whose artifacts to list.
         #[arg(long)]
         task: String,
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
@@ -45,8 +46,10 @@ pub enum CaptureCommand {
     /// Download one immutable file and verify its digest before publishing it locally.
     Download {
         artifact_id: String,
+        /// File in the artifact to download.
         #[arg(long)]
         path: String,
+        /// Local file to create with the verified download. It must not already exist.
         #[arg(long)]
         output: PathBuf,
     },
@@ -140,7 +143,7 @@ pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Res
             return Ok(());
         }
     };
-    println!("{value}");
+    crate::terminal::print_json(&value)?;
     Ok(())
 }
 
@@ -224,10 +227,9 @@ pub(crate) async fn publish_download<M: 'static>(
         .persist_noclobber(output)
         .context("publish artifact download")?;
     tokio::fs::File::open(parent).await?.sync_all().await?;
-    println!(
-        "{}",
-        json!({ "output": output, "sha256": blob.sha256, "byte_length": size })
-    );
+    crate::terminal::print_json(
+        &json!({ "output": output, "sha256": blob.sha256, "byte_length": size }),
+    )?;
     Ok(())
 }
 

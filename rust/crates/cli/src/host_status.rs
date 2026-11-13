@@ -55,7 +55,7 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
                 .into_inner(),
         ),
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

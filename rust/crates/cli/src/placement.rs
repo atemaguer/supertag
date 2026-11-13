@@ -71,7 +71,7 @@ pub async fn run(connection: Connection, command: PlacementCommand) -> Result<()
             })
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 
@@ -83,15 +83,12 @@ pub async fn revoke_auth_key(connection: Connection, key_id: String) -> Result<(
         .revoke_auth_key(request(RevokeAuthKeyRequest { key_id }, &token)?)
         .await?
         .into_inner();
-    println!(
-        "{}",
-        json!({
-            "key_id": key.key_id,
-            "revoked": key.revoked,
-            "reusable": key.reusable,
-            "ephemeral": key.ephemeral,
-            "expires_at_ms": key.expires_at_ms,
-        })
-    );
+    crate::terminal::print_json(&json!({
+        "key_id": key.key_id,
+        "revoked": key.revoked,
+        "reusable": key.reusable,
+        "ephemeral": key.ephemeral,
+        "expires_at_ms": key.expires_at_ms,
+    }))?;
     Ok(())
 }

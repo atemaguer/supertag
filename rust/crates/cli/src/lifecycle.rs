@@ -314,7 +314,7 @@ pub async fn up(options: Background) -> Result<()> {
         Some(config) if config.service_unit => {
             let definition = unit_definition(&options, config)?;
             for warning in local_config::unit_check(config, &definition.environment)? {
-                println!("{warning}");
+                outln!("{warning}");
             }
             Some(definition)
         }
@@ -329,11 +329,11 @@ pub async fn up(options: Background) -> Result<()> {
                 (Some(_), Err(_)) => false,
             };
             if status.fingerprint == fingerprint && unit_current {
-                println!("SuperTag already runs with these settings, so it was left alone.");
+                outln!("SuperTag already runs with these settings, so it was left alone.");
                 summary(&options.state, &status);
                 return Ok(());
             }
-            println!("SuperTag's settings changed, so it restarts.");
+            outln!("SuperTag's settings changed, so it restarts.");
             stop(&options.state, Some(&status), options.force).await?;
         }
         Supervisor::Starting => {
@@ -359,7 +359,7 @@ pub async fn up(options: Background) -> Result<()> {
         }
         let since = now_ms();
         for line in manager.install(&definition)? {
-            println!("{line}");
+            outln!("{line}");
         }
         wait_ready(
             &state,
@@ -396,9 +396,9 @@ pub async fn up(options: Background) -> Result<()> {
         "service" => "under its service unit",
         _ => "in the background",
     };
-    println!("Started SuperTag {how} (process {}).", status.pid);
+    outln!("Started SuperTag {how} (process {}).", status.pid);
     summary(&state, &status);
-    println!(
+    outln!(
         "Follow the logs with supertag logs -f, list services with supertag ps, and stop with supertag down."
     );
     Ok(())
@@ -406,20 +406,20 @@ pub async fn up(options: Background) -> Result<()> {
 
 fn summary(state: &Path, status: &SupervisorStatus) {
     if let Some(endpoint) = &status.endpoint {
-        println!("Gateway: {endpoint}");
+        outln!("Gateway: {endpoint}");
     }
     for service in status
         .services
         .iter()
         .filter(|service| service.kind == HOST)
     {
-        println!(
+        outln!(
             "Worker Host {}: {}",
             service.name,
             service.address.as_deref().unwrap_or("unknown Gateway")
         );
     }
-    println!("State: {}", state.display());
+    outln!("State: {}", state.display());
 }
 
 /// The state directory as a service unit records it.
@@ -630,7 +630,7 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
             );
         }
         if reported.is_none_or(|at| at.elapsed() >= DRAIN_PROGRESS) {
-            println!(
+            outln!(
                 "Waiting for running Task Attempts before stopping: {}. Press Ctrl-C or pass --force to stop waiting.",
                 running.join(", ")
             );
@@ -638,7 +638,7 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
         }
         tokio::select! {
             _ = interrupt.recv() => {
-                println!(
+                outln!(
                     "Stopped waiting for {}; running Task Attempts follow the recovery rules.",
                     running.join(", ")
                 );
@@ -662,6 +662,7 @@ fn drain_timeout() -> Duration {
 
 #[derive(Args)]
 pub struct DownArgs {
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
     /// supertag.yaml, or a directory that holds one, naming the service unit to remove.
@@ -701,7 +702,7 @@ pub async fn down(args: DownArgs) -> Result<()> {
         && !installed
         && let Some(manager) = &manager
     {
-        println!(
+        outln!(
             "Service unit {} runs SuperTag for another state directory, so it was left alone.",
             manager.path(&unit).display()
         );
@@ -709,7 +710,7 @@ pub async fn down(args: DownArgs) -> Result<()> {
     let stopped = match &status {
         Supervisor::Running(status) => {
             stop(&state, Some(status), args.force).await?;
-            println!("Stopped SuperTag (process {}).", status.pid);
+            outln!("Stopped SuperTag (process {}).", status.pid);
             true
         }
         Supervisor::Starting => {
@@ -720,13 +721,13 @@ pub async fn down(args: DownArgs) -> Result<()> {
     if let Some(manager) = manager.as_ref().filter(|_| installed) {
         if args.remove_services {
             manager.uninstall(&unit)?;
-            println!("Removed service unit {}.", manager.path(&unit).display());
+            outln!("Removed service unit {}.", manager.path(&unit).display());
         } else {
             if manager.loaded(&unit) {
                 manager.stop(&unit)?;
             }
             if stopped {
-                println!(
+                outln!(
                     "Its service unit starts it again when you log in; supertag down --remove-services removes it."
                 );
             }
@@ -734,7 +735,7 @@ pub async fn down(args: DownArgs) -> Result<()> {
     }
     let removed = installed && args.remove_services;
     if !stopped && !removed {
-        println!("SuperTag is not running on this machine.");
+        outln!("SuperTag is not running on this machine.");
     }
     Ok(())
 }
@@ -748,11 +749,13 @@ pub enum Output {
 
 #[derive(Args)]
 pub struct PsArgs {
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
     /// supertag.yaml, or a directory that holds one.
     #[arg(short = 'f', long = "file")]
     file: Option<PathBuf>,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value_t)]
     output: Output,
 }
@@ -872,8 +875,8 @@ pub async fn ps(args: PsArgs) -> Result<()> {
         services,
     };
     match args.output {
-        Output::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        Output::Text => print!("{}", format_ps(&report, &supervisor)),
+        Output::Json => crate::terminal::print_json_pretty(&report)?,
+        Output::Text => out!("{}", format_ps(&report, &supervisor)),
     }
     Ok(())
 }
@@ -1023,6 +1026,7 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
 
 #[derive(Args)]
 pub struct LogsArgs {
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
     /// Keep printing new lines until interrupted.
@@ -1079,7 +1083,7 @@ pub async fn logs(args: LogsArgs) -> Result<()> {
         })
         .collect();
     if !args.follow && !sources.iter().any(|source| source.path.exists()) {
-        println!("No logs yet in {}.", state.display());
+        outln!("No logs yet in {}.", state.display());
         return Ok(());
     }
     // Handle interruption before printing anything, so a signal never kills a follower
@@ -1087,6 +1091,7 @@ pub async fn logs(args: LogsArgs) -> Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
     let mut terminate = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
+    // terminal-safe: LogSource::write_line filters each line.
     let mut stdout = io::stdout().lock();
     for source in &mut sources {
         source.drain(&mut stdout, prefixed)?;
@@ -1104,6 +1109,7 @@ pub async fn logs(args: LogsArgs) -> Result<()> {
             _ = interrupt.recv() => return Ok(()),
             _ = tokio::time::sleep(Duration::from_millis(250)) => {}
         }
+        // terminal-safe: LogSource::write_line filters each line.
         let mut stdout = io::stdout().lock();
         for source in &mut sources {
             source.drain(&mut stdout, prefixed)?;
@@ -1136,29 +1142,41 @@ impl LogSource {
             .take(size - self.offset)
             .read_to_end(&mut bytes)?;
         self.offset += bytes.len() as u64;
-        if !prefixed {
-            out.write_all(&bytes)?;
-            return Ok(out.flush()?);
-        }
         self.partial.extend_from_slice(&bytes);
         while let Some(end) = self.partial.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = self.partial.drain(..=end).collect();
-            out.write_all(format!("{} | ", self.name).as_bytes())?;
-            out.write_all(&line)?;
+            self.write_line(out, &line[..end], prefixed)?;
+        }
+        // A service that never ends its line still shows up in bounded pieces.
+        if self.partial.len() >= MAX_PARTIAL_LOG_LINE {
+            let line = std::mem::take(&mut self.partial);
+            self.write_line(out, &line, prefixed)?;
         }
         Ok(out.flush()?)
     }
 
     fn finish(&mut self, out: &mut impl io::Write, prefixed: bool) -> Result<()> {
-        if prefixed && !self.partial.is_empty() {
-            out.write_all(format!("{} | ", self.name).as_bytes())?;
-            out.write_all(&self.partial)?;
-            out.write_all(b"\n")?;
-            self.partial.clear();
+        if !self.partial.is_empty() {
+            let line = std::mem::take(&mut self.partial);
+            self.write_line(out, &line, prefixed)?;
         }
-        Ok(())
+        Ok(out.flush()?)
+    }
+
+    /// Logs record text from surfaces, harnesses and remote services, so filter each line.
+    fn write_line(&self, out: &mut impl io::Write, line: &[u8], prefixed: bool) -> Result<()> {
+        let line = String::from_utf8_lossy(line);
+        let line = crate::terminal::text(line.strip_suffix('\r').unwrap_or(&line));
+        if prefixed {
+            out.write_all(format!("{} | ", crate::terminal::text(&self.name)).as_bytes())?;
+        }
+        out.write_all(line.as_bytes())?;
+        Ok(out.write_all(b"\n")?)
     }
 }
+
+/// Longest unterminated log line held back before it is printed anyway.
+const MAX_PARTIAL_LOG_LINE: usize = 64 * 1024;
 
 #[cfg(test)]
 mod tests {

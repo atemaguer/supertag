@@ -41,8 +41,10 @@ enum SurfacePolicyCommand {
     Put {
         resource: Resource,
         file: PathBuf,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -62,8 +64,10 @@ enum SurfacePolicyCommand {
     /// Remove a location's policy and stop new work on its connector alias.
     DeleteLocation {
         id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -384,6 +388,6 @@ pub async fn run(
             json!({ "deleted": deleted })
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }

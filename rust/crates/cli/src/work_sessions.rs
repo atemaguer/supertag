@@ -22,10 +22,13 @@ pub enum WorkSessionCommand {
     },
     /// List the Work Sessions started from a parent Session.
     List {
+        /// Tag that started the Work Sessions.
         #[arg(long)]
         parent_tag: String,
+        /// Session that started the Work Sessions.
         #[arg(long)]
         parent_session: String,
+        /// Only Work Sessions started by this Task.
         #[arg(long)]
         starter_task: Option<String>,
         #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u32).range(1..=100))]
@@ -82,7 +85,7 @@ pub async fn run(connection: Connection, command: WorkSessionCommand) -> Result<
             })
         }
     };
-    println!("{}", serde_json::to_string(&output)?);
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

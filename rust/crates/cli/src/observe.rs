@@ -45,6 +45,7 @@ pub struct SpendArgs {
     /// Only Attempts claimed at or after this RFC 3339 time.
     #[arg(long)]
     since: Option<String>,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value = "text")]
     output: Output,
 }
@@ -78,8 +79,8 @@ pub async fn spend(connection: Connection, args: SpendArgs) -> Result<()> {
         .await?
         .into_inner();
     match args.output {
-        Output::Json => println!("{}", spend_json(&report)),
-        Output::Text => print!("{}", spend_text(&report)),
+        Output::Json => crate::terminal::print_json(&spend_json(&report))?,
+        Output::Text => out!("{}", spend_text(&report)),
     }
     Ok(())
 }
@@ -146,7 +147,7 @@ fn spend_text(report: &SpendReport) -> String {
         };
         let mut line = format!(
             "{} | {} Attempt(s) | cost {cost}",
-            terminal_text(label),
+            crate::terminal::text(label),
             group.attempts
         );
         if group.estimated_cost_attempts > 0 {
@@ -162,7 +163,7 @@ fn spend_text(report: &SpendReport) -> String {
                 .map(|model| {
                     format!(
                         "unpriced: no reported or estimated cost for {} in {}; tokens recorded",
-                        terminal_text(&model.model),
+                        crate::terminal::text(&model.model),
                         model.attempts
                     )
                 })
@@ -214,7 +215,7 @@ pub(crate) fn money(minor: u64, currency: &str) -> String {
         "JPY" => ("¥", 0),
         "KRW" => ("₩", 0),
         _ if currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase()) => ("", 2),
-        _ => return format!("{minor} {} minor units", terminal_text(currency)),
+        _ => return format!("{minor} {} minor units", crate::terminal::text(currency)),
     };
     let amount = if digits == 0 {
         group_thousands(minor)
@@ -240,14 +241,6 @@ fn group_thousands(value: u64) -> String {
     out
 }
 
-/// Replace terminal control characters so recorded text cannot drive the terminal.
-pub(crate) fn terminal_text(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
-        .collect()
-}
-
 #[derive(Clone, Copy, ValueEnum)]
 pub enum DescribeKind {
     Tag,
@@ -270,6 +263,7 @@ pub struct DescribeArgs {
     kind: DescribeKind,
     /// The resource's ID or name.
     id: String,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value = "text")]
     output: Output,
 }
@@ -279,8 +273,8 @@ pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> 
     let id = args.id;
     let (title, value) = fetch(channel, &token, args.kind, id).await?;
     match args.output {
-        Output::Json => println!("{value}"),
-        Output::Text => print!("{}", describe_text(title, &value)),
+        Output::Json => crate::terminal::print_json(&value)?,
+        Output::Text => out!("{}", describe_text(title, &value)),
     }
     Ok(())
 }
@@ -521,7 +515,7 @@ fn render(out: &mut String, depth: usize, key: &str, value: &Value) {
 
 fn scalar(value: &Value) -> String {
     match value {
-        Value::String(text) => terminal_text(text),
+        Value::String(text) => crate::terminal::text(text),
         other => other.to_string(),
     }
 }
@@ -564,6 +558,7 @@ pub struct WatchArgs {
     /// connection drops. Zero exits on the first disconnect.
     #[arg(long, default_value_t = 60)]
     reconnect_seconds: u64,
+    /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value = "text")]
     output: Output,
 }
@@ -609,7 +604,7 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
                 disconnected_at = None;
                 delay = Duration::from_millis(250);
                 resume.clone_from(&event.resume_token);
-                if print_event(&event, args.output, &mut announced) {
+                if print_event(&event, args.output, &mut announced)? {
                     changes += 1;
                     if args.limit.is_some_and(|limit| changes >= limit) {
                         return Ok::<bool, anyhow::Error>(true);
@@ -664,55 +659,53 @@ fn kind_name(kind: WatchKind) -> &'static str {
 }
 
 /// Prints one notice and returns whether it was a change.
-fn print_event(event: &WatchEvent, output: Output, announced: &mut bool) -> bool {
+fn print_event(event: &WatchEvent, output: Output, announced: &mut bool) -> Result<bool> {
     let Some(update) = &event.update else {
-        return false;
+        return Ok(false);
     };
-    match (output, update) {
+    Ok(match (output, update) {
         (Output::Json, Update::Heartbeat(_)) => {
-            println!(
-                "{}",
-                json!({"type": "heartbeat", "resume_token": event.resume_token})
-            );
+            crate::terminal::print_json(
+                &json!({"type": "heartbeat", "resume_token": event.resume_token}),
+            )?;
             false
         }
         (Output::Json, Update::Resync(_)) => {
-            println!(
-                "{}",
-                json!({"type": "resync", "resume_token": event.resume_token})
-            );
+            crate::terminal::print_json(
+                &json!({"type": "resync", "resume_token": event.resume_token}),
+            )?;
             false
         }
         (Output::Json, Update::Change(change)) => {
-            println!(
-                "{}",
-                json!({
-                    "type": "change",
-                    "kind": kind_name(change.kind()),
-                    "reason": change.reason().as_str_name().trim_start_matches("WATCH_REASON_").to_ascii_lowercase(),
-                    "id": change.id,
-                    "tag_id": change.tag_id,
-                    "session_id": change.session_id,
-                    "objective_id": change.objective_id,
-                    "team_id": change.team_id,
-                    "conversation": change.conversation,
-                    "changed_at": Timestamp::from_millis(change.changed_at_ms).map(|at| at.to_string()),
-                    "resume_token": event.resume_token,
-                })
-            );
+            crate::terminal::print_json(&json!({
+                "type": "change",
+                "kind": kind_name(change.kind()),
+                "reason": change.reason().as_str_name().trim_start_matches("WATCH_REASON_").to_ascii_lowercase(),
+                "id": change.id,
+                "tag_id": change.tag_id,
+                "session_id": change.session_id,
+                "objective_id": change.objective_id,
+                "team_id": change.team_id,
+                "conversation": change.conversation,
+                "changed_at": Timestamp::from_millis(change.changed_at_ms).map(|at| at.to_string()),
+                "resume_token": event.resume_token,
+            }))?;
             true
         }
         (Output::Text, Update::Heartbeat(_)) => {
             if !*announced {
-                println!("Watching. Resume token: {}", event.resume_token);
+                outln!(
+                    "Watching. Resume token: {}",
+                    crate::terminal::text(&event.resume_token)
+                );
                 *announced = true;
             }
             false
         }
         (Output::Text, Update::Resync(_)) => {
-            println!(
+            outln!(
                 "Resync: changes were missed; reread current state. Resume token: {}",
-                event.resume_token
+                crate::terminal::text(&event.resume_token)
             );
             false
         }
@@ -725,7 +718,7 @@ fn print_event(event: &WatchEvent, output: Output, announced: &mut bool) -> bool
                     .trim_start_matches("WATCH_REASON_")
                     .to_ascii_lowercase(),
                 kind_name(change.kind()),
-                terminal_text(&change.id)
+                crate::terminal::text(&change.id)
             );
             for (name, value) in [
                 ("tag", &change.tag_id),
@@ -734,13 +727,16 @@ fn print_event(event: &WatchEvent, output: Output, announced: &mut bool) -> bool
                 ("team", &change.team_id),
             ] {
                 if !value.is_empty() && value != &change.id {
-                    line += &format!(" {name}={}", terminal_text(value));
+                    line += &format!(" {name}={}", crate::terminal::text(value));
                 }
             }
-            println!("{line} (resume token {})", event.resume_token);
+            outln!(
+                "{line} (resume token {})",
+                crate::terminal::text(&event.resume_token)
+            );
             true
         }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -800,7 +796,7 @@ mod tests {
         );
         assert_eq!(
             text,
-            "Tag\nAllowed actions: read, write\nCreated at: 1970-01-01T00:00:00.000Z\nName: Builder\u{fffd}[2J\nTag ID: builder\nWorkspace:\n  Workspace ID: repo\n"
+            "Tag\nAllowed actions: read, write\nCreated at: 1970-01-01T00:00:00.000Z\nName: Builder [2J\nTag ID: builder\nWorkspace:\n  Workspace ID: repo\n"
         );
     }
 

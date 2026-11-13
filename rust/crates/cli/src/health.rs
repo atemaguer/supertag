@@ -54,9 +54,8 @@ pub(crate) async fn run(args: HealthArgs) -> Result<()> {
         "gRPC service is {}",
         status.as_str_name()
     );
-    println!(
-        "{}",
-        serde_json::json!({"service": args.service, "status": status.as_str_name()})
-    );
+    crate::terminal::print_json(
+        &serde_json::json!({"service": args.service, "status": status.as_str_name()}),
+    )?;
     Ok(())
 }

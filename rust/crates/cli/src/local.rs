@@ -501,9 +501,12 @@ async fn copy_log(
         stamped.extend_from_slice(&line);
         let _ = file.write_all(&stamped).await;
         if let Some(service) = &echo {
-            let mut prefixed = format!("{service} | ").into_bytes();
-            prefixed.extend_from_slice(&line);
-            let _ = io::stderr().lock().write_all(&prefixed);
+            // Service output records text from surfaces and harnesses; filter it for the terminal.
+            let text = String::from_utf8_lossy(&line);
+            errln!(
+                "{service} | {}",
+                crate::terminal::text(text.trim_end_matches('\n').trim_end_matches('\r'))
+            );
         }
     }
     let _ = file.flush().await;
@@ -614,6 +617,7 @@ impl Credentials {
 fn announce(directory: &Path, endpoint: &str) -> Result<()> {
     let endpoint = format!("{endpoint}\n");
     write_private(directory, ENDPOINT, endpoint.as_bytes())?;
+    // terminal-safe: the endpoint this process bound, read by the parent as a handshake.
     let mut stdout = io::stdout().lock();
     stdout.write_all(endpoint.as_bytes())?;
     stdout.flush()?;
@@ -1243,6 +1247,7 @@ pub async fn configured(
         } else {
             // Host-only machines hold no operator credential and cannot use --state-directory
             // to impersonate an operator on the remote Gateway.
+            // terminal-safe: a fixed readiness line for the parent.
             let mut stdout = io::stdout().lock();
             stdout.write_all(b"ready\n")?;
             stdout.flush()?;

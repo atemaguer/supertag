@@ -16,6 +16,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn default_connection() -> Result<Connection> {
     ensure!(
+        // terminal-safe: only checks whether output is a terminal.
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
         "run supertag in a terminal or select a command with --help"
     );

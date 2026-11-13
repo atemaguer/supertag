@@ -459,13 +459,19 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
             .map(plan::Change::preview)
             .collect::<Vec<_>>();
         if args.prune {
-            lines.extend(catalog.reconcile_apply_set(true, true).await?);
+            lines.extend(
+                catalog
+                    .reconcile_apply_set(true, true)
+                    .await?
+                    .iter()
+                    .map(|line| crate::terminal::text(line)),
+            );
         }
         if lines.is_empty() {
-            println!("No changes.");
+            outln!("No changes.");
         }
         for line in lines {
-            println!("{line}");
+            outln!("{line}");
         }
         return Ok(());
     }
@@ -482,10 +488,10 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
     }
     let pruned = catalog.reconcile_apply_set(args.prune, false).await?;
     if unchanged && pruned.is_empty() {
-        println!("No changes.");
+        outln!("No changes.");
     }
     for line in pruned {
-        println!("{line}");
+        outln!("{}", crate::terminal::text(&line));
     }
     Ok(())
 }

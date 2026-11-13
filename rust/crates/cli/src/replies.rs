@@ -54,6 +54,7 @@ pub enum ReplyCommand {
         reply_id: String,
         #[arg(long)]
         decision: Decision,
+        /// What you checked at the provider that shows the outcome.
         #[arg(long)]
         evidence: String,
         /// Required for a delivered decision; identifies the observed provider response.
@@ -136,7 +137,7 @@ pub async fn run(connection: Connection, command: ReplyCommand) -> Result<()> {
             value
         }
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

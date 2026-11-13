@@ -18,6 +18,7 @@ pub enum InputCommand {
     Queue {
         task_id: String,
         text: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -28,8 +29,10 @@ pub enum InputCommand {
         input_id: String,
         #[arg(value_enum)]
         decision: Decision,
+        /// What you checked that shows whether the message arrived.
         #[arg(long)]
         evidence: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -92,17 +95,14 @@ pub async fn run(connection: Connection, command: InputCommand) -> Result<()> {
         }
     };
     let input = response.into_inner();
-    println!(
-        "{}",
-        json!({
-            "input_id": input.input_id,
-            "task_id": input.task_id,
-            "attempt_id": input.attempt_id,
-            "follower_task_id": input.follower_task_id,
-            "text": input.text,
-            "state": input.state().as_str_name(),
-            "order": input.order,
-        })
-    );
+    crate::terminal::print_json(&json!({
+        "input_id": input.input_id,
+        "task_id": input.task_id,
+        "attempt_id": input.attempt_id,
+        "follower_task_id": input.follower_task_id,
+        "text": input.text,
+        "state": input.state().as_str_name(),
+        "order": input.order,
+    }))?;
     Ok(())
 }

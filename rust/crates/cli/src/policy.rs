@@ -22,8 +22,10 @@ pub enum PolicyCommand {
     Put {
         kind: Kind,
         file: PathBuf,
+        /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -41,8 +43,10 @@ pub enum PolicyCommand {
     DeleteSet {
         kind: Kind,
         reference: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -50,6 +54,7 @@ pub enum PolicyCommand {
     Assign {
         role: String,
         tag_id: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -59,6 +64,7 @@ pub enum PolicyCommand {
         role: String,
         #[arg(long, default_value = "")]
         tag: String,
+        /// Only assignments in effect now.
         #[arg(long)]
         active: bool,
         #[arg(long, default_value_t = 20)]
@@ -69,8 +75,10 @@ pub enum PolicyCommand {
     /// Deactivate a Role assignment.
     Deactivate {
         assignment_id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -448,7 +456,7 @@ pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
                 .into_inner(),
         ),
     };
-    println!("{output}");
+    crate::terminal::print_json(&output)?;
     Ok(())
 }
 

@@ -24,6 +24,7 @@ pub struct InitArgs {
     /// Accept every default without asking.
     #[arg(long, short = 'y')]
     yes: bool,
+    /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
 }
@@ -164,11 +165,10 @@ struct Prompter {
 impl Prompter {
     fn ask(&mut self, question: &str, default: &str) -> Result<String> {
         if default.is_empty() {
-            print!("{question}: ");
+            out!("{question}: ");
         } else {
-            print!("{question} [{default}]: ");
+            out!("{question} [{default}]: ");
         }
-        io::stdout().flush()?;
         let mut line = String::new();
         ensure!(
             self.input.read_line(&mut line)? > 0,
@@ -188,7 +188,7 @@ impl Prompter {
             match answer.to_ascii_lowercase().as_str() {
                 "y" | "yes" => return Ok(true),
                 "n" | "no" => return Ok(false),
-                _ => println!("Answer yes or no."),
+                _ => outln!("Answer yes or no."),
             }
         }
     }
@@ -235,12 +235,12 @@ pub async fn init(args: InitArgs) -> Result<()> {
     let mut prompter = ask.then(|| Prompter {
         input: io::stdin().lock(),
     });
-    println!("SuperTag setup for {}", repository.root.display());
+    outln!("SuperTag setup for {}", repository.root.display());
 
     if path.exists() {
         let config =
             local_config::load(Some(path.clone()), &state)?.context("supertag.yaml disappeared")?;
-        println!(
+        outln!(
             "\nSuperTag is already set up on this machine: {}",
             path.display()
         );
@@ -251,7 +251,7 @@ pub async fn init(args: InitArgs) -> Result<()> {
             None => true,
         };
         if !keep {
-            println!(
+            outln!(
                 "Nothing was changed. Edit {} or move it aside to start over.",
                 path.display()
             );
@@ -261,7 +261,7 @@ pub async fn init(args: InitArgs) -> Result<()> {
     }
 
     if prompter.is_some() {
-        println!("Press Enter to accept the default in [brackets].");
+        outln!("Press Enter to accept the default in [brackets].");
     }
     let answers = answers(prompter.as_mut(), &installed, &repository)?;
     let document = document(&answers, &repository);
@@ -294,18 +294,18 @@ pub async fn init(args: InitArgs) -> Result<()> {
     };
     drop(config);
     std::fs::rename(&temporary, &path)?;
-    println!("\nWrote {}.", path.display());
+    outln!("\nWrote {}.", path.display());
     let config =
         local_config::load(Some(path.clone()), &state)?.context("supertag.yaml missing")?;
     up(&state, config).await?;
-    println!(
+    outln!(
         "\nTag {} runs {} on this machine, in Workspace {} ({}).",
         answers.tag,
         answers.harness.harness(),
         answers.workspace,
         repository.root.display()
     );
-    println!(
+    outln!(
         "Run supertag in your terminal to talk to it. To keep SuperTag running after restarts, add restart: unless-stopped to both services in {} and run supertag up.",
         path.display()
     );
@@ -342,8 +342,8 @@ fn answers(
             let answer = prompter.ask("Gateway port", &free.to_string())?;
             match answer.parse::<u16>() {
                 Ok(port) if port > 0 && port_free(port) => break port,
-                Ok(port) if port > 0 => println!("Port {port} is in use; choose another."),
-                _ => println!("Enter a port number from 1 to 65535."),
+                Ok(port) if port > 0 => outln!("Port {port} is in use; choose another."),
+                _ => outln!("Enter a port number from 1 to 65535."),
             }
         },
     };
@@ -356,13 +356,13 @@ fn answers(
     let harness = match ask.as_deref_mut() {
         Some(prompter) if installed.len() > 1 => {
             let names: Vec<_> = installed.iter().map(|harness| harness.harness()).collect();
-            println!("Harnesses on this machine: {}", names.join(", "));
+            outln!("Harnesses on this machine: {}", names.join(", "));
             loop {
                 let answer = prompter.ask("Harness for this machine", default.harness())?;
                 if let Some(found) = installed.iter().find(|harness| harness.harness() == answer) {
                     break *found;
                 }
-                println!("Choose one of: {}", names.join(", "));
+                outln!("Choose one of: {}", names.join(", "));
             }
         }
         _ => default,
@@ -376,7 +376,7 @@ fn answers(
             {
                 break answer;
             }
-            println!("Enter the model as provider/model.");
+            outln!("Enter the model as provider/model.");
         }),
         (Found::Opencode, None) => unreachable!("--yes never selects OpenCode"),
         _ => None,
@@ -384,7 +384,7 @@ fn answers(
     let unsandboxed = match (harness, ask.as_deref_mut()) {
         (Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
-            println!(
+            outln!(
                 "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
             );
             let allowed = prompter.confirm(
@@ -392,14 +392,14 @@ fn answers(
                 true,
             )?;
             if !allowed {
-                println!(
+                outln!(
                     "  Tasks that run commands will not run on {name}. To allow it later, add allow-unsandboxed-commands to its host in supertag.yaml."
                 );
             }
             allowed
         }
         (Found::Opencode | Found::Cursor, None) => {
-            println!(
+            outln!(
                 "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
                 harness.harness()
             );
@@ -413,7 +413,7 @@ fn answers(
             let answer = prompter.ask("Workspace name", &repository.name)?;
             match sanitize(&answer).filter(|name| *name == answer) {
                 Some(name) => break name,
-                None => println!("Use lowercase letters, digits and hyphens."),
+                None => outln!("Use lowercase letters, digits and hyphens."),
             }
         },
     };
@@ -423,7 +423,7 @@ fn answers(
             let answer = prompter.ask("Lead Tag name", "lead")?;
             match sanitize(&answer).filter(|name| *name == answer) {
                 Some(name) => break name,
-                None => println!("Use lowercase letters, digits and hyphens."),
+                None => outln!("Use lowercase letters, digits and hyphens."),
             }
         },
     };

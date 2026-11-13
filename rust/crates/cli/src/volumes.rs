@@ -13,16 +13,19 @@ pub enum VolumeCommand {
     /// Register a file or S3-compatible Volume. Existing metadata requires its exact revision.
     Put {
         volume_id: String,
+        /// Canonical file:///absolute/path or s3://bucket/prefix. The Gateway supplies storage endpoints and credentials.
         #[arg(long)]
         source: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
         #[arg(long)]
         operation_id: String,
+        /// The revision you last read, or 0 to create. The change is refused when it no longer matches.
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
     },
-    Get {
-        volume_id: String,
-    },
+    /// Read one Volume.
+    Get { volume_id: String },
+    /// List registered Volumes.
     List {
         #[arg(long, default_value_t = 30)]
         limit: u32,
@@ -32,8 +35,10 @@ pub enum VolumeCommand {
     /// Remove metadata only when no reserved or verified copies depend on it.
     Delete {
         volume_id: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
         #[arg(long)]
         operation_id: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
     },
@@ -41,22 +46,26 @@ pub enum VolumeCommand {
     Copy {
         volume_id: String,
         artifact_id: String,
+        /// File in the artifact to copy.
         #[arg(long)]
         path: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
         #[arg(long)]
         operation_id: String,
     },
     /// Download and re-verify one recorded copy, including after the Gateway cache is lost.
     Download {
         copy_id: String,
+        /// Local file to create with the verified copy. It must not already exist.
         #[arg(long)]
         output: PathBuf,
     },
-    CopyGet {
-        copy_id: String,
-    },
+    /// Read one recorded artifact copy.
+    CopyGet { copy_id: String },
+    /// List recorded artifact copies, newest first, optionally for one Volume.
     Copies {
         #[arg(long, default_value = "")]
         volume_id: String,
@@ -247,6 +256,6 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
             json!({"copies":page.copies.iter().map(copy).collect::<Vec<_>>(),"next_before_order":page.next_before_order})
         }
     };
-    println!("{value}");
+    crate::terminal::print_json(&value)?;
     Ok(())
 }

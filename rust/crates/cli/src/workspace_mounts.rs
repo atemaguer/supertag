@@ -13,14 +13,15 @@ pub enum VolumeCommand {
     /// Register a canonical file Volume for Workspace data.
     Put {
         volume_id: String,
+        /// Canonical file:///absolute/path of the data directory.
         #[arg(long)]
         source: String,
+        /// The revision you last read, or 0 to create. The change is refused when it no longer matches.
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
     },
-    Get {
-        volume_id: String,
-    },
+    /// Read one Workspace data Volume.
+    Get { volume_id: String },
 }
 
 pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
@@ -50,10 +51,9 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
         }
     }
     .into_inner();
-    println!(
-        "{}",
-        json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision})
-    );
+    crate::terminal::print_json(
+        &json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision}),
+    )?;
     Ok(())
 }
 

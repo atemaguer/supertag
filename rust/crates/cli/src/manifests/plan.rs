@@ -78,9 +78,13 @@ pub(super) struct Change {
 impl Change {
     pub(super) fn preview(&self) -> String {
         if self.details.is_empty() {
-            format!("{} {}", self.action, self.label)
+            format!("{} {}", self.action, crate::terminal::text(&self.label))
         } else {
-            self.details.join("\n")
+            self.details
+                .iter()
+                .map(|detail| crate::terminal::text(detail))
+                .collect::<Vec<_>>()
+                .join("\n")
         }
     }
 }
@@ -1156,7 +1160,7 @@ impl<'a> Catalog<'a> {
             declared.applied = true;
         }
         if report {
-            println!("configured {}", change.label);
+            outln!("configured {}", crate::terminal::text(&change.label));
         }
         Ok(())
     }
