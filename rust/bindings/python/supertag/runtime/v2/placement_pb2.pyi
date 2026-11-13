@@ -8,10 +8,50 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class RevokeAuthKeyRequest(_message.Message):
-    __slots__ = ("key_id",)
-    KEY_ID_FIELD_NUMBER: _ClassVar[int]
-    key_id: str
-    def __init__(self, key_id: _Optional[str] = ...) -> None: ...
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class GetAuthKeyRequest(_message.Message):
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class ListAuthKeysRequest(_message.Message):
+    __slots__ = ("limit", "cursor")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    cursor: str
+    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListAuthKeysResponse(_message.Message):
+    __slots__ = ("auth_keys", "next_cursor")
+    AUTH_KEYS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    auth_keys: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.AuthKey]
+    next_cursor: str
+    def __init__(self, auth_keys: _Optional[_Iterable[_Union[_runtime_pb2.AuthKey, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class RotateHostCredentialRequest(_message.Message):
+    __slots__ = ("host_id", "expected_credential_revision", "token_digest")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_CREDENTIAL_REVISION_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    expected_credential_revision: int
+    token_digest: bytes
+    def __init__(self, host_id: _Optional[str] = ..., expected_credential_revision: _Optional[int] = ..., token_digest: _Optional[bytes] = ...) -> None: ...
+
+class HostCredentialRotation(_message.Message):
+    __slots__ = ("host_id", "credential_revision")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_REVISION_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    credential_revision: int
+    def __init__(self, host_id: _Optional[str] = ..., credential_revision: _Optional[int] = ...) -> None: ...
 
 class SetTagRunsOnRequest(_message.Message):
     __slots__ = ("tag_id", "runs_on")

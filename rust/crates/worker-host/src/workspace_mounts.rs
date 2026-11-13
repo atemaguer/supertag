@@ -136,11 +136,11 @@ impl WorkspaceMounts {
     pub fn protect(
         &mut self,
         state: &Path,
-        workspace: Option<&Path>,
+        workspaces: &[&Path],
         artifact_storage: Option<&Path>,
     ) -> Result<()> {
         let mut protected = vec![state.canonicalize()?];
-        for path in workspace.into_iter().chain(artifact_storage) {
+        for path in workspaces.iter().copied().chain(artifact_storage) {
             protected.push(canonical_allow_missing(path)?);
         }
         let home = std::env::var_os("HOME")

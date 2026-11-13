@@ -6104,10 +6104,12 @@ type WorkerHostStatus struct {
 	GrantedLabels []string `protobuf:"bytes,1401,rep,name=granted_labels,json=grantedLabels,proto3" json:"granted_labels,omitempty"`
 	Ephemeral     bool     `protobuf:"varint,1402,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	// Set when an offline ephemeral host was removed.
-	RemovedAtMs   *int64                 `protobuf:"varint,1403,opt,name=removed_at_ms,json=removedAtMs,proto3,oneof" json:"removed_at_ms,omitempty"`
-	Harnesses     []*HostHarnessCapacity `protobuf:"bytes,1500,rep,name=harnesses,proto3" json:"harnesses,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RemovedAtMs *int64                 `protobuf:"varint,1403,opt,name=removed_at_ms,json=removedAtMs,proto3,oneof" json:"removed_at_ms,omitempty"`
+	Harnesses   []*HostHarnessCapacity `protobuf:"bytes,1500,rep,name=harnesses,proto3" json:"harnesses,omitempty"`
+	// Increases with every credential rotation, from 1.
+	CredentialRevision uint64 `protobuf:"varint,3300,opt,name=credential_revision,json=credentialRevision,proto3" json:"credential_revision,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *WorkerHostStatus) Reset() {
@@ -6285,6 +6287,13 @@ func (x *WorkerHostStatus) GetHarnesses() []*HostHarnessCapacity {
 		return x.Harnesses
 	}
 	return nil
+}
+
+func (x *WorkerHostStatus) GetCredentialRevision() uint64 {
+	if x != nil {
+		return x.CredentialRevision
+	}
+	return 0
 }
 
 type ListHostsRequest struct {
@@ -8871,7 +8880,10 @@ type CreateAuthKeyRequest struct {
 	// Hosts that join with an ephemeral key are removed once they go offline.
 	Ephemeral bool `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	// Labels granted to every host that joins with the key.
-	Labels        []string `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
+	Labels []string `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
+	// The operator's name for the key: 1 to 63 lowercase letters, digits,
+	// hyphens or underscores, starting with a letter or digit. Never reused.
+	Name          string `protobuf:"bytes,3300,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8969,6 +8981,13 @@ func (x *CreateAuthKeyRequest) GetLabels() []string {
 	return nil
 }
 
+func (x *CreateAuthKeyRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type AuthKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HostId        string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
@@ -8978,10 +8997,12 @@ type AuthKey struct {
 	Reusable      bool                   `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
 	Ephemeral     bool                   `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	Labels        []string               `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
-	// Public name of the key, for revocation. It does not authorize anything.
-	KeyId string `protobuf:"bytes,1403,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	// A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
-	Revoked       bool `protobuf:"varint,1404,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	Revoked     bool   `protobuf:"varint,1404,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	Name        string `protobuf:"bytes,3300,opt,name=name,proto3" json:"name,omitempty"`
+	CreatedAtMs int64  `protobuf:"varint,3301,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	// A one-time key enrolled its host, or a reusable key enrolled at least one.
+	Used          bool `protobuf:"varint,3302,opt,name=used,proto3" json:"used,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9065,16 +9086,30 @@ func (x *AuthKey) GetLabels() []string {
 	return nil
 }
 
-func (x *AuthKey) GetKeyId() string {
+func (x *AuthKey) GetRevoked() bool {
 	if x != nil {
-		return x.KeyId
+		return x.Revoked
+	}
+	return false
+}
+
+func (x *AuthKey) GetName() string {
+	if x != nil {
+		return x.Name
 	}
 	return ""
 }
 
-func (x *AuthKey) GetRevoked() bool {
+func (x *AuthKey) GetCreatedAtMs() int64 {
 	if x != nil {
-		return x.Revoked
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *AuthKey) GetUsed() bool {
+	if x != nil {
+		return x.Used
 	}
 	return false
 }
@@ -20429,7 +20464,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\bcapacity\x18\x03 \x01(\rR\bcapacity\x12'\n" +
 	"\x0favailable_slots\x18\x04 \x01(\rR\x0eavailableSlots\"_\n" +
 	"\x15HostHarnessCapacities\x12F\n" +
-	"\tharnesses\x18\x01 \x03(\v2(.supertag.runtime.v2.HostHarnessCapacityR\tharnesses\"\xb1\b\n" +
+	"\tharnesses\x18\x01 \x03(\v2(.supertag.runtime.v2.HostHarnessCapacityR\tharnesses\"\xe3\b\n" +
 	"\x10WorkerHostStatus\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1e\n" +
 	"\n" +
@@ -20459,7 +20494,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	" \x01(\bR\tephemeral\x12(\n" +
 	"\rremoved_at_ms\x18\xfb\n" +
 	" \x01(\x03H\x03R\vremovedAtMs\x88\x01\x01\x12G\n" +
-	"\tharnesses\x18\xdc\v \x03(\v2(.supertag.runtime.v2.HostHarnessCapacityR\tharnessesB\x12\n" +
+	"\tharnesses\x18\xdc\v \x03(\v2(.supertag.runtime.v2.HostHarnessCapacityR\tharnesses\x120\n" +
+	"\x13credential_revision\x18\xe4\x19 \x01(\x04R\x12credentialRevisionB\x12\n" +
 	"\x10_last_seen_at_msB\x19\n" +
 	"\x17_presence_expires_at_msB\x10\n" +
 	"\x0e_revoked_at_msB\x10\n" +
@@ -20649,7 +20685,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12SettleInputRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x19\n" +
 	"\binput_id\x18\x02 \x01(\tR\ainputId\x12?\n" +
-	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceipt\"\xad\x02\n" +
+	"\areceipt\x18\x03 \x01(\x0e2%.supertag.runtime.v2.LiveInputReceiptR\areceipt\"\xc2\x02\n" +
 	"\x14CreateAuthKeyRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1d\n" +
@@ -20663,7 +20699,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\tephemeral\x18\xf9\n" +
 	" \x01(\bR\tephemeral\x12\x17\n" +
 	"\x06labels\x18\xfa\n" +
-	" \x03(\tR\x06labels\"\x91\x02\n" +
+	" \x03(\tR\x06labels\x12\x13\n" +
+	"\x04name\x18\xe4\x19 \x01(\tR\x04name\"\xd0\x02\n" +
 	"\aAuthKey\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\"\n" +
 	"\rexpires_at_ms\x18\x02 \x01(\x03R\vexpiresAtMs\x12&\n" +
@@ -20674,11 +20711,14 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\tephemeral\x18\xf9\n" +
 	" \x01(\bR\tephemeral\x12\x17\n" +
 	"\x06labels\x18\xfa\n" +
-	" \x03(\tR\x06labels\x12\x16\n" +
-	"\x06key_id\x18\xfb\n" +
-	" \x01(\tR\x05keyId\x12\x19\n" +
+	" \x03(\tR\x06labels\x12\x19\n" +
 	"\arevoked\x18\xfc\n" +
-	" \x01(\bR\arevoked\",\n" +
+	" \x01(\bR\arevoked\x12\x13\n" +
+	"\x04name\x18\xe4\x19 \x01(\tR\x04name\x12#\n" +
+	"\rcreated_at_ms\x18\xe5\x19 \x01(\x03R\vcreatedAtMs\x12\x13\n" +
+	"\x04used\x18\xe6\x19 \x01(\bR\x04usedJ\x06\b\xfb\n" +
+	"\x10\xfc\n" +
+	"\",\n" +
 	"\x11RevokeHostRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\"<\n" +
 	"\x13RegisterHostRequest\x12%\n" +

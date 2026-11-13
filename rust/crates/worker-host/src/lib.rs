@@ -22,7 +22,10 @@ mod workspaces;
 
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
-pub use enrollment::enroll;
+pub use enrollment::{
+    PendingRotation, abandon_credential_rotation, begin_credential_rotation, enroll,
+    finish_credential_rotation,
+};
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
@@ -80,7 +83,8 @@ pub struct HostOptions {
     pub attempt_timeout: Duration,
     pub wait_for_recovery: bool,
     pub once: bool,
-    pub workspace: Option<WorkspaceMapping>,
+    /// Every Workspace this host can prepare. Several IDs may name one source.
+    pub workspaces: Vec<WorkspaceMapping>,
     pub remote_provider: Option<ProviderConfig>,
     pub shared_execution: Option<SharedExecutionConfig>,
     pub context_catalog: context::ContextCatalog,
@@ -237,7 +241,7 @@ pub async fn run(
         options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
             && (options.remote_provider.is_none()
                 || (options.harness == HarnessKind::Cursor
-                    && options.workspace.is_some()
+                    && !options.workspaces.is_empty()
                     && !options.execution_profile.allow_unsandboxed_commands)),
         "invalid Worker Host remote Workspace profile"
     );
@@ -249,7 +253,7 @@ pub async fn run(
                 .map(SharedExecutionConfig::capability)
             && (options.shared_execution.is_none()
                 || (options.harness == HarnessKind::Cursor
-                    && options.workspace.is_none()
+                    && options.workspaces.is_empty()
                     && options.remote_provider.is_none()
                     && options.execution_profile.mcp_servers.is_empty()
                     && !options.execution_profile.allow_unsandboxed_commands)),
@@ -264,36 +268,35 @@ pub async fn run(
     );
     let shutdown = shutdown.child_token();
     let journal = Arc::new(Journal::open(&options.state_directory)?);
+    let local_roots: Vec<PathBuf> = options
+        .workspaces
+        .iter()
+        .filter_map(workspaces::WorkspaceMapping::local_root)
+        .map(std::path::Path::to_path_buf)
+        .collect();
+    let local_roots: Vec<&std::path::Path> = local_roots.iter().map(PathBuf::as_path).collect();
     if !options.workspace_mounts.is_empty() {
         ensure!(
             options.harness == HarnessKind::Codex
-                && options
-                    .workspace
-                    .as_ref()
-                    .and_then(workspaces::WorkspaceMapping::local_root)
-                    .is_some()
+                && !options.workspaces.is_empty()
+                && local_roots.len() == options.workspaces.len()
                 && options.remote_provider.is_none()
                 && options.shared_execution.is_none(),
             "Workspace copy mounts require a local Codex Worker Host"
         );
         let state_directory = options.state_directory.clone();
-        let local_root = options
-            .workspace
-            .as_ref()
-            .and_then(workspaces::WorkspaceMapping::local_root)
-            .map(std::path::Path::to_path_buf);
         let artifact_storage = options
             .artifact_source
             .as_ref()
             .map(|source| source.directory.clone());
         options.workspace_mounts.protect(
             &state_directory,
-            local_root.as_deref(),
+            &local_roots,
             artifact_storage.as_deref(),
         )?;
     }
     let workspaces =
-        workspaces::Workspaces::new(&options.state_directory, options.workspace.clone())?;
+        workspaces::Workspaces::new(&options.state_directory, options.workspaces.clone())?;
     // Terminal proof is durable; finishing local cleanup needs neither the source
     // repository nor a new network registration.
     if let Some(Entry::Terminal { attempt, prepared }) = journal.load()? {
@@ -379,13 +382,7 @@ pub async fn run(
     let serving = match options.artifact_source.take() {
         Some(config) => Some(
             config
-                .bind(
-                    &options.state_directory,
-                    options
-                        .workspace
-                        .as_ref()
-                        .and_then(workspaces::WorkspaceMapping::local_root),
-                )
+                .bind(&options.state_directory, &local_roots)
                 .await?
                 .serve(acquisitions.clone(), &token, &shutdown)
                 .await?,

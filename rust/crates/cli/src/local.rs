@@ -884,17 +884,18 @@ impl ManagedHost {
                 capacity: self.definition.concurrency,
             });
         }
-        let workspaces = self
-            .definition
-            .harnesses
-            .first()
-            .and_then(crate::harness::AdapterOptions::workspace_mapping)
-            .filter(|mapping| match &mapping.source {
-                supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
-                supertag_worker_host::WorkspaceSource::Gateway => true,
-            })
-            .map(|mapping| vec![mapping.workspace_id])
-            .unwrap_or_default();
+        let workspaces = match self.definition.harnesses.first() {
+            Some(adapter) => adapter
+                .workspace_mappings()?
+                .into_iter()
+                .filter(|mapping| match &mapping.source {
+                    supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
+                    supertag_worker_host::WorkspaceSource::Gateway => true,
+                })
+                .map(|mapping| mapping.workspace_id)
+                .collect(),
+            None => vec![],
+        };
         let harness_of = self.lanes.iter().map(|lane| lane.harness).collect();
         self.presence = Some(report_presence(
             shared,
@@ -1063,7 +1064,7 @@ fn configured_profile(
     adapter: &crate::harness::AdapterOptions,
 ) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
     let mut profile = adapter.execution_profile()?;
-    profile.task_artifact_inputs = adapter.workspace_mapping().is_some()
+    profile.task_artifact_inputs = !adapter.workspace_mappings()?.is_empty()
         && supertag_protocol::task_artifact_inputs::supports_harness(adapter.harness_kind());
     Ok(profile)
 }
@@ -1380,6 +1381,7 @@ async fn enroll_configured(
         OperatorClient::new(gateway.connect_lazy())
             .create_auth_key(crate::request(
                 CreateAuthKeyRequest {
+                    name: join_key_name(&definition.name),
                     host_id: definition.name.clone(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
@@ -1401,6 +1403,21 @@ async fn enroll_configured(
     };
     supertag_worker_host::enroll(gateway, state, definition.name.clone(), Some(&key)).await?;
     Ok(())
+}
+/// A fresh name for the one-time key that joins a configured host, since names are never reused.
+fn join_key_name(host: &str) -> String {
+    let mut name: String = host
+        .chars()
+        .map(|c| match c.to_ascii_lowercase() {
+            c @ ('a'..='z' | '0'..='9' | '-' | '_') => c,
+            _ => '-',
+        })
+        .take(40)
+        .collect();
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        name.insert(0, 'h');
+    }
+    format!("{name}-join-{}", &Uuid::new_v4().simple().to_string()[..12])
 }
 async fn wait_configured(
     base: &mut Children,

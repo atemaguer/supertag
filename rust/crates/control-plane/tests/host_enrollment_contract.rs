@@ -76,6 +76,7 @@ async fn host_enrollment_contract(url: &str) {
         store.put_tag(tag, "Review requests", vec![]).await.unwrap();
     }
     let key = CreateAuthKeyRequest {
+        name: "review".into(),
         host_id: "review-host".into(),
         operation_id: "issue-join".into(),
         key_digest: digest("one-time-review-key"),
@@ -101,6 +102,7 @@ async fn host_enrollment_contract(url: &str) {
     ));
 
     let expired = CreateAuthKeyRequest {
+        name: "expired".into(),
         host_id: "expired".into(),
         operation_id: "issue-expired".into(),
         key_digest: digest("expired-key"),

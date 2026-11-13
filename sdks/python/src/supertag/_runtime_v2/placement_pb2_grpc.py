@@ -150,8 +150,9 @@ class Placement:
 
 
 class AuthKeysStub:
-    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
-    replays of earlier joins; hosts that already joined keep their enrollment.
+    """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+    name is never reused. Revocation blocks new joins, including replays of
+    earlier joins; hosts that already joined keep their enrollment.
     """
 
     def __init__(self, channel):
@@ -165,14 +166,38 @@ class AuthKeysStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
                 _registered_method=True)
+        self.ListAuthKeys = channel.unary_unary(
+                '/supertag.runtime.v2.AuthKeys/ListAuthKeys',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysResponse.FromString,
+                _registered_method=True)
+        self.GetAuthKey = channel.unary_unary(
+                '/supertag.runtime.v2.AuthKeys/GetAuthKey',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetAuthKeyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+                _registered_method=True)
 
 
 class AuthKeysServicer:
-    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
-    replays of earlier joins; hosts that already joined keep their enrollment.
+    """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+    name is never reused. Revocation blocks new joins, including replays of
+    earlier joins; hosts that already joined keep their enrollment.
     """
 
     def RevokeAuthKey(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListAuthKeys(self, request, context):
+        """Revoked, expired and used keys included, the earliest created first, then by name.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAuthKey(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -186,6 +211,16 @@ def add_AuthKeysServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.SerializeToString,
             ),
+            'ListAuthKeys': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListAuthKeys,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysResponse.SerializeToString,
+            ),
+            'GetAuthKey': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAuthKey,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.GetAuthKeyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'supertag.runtime.v2.AuthKeys', rpc_method_handlers)
@@ -195,8 +230,9 @@ def add_AuthKeysServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AuthKeys:
-    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
-    replays of earlier joins; hosts that already joined keep their enrollment.
+    """Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+    name is never reused. Revocation blocks new joins, including replays of
+    earlier joins; hosts that already joined keep their enrollment.
     """
 
     @staticmethod
@@ -216,6 +252,140 @@ class AuthKeys:
             '/supertag.runtime.v2.AuthKeys/RevokeAuthKey',
             supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListAuthKeys(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AuthKeys/ListAuthKeys',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.ListAuthKeysResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAuthKey(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AuthKeys/GetAuthKey',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.GetAuthKeyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HostCredentialsStub:
+    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
+    the caller generates the secret, so the Control Plane never receives it.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.RotateHostCredential = channel.unary_unary(
+                '/supertag.runtime.v2.HostCredentials/RotateHostCredential',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.FromString,
+                _registered_method=True)
+
+
+class HostCredentialsServicer:
+    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
+    the caller generates the secret, so the Control Plane never receives it.
+    """
+
+    def RotateHostCredential(self, request, context):
+        """Replaces the host's credential. The previous credential stops working at
+        once. A revoked host must be enrolled under a new ID instead.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HostCredentialsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'RotateHostCredential': grpc.unary_unary_rpc_method_handler(
+                    servicer.RotateHostCredential,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HostCredentials', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HostCredentials', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HostCredentials:
+    """An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
+    the caller generates the secret, so the Control Plane never receives it.
+    """
+
+    @staticmethod
+    def RotateHostCredential(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostCredentials/RotateHostCredential',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RotateHostCredentialRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.HostCredentialRotation.FromString,
             options,
             channel_credentials,
             insecure,

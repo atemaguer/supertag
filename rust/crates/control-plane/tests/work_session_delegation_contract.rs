@@ -29,6 +29,7 @@ async fn enroll_scoped(store: &Store, host: &str, tag: &str) {
         .create_auth_key(
             OPERATOR,
             &CreateAuthKeyRequest {
+                name: host.into(),
                 host_id: host.into(),
                 operation_id: format!("issue-{host}"),
                 key_digest: key.clone(),

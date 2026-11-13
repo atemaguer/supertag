@@ -240,7 +240,7 @@ pub(crate) async fn status_in(
     id: &str,
     now: i64,
 ) -> Result<WorkerHostStatus> {
-    let host = sqlx::query("SELECT generation,draining,enrolled_at_ms,revoked_at_ms,ephemeral,granted_labels,removed_at_ms FROM supertag_v2_hosts WHERE host_id=$1")
+    let host = sqlx::query("SELECT generation,draining,enrolled_at_ms,revoked_at_ms,ephemeral,granted_labels,removed_at_ms,credential_revision FROM supertag_v2_hosts WHERE host_id=$1")
         .bind(id).fetch_optional(&mut **transaction).await?.ok_or_else(|| StoreError::NotFound("Worker Host was not found".into()))?;
     let generation: i64 = host.try_get("generation")?;
     let draining = host.try_get::<i64, _>("draining")? != 0;
@@ -267,6 +267,7 @@ pub(crate) async fn status_in(
         ephemeral: host.try_get::<i64, _>("ephemeral")? != 0,
         granted_labels: serde_json::from_str(&host.try_get::<String, _>("granted_labels")?)?,
         removed_at_ms: host.try_get("removed_at_ms")?,
+        credential_revision: host.try_get::<i64, _>("credential_revision")? as u64,
         ..Default::default()
     };
     let mut labels: std::collections::BTreeSet<String> =

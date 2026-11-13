@@ -26,6 +26,7 @@ fn submission(tag: &str) -> SubmitTaskRequest {
 
 fn auth_key(operation_id: &str) -> CreateAuthKeyRequest {
     CreateAuthKeyRequest {
+        name: operation_id.into(),
         host_id: "release-host".into(),
         operation_id: operation_id.into(),
         key_digest: vec![7; 32],

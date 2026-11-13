@@ -11,13 +11,52 @@ service Placement {
   rpc DiagnoseTask(DiagnoseTaskPlacementRequest) returns (TaskPlacementDiagnosis);
 }
 
-// Auth Key lifecycle beyond creation. Revocation blocks new joins, including
-// replays of earlier joins; hosts that already joined keep their enrollment.
+// Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+// name is never reused. Revocation blocks new joins, including replays of
+// earlier joins; hosts that already joined keep their enrollment.
 service AuthKeys {
   rpc RevokeAuthKey(RevokeAuthKeyRequest) returns (AuthKey);
+  // Revoked, expired and used keys included, the earliest created first, then by name.
+  rpc ListAuthKeys(ListAuthKeysRequest) returns (ListAuthKeysResponse);
+  rpc GetAuthKey(GetAuthKeyRequest) returns (AuthKey);
 }
 
-message RevokeAuthKeyRequest { string key_id = 1; }
+message RevokeAuthKeyRequest { string name = 1; }
+
+message GetAuthKeyRequest { string name = 1; }
+
+message ListAuthKeysRequest {
+  // At most this many keys; 0 means 100. At most 500.
+  uint32 limit = 1;
+  // The name of the last key on the previous page.
+  string cursor = 2;
+}
+
+message ListAuthKeysResponse {
+  repeated AuthKey auth_keys = 1;
+  string next_cursor = 2;
+}
+
+// An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
+// the caller generates the secret, so the Control Plane never receives it.
+service HostCredentials {
+  // Replaces the host's credential. The previous credential stops working at
+  // once. A revoked host must be enrolled under a new ID instead.
+  rpc RotateHostCredential(RotateHostCredentialRequest) returns (HostCredentialRotation);
+}
+
+message RotateHostCredentialRequest {
+  string host_id = 1;
+  // The host's current credential_revision. A repeat of a rotation that already
+  // applied, with the same digest, returns the same result.
+  uint64 expected_credential_revision = 2;
+  bytes token_digest = 3;
+}
+
+message HostCredentialRotation {
+  string host_id = 1;
+  uint64 credential_revision = 2;
+}
 
 message SetTagRunsOnRequest {
   string tag_id = 1;

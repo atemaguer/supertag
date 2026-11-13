@@ -74,7 +74,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 64;
+        const SCHEMA_VERSION: i64 = 65;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -189,6 +189,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0062_surface_objectives_connector_leases.sql"),
                 include_str!("../migrations/sqlite/0063_attempt_claim_times.sql"),
                 include_str!("../migrations/sqlite/0064_workspace_mcp.sql"),
+                include_str!("../migrations/sqlite/0103_host_credentials_auth_key_names.sql"),
             ]
         } else {
             [
@@ -258,6 +259,7 @@ impl Store {
                 ),
                 include_str!("../migrations/postgresql/0063_attempt_claim_times.sql"),
                 include_str!("../migrations/postgresql/0064_workspace_mcp.sql"),
+                include_str!("../migrations/postgresql/0103_host_credentials_auth_key_names.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

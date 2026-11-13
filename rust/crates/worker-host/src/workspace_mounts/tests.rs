@@ -64,7 +64,7 @@ fn load(
         }]))?,
     )?;
     let mut mounts = WorkspaceMounts::load(&config)?;
-    mounts.protect(state, Some(checkout), None)?;
+    mounts.protect(state, &[checkout], None)?;
     Ok(mounts)
 }
 

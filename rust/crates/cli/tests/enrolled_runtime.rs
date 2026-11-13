@@ -126,7 +126,14 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         .await?;
     }
     let issued = json(operator(
-        &["create-auth-key", "review-host", "--tag", "reviewer"],
+        &[
+            "create-auth-key",
+            "review",
+            "--host",
+            "review-host",
+            "--tag",
+            "reviewer",
+        ],
         &public,
         &operator_token,
     ))

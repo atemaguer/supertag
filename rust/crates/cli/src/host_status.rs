@@ -100,5 +100,6 @@ pub(crate) fn status_json(host: WorkerHostStatus) -> Value {
         "granted_labels": host.granted_labels,
         "ephemeral": host.ephemeral,
         "removed_at_ms": host.removed_at_ms,
+        "credential_revision": host.credential_revision,
     })
 }

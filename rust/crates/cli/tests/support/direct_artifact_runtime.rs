@@ -15,8 +15,11 @@ async fn enroll(
     id: &str,
     directory: &Path,
 ) -> Result<()> {
-    let issued =
-        json(credentials.operator(&["create-auth-key", id, "--tag", "builder"], gateway)).await?;
+    let issued = json(credentials.operator(
+        &["create-auth-key", id, "--host", id, "--tag", "builder"],
+        gateway,
+    ))
+    .await?;
     let key_path = directory.with_extension("key");
     std::fs::write(&key_path, field(&issued, "auth_key")?)?;
     std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;

@@ -25,6 +25,8 @@ const (
 	PlacementName = "supertag.runtime.v2.Placement"
 	// AuthKeysName is the fully-qualified name of the AuthKeys service.
 	AuthKeysName = "supertag.runtime.v2.AuthKeys"
+	// HostCredentialsName is the fully-qualified name of the HostCredentials service.
+	HostCredentialsName = "supertag.runtime.v2.HostCredentials"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -41,6 +43,13 @@ const (
 	PlacementDiagnoseTaskProcedure = "/supertag.runtime.v2.Placement/DiagnoseTask"
 	// AuthKeysRevokeAuthKeyProcedure is the fully-qualified name of the AuthKeys's RevokeAuthKey RPC.
 	AuthKeysRevokeAuthKeyProcedure = "/supertag.runtime.v2.AuthKeys/RevokeAuthKey"
+	// AuthKeysListAuthKeysProcedure is the fully-qualified name of the AuthKeys's ListAuthKeys RPC.
+	AuthKeysListAuthKeysProcedure = "/supertag.runtime.v2.AuthKeys/ListAuthKeys"
+	// AuthKeysGetAuthKeyProcedure is the fully-qualified name of the AuthKeys's GetAuthKey RPC.
+	AuthKeysGetAuthKeyProcedure = "/supertag.runtime.v2.AuthKeys/GetAuthKey"
+	// HostCredentialsRotateHostCredentialProcedure is the fully-qualified name of the HostCredentials's
+	// RotateHostCredential RPC.
+	HostCredentialsRotateHostCredentialProcedure = "/supertag.runtime.v2.HostCredentials/RotateHostCredential"
 )
 
 // PlacementClient is a client for the supertag.runtime.v2.Placement service.
@@ -146,6 +155,9 @@ func (UnimplementedPlacementHandler) DiagnoseTask(context.Context, *connect.Requ
 // AuthKeysClient is a client for the supertag.runtime.v2.AuthKeys service.
 type AuthKeysClient interface {
 	RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+	// Revoked, expired and used keys included, the earliest created first, then by name.
+	ListAuthKeys(context.Context, *connect.Request[runtimev2.ListAuthKeysRequest]) (*connect.Response[runtimev2.ListAuthKeysResponse], error)
+	GetAuthKey(context.Context, *connect.Request[runtimev2.GetAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 }
 
 // NewAuthKeysClient constructs a client for the supertag.runtime.v2.AuthKeys service. By default,
@@ -165,12 +177,26 @@ func NewAuthKeysClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(authKeysMethods.ByName("RevokeAuthKey")),
 			connect.WithClientOptions(opts...),
 		),
+		listAuthKeys: connect.NewClient[runtimev2.ListAuthKeysRequest, runtimev2.ListAuthKeysResponse](
+			httpClient,
+			baseURL+AuthKeysListAuthKeysProcedure,
+			connect.WithSchema(authKeysMethods.ByName("ListAuthKeys")),
+			connect.WithClientOptions(opts...),
+		),
+		getAuthKey: connect.NewClient[runtimev2.GetAuthKeyRequest, runtimev2.AuthKey](
+			httpClient,
+			baseURL+AuthKeysGetAuthKeyProcedure,
+			connect.WithSchema(authKeysMethods.ByName("GetAuthKey")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // authKeysClient implements AuthKeysClient.
 type authKeysClient struct {
 	revokeAuthKey *connect.Client[runtimev2.RevokeAuthKeyRequest, runtimev2.AuthKey]
+	listAuthKeys  *connect.Client[runtimev2.ListAuthKeysRequest, runtimev2.ListAuthKeysResponse]
+	getAuthKey    *connect.Client[runtimev2.GetAuthKeyRequest, runtimev2.AuthKey]
 }
 
 // RevokeAuthKey calls supertag.runtime.v2.AuthKeys.RevokeAuthKey.
@@ -178,9 +204,22 @@ func (c *authKeysClient) RevokeAuthKey(ctx context.Context, req *connect.Request
 	return c.revokeAuthKey.CallUnary(ctx, req)
 }
 
+// ListAuthKeys calls supertag.runtime.v2.AuthKeys.ListAuthKeys.
+func (c *authKeysClient) ListAuthKeys(ctx context.Context, req *connect.Request[runtimev2.ListAuthKeysRequest]) (*connect.Response[runtimev2.ListAuthKeysResponse], error) {
+	return c.listAuthKeys.CallUnary(ctx, req)
+}
+
+// GetAuthKey calls supertag.runtime.v2.AuthKeys.GetAuthKey.
+func (c *authKeysClient) GetAuthKey(ctx context.Context, req *connect.Request[runtimev2.GetAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return c.getAuthKey.CallUnary(ctx, req)
+}
+
 // AuthKeysHandler is an implementation of the supertag.runtime.v2.AuthKeys service.
 type AuthKeysHandler interface {
 	RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+	// Revoked, expired and used keys included, the earliest created first, then by name.
+	ListAuthKeys(context.Context, *connect.Request[runtimev2.ListAuthKeysRequest]) (*connect.Response[runtimev2.ListAuthKeysResponse], error)
+	GetAuthKey(context.Context, *connect.Request[runtimev2.GetAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
 }
 
 // NewAuthKeysHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -196,10 +235,26 @@ func NewAuthKeysHandler(svc AuthKeysHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(authKeysMethods.ByName("RevokeAuthKey")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authKeysListAuthKeysHandler := connect.NewUnaryHandler(
+		AuthKeysListAuthKeysProcedure,
+		svc.ListAuthKeys,
+		connect.WithSchema(authKeysMethods.ByName("ListAuthKeys")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authKeysGetAuthKeyHandler := connect.NewUnaryHandler(
+		AuthKeysGetAuthKeyProcedure,
+		svc.GetAuthKey,
+		connect.WithSchema(authKeysMethods.ByName("GetAuthKey")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AuthKeys/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthKeysRevokeAuthKeyProcedure:
 			authKeysRevokeAuthKeyHandler.ServeHTTP(w, r)
+		case AuthKeysListAuthKeysProcedure:
+			authKeysListAuthKeysHandler.ServeHTTP(w, r)
+		case AuthKeysGetAuthKeyProcedure:
+			authKeysGetAuthKeyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -211,4 +266,86 @@ type UnimplementedAuthKeysHandler struct{}
 
 func (UnimplementedAuthKeysHandler) RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.RevokeAuthKey is not implemented"))
+}
+
+func (UnimplementedAuthKeysHandler) ListAuthKeys(context.Context, *connect.Request[runtimev2.ListAuthKeysRequest]) (*connect.Response[runtimev2.ListAuthKeysResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.ListAuthKeys is not implemented"))
+}
+
+func (UnimplementedAuthKeysHandler) GetAuthKey(context.Context, *connect.Request[runtimev2.GetAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.GetAuthKey is not implemented"))
+}
+
+// HostCredentialsClient is a client for the supertag.runtime.v2.HostCredentials service.
+type HostCredentialsClient interface {
+	// Replaces the host's credential. The previous credential stops working at
+	// once. A revoked host must be enrolled under a new ID instead.
+	RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error)
+}
+
+// NewHostCredentialsClient constructs a client for the supertag.runtime.v2.HostCredentials service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHostCredentialsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostCredentialsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hostCredentialsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("HostCredentials").Methods()
+	return &hostCredentialsClient{
+		rotateHostCredential: connect.NewClient[runtimev2.RotateHostCredentialRequest, runtimev2.HostCredentialRotation](
+			httpClient,
+			baseURL+HostCredentialsRotateHostCredentialProcedure,
+			connect.WithSchema(hostCredentialsMethods.ByName("RotateHostCredential")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hostCredentialsClient implements HostCredentialsClient.
+type hostCredentialsClient struct {
+	rotateHostCredential *connect.Client[runtimev2.RotateHostCredentialRequest, runtimev2.HostCredentialRotation]
+}
+
+// RotateHostCredential calls supertag.runtime.v2.HostCredentials.RotateHostCredential.
+func (c *hostCredentialsClient) RotateHostCredential(ctx context.Context, req *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error) {
+	return c.rotateHostCredential.CallUnary(ctx, req)
+}
+
+// HostCredentialsHandler is an implementation of the supertag.runtime.v2.HostCredentials service.
+type HostCredentialsHandler interface {
+	// Replaces the host's credential. The previous credential stops working at
+	// once. A revoked host must be enrolled under a new ID instead.
+	RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error)
+}
+
+// NewHostCredentialsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHostCredentialsHandler(svc HostCredentialsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hostCredentialsMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("HostCredentials").Methods()
+	hostCredentialsRotateHostCredentialHandler := connect.NewUnaryHandler(
+		HostCredentialsRotateHostCredentialProcedure,
+		svc.RotateHostCredential,
+		connect.WithSchema(hostCredentialsMethods.ByName("RotateHostCredential")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HostCredentials/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HostCredentialsRotateHostCredentialProcedure:
+			hostCredentialsRotateHostCredentialHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHostCredentialsHandler returns CodeUnimplemented from all methods.
+type UnimplementedHostCredentialsHandler struct{}
+
+func (UnimplementedHostCredentialsHandler) RotateHostCredential(context.Context, *connect.Request[runtimev2.RotateHostCredentialRequest]) (*connect.Response[runtimev2.HostCredentialRotation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostCredentials.RotateHostCredential is not implemented"))
 }

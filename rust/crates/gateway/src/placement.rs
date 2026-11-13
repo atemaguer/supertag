@@ -2,6 +2,8 @@ use super::*;
 use supertag_protocol::v2::{
     auth_keys_client::AuthKeysClient,
     auth_keys_server::{AuthKeys, AuthKeysServer},
+    host_credentials_client::HostCredentialsClient,
+    host_credentials_server::{HostCredentials, HostCredentialsServer},
     placement_client::PlacementClient,
     placement_server::{Placement, PlacementServer},
 };
@@ -13,6 +15,29 @@ impl Gateway {
 
     pub fn auth_keys_service(&self) -> AuthKeysServer<Self> {
         AuthKeysServer::new(self.clone()).max_decoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    pub fn host_credentials_service(&self) -> HostCredentialsServer<Self> {
+        HostCredentialsServer::new(self.clone()).max_decoding_message_size(MAX_MESSAGE_BYTES)
+    }
+}
+
+#[tonic::async_trait]
+impl HostCredentials for Gateway {
+    async fn rotate_host_credential(
+        &self,
+        request: Request<RotateHostCredentialRequest>,
+    ) -> Result<Response<HostCredentialRotation>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async move {
+                HostCredentialsClient::new(channel)
+                    .rotate_host_credential(request)
+                    .await
+            },
+        )
+        .await
     }
 }
 
@@ -28,6 +53,32 @@ impl AuthKeys for Gateway {
             |channel, request| async move {
                 AuthKeysClient::new(channel).revoke_auth_key(request).await
             },
+        )
+        .await
+    }
+
+    async fn list_auth_keys(
+        &self,
+        request: Request<ListAuthKeysRequest>,
+    ) -> Result<Response<ListAuthKeysResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async move {
+                AuthKeysClient::new(channel).list_auth_keys(request).await
+            },
+        )
+        .await
+    }
+
+    async fn get_auth_key(
+        &self,
+        request: Request<GetAuthKeyRequest>,
+    ) -> Result<Response<AuthKey>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async move { AuthKeysClient::new(channel).get_auth_key(request).await },
         )
         .await
     }

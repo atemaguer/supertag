@@ -105,8 +105,20 @@ fn rule(path: &str) -> Option<Rule> {
         ),
         ("Operator", "CreateAuthKey") => rule!(
             "auth-key.create",
-            "WorkerHost",
+            "AuthKey",
             CreateAuthKeyRequest,
+            |value| named("AuthKey", &value.name)
+        ),
+        ("AuthKeys", "RevokeAuthKey") => rule!(
+            "auth-key.revoke",
+            "AuthKey",
+            RevokeAuthKeyRequest,
+            |value| named("AuthKey", &value.name)
+        ),
+        ("HostCredentials", "RotateHostCredential") => rule!(
+            "worker-host.credential.rotate",
+            "WorkerHost",
+            RotateHostCredentialRequest,
             |value| named("WorkerHost", &value.host_id)
         ),
         ("Operator", "RevokeHost") => rule!(
