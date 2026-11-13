@@ -113,7 +113,7 @@ fn operator(principal: &str) -> Result<()> {
     Ok(())
 }
 
-fn digest(kind: &str, request: &impl Message) -> String {
+pub(crate) fn digest(kind: &str, request: &impl Message) -> String {
     let mut hash = Sha256::new();
     hash.update(kind);
     hash.update([0]);
@@ -675,88 +675,11 @@ impl Store {
             tx.commit().await?;
             return Ok(prior);
         }
-        let mut record = get_in(&mut tx, &input.objective_id).await?;
-        match action {
-            "pause" => {
-                if record.closed() {
-                    return Err(refused("a closed Objective cannot be paused"));
-                }
-                if record.value.paused_at_ms.is_none() {
-                    record.value.paused_at_ms = Some(now_ms);
-                    record.limits.paused_at = Some(timestamp(now_ms)?);
-                    record.changed(now_ms);
-                }
-            }
-            "resume" => {
-                if record.closed() {
-                    return Err(refused("a closed Objective cannot be resumed"));
-                }
-                if let Some(paused_at) = record.value.paused_at_ms.take() {
-                    record.limits.paused_at = None;
-                    record.changed(now_ms);
-                    // Admission must observe the cleared pause. A valid approval
-                    // wait owns the next continuation and must not be displaced
-                    // by the generic resume turn.
-                    save_in(&mut tx, &record).await?;
-                    if crate::approvals::resume_wait_in(&mut tx, &input.objective_id, now_ms)
-                        .await?
-                    {
-                        record = get_in(&mut tx, &input.objective_id).await?;
-                    } else {
-                        let counts = sqlx::query("SELECT t.state, COUNT(*) AS total FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 GROUP BY t.state").bind(&input.objective_id).fetch_all(&mut *tx).await?;
-                        let mut summary = format!(
-                            "An operator resumed the Objective after its pause at {}. Recorded Task states at resume:",
-                            timestamp(paused_at)?
-                        );
-                        for count in counts {
-                            let state =
-                                TaskState::try_from(count.try_get::<i64, _>("state")? as i32)
-                                    .map_err(|_| refused("stored Task state is invalid"))?;
-                            summary.push_str(&format!(
-                                " {:?}: {}.",
-                                state,
-                                count.try_get::<i64, _>("total")?
-                            ));
-                        }
-                        internal_turn_in(
-                            &mut tx,
-                            &record,
-                            &format!("resumed:{paused_at}"),
-                            &summary,
-                            "resume",
-                            now_ms,
-                        )
-                        .await?;
-                    }
-                }
-            }
-            "cancel" => {
-                if record.value.status == ObjectiveStatus::Completed as i32 {
-                    return Err(refused("a completed Objective cannot be cancelled"));
-                }
-                if record.value.status != ObjectiveStatus::Cancelled as i32 {
-                    record.cancelled_at_ms = Some(now_ms);
-                    record.cancellation_reason =
-                        (!input.reason.is_empty()).then(|| input.reason.clone());
-                    record.change_status(ObjectiveStatus::Cancelled, now_ms);
-                }
-                cancel_open_in(&mut tx, &input.objective_id, None).await?;
-            }
-            _ => return Err(invalid("unknown Objective action")),
-        }
-        save_in(&mut tx, &record).await?;
-        receipt_in(
-            &mut tx,
-            principal,
-            &input.operation_id,
-            &fingerprint,
-            &record.value,
-        )
-        .await?;
+        let objective =
+            objective_action_in(&mut tx, principal, input, action, &fingerprint, now_ms).await?;
         tx.commit().await?;
-        Ok(record.value)
+        Ok(objective)
     }
-
     pub async fn review_objective(
         &self,
         principal: &str,
@@ -775,50 +698,9 @@ impl Store {
             tx.commit().await?;
             return Ok(prior);
         }
-        let mut record = get_in(&mut tx, &input.objective_id).await?;
-        if record.value.status != ObjectiveStatus::ReadyForReview as i32 {
-            return Err(refused("the Objective must be ready for review"));
-        }
-        crate::artifact_publications::review_in(
-            &mut tx,
-            &record.value,
-            principal,
-            input.approved,
-            now_ms,
-        )
-        .await?;
-        if input.approved {
-            record.change_status(ObjectiveStatus::Completed, now_ms);
-            if !input.feedback.trim().is_empty() {
-                record.completion_summary = Some(input.feedback.clone());
-            }
-            cancel_open_in(&mut tx, &input.objective_id, None).await?;
-        } else {
-            if input.feedback.trim().is_empty() {
-                return Err(invalid("feedback is required to request changes"));
-            }
-            record.change_status(ObjectiveStatus::Working, now_ms);
-            internal_turn_in(
-                &mut tx,
-                &record,
-                &format!("review:{}", record.value.revision),
-                &input.feedback,
-                "work",
-                now_ms,
-            )
-            .await?;
-        }
-        save_in(&mut tx, &record).await?;
-        receipt_in(
-            &mut tx,
-            principal,
-            &input.operation_id,
-            &fingerprint,
-            &record.value,
-        )
-        .await?;
+        let objective = review_in(&mut tx, principal, input, &fingerprint, now_ms).await?;
         tx.commit().await?;
-        Ok(record.value)
+        Ok(objective)
     }
 
     pub async fn sweep_objectives(&self) -> Result<()> {
@@ -828,6 +710,180 @@ impl Store {
         tx.commit().await?;
         Ok(())
     }
+}
+
+/// Pause, resume, or cancel inside the caller's transaction. Callers authorize
+/// `principal` and check the operation receipt first.
+pub(crate) async fn objective_action_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    input: &ObjectiveActionRequest,
+    action: &str,
+    fingerprint: &str,
+    now_ms: i64,
+) -> Result<Objective> {
+    let mut record = get_in(tx, &input.objective_id).await?;
+    match action {
+        "pause" => {
+            if record.closed() {
+                return Err(refused("a closed Objective cannot be paused"));
+            }
+            if record.value.paused_at_ms.is_none() {
+                record.value.paused_at_ms = Some(now_ms);
+                record.limits.paused_at = Some(timestamp(now_ms)?);
+                record.changed(now_ms);
+            }
+        }
+        "resume" => {
+            if record.closed() {
+                return Err(refused("a closed Objective cannot be resumed"));
+            }
+            if let Some(paused_at) = record.value.paused_at_ms.take() {
+                record.limits.paused_at = None;
+                record.changed(now_ms);
+                // Admission must observe the cleared pause. A valid approval
+                // wait owns the next continuation and must not be displaced
+                // by the generic resume turn.
+                save_in(tx, &record).await?;
+                if crate::approvals::resume_wait_in(tx, &input.objective_id, now_ms).await? {
+                    record = get_in(tx, &input.objective_id).await?;
+                } else {
+                    let counts = sqlx::query("SELECT t.state, COUNT(*) AS total FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 GROUP BY t.state").bind(&input.objective_id).fetch_all(&mut **tx).await?;
+                    let mut summary = format!(
+                        "An operator resumed the Objective after its pause at {}. Recorded Task states at resume:",
+                        timestamp(paused_at)?
+                    );
+                    for count in counts {
+                        let state = TaskState::try_from(count.try_get::<i64, _>("state")? as i32)
+                            .map_err(|_| refused("stored Task state is invalid"))?;
+                        summary.push_str(&format!(
+                            " {:?}: {}.",
+                            state,
+                            count.try_get::<i64, _>("total")?
+                        ));
+                    }
+                    internal_turn_in(
+                        tx,
+                        &record,
+                        &format!("resumed:{paused_at}"),
+                        &summary,
+                        "resume",
+                        now_ms,
+                    )
+                    .await?;
+                }
+            }
+        }
+        "cancel" => {
+            if record.value.status == ObjectiveStatus::Completed as i32 {
+                return Err(refused("a completed Objective cannot be cancelled"));
+            }
+            if record.value.status != ObjectiveStatus::Cancelled as i32 {
+                record.cancelled_at_ms = Some(now_ms);
+                record.cancellation_reason =
+                    (!input.reason.is_empty()).then(|| input.reason.clone());
+                record.change_status(ObjectiveStatus::Cancelled, now_ms);
+            }
+            cancel_open_in(tx, &input.objective_id, None).await?;
+        }
+        _ => return Err(invalid("unknown Objective action")),
+    }
+    save_in(tx, &record).await?;
+    receipt_in(
+        tx,
+        principal,
+        &input.operation_id,
+        fingerprint,
+        &record.value,
+    )
+    .await?;
+    Ok(record.value)
+}
+
+/// Approve or request changes inside the caller's transaction. Callers authorize
+/// `principal` and check the operation receipt first.
+pub(crate) async fn review_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    input: &ReviewObjectiveRequest,
+    fingerprint: &str,
+    now_ms: i64,
+) -> Result<Objective> {
+    let mut record = get_in(tx, &input.objective_id).await?;
+    if record.value.status != ObjectiveStatus::ReadyForReview as i32 {
+        return Err(refused("the Objective must be ready for review"));
+    }
+    crate::artifact_publications::review_in(tx, &record.value, principal, input.approved, now_ms)
+        .await?;
+    if input.approved {
+        record.change_status(ObjectiveStatus::Completed, now_ms);
+        if !input.feedback.trim().is_empty() {
+            record.completion_summary = Some(input.feedback.clone());
+        }
+        cancel_open_in(tx, &input.objective_id, None).await?;
+    } else {
+        if input.feedback.trim().is_empty() {
+            return Err(invalid("feedback is required to request changes"));
+        }
+        record.change_status(ObjectiveStatus::Working, now_ms);
+        internal_turn_in(
+            tx,
+            &record,
+            &format!("review:{}", record.value.revision),
+            &input.feedback,
+            "work",
+            now_ms,
+        )
+        .await?;
+    }
+    save_in(tx, &record).await?;
+    receipt_in(
+        tx,
+        principal,
+        &input.operation_id,
+        fingerprint,
+        &record.value,
+    )
+    .await?;
+    Ok(record.value)
+}
+
+/// Record a surface-started Objective and its Session. The caller admits its
+/// starting Task through the verified surface and links it with `set_starting_task_in`.
+pub(crate) async fn insert_surface_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    owner_tag_id: &str,
+    session_id: &str,
+    outcome: &str,
+    runtime_actions: &[String],
+    now_ms: i64,
+) -> Result<()> {
+    text("outcome", outcome, 65_536)?;
+    let state = limits::LimitState::default();
+    sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions) VALUES ($1,$2,$3,$4,0,$5,1,NULL,NULL,NULL,$6,$7,$7,NULL,$8)")
+        .bind(objective_id).bind(owner_tag_id).bind(session_id).bind(outcome).bind(ObjectiveStatus::Working as i64)
+        .bind(serde_json::to_string(&state)?).bind(now_ms).bind(serde_json::to_string(runtime_actions)?).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
+        .bind(owner_tag_id).bind(session_id).bind(objective_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+pub(crate) async fn set_starting_task_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    task_id: &str,
+) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
+        .bind(task_id)
+        .bind(objective_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn objective_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Objective> {
+    Ok(get_in(tx, id).await?.value)
 }
 
 pub(crate) async fn objective_admission_in(

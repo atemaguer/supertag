@@ -1,6 +1,6 @@
 use super::{Connector, DELIVERY_TIMEOUT, render, slack_ts};
 pub(super) use crate::delivery_journal::Journal;
-use crate::delivery_journal::{Claim, Entry, Outcome, private_call, settle_call, with_claim_lease};
+use crate::delivery_journal::{Claim, Entry, Outcome, claim_call, settle_call, with_claim_lease};
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -9,7 +9,6 @@ use supertag_protocol::v2::{ClaimReplyRequest, Reply, ReplyState, SettleReplyReq
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 /// Rate-limit retries stay well inside a reply claim's 30-second lease.
 const RATE_LIMIT_ATTEMPTS: usize = 3;
@@ -17,26 +16,19 @@ const RATE_LIMIT_WAIT: Duration = Duration::from_secs(1);
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(3);
 impl Connector {
     pub(super) async fn deliver(&self, shutdown: &CancellationToken) -> Result<()> {
-        while !shutdown.is_cancelled() {
-            let advance = tokio::select! {
-                _ = shutdown.cancelled() => break,
-                advance = self.advance_delivery() => advance?,
-            };
-            // Progress is presentation only. A refused progress claim or settlement must never
-            // stop final replies: retire that record and continue. Its lease then expires.
-            let progressed = tokio::select! {
-                _ = shutdown.cancelled() => break,
-                progressed = self.progress_step() => progressed?,
-            };
-            let advance = advance || progressed;
-            if !advance {
-                tokio::select! {
-                    _ = shutdown.cancelled() => break,
-                    _ = time::sleep(POLL_INTERVAL) => {}
-                }
-            }
+        crate::ownership::Owner {
+            control_plane: &self.control_plane,
+            gateway_token: &self.gateway_token,
+            principal: &self.principal,
+            journal: &self.journal,
         }
-        Ok(())
+        .drive(shutdown, |owner| async move {
+            let advanced = self.advance_delivery(&owner).await?;
+            // Progress runs only while this Gateway owns the account's delivery.
+            let progressed = self.progress_step().await?;
+            Ok(advanced || progressed)
+        })
+        .await
     }
 
     /// Progress is presentation only. A refused progress claim or settlement must never stop
@@ -52,7 +44,7 @@ impl Connector {
         }
     }
 
-    async fn advance_delivery(&self) -> Result<bool> {
+    async fn advance_delivery(&self, owner: &str) -> Result<bool> {
         let entry = match self.journal.load()? {
             Some(entry) => entry,
             None => {
@@ -65,8 +57,14 @@ impl Connector {
         };
         match entry {
             Entry::Claim { operation_id } => {
-                let request = self.request(ClaimReplyRequest { operation_id }, DELIVERY_TIMEOUT)?;
-                let Some(claim) = private_call(
+                let request = self.request(
+                    ClaimReplyRequest {
+                        operation_id,
+                        connector_lease_token: owner.into(),
+                    },
+                    DELIVERY_TIMEOUT,
+                )?;
+                let Some(claim) = claim_call(
                     self.control_plane.clone().claim_reply(request),
                     "claim Slack reply",
                 )
@@ -413,7 +411,7 @@ mod tests {
         drop(first);
 
         let reopened = connector(&directory)?;
-        assert!(reopened.0.advance_delivery().await?);
+        assert!(reopened.0.advance_delivery("").await?);
         assert!(matches!(
             reopened.0.journal.load()?,
             Some(Entry::Settle { target, outcome: Outcome::Uncertain }) if target.reply_id == "reply"

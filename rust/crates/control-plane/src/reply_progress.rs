@@ -540,6 +540,7 @@ mod tests {
                     thread_ts: message.into(),
                     prompt: "Ship it".into(),
                     mention_tag_id: Some("builder".into()),
+                    actor_id: "UALICE1".into(),
                 },
             )
             .await

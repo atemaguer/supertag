@@ -20,12 +20,14 @@ pub(crate) struct AdmissionSurface {
     pub context_set_ids: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct VerifiedConnectorOrigin<'a> {
     pub connector_account_id: &'a str,
     pub tag_id: &'a str,
     pub scope: VerifiedScope<'a>,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum VerifiedScope<'a> {
     Slack {
         team_id: &'a str,
@@ -121,14 +123,12 @@ impl VerifiedScope<'_> {
 
 /// Exact delivery and logical-source receipts are replayed by the caller first.
 /// This only admits a fresh Task and does not modify the connector's reply route.
-pub(crate) async fn admit_connector_task_in(
+/// The verified origin's surface policy. `None` means the origin admits no new
+/// work (a deleted or disabled location, or an inactive Tag).
+pub(crate) async fn connector_surface_in(
     tx: &mut Transaction<'_, Any>,
-    order: i64,
-    verified: VerifiedConnectorOrigin<'_>,
-    session_id: &str,
-    prompt: &str,
-    now_ms: i64,
-) -> Result<Option<Task>> {
+    verified: &VerifiedConnectorOrigin<'_>,
+) -> Result<Option<Option<AdmissionSurface>>> {
     let row = sqlx::query(
         "SELECT account.payload AS account, location.payload AS location
          FROM supertag_v2_managed_connector_aliases alias
@@ -175,6 +175,20 @@ pub(crate) async fn admit_connector_task_in(
         Err(StoreError::FailedPrecondition(_)) => return Ok(None),
         Err(error) => return Err(error),
     }
+    Ok(Some(surface))
+}
+
+pub(crate) async fn admit_connector_task_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    verified: VerifiedConnectorOrigin<'_>,
+    session_id: &str,
+    prompt: &str,
+    now_ms: i64,
+) -> Result<Option<Task>> {
+    let Some(surface) = connector_surface_in(tx, &verified).await? else {
+        return Ok(None);
+    };
     objectives::objective_admission_in(tx, verified.tag_id, session_id, now_ms).await?;
     let mut task = insert_task_with_surface(
         tx,

@@ -24,9 +24,9 @@ use sha2::Sha256;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, authenticated_request,
     v2::{
-        AttemptDecision, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
-        InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyState, ResolveAttemptRequest,
-        SettleReplyRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
+        AttemptDecision, CancelTaskRequest, ClaimConnectorRequest, ClaimReplyRequest,
+        GetTaskRequest, InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyState,
+        ResolveAttemptRequest, SettleReplyRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
         connector_client::ConnectorClient, operator_client::OperatorClient,
         worker_host_client::WorkerHostClient,
     },
@@ -1553,6 +1553,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         account_id: SLACK_ACCOUNT.into(),
         event_id: SLACK_EVENT.into(),
         mention_tag_id: Some("slack-engineer".into()),
+        actor_id: "UALICE1".into(),
         team_id: SLACK_TEAM.into(),
         channel_id: SLACK_CHANNEL.into(),
         message_ts: "1794470000.123456".into(),
@@ -1713,11 +1714,32 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     assert_eq!(delivered.state(), ReplyState::Delivered);
     assert_eq!(delivered.provider_receipt.as_deref(), Some(SLACK_RECEIPT));
     assert_eq!(delivered.task_id, completed.task_id);
+    // Claim as the Gateway's own stable owner identity: only the owner may claim.
+    let owner = std::fs::read_to_string(
+        journal
+            .parent()
+            .context("journal has no state directory")?
+            .join("connector-owner"),
+    )?;
+    let lease = connector
+        .claim_connector(connector_request(
+            &credentials,
+            ClaimConnectorRequest {
+                owner_id: owner.trim().into(),
+            },
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        lease.granted,
+        "the Gateway's owner identity was not granted"
+    );
     let remaining = connector
         .claim_reply(connector_request(
             &credentials,
             ClaimReplyRequest {
                 operation_id: "test-after-settlement".into(),
+                connector_lease_token: lease.lease_token,
             },
         )?)
         .await?

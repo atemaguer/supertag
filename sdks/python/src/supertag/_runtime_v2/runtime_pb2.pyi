@@ -3113,7 +3113,7 @@ class AcceptEventRequest(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ..., requested_execution: _Optional[_Union[ExecutionSelection, _Mapping]] = ...) -> None: ...
 
 class AcceptSlackEventRequest(_message.Message):
-    __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id")
+    __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id", "actor_id")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3122,6 +3122,7 @@ class AcceptSlackEventRequest(_message.Message):
     THREAD_TS_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     MENTION_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     event_id: str
     team_id: str
@@ -3130,7 +3131,8 @@ class AcceptSlackEventRequest(_message.Message):
     thread_ts: str
     prompt: str
     mention_tag_id: str
-    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ...) -> None: ...
+    actor_id: str
+    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ..., actor_id: _Optional[str] = ...) -> None: ...
 
 class AcceptSlackEventResponse(_message.Message):
     __slots__ = ("task",)
@@ -3325,10 +3327,12 @@ class ReplyResultCard(_message.Message):
     def __init__(self, branch: _Optional[str] = ..., pull_request_url: _Optional[str] = ...) -> None: ...
 
 class ClaimReplyRequest(_message.Message):
-    __slots__ = ("operation_id",)
+    __slots__ = ("operation_id", "connector_lease_token")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    CONNECTOR_LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
-    def __init__(self, operation_id: _Optional[str] = ...) -> None: ...
+    connector_lease_token: str
+    def __init__(self, operation_id: _Optional[str] = ..., connector_lease_token: _Optional[str] = ...) -> None: ...
 
 class ClaimReplyResponse(_message.Message):
     __slots__ = ("reply", "lease_token")
@@ -3445,3 +3449,39 @@ class ArtifactPublicationPin(_message.Message):
     source_objective_id: str
     destination_objective_id: str
     def __init__(self, publication_id: _Optional[str] = ..., publication_revision: _Optional[int] = ..., consumption_id: _Optional[str] = ..., consumption_revision: _Optional[int] = ..., source_objective_id: _Optional[str] = ..., destination_objective_id: _Optional[str] = ...) -> None: ...
+
+class ClaimConnectorRequest(_message.Message):
+    __slots__ = ("owner_id",)
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    owner_id: str
+    def __init__(self, owner_id: _Optional[str] = ...) -> None: ...
+
+class RenewConnectorRequest(_message.Message):
+    __slots__ = ("lease_token",)
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    lease_token: str
+    def __init__(self, lease_token: _Optional[str] = ...) -> None: ...
+
+class ReleaseConnectorRequest(_message.Message):
+    __slots__ = ("lease_token",)
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    lease_token: str
+    def __init__(self, lease_token: _Optional[str] = ...) -> None: ...
+
+class ReleaseConnectorResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ConnectorLease(_message.Message):
+    __slots__ = ("granted", "lease_token", "fence", "valid_for_ms", "retry_after_ms")
+    GRANTED_FIELD_NUMBER: _ClassVar[int]
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    FENCE_FIELD_NUMBER: _ClassVar[int]
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    RETRY_AFTER_MS_FIELD_NUMBER: _ClassVar[int]
+    granted: bool
+    lease_token: str
+    fence: int
+    valid_for_ms: int
+    retry_after_ms: int
+    def __init__(self, granted: _Optional[bool] = ..., lease_token: _Optional[str] = ..., fence: _Optional[int] = ..., valid_for_ms: _Optional[int] = ..., retry_after_ms: _Optional[int] = ...) -> None: ...

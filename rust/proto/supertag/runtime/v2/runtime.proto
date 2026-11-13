@@ -769,6 +769,11 @@ service Connector {
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc RenewReply(RenewReplyRequest) returns (ReplyLease);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
+  // One fenced Gateway owns an account's outbound delivery. A draining Gateway
+  // releases ownership so another Gateway takes over without waiting for expiry.
+  rpc ClaimConnector(ClaimConnectorRequest) returns (ConnectorLease);
+  rpc RenewConnector(RenewConnectorRequest) returns (ConnectorLease);
+  rpc ReleaseConnector(ReleaseConnectorRequest) returns (ReleaseConnectorResponse);
 }
 
 // Public, attempt-authorized transfer of native Session checkpoints.
@@ -2122,6 +2127,8 @@ message AcceptSlackEventRequest {
   string thread_ts = 6;
   string prompt = 7;
   optional string mention_tag_id = 8;
+  // The verified, allowlisted Slack user who wrote the message.
+  string actor_id = 1300;
 }
 
 message AcceptSlackEventResponse {
@@ -2279,6 +2286,8 @@ message ReplyResultCard {
 
 message ClaimReplyRequest {
   string operation_id = 1;
+  // The account's current connector ownership lease. Only its owner claims replies.
+  string connector_lease_token = 1300;
 }
 
 message ClaimReplyResponse {
@@ -2337,4 +2346,19 @@ message ArtifactPublicationPin {
   uint64 consumption_revision = 4;
   string source_objective_id = 5;
   string destination_objective_id = 6;
+}
+
+// A stable owner ID survives a Gateway restart with the same private state, so
+// the restarted process reclaims at once. Any other owner waits for release or expiry.
+message ClaimConnectorRequest { string owner_id = 1; }
+message RenewConnectorRequest { string lease_token = 1; }
+message ReleaseConnectorRequest { string lease_token = 1; }
+message ReleaseConnectorResponse {}
+message ConnectorLease {
+  bool granted = 1;
+  string lease_token = 2;
+  uint64 fence = 3;
+  uint64 valid_for_ms = 4;
+  // Set when another owner holds the account.
+  uint64 retry_after_ms = 5;
 }

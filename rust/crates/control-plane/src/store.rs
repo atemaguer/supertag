@@ -74,7 +74,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 61;
+        const SCHEMA_VERSION: i64 = 62;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -186,6 +186,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0059_placement_auth_keys.sql"),
                 include_str!("../migrations/sqlite/0060_host_harness_capacity.sql"),
                 include_str!("../migrations/sqlite/0061_reply_progress.sql"),
+                include_str!("../migrations/sqlite/0062_surface_objectives_connector_leases.sql"),
             ]
         } else {
             [
@@ -250,6 +251,9 @@ impl Store {
                 include_str!("../migrations/postgresql/0059_placement_auth_keys.sql"),
                 include_str!("../migrations/postgresql/0060_host_harness_capacity.sql"),
                 include_str!("../migrations/postgresql/0061_reply_progress.sql"),
+                include_str!(
+                    "../migrations/postgresql/0062_surface_objectives_connector_leases.sql"
+                ),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1429,6 +1433,21 @@ pub(crate) fn tag_execution_from_row(row: &AnyRow) -> Result<Option<PolicyExecut
         .transpose()
 }
 
+/// The runtime actions a verified surface origin would grant this Tag's turn.
+pub(crate) async fn surface_runtime_actions_in(
+    transaction: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    surface: Option<&crate::surface_policy::AdmissionSurface>,
+) -> Result<Vec<String>> {
+    let tag = tag_policy_in(transaction, tag_id, surface).await?;
+    Ok(tag
+        .policy
+        .snapshot
+        .runtime_authority
+        .unwrap_or_default()
+        .actions)
+}
+
 pub(crate) async fn owner_runtime_actions_in(
     transaction: &mut Transaction<'_, Any>,
     tag_id: &str,
@@ -1671,13 +1690,18 @@ async fn bounded_task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Re
     Ok(task)
 }
 
-async fn enqueue_reply(
+pub(crate) async fn enqueue_reply(
     transaction: &mut Transaction<'_, Any>,
     task: &Task,
     order: i64,
 ) -> Result<()> {
-    let route = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_inbound_events WHERE task_id = $1")
+    let mut route = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_inbound_events WHERE task_id = $1")
         .bind(&task.task_id).fetch_optional(&mut **transaction).await?;
+    if route.is_none() {
+        // An Objective started from a surface thread answers there from its own Session.
+        route = sqlx::query("SELECT home.account_id, home.conversation_id, home.thread_id FROM supertag_v2_surface_objectives home JOIN supertag_v2_objectives o ON o.objective_id=home.objective_id WHERE o.owner_tag_id=$1 AND o.session_id=$2")
+            .bind(&task.tag_id).bind(&task.session_id).fetch_optional(&mut **transaction).await?;
+    }
     let Some(route) = route else {
         return Ok(());
     };

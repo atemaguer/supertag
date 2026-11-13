@@ -4224,6 +4224,21 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleReplyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Reply.FromString,
                 _registered_method=True)
+        self.ClaimConnector = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/ClaimConnector',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimConnectorRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.FromString,
+                _registered_method=True)
+        self.RenewConnector = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/RenewConnector',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewConnectorRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.FromString,
+                _registered_method=True)
+        self.ReleaseConnector = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/ReleaseConnector',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorResponse.FromString,
+                _registered_method=True)
 
 
 class ConnectorServicer:
@@ -4291,6 +4306,26 @@ class ConnectorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ClaimConnector(self, request, context):
+        """One fenced Gateway owns an account's outbound delivery. A draining Gateway
+        releases ownership so another Gateway takes over without waiting for expiry.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RenewConnector(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReleaseConnector(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ConnectorServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -4343,6 +4378,21 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.SettleReply,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleReplyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Reply.SerializeToString,
+            ),
+            'ClaimConnector': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClaimConnector,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimConnectorRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.SerializeToString,
+            ),
+            'RenewConnector': grpc.unary_unary_rpc_method_handler(
+                    servicer.RenewConnector,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewConnectorRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.SerializeToString,
+            ),
+            'ReleaseConnector': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReleaseConnector,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -4617,6 +4667,87 @@ class Connector:
             '/supertag.runtime.v2.Connector/SettleReply',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleReplyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Reply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClaimConnector(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/ClaimConnector',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimConnectorRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RenewConnector(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/RenewConnector',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewConnectorRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConnectorLease.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReleaseConnector(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/ReleaseConnector',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReleaseConnectorResponse.FromString,
             options,
             channel_credentials,
             insecure,

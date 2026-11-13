@@ -29,6 +29,9 @@ impl Store {
         if let Some(tag) = &input.mention_tag_id {
             name("Tag ID", tag)?;
         }
+        if !slack_id(&input.actor_id, b"UW") {
+            return Err(invalid("invalid Slack user ID"));
+        }
         // Both Slack notifications for one human message are the same logical
         // input. Event kind and a Gateway's current default Tag are not content.
         let fingerprint = format!(
@@ -100,23 +103,43 @@ impl Store {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
-        let Some(task) = admit_connector_task_in(
+        let origin = VerifiedConnectorOrigin {
+            connector_account_id: account,
+            tag_id: &tag,
+            scope: VerifiedScope::Slack {
+                team_id: &input.team_id,
+                channel_id: &input.channel_id,
+            },
+        };
+        let now_ms = self.execution_now_ms();
+        let actor = format!("slack:{}", input.actor_id);
+        let handled = Box::pin(crate::surface_objectives::handle_in(
             &mut tx,
             order,
-            VerifiedConnectorOrigin {
-                connector_account_id: account,
-                tag_id: &tag,
-                scope: VerifiedScope::Slack {
-                    team_id: &input.team_id,
-                    channel_id: &input.channel_id,
-                },
+            crate::surface_objectives::Message {
+                origin,
+                conversation_id: &input.channel_id,
+                thread_id: &input.thread_ts,
+                event_id: &input.event_id,
+                prompt: &input.prompt,
+                // Only Slack's app_mention addresses the app. A plain thread
+                // message that mentions someone else is never a command.
+                addressed: input.mention_tag_id.is_some(),
+                actor: &actor,
             },
-            &session,
-            &input.prompt,
-            self.execution_now_ms(),
-        )
-        .await?
-        else {
+            now_ms,
+        ))
+        .await?;
+        let (task, answered) = match handled {
+            crate::surface_objectives::Handled::Ordinary => (
+                admit_connector_task_in(&mut tx, order, origin, &session, &input.prompt, now_ms)
+                    .await?,
+                false,
+            ),
+            crate::surface_objectives::Handled::Work(task) => (task, false),
+            crate::surface_objectives::Handled::Status(task) => (Some(task), true),
+        };
+        let Some(task) = task else {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
@@ -172,6 +195,9 @@ impl Store {
             &task.task_id,
         )
         .await?;
+        if answered {
+            crate::surface_objectives::reply_in(&mut tx, &task).await?;
+        }
         supertag_protocol::crash_point("control-plane.slack-admission", "before-commit");
         tx.commit().await?;
         Ok(AcceptSlackEventResponse { task: Some(task) })
@@ -233,6 +259,7 @@ mod tests {
             thread_ts: "1794470000.100000".into(),
             prompt: format!("Message {message}"),
             mention_tag_id: mention.then(|| "builder".into()),
+            actor_id: "UALICE1".into(),
         }
     }
 

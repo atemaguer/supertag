@@ -537,6 +537,25 @@ impl supertag_protocol::v2::connector_server::Connector for LeaseFixture {
     ) -> Result<tonic::Response<supertag_protocol::v2::Reply>, tonic::Status> {
         Err(tonic::Status::unimplemented("lease fixture only"))
     }
+    async fn claim_connector(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::ClaimConnectorRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::ConnectorLease>, tonic::Status> {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn renew_connector(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::RenewConnectorRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::ConnectorLease>, tonic::Status> {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn release_connector(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::ReleaseConnectorRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::ReleaseConnectorResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
 }
 
 async fn lease_fixture() -> Result<(tonic::transport::Channel, tokio::task::JoinHandle<()>)> {

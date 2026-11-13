@@ -29,6 +29,7 @@ fn mention(id: &str, message: &str) -> AcceptSlackEventRequest {
         thread_ts: message.into(),
         prompt: format!("Message {message}"),
         mention_tag_id: Some("builder".into()),
+        actor_id: "UALICE1".into(),
     }
 }
 

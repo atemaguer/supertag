@@ -320,6 +320,15 @@ const (
 	ConnectorRenewReplyProcedure = "/supertag.runtime.v2.Connector/RenewReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
 	ConnectorSettleReplyProcedure = "/supertag.runtime.v2.Connector/SettleReply"
+	// ConnectorClaimConnectorProcedure is the fully-qualified name of the Connector's ClaimConnector
+	// RPC.
+	ConnectorClaimConnectorProcedure = "/supertag.runtime.v2.Connector/ClaimConnector"
+	// ConnectorRenewConnectorProcedure is the fully-qualified name of the Connector's RenewConnector
+	// RPC.
+	ConnectorRenewConnectorProcedure = "/supertag.runtime.v2.Connector/RenewConnector"
+	// ConnectorReleaseConnectorProcedure is the fully-qualified name of the Connector's
+	// ReleaseConnector RPC.
+	ConnectorReleaseConnectorProcedure = "/supertag.runtime.v2.Connector/ReleaseConnector"
 	// TransfersUploadCheckpointProcedure is the fully-qualified name of the Transfers's
 	// UploadCheckpoint RPC.
 	TransfersUploadCheckpointProcedure = "/supertag.runtime.v2.Transfers/UploadCheckpoint"
@@ -3384,6 +3393,11 @@ type ConnectorClient interface {
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	RenewReply(context.Context, *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
+	// One fenced Gateway owns an account's outbound delivery. A draining Gateway
+	// releases ownership so another Gateway takes over without waiting for expiry.
+	ClaimConnector(context.Context, *connect.Request[runtimev2.ClaimConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error)
+	RenewConnector(context.Context, *connect.Request[runtimev2.RenewConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error)
+	ReleaseConnector(context.Context, *connect.Request[runtimev2.ReleaseConnectorRequest]) (*connect.Response[runtimev2.ReleaseConnectorResponse], error)
 }
 
 // NewConnectorClient constructs a client for the supertag.runtime.v2.Connector service. By default,
@@ -3457,6 +3471,24 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("SettleReply")),
 			connect.WithClientOptions(opts...),
 		),
+		claimConnector: connect.NewClient[runtimev2.ClaimConnectorRequest, runtimev2.ConnectorLease](
+			httpClient,
+			baseURL+ConnectorClaimConnectorProcedure,
+			connect.WithSchema(connectorMethods.ByName("ClaimConnector")),
+			connect.WithClientOptions(opts...),
+		),
+		renewConnector: connect.NewClient[runtimev2.RenewConnectorRequest, runtimev2.ConnectorLease](
+			httpClient,
+			baseURL+ConnectorRenewConnectorProcedure,
+			connect.WithSchema(connectorMethods.ByName("RenewConnector")),
+			connect.WithClientOptions(opts...),
+		),
+		releaseConnector: connect.NewClient[runtimev2.ReleaseConnectorRequest, runtimev2.ReleaseConnectorResponse](
+			httpClient,
+			baseURL+ConnectorReleaseConnectorProcedure,
+			connect.WithSchema(connectorMethods.ByName("ReleaseConnector")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -3472,6 +3504,9 @@ type connectorClient struct {
 	claimReply                   *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
 	renewReply                   *connect.Client[runtimev2.RenewReplyRequest, runtimev2.ReplyLease]
 	settleReply                  *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
+	claimConnector               *connect.Client[runtimev2.ClaimConnectorRequest, runtimev2.ConnectorLease]
+	renewConnector               *connect.Client[runtimev2.RenewConnectorRequest, runtimev2.ConnectorLease]
+	releaseConnector             *connect.Client[runtimev2.ReleaseConnectorRequest, runtimev2.ReleaseConnectorResponse]
 }
 
 // AcceptEvent calls supertag.runtime.v2.Connector.AcceptEvent.
@@ -3524,6 +3559,21 @@ func (c *connectorClient) SettleReply(ctx context.Context, req *connect.Request[
 	return c.settleReply.CallUnary(ctx, req)
 }
 
+// ClaimConnector calls supertag.runtime.v2.Connector.ClaimConnector.
+func (c *connectorClient) ClaimConnector(ctx context.Context, req *connect.Request[runtimev2.ClaimConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error) {
+	return c.claimConnector.CallUnary(ctx, req)
+}
+
+// RenewConnector calls supertag.runtime.v2.Connector.RenewConnector.
+func (c *connectorClient) RenewConnector(ctx context.Context, req *connect.Request[runtimev2.RenewConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error) {
+	return c.renewConnector.CallUnary(ctx, req)
+}
+
+// ReleaseConnector calls supertag.runtime.v2.Connector.ReleaseConnector.
+func (c *connectorClient) ReleaseConnector(ctx context.Context, req *connect.Request[runtimev2.ReleaseConnectorRequest]) (*connect.Response[runtimev2.ReleaseConnectorResponse], error) {
+	return c.releaseConnector.CallUnary(ctx, req)
+}
+
 // ConnectorHandler is an implementation of the supertag.runtime.v2.Connector service.
 type ConnectorHandler interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
@@ -3536,6 +3586,11 @@ type ConnectorHandler interface {
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	RenewReply(context.Context, *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
+	// One fenced Gateway owns an account's outbound delivery. A draining Gateway
+	// releases ownership so another Gateway takes over without waiting for expiry.
+	ClaimConnector(context.Context, *connect.Request[runtimev2.ClaimConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error)
+	RenewConnector(context.Context, *connect.Request[runtimev2.RenewConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error)
+	ReleaseConnector(context.Context, *connect.Request[runtimev2.ReleaseConnectorRequest]) (*connect.Response[runtimev2.ReleaseConnectorResponse], error)
 }
 
 // NewConnectorHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3605,6 +3660,24 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("SettleReply")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorClaimConnectorHandler := connect.NewUnaryHandler(
+		ConnectorClaimConnectorProcedure,
+		svc.ClaimConnector,
+		connect.WithSchema(connectorMethods.ByName("ClaimConnector")),
+		connect.WithHandlerOptions(opts...),
+	)
+	connectorRenewConnectorHandler := connect.NewUnaryHandler(
+		ConnectorRenewConnectorProcedure,
+		svc.RenewConnector,
+		connect.WithSchema(connectorMethods.ByName("RenewConnector")),
+		connect.WithHandlerOptions(opts...),
+	)
+	connectorReleaseConnectorHandler := connect.NewUnaryHandler(
+		ConnectorReleaseConnectorProcedure,
+		svc.ReleaseConnector,
+		connect.WithSchema(connectorMethods.ByName("ReleaseConnector")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Connector/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConnectorAcceptEventProcedure:
@@ -3627,6 +3700,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorRenewReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
 			connectorSettleReplyHandler.ServeHTTP(w, r)
+		case ConnectorClaimConnectorProcedure:
+			connectorClaimConnectorHandler.ServeHTTP(w, r)
+		case ConnectorRenewConnectorProcedure:
+			connectorRenewConnectorHandler.ServeHTTP(w, r)
+		case ConnectorReleaseConnectorProcedure:
+			connectorReleaseConnectorHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3674,6 +3753,18 @@ func (UnimplementedConnectorHandler) RenewReply(context.Context, *connect.Reques
 
 func (UnimplementedConnectorHandler) SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.SettleReply is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) ClaimConnector(context.Context, *connect.Request[runtimev2.ClaimConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.ClaimConnector is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) RenewConnector(context.Context, *connect.Request[runtimev2.RenewConnectorRequest]) (*connect.Response[runtimev2.ConnectorLease], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.RenewConnector is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) ReleaseConnector(context.Context, *connect.Request[runtimev2.ReleaseConnectorRequest]) (*connect.Response[runtimev2.ReleaseConnectorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.ReleaseConnector is not implemented"))
 }
 
 // TransfersClient is a client for the supertag.runtime.v2.Transfers service.
