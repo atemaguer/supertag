@@ -293,20 +293,22 @@ class PermissionSet(_message.Message):
     def __init__(self, set_id: _Optional[str] = ..., name: _Optional[str] = ..., revision: _Optional[int] = ..., approvers: _Optional[_Iterable[str]] = ..., permissions: _Optional[_Iterable[_Union[PolicyPermission, _Mapping]]] = ...) -> None: ...
 
 class PolicyContextItem(_message.Message):
-    __slots__ = ("item_id", "item_key", "type", "version", "required", "config_json")
+    __slots__ = ("item_id", "item_key", "type", "version", "required", "config_json", "artifact_snapshot")
     ITEM_ID_FIELD_NUMBER: _ClassVar[int]
     ITEM_KEY_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
     VERSION_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_FIELD_NUMBER: _ClassVar[int]
     CONFIG_JSON_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
     item_id: str
     item_key: str
     type: str
     version: int
     required: bool
     config_json: str
-    def __init__(self, item_id: _Optional[str] = ..., item_key: _Optional[str] = ..., type: _Optional[str] = ..., version: _Optional[int] = ..., required: _Optional[bool] = ..., config_json: _Optional[str] = ...) -> None: ...
+    artifact_snapshot: PolicyArtifactContextSnapshot
+    def __init__(self, item_id: _Optional[str] = ..., item_key: _Optional[str] = ..., type: _Optional[str] = ..., version: _Optional[int] = ..., required: _Optional[bool] = ..., config_json: _Optional[str] = ..., artifact_snapshot: _Optional[_Union[PolicyArtifactContextSnapshot, _Mapping]] = ...) -> None: ...
 
 class ContextSet(_message.Message):
     __slots__ = ("set_id", "name", "revision", "items")
@@ -543,3 +545,39 @@ class DeactivateRoleAssignmentRequest(_message.Message):
     assignment_id: str
     expected_revision: int
     def __init__(self, operation_id: _Optional[str] = ..., assignment_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class PolicyArtifactContextSnapshot(_message.Message):
+    __slots__ = ("source", "artifacts")
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
+    source: SurfacePolicyOrigin
+    artifacts: _containers.RepeatedCompositeFieldContainer[PolicyArtifactContextEntry]
+    def __init__(self, source: _Optional[_Union[SurfacePolicyOrigin, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[PolicyArtifactContextEntry, _Mapping]]] = ...) -> None: ...
+
+class PolicyArtifactContextEntry(_message.Message):
+    __slots__ = ("artifact_id", "title", "kind", "summary", "task_id", "attempt_id", "tag_id", "session_id", "objective_id", "captured_at_ms", "file_count", "byte_length")
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    CAPTURED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    FILE_COUNT_FIELD_NUMBER: _ClassVar[int]
+    BYTE_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    artifact_id: str
+    title: str
+    kind: str
+    summary: str
+    task_id: str
+    attempt_id: str
+    tag_id: str
+    session_id: str
+    objective_id: str
+    captured_at_ms: int
+    file_count: int
+    byte_length: int
+    def __init__(self, artifact_id: _Optional[str] = ..., title: _Optional[str] = ..., kind: _Optional[str] = ..., summary: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., captured_at_ms: _Optional[int] = ..., file_count: _Optional[int] = ..., byte_length: _Optional[int] = ...) -> None: ...

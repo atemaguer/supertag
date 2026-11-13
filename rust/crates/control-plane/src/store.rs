@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 50;
+        const SCHEMA_VERSION: i64 = 51;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -172,6 +172,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0048_artifact_volumes.sql"),
                 include_str!("../migrations/sqlite/0049_task_artifact_inputs.sql"),
                 include_str!("../migrations/sqlite/0050_artifact_publications.sql"),
+                include_str!("../migrations/sqlite/0051_artifact_context.sql"),
             ]
         } else {
             [
@@ -225,6 +226,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0048_artifact_volumes.sql"),
                 include_str!("../migrations/postgresql/0049_task_artifact_inputs.sql"),
                 include_str!("../migrations/postgresql/0050_artifact_publications.sql"),
+                include_str!("../migrations/postgresql/0051_artifact_context.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -959,6 +961,11 @@ impl Store {
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
+            sqlx::query("UPDATE supertag_v2_tasks SET completed_at_ms=$1 WHERE task_id=$2")
+                .bind(now)
+                .bind(&task.task_id)
+                .execute(&mut *transaction)
+                .await?;
             crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
             crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
         }
@@ -1421,6 +1428,7 @@ pub(crate) async fn current_work_policy_in(
         }
     }
     let mut accepted = tag_policy_in(tx, &source.tag_id, surface.as_ref()).await?;
+    crate::artifact_context::inherit(source, &mut accepted.policy)?;
     if let Some(id) = objective {
         let row = sqlx::query(
             "SELECT revision,runtime_actions FROM supertag_v2_objectives WHERE objective_id=$1",
@@ -1552,6 +1560,7 @@ pub(crate) async fn insert_task_from_snapshot(
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
     .bind(&source.task_id).execute(&mut **transaction).await?;
+    sqlx::query("INSERT INTO supertag_v2_artifact_context_grants(task_id,artifact_id) SELECT $1,artifact_id FROM supertag_v2_artifact_context_grants WHERE task_id=$2").bind(&id).bind(&source.task_id).execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
 }
 

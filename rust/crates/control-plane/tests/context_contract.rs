@@ -64,6 +64,7 @@ async fn contract(url: String) {
                     name: "Context".into(),
                     items: vec![
                         PolicyContextItem {
+                            artifact_snapshot: None,
                             item_key: "skill".into(),
                             r#type: "supertag/skill".into(),
                             version: 1,
@@ -72,6 +73,7 @@ async fn contract(url: String) {
                             ..Default::default()
                         },
                         PolicyContextItem {
+                            artifact_snapshot: None,
                             item_key: "optional".into(),
                             r#type: "example/unknown".into(),
                             version: 2,

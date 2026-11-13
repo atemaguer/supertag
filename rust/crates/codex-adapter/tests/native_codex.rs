@@ -1205,6 +1205,7 @@ async fn native_skill_delivery_is_explicit_pinned_and_read_only() -> Result<()> 
         context_sets: vec![ContextSet {
             set_id: "set".into(),
             items: vec![PolicyContextItem {
+                artifact_snapshot: None,
                 item_id: "item".into(),
                 item_key: "review".into(),
                 r#type: "supertag/skill".into(),

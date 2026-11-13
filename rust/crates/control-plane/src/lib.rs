@@ -1,6 +1,7 @@
 mod approvals;
 mod artifact_acquisitions;
 mod artifact_captures;
+mod artifact_context;
 mod artifact_publications;
 mod artifact_volumes;
 mod budget_pool;

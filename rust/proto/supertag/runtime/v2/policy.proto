@@ -166,6 +166,8 @@ message PolicyContextItem {
   bool required = 5;
   // A JSON object interpreted by the named, versioned context resolver. Never a secret.
   string config_json = 6;
+  // Assigned only by connector admission after source authority is verified.
+  PolicyArtifactContextSnapshot artifact_snapshot = 7;
 }
 message ContextSet {
   string set_id = 1;
@@ -297,4 +299,23 @@ message DeactivateRoleAssignmentRequest {
   string operation_id = 1;
   string assignment_id = 2;
   uint64 expected_revision = 3;
+}
+
+message PolicyArtifactContextSnapshot {
+  SurfacePolicyOrigin source = 1;
+  repeated PolicyArtifactContextEntry artifacts = 2;
+}
+message PolicyArtifactContextEntry {
+  string artifact_id = 1;
+  string title = 2;
+  string kind = 3;
+  optional string summary = 4;
+  string task_id = 5;
+  string attempt_id = 6;
+  string tag_id = 7;
+  string session_id = 8;
+  optional string objective_id = 9;
+  int64 captured_at_ms = 10;
+  uint32 file_count = 11;
+  uint64 byte_length = 12;
 }

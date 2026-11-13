@@ -351,6 +351,11 @@ fn validate_context(item: &PolicyContextItem, config: &mut serde_json::Value) ->
                 serde_json::Value::String(value.as_str().expect("validated string").trim().into());
         }
     }
+    if item.artifact_snapshot.is_some() {
+        return Err(invalid(
+            "Context Item snapshots are assigned only at admission",
+        ));
+    }
     if item.r#type == "supertag/artifacts" {
         if config
             .get("sourceRouteId")
@@ -1199,6 +1204,7 @@ pub(crate) async fn admission_in(
         .iter()
         .flat_map(|s| &s.items)
         .any(|i| i.r#type == "supertag/artifacts")
+        && surface.is_none()
     {
         return Err(StoreError::FailedPrecondition(
             "artifact context requires a supported surface selection resolver".into(),
@@ -1508,7 +1514,7 @@ pub(crate) fn apply_delegated_runtime(
 
 /// Semantic policy excludes mutable catalog identity, revisions and capture time.
 /// Instructions, direct actions, harness and workspace are separately fenced.
-fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
+pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
     let mut permissions: BTreeMap<String, (bool, BTreeSet<String>, BTreeSet<String>)> =
         BTreeMap::new();
     for set in &snapshot.permission_sets {
@@ -1544,6 +1550,16 @@ fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
                 i.required,
                 &i.config_json,
             ))?);
+            if let Some(snapshot) = &i.artifact_snapshot {
+                let mut semantic = snapshot.clone();
+                if let Some(source) = &mut semantic.source {
+                    source.location_revision = 0;
+                }
+                contexts.insert(serde_json::to_string(&(
+                    "resolved-artifact-context",
+                    semantic.encode_to_vec(),
+                ))?);
+            }
         }
     }
     // Harness is separately fenced. An explicit default effort range has the
@@ -1849,6 +1865,7 @@ mod tests {
                 name: "Knowledge".into(),
                 revision: 1,
                 items: vec![PolicyContextItem {
+                    artifact_snapshot: None,
                     item_id: "old".into(),
                     item_key: "style".into(),
                     r#type: "example/style".into(),

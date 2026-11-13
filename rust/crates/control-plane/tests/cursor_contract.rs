@@ -232,6 +232,7 @@ async fn contract(url: &str) {
                     set_id: "skills".into(),
                     name: "Skills".into(),
                     items: vec![PolicyContextItem {
+                        artifact_snapshot: None,
                         item_key: "review".into(),
                         r#type: "supertag/skill".into(),
                         version: 1,

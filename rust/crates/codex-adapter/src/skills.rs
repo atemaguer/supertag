@@ -154,6 +154,7 @@ mod tests {
                 context_sets: vec![ContextSet {
                     set_id: "set".into(),
                     items: vec![PolicyContextItem {
+                        artifact_snapshot: None,
                         item_id: "item".into(),
                         item_key: "review".into(),
                         r#type: "supertag/skill".into(),

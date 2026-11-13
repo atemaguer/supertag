@@ -561,3 +561,298 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     }
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads() -> Result<()> {
+    use sha2::Digest;
+    use supertag_protocol::{HOST_GENERATION_HEADER, v2::*};
+    let directory = tempfile::tempdir()?;
+    let credentials = Credentials::new();
+    let mock = MockSlack::start().await?;
+    let mut command = credentials.command(&["control-plane"]);
+    command.env(
+        "SUPERTAG_DATABASE_URL",
+        format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("contexts.db").display()
+        ),
+    );
+    let mut cp = Process::spawn(command, directory.path(), "context-cp")?;
+    let private = cp.endpoints(1).await?.remove(0);
+    let mut command = credentials.command(&[
+        "gateway",
+        "--control-plane",
+        &private,
+        "--slack-listen",
+        "127.0.0.1:0",
+        "--slack-state-directory",
+    ]);
+    command
+        .arg(directory.path().join("slack"))
+        .arg("--checkpoint-directory")
+        .arg(directory.path().join("cas"))
+        .env("SUPERTAG_SLACK_ACCOUNT_ID", ACCOUNT)
+        .env("SUPERTAG_SLACK_TEAM_ID", TEAM)
+        .env("SUPERTAG_SLACK_CHANNEL_ID", CHANNEL)
+        .env("SUPERTAG_SLACK_TAG_ID", "builder")
+        .env("SUPERTAG_SLACK_ALLOWED_USERS", "UALICE1")
+        .env("SUPERTAG_SLACK_SIGNING_SECRET", SIGNING)
+        .env("SUPERTAG_SLACK_BOT_TOKEN", BOT)
+        .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint);
+    let mut gateway = Process::spawn(command, directory.path(), "context-gateway")?;
+    let endpoints = gateway.endpoints(2).await?;
+    let (public, http) = (&endpoints[0], &endpoints[1]);
+    let channel = Channel::from_shared(public.clone())?.connect().await?;
+    let mut operator = OperatorClient::new(channel.clone());
+    operator
+        .put_tag(credentials.operator(PutTagRequest {
+            tag_id: "builder".into(),
+            instructions: "Use admitted context".into(),
+            allowed_actions: vec!["files:read".into()],
+            ..Default::default()
+        })?)
+        .await?;
+    let mut surfaces =
+        surface_policy_catalog_client::SurfacePolicyCatalogClient::new(channel.clone());
+    surfaces
+        .put_surface_account(credentials.operator(PutSurfaceAccountRequest {
+            operation_id: "account".into(),
+            account: Some(SurfaceAccount {
+                account_id: "slack-context".into(),
+                identity: Some(SurfaceAccountIdentity {
+                    provider: Some(surface_account_identity::Provider::Slack(
+                        SlackSurfaceIdentity {
+                            team_id: TEAM.into(),
+                        },
+                    )),
+                }),
+                enabled: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })?)
+        .await?;
+    let location = SurfaceLocation {
+        location_id: "context-source".into(),
+        account_id: "slack-context".into(),
+        connector_account_id: ACCOUNT.into(),
+        scope: Some(SurfaceLocationScope {
+            provider: Some(surface_location_scope::Provider::Slack(
+                SlackSurfaceChannel {
+                    channel_id: CHANNEL.into(),
+                },
+            )),
+        }),
+        tag_id: "builder".into(),
+        enabled: true,
+        ..Default::default()
+    };
+    surfaces
+        .put_surface_location(credentials.operator(PutSurfaceLocationRequest {
+            operation_id: "location".into(),
+            location: Some(location.clone()),
+            ..Default::default()
+        })?)
+        .await?;
+    let first = payload("EvCONTEXT1", THREAD, true, "Capture shared evidence");
+    assert_eq!(signed(http, &first).await?, reqwest::StatusCode::OK);
+    let mut connector = ConnectorClient::connect(private).await?;
+    let source = receipt(&mut connector, &credentials, &first).await?;
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    let registered = host
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "context-host".into(),
+            },
+            &credentials.host,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let auth = |value| {
+        let mut request = authenticated_request(value, &credentials.host, None).unwrap();
+        request.metadata_mut().insert(
+            HOST_GENERATION_HEADER,
+            registered.generation.to_string().parse().unwrap(),
+        );
+        request
+    };
+    let claim = host
+        .claim_task(auth(ClaimTaskRequest {
+            operation_id: "capture".into(),
+            ..Default::default()
+        }))
+        .await?
+        .into_inner()
+        .assignment
+        .context("missing source claim")?;
+    assert_eq!(claim.task.as_ref().unwrap().task_id, source.task_id);
+    fn host_request<T>(input: T, credentials: &Credentials, generation: u64) -> Result<Request<T>> {
+        let mut request = authenticated_request(input, &credentials.host, None)?;
+        request
+            .metadata_mut()
+            .insert(HOST_GENERATION_HEADER, generation.to_string().parse()?);
+        Ok(request)
+    }
+    let attempt = InspectAttemptRequest {
+        task_id: source.task_id.clone(),
+        attempt_id: claim.attempt_id,
+        lease_token: claim.lease_token,
+    };
+    host.start_task(host_request(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        &credentials,
+        registered.generation,
+    )?)
+    .await?;
+    let bytes = b"source evidence\n".to_vec();
+    let blob = BlobReference {
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        byte_length: bytes.len() as u64,
+    };
+    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel.clone());
+    let captured = transfers
+        .upload_capture(host_request(
+            tokio_stream::iter(vec![
+                ArtifactUpload {
+                    part: Some(artifact_upload::Part::Begin(CommitArtifactCaptureRequest {
+                        attempt: Some(attempt.clone()),
+                        operation_id: "capture".into(),
+                        description: Some(ArtifactDescription {
+                            title: "Prior shared evidence".into(),
+                            kind: "report".into(),
+                            summary: Some("Frozen source result".into()),
+                        }),
+                        files: vec![ArtifactFile {
+                            path: "report.txt".into(),
+                            blob: Some(blob.clone()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    })),
+                },
+                ArtifactUpload {
+                    part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
+                        file_index: 0,
+                        data: bytes.clone(),
+                    })),
+                },
+            ]),
+            &credentials,
+            registered.generation,
+        )?)
+        .await?
+        .into_inner();
+    let artifact = captured.summary.context("missing summary")?.artifact_id;
+    host.finish_task(host_request(
+        FinishTaskRequest {
+            task_id: attempt.task_id,
+            attempt_id: attempt.attempt_id,
+            lease_token: attempt.lease_token,
+            succeeded: true,
+            result: "Captured evidence".into(),
+            ..Default::default()
+        },
+        &credentials,
+        registered.generation,
+    )?)
+    .await?;
+    let mut policy = policy_catalog_client::PolicyCatalogClient::new(channel.clone());
+    policy.put_context_set(credentials.operator(PutContextSetRequest{operation_id:"context".into(),context_set:Some(ContextSet{set_id:"prior".into(),name:"Prior work".into(),items:vec![PolicyContextItem{item_key:"research".into(),r#type:"supertag/artifacts".into(),version:1,required:true,config_json:r#"{"sourceRouteId":"context-source","selection":{"match":"shared-resource","maxAgeDays":30,"limit":5}}"#.into(),..Default::default()}],..Default::default()}),..Default::default()})?).await?;
+    surfaces
+        .put_surface_location(credentials.operator(PutSurfaceLocationRequest {
+            operation_id: "activate".into(),
+            location: Some(SurfaceLocation {
+                context_set_ids: vec!["prior".into()],
+                ..location
+            }),
+            expected_revision: Some(1),
+        })?)
+        .await?;
+    let mut next = payload(
+        "EvCONTEXT2",
+        "1794470001.100001",
+        true,
+        "Find prior evidence",
+    );
+    next["event"]["thread_ts"] = "1794470001.100001".into();
+    assert_eq!(signed(http, &next).await?, reqwest::StatusCode::OK);
+    let consumer = receipt(&mut connector, &credentials, &next).await?;
+    assert!(consumer.instructions.contains("<supertag-artifacts>"));
+    assert_eq!(
+        consumer.policy_snapshot.as_ref().unwrap().context_sets[0].items[0]
+            .artifact_snapshot
+            .as_ref()
+            .unwrap()
+            .artifacts[0]
+            .artifact_id,
+        artifact
+    );
+    let claim = host
+        .claim_task(auth(ClaimTaskRequest {
+            operation_id: "consume".into(),
+            ..Default::default()
+        }))
+        .await?
+        .into_inner()
+        .assignment
+        .context("missing consumer claim")?;
+    assert_eq!(claim.task.as_ref().unwrap().task_id, consumer.task_id);
+    let attempt = InspectAttemptRequest {
+        task_id: consumer.task_id,
+        attempt_id: claim.attempt_id,
+        lease_token: claim.lease_token,
+    };
+    host.start_task(host_request(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        &credentials,
+        registered.generation,
+    )?)
+    .await?;
+    let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel);
+    let acquired = acquisitions
+        .acquire(host_request(
+            AcquireArtifactRequest {
+                attempt: Some(attempt.clone()),
+                operation_id: "read".into(),
+                artifact_id: artifact,
+                paths: vec!["report.txt".into()],
+                delivery: ArtifactDelivery::Read as i32,
+                destination: None,
+            },
+            &credentials,
+            registered.generation,
+        )?)
+        .await?
+        .into_inner();
+    let mut stream = transfers
+        .download_acquired_file(host_request(
+            GetAcquiredArtifactFileRequest {
+                attempt: Some(attempt),
+                acquisition_id: acquired.acquisition_id,
+                path: "report.txt".into(),
+            },
+            &credentials,
+            registered.generation,
+        )?)
+        .await?
+        .into_inner();
+    let mut received = Vec::new();
+    while let Some(part) = stream.message().await? {
+        if let Some(artifact_download::Part::Chunk(chunk)) = part.part {
+            received.extend(chunk)
+        }
+    }
+    assert_eq!(received, bytes);
+    gateway.stop().await?;
+    cp.stop().await?;
+    Ok(())
+}

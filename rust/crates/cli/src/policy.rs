@@ -174,6 +174,7 @@ impl From<ContextSpec> for ContextSet {
                 .items
                 .into_iter()
                 .map(|item| PolicyContextItem {
+                    artifact_snapshot: None,
                     item_key: item.item_key,
                     r#type: item.kind,
                     version: item.version,

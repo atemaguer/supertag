@@ -78,6 +78,7 @@ async fn contract(url: String) {
                     set_id: "knowledge".into(),
                     name: "Knowledge".into(),
                     items: vec![PolicyContextItem {
+                        artifact_snapshot: None,
                         item_key: "style".into(),
                         r#type: "example/style".into(),
                         version: 2,

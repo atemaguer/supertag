@@ -43,6 +43,9 @@ pub(crate) async fn visible_in(
     consumer: &str,
     id: &str,
 ) -> Result<CapturedArtifact> {
+    if let Some(capture) = crate::artifact_context::capture_in(tx, consumer, id).await? {
+        return Ok(capture);
+    }
     if let Some(capture) =
         crate::artifact_publications::accepted_capture_in(tx, consumer, id).await?
     {
@@ -149,7 +152,7 @@ impl Store {
         let mut scanned = 0;
         let mut bytes = 0;
         loop {
-            let rows=sqlx::query("SELECT c.payload,c.committed_order FROM supertag_v2_artifact_captures c JOIN supertag_v2_task_audience source ON source.task_id=c.task_id JOIN supertag_v2_task_audience current ON current.task_id=$1 WHERE c.committed_order IS NOT NULL AND ($2=0 OR c.committed_order<$2) AND ($3='' OR c.task_id=$3) AND (source.owner='' OR source.owner=current.owner) AND ((source.tag_id=current.tag_id AND source.session_id=current.session_id) OR (current.objective_id<>'' AND source.objective_id=current.objective_id)) ORDER BY c.committed_order DESC LIMIT 8")
+            let rows=sqlx::query("SELECT c.payload,c.committed_order FROM supertag_v2_artifact_captures c JOIN supertag_v2_task_audience source ON source.task_id=c.task_id JOIN supertag_v2_task_audience current ON current.task_id=$1 WHERE c.committed_order IS NOT NULL AND ($2=0 OR c.committed_order<$2) AND ($3='' OR c.task_id=$3) AND (((source.owner='' OR source.owner=current.owner) AND ((source.tag_id=current.tag_id AND source.session_id=current.session_id) OR (current.objective_id<>'' AND source.objective_id=current.objective_id))) OR EXISTS (SELECT 1 FROM supertag_v2_artifact_context_grants g WHERE g.task_id=current.task_id AND g.artifact_id=c.artifact_id)) ORDER BY c.committed_order DESC LIMIT 8")
                 .bind(&identity.task_id).bind(before).bind(&input.task_id).fetch_all(&mut *tx).await?;
             if rows.is_empty() {
                 return Ok(ListCapturedArtifactsResponse {

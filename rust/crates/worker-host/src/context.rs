@@ -214,6 +214,12 @@ impl ContextCatalog {
             for set in &snapshot.context_sets {
                 for item in &set.items {
                     ensure!(!cancel.is_cancelled(), "context preparation cancelled");
+                    if item.r#type == "supertag/artifacts"
+                        && item.version == 1
+                        && item.artifact_snapshot.is_some()
+                    {
+                        continue;
+                    }
                     if !self.configured || item.r#type != TYPE || item.version != 1 {
                         ensure!(
                             !item.required,
@@ -515,6 +521,7 @@ mod tests {
                 context_sets: vec![ContextSet {
                     set_id: "set".into(),
                     items: vec![PolicyContextItem {
+                        artifact_snapshot: None,
                         item_id: "item".into(),
                         item_key: "review".into(),
                         r#type: kind.into(),
@@ -528,6 +535,28 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+    #[test]
+    fn admitted_artifact_metadata_requires_no_skill_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut task = task(true, "supertag/artifacts");
+        task.policy_snapshot.as_mut().unwrap().context_sets[0].items[0].artifact_snapshot =
+            Some(Default::default());
+        let prepared = ContextCatalog::default()
+            .prepare_blocking(
+                &task,
+                temp.path(),
+                "artifact-metadata",
+                &ContextResolutionManifest::default(),
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            prepared.manifest().unwrap(),
+            ContextResolutionManifest::default()
+        );
+        assert!(prepared.delivery().unwrap().is_empty());
+        prepared.discard().unwrap();
     }
     #[test]
     fn local_catalog_pins_private_copy_and_cleanup_survives_missing_source() {

@@ -102,6 +102,7 @@ async fn contract(url: &str) {
                     set_id: "runbook".into(),
                     name: "Runbook".into(),
                     items: vec![PolicyContextItem {
+                        artifact_snapshot: None,
                         item_key: "release".into(),
                         r#type: "example/runbook".into(),
                         version: 1,

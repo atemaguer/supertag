@@ -12,7 +12,8 @@ pub(crate) fn task_supported(task: &Task, contracts: &[ContextContract]) -> bool
     task.policy_snapshot.as_ref().is_none_or(|snapshot| {
         snapshot.context_sets.iter().all(|set| {
             set.items.iter().all(|item| {
-                !item.required
+                crate::artifact_context::resolved(item)
+                    || !item.required
                     || contracts.iter().any(|contract| {
                         contract.r#type == item.r#type && contract.version == item.version
                     })
@@ -129,6 +130,9 @@ fn validate(task: &Task, manifest: &ContextResolutionManifest) -> Result<()> {
     if let Some(snapshot) = &task.policy_snapshot {
         for set in &snapshot.context_sets {
             for item in &set.items {
+                if crate::artifact_context::resolved(item) {
+                    continue;
+                }
                 items.insert((set.set_id.as_str(), item.item_id.as_str()), item);
             }
         }

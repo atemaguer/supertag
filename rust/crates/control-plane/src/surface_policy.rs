@@ -176,7 +176,7 @@ pub(crate) async fn admit_connector_task_in(
         Err(error) => return Err(error),
     }
     objectives::objective_admission_in(tx, verified.tag_id, session_id, now_ms).await?;
-    let task = insert_task_with_surface(
+    let mut task = insert_task_with_surface(
         tx,
         order,
         verified.tag_id,
@@ -185,6 +185,7 @@ pub(crate) async fn admit_connector_task_in(
         surface.as_ref(),
     )
     .await?;
+    crate::artifact_context::resolve_in(tx, &mut task, now_ms).await?;
     objectives::objective_link_task_in(tx, &task).await?;
     Ok(Some(task))
 }
