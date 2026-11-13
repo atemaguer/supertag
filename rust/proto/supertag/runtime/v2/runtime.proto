@@ -43,6 +43,32 @@ service OperatorEvents {
   rpc Watch(WatchRequest) returns (stream WatchEvent);
 }
 
+// Applies owned Tag relationships under one serialized Control Plane write.
+service ManifestRelationships {
+  rpc ReconcileTag(ReconcileTagRelationshipsRequest) returns (ReconcileTagRelationshipsResponse);
+}
+
+message ReconcileTagRelationshipsRequest {
+  string tag_id = 1;
+  // An empty manager denotes the default apply manager.
+  string manager = 2;
+  repeated string role_ids = 3;
+  repeated string mailbox_senders = 4;
+  bool force_conflicts = 5;
+  bool preview = 6;
+}
+
+message ManifestRelationshipChange {
+  string path = 1;
+  bool present = 2;
+  // True if the relationship already matches and only ownership changes.
+  bool ownership_only = 3;
+}
+
+message ReconcileTagRelationshipsResponse {
+  repeated ManifestRelationshipChange changes = 1;
+}
+
 enum WatchKind {
   WATCH_KIND_UNSPECIFIED = 0;
   WATCH_KIND_TAG = 1;

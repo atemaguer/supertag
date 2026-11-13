@@ -16,6 +16,7 @@ mod history;
 mod inbox;
 mod inputs;
 mod mailbox;
+mod manifest_relationships;
 mod mcp_effects;
 pub mod objective_limits;
 mod objectives;

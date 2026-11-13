@@ -12,6 +12,7 @@ mod inputs;
 pub mod lark;
 pub mod linear;
 mod mailbox;
+mod manifest_relationships;
 mod mcp_effects;
 pub mod microsoft_teams;
 mod policy;
