@@ -2151,3 +2151,36 @@ pub(crate) fn text(kind: &str, value: &str, maximum: usize) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod durability_tests {
+    use super::Store;
+
+    /// A process kill cannot lose a commit SQLite has written, but power loss can lose one
+    /// that is still in the operating system's cache. With `synchronous = FULL` SQLite
+    /// syncs the journal and the database file before a commit returns, so an
+    /// acknowledged transition is on stable storage. A real power cut is not simulated:
+    /// see "Hard-crash durability" in `rust/docs/rust-port-capability-ledger.md`.
+    #[tokio::test]
+    async fn sqlite_commits_are_synced_to_storage_before_they_return() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("state.db").display()
+        );
+        let store = Store::open(&url).await.unwrap();
+        let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(synchronous, 2, "SQLite commits must use synchronous = FULL");
+        let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            matches!(journal.as_str(), "delete" | "wal"),
+            "journal mode {journal} does not keep a durable commit"
+        );
+    }
+}
