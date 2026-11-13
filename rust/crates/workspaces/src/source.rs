@@ -3,7 +3,7 @@ use super::*;
 
 const MAX_SOURCE_BYTES: usize = 268_435_456;
 
-fn root(directory: &Path) -> Result<(PathBuf, File)> {
+fn root(directory: &Path) -> Result<(PathBuf, ExclusiveLock)> {
     let directory = paths::planned_path(directory)?;
     paths::create_private_root(&directory)?;
     let lock = OpenOptions::new()
@@ -14,8 +14,8 @@ fn root(directory: &Path) -> Result<(PathBuf, File)> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(directory.join("source.lock"))?;
-    lock.try_lock()
-        .context("another process is preparing this source")?;
+    let lock =
+        ExclusiveLock::try_acquire(lock).context("another process is preparing this source")?;
     Ok((directory, lock))
 }
 
@@ -85,4 +85,18 @@ pub async fn materialize(
     }
     atomic_json(&identity, &commit)?;
     Ok(repository.path().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn released_source_lock_is_immediately_reacquirable_while_children_spawn() -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let directory = state.path().join("source");
+        crate::lock::tests::while_children_spawn(|| {
+            (0..2_000).try_for_each(|_| root(&directory).map(drop))
+        })
+    }
 }

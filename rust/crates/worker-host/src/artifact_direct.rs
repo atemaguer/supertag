@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use crate::journal::ExclusiveLock;
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
@@ -28,6 +27,7 @@ use supertag_protocol::{
     },
     valid_sha256,
 };
+use supertag_workspaces::ExclusiveLock;
 use tokio::{
     net::TcpListener,
     sync::{Semaphore, mpsc},

@@ -13,7 +13,7 @@ use supertag_protocol::{
     v2::{RemoteWorkspaceOwner, SessionCheckpoint},
     valid_sha256,
 };
-use supertag_workspaces::TransferArtifact;
+use supertag_workspaces::{ExclusiveLock, TransferArtifact};
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -180,37 +180,6 @@ impl Entry {
             "workspace journal belongs to another Attempt"
         );
         Ok(prepared)
-    }
-}
-
-/// An exclusive `flock` that is released when this value drops.
-///
-/// `flock` ownership belongs to the open file description, not the descriptor. A child
-/// process spawned concurrently on another thread briefly shares every descriptor until
-/// its exec closes the close-on-exec ones, so merely closing ours can leave the lock held
-/// past drop and make an immediate reopen in this process fail. Unlocking explicitly
-/// releases the description's lock regardless of those transient copies.
-#[derive(Debug)]
-pub(crate) struct ExclusiveLock(File);
-
-impl ExclusiveLock {
-    pub(crate) fn try_acquire(file: File) -> std::io::Result<Self> {
-        file.try_lock()?;
-        Ok(Self(file))
-    }
-}
-
-impl std::ops::Deref for ExclusiveLock {
-    type Target = File;
-
-    fn deref(&self) -> &File {
-        &self.0
-    }
-}
-
-impl Drop for ExclusiveLock {
-    fn drop(&mut self) {
-        let _ = self.0.unlock();
     }
 }
 

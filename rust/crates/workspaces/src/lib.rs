@@ -6,10 +6,12 @@
 
 pub mod devcontainer;
 mod git;
+mod lock;
 pub mod packages;
 mod paths;
 pub mod source;
 mod transfer;
+pub use lock::ExclusiveLock;
 pub use transfer::{
     PreparedExport, TransferArtifact, materialize_returned_files, verify_return_excludes,
 };
@@ -204,7 +206,7 @@ pub struct Workspace {
 struct Inner {
     config: ConfigRecord,
     root: PathBuf,
-    _lock: File,
+    _lock: ExclusiveLock,
     gate: Mutex<()>,
 }
 
@@ -271,7 +273,7 @@ impl Workspace {
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
             .open(root.join("workspace.lock"))?;
-        lock.try_lock()
+        let lock = ExclusiveLock::try_acquire(lock)
             .context("another process owns this workspace state directory")?;
         let config_path = root.join("config.json");
         match read_json::<ConfigRecord>(&config_path)? {
@@ -865,4 +867,24 @@ fn verify_bundle_head(bytes: &[u8], head: &str, reference: &str) -> Result<()> {
         "bundle does not bind the delivered commit to its receipt"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn released_workspace_is_immediately_reopenable_while_children_spawn() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        fs::create_dir(&source)?;
+        let config = || WorkspaceConfig {
+            source: source.clone(),
+            state_dir: root.path().join("state"),
+            base_commit: "0".repeat(40),
+        };
+        lock::tests::while_children_spawn(|| {
+            (0..2_000).try_for_each(|_| Workspace::open(config()).map(drop))
+        })
+    }
 }
