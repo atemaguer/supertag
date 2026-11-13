@@ -362,7 +362,7 @@ async fn git_policies(
     Ok(())
 }
 
-async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
+async fn contract(provider: RemoteWorkspace, name: &str, database: &str) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let mut fixture = Fixture::prepare(directory.path()).await?;
     std::fs::write(
@@ -392,7 +392,7 @@ async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
     .await?;
     std::fs::write(fixture.root.join("provider-kind"), name)?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
     runtime
         .tag(
             &fixture,
@@ -412,12 +412,17 @@ async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
     runtime.stop().await
 }
 
-#[tokio::test]
-async fn cursor_freezes_e2b_outputs_before_provider_stop() -> Result<()> {
-    Box::pin(contract(RemoteWorkspace::E2b, "e2b")).await
+database_tests! {
+    #[tokio::test]
+    cursor_freezes_e2b_outputs_before_provider_stop;
+    #[tokio::test]
+    cursor_freezes_modal_outputs_before_provider_stop;
 }
 
-#[tokio::test]
-async fn cursor_freezes_modal_outputs_before_provider_stop() -> Result<()> {
-    Box::pin(contract(RemoteWorkspace::Modal, "modal")).await
+async fn cursor_freezes_e2b_outputs_before_provider_stop(database: String) -> Result<()> {
+    Box::pin(contract(RemoteWorkspace::E2b, "e2b", &database)).await
+}
+
+async fn cursor_freezes_modal_outputs_before_provider_stop(database: String) -> Result<()> {
+    Box::pin(contract(RemoteWorkspace::Modal, "modal", &database)).await
 }

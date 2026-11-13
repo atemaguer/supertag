@@ -2,16 +2,26 @@ use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 
-#[tokio::test]
-#[ignore = "requires isolated Linux root, util-linux setsid and SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY"]
-async fn cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    #[ignore = "requires isolated Linux root, util-linux setsid and SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY"]
+    cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle;
+}
+
+async fn cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle(
+    database: String,
+) -> Result<()> {
     const ENVIRONMENT: &str = "fixture-command-root";
-    let binary = std::env::var_os("SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY")
-        .context("set the isolated shared execution provider fixture binary")?;
-    ensure!(
-        unsafe { libc::geteuid() } == 0,
-        "isolated Linux root required"
-    );
+    if crate::prerequisites::linux_root()?.is_none() {
+        return Ok(());
+    }
+    let Some(binary) = crate::prerequisites::env(
+        "linux-root",
+        "SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY",
+    )?
+    else {
+        return Ok(());
+    };
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     std::fs::set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o711))?;
@@ -41,7 +51,7 @@ async fn cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle() 
         .kill_on_drop(true);
     let (mut provider, endpoint) = service(command).await?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     runtime
         .operator
         .put_tag(credentials.request(PutTagRequest {

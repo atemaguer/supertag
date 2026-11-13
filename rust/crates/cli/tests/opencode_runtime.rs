@@ -1,4 +1,10 @@
 //! Real Control Plane, Gateway and Worker Host processes with a provider-shaped OpenCode CLI.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use anyhow::{Context, Result, anyhow, ensure};
 use prost::Message;
 use serde_json::Value;
@@ -174,7 +180,7 @@ struct Runtime {
     fixture: PathBuf,
 }
 impl Runtime {
-    async fn start(directory: &Path) -> Result<Self> {
+    async fn start(directory: &Path, database: String) -> Result<Self> {
         sqlx::any::install_default_drivers();
         let credentials = Credentials::new();
         let output = Command::new("/usr/bin/which").arg("node").output()?;
@@ -196,10 +202,6 @@ impl Runtime {
         let native = fixture.join("opencode.mjs");
         std::fs::write(&native, format!("#!{}\n{NATIVE}", node.display()))?;
         std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
-        let database = format!(
-            "sqlite://{}?mode=rwc",
-            directory.join("control.db").display()
-        );
         let mut control = credentials.command();
         control
             .arg("control-plane")
@@ -376,10 +378,32 @@ impl Runtime {
     }
 }
 
-#[tokio::test]
-async fn opencode_stages_only_selected_provider_from_explicit_auth_file() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    opencode_stages_only_selected_provider_from_explicit_auth_file;
+    #[tokio::test]
+    opencode_streams_through_split_services_and_starts_fresh_turns;
+    #[tokio::test]
+    opencode_cancellation_reaps_native_process;
+    #[tokio::test]
+    opencode_bad_streams_fail_closed;
+    #[tokio::test]
+    opencode_recovers_missing_terminal_from_credential_free_local_export;
+    #[tokio::test]
+    opencode_leaves_unsupported_limits_and_unapproved_commands_queued;
+    #[tokio::test]
+    opencode_claims_and_runs_the_accepted_role_model;
+    #[tokio::test]
+    put_tag_cli_preserves_model_and_effort_order_at_admission;
+    #[tokio::test]
+    opencode_manager_coordination_uses_real_private_harness_with_child_denials;
+}
+
+async fn opencode_stages_only_selected_provider_from_explicit_auth_file(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     let auth_file = directory.path().join("operator-auth.json");
     let source = br#"{"openai":{"type":"api","key":"synthetic-opencode-provider-key"},"anthropic":{"type":"api","key":"unused-file-provider-key"}}"#;
     std::fs::write(&auth_file, source)?;
@@ -447,10 +471,11 @@ async fn gone(pid: i32) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_streams_through_split_services_and_starts_fresh_turns() -> Result<()> {
+async fn opencode_streams_through_split_services_and_starts_fresh_turns(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("wrong", HarnessKind::ClaudeCode, &["files:read"])
         .await?;
@@ -550,10 +575,9 @@ async fn opencode_streams_through_split_services_and_starts_fresh_turns() -> Res
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_cancellation_reaps_native_process() -> Result<()> {
+async fn opencode_cancellation_reaps_native_process(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;
@@ -591,10 +615,9 @@ async fn opencode_cancellation_reaps_native_process() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_bad_streams_fail_closed() -> Result<()> {
+async fn opencode_bad_streams_fail_closed(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;
@@ -628,10 +651,11 @@ async fn opencode_bad_streams_fail_closed() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_recovers_missing_terminal_from_credential_free_local_export() -> Result<()> {
+async fn opencode_recovers_missing_terminal_from_credential_free_local_export(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     let auth_file = directory.path().join("operator-auth.json");
     let source = br#"{"openai":{"type":"api","key":"synthetic-opencode-provider-key"},"anthropic":{"type":"api","key":"unused-file-provider-key"}}"#;
     std::fs::write(&auth_file, source)?;
@@ -684,10 +708,11 @@ async fn opencode_recovers_missing_terminal_from_credential_free_local_export() 
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued() -> Result<()> {
+async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;
@@ -747,10 +772,9 @@ async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued() -> 
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
+async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("reviewer", HarnessKind::Opencode, &["files:read"])
         .await?;
@@ -860,10 +884,9 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn put_tag_cli_preserves_model_and_effort_order_at_admission() -> Result<()> {
+async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     let put_tag = |runtime: &Runtime, flags: &[&str]| {
         let mut command = runtime.credentials.command();
         command
@@ -930,11 +953,11 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission() -> Result<(
     Ok(())
 }
 
-#[tokio::test]
-async fn opencode_manager_coordination_uses_real_private_harness_with_child_denials() -> Result<()>
-{
+async fn opencode_manager_coordination_uses_real_private_harness_with_child_denials(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let mut runtime = Runtime::start(directory.path()).await?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;

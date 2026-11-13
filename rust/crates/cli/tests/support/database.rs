@@ -19,7 +19,8 @@ pub enum Backend {
 }
 
 /// Runs `test` with a Control Plane database URL for `backend`. PostgreSQL cases each get their
-/// own database, dropped afterwards even when the body fails or panics.
+/// own database, dropped afterwards even when the body fails or panics. The body is boxed
+/// because split-process test futures are large.
 pub async fn run<F, Fut>(backend: Backend, test: F) -> Result<()>
 where
     F: FnOnce(String) -> Fut,
@@ -32,7 +33,7 @@ where
                 "sqlite://{}?mode=rwc",
                 directory.path().join("control-plane.db").display()
             );
-            test(url).await
+            Box::pin(test(url)).await
         }
         Backend::Postgres => {
             let Some(path) =
@@ -49,7 +50,7 @@ where
                 .execute(format!("CREATE DATABASE {name}").as_str())
                 .await?;
             let url = options.database(&name).to_url_lossy().to_string();
-            let outcome = AssertUnwindSafe(test(url)).catch_unwind().await;
+            let outcome = AssertUnwindSafe(Box::pin(test(url))).catch_unwind().await;
             // FORCE ends connections from any service a failed body left running.
             let cleanup = admin
                 .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
