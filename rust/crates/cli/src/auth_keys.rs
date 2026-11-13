@@ -28,7 +28,8 @@ pub enum AuthKeyCommand {
             conflicts_with = "reusable"
         )]
         host_id: Option<String>,
-        /// Enroll any number of Worker Hosts, each choosing its own ID.
+        /// Enroll any number of Worker Hosts, each choosing its own ID. A taken ID enrolls as
+        /// ID-2, ID-3, and so on.
         #[arg(long)]
         reusable: bool,
         /// Remove hosts that join with this key once they go offline.

@@ -337,6 +337,7 @@ impl Store {
                 "Auth Key and Worker Host credential must be distinct",
             ));
         }
+        let operation = fingerprint(&(&input.host_id, &input.operation_id))?;
         let fingerprint = fingerprint(&(&input.host_id, &input.operation_id, &token))?;
         let (mut transaction, _) = self.write().await?;
         let Some(row) = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE key_digest=$1")
@@ -355,17 +356,20 @@ impl Store {
         if !reusable && row.try_get::<String, _>("host_id")? != input.host_id {
             return Err(StoreError::PermissionDenied);
         }
+        // A reusable join is found again by its requested ID and operation, since the host it
+        // enrolled may carry a suffix.
         let prior = if reusable {
-            sqlx::query_scalar("SELECT enrollment_digest FROM supertag_v2_auth_key_enrollments WHERE key_digest=$1 AND host_id=$2")
-                .bind(&key).bind(&input.host_id).fetch_optional(&mut *transaction).await?
+            sqlx::query_as::<_, (String, String)>("SELECT host_id, enrollment_digest FROM supertag_v2_auth_key_enrollments WHERE key_digest=$1 AND operation_digest=$2")
+                .bind(&key).bind(&operation).fetch_optional(&mut *transaction).await?
         } else {
             row.try_get::<Option<String>, _>("enrollment_digest")?
+                .map(|digest| (input.host_id.clone(), digest))
         };
-        if let Some(prior) = prior {
+        if let Some((enrolled, prior)) = prior {
             if prior != fingerprint {
                 return Err(StoreError::PermissionDenied);
             }
-            let record = host_in(&mut transaction, &input.host_id)
+            let record = host_in(&mut transaction, &enrolled)
                 .await?
                 .ok_or(StoreError::PermissionDenied)?;
             transaction.rollback().await?;
@@ -387,34 +391,41 @@ impl Store {
                 Err(error) => return Err(error),
             }
         }
-        // A reusable join takes neither an enrolled ID nor one a pending one-time
-        // key reserves. Both answers are the same, so the reply reveals no more.
-        if reusable {
-            let reserved: Option<String> = sqlx::query_scalar("SELECT key_digest FROM supertag_v2_auth_keys WHERE reusable=0 AND host_id=$1 AND consumed_at_ms IS NULL AND revoked_at_ms IS NULL AND expires_at_ms>$2")
-                .bind(&input.host_id).bind(now).fetch_optional(&mut *transaction).await?;
-            if reserved.is_some() || host_in(&mut transaction, &input.host_id).await?.is_some() {
-                return Err(StoreError::Conflict(
-                    "Worker Host ID is not available".into(),
-                ));
+        // A reusable join takes neither an enrolled ID nor one a pending one-time key reserves:
+        // it enrolls the first free NAME-2, NAME-3, ... instead, as TypeScript does.
+        let host_id = if reusable {
+            let host_id = available_host_id_in(&mut transaction, &input.host_id, now).await?;
+            if host_id != input.host_id {
+                crate::audit::changes_in(
+                    &mut transaction,
+                    &[crate::audit::AuditChange {
+                        action: "worker-host.join".into(),
+                        target: format!("WorkerHost/{host_id}"),
+                    }],
+                )
+                .await?;
             }
-        }
-        let host = insert_host_in(&mut transaction, &input.host_id, &token, all_tags, now).await?;
+            host_id
+        } else {
+            input.host_id.clone()
+        };
+        let host = insert_host_in(&mut transaction, &host_id, &token, all_tags, now).await?;
         sqlx::query("UPDATE supertag_v2_hosts SET ephemeral=$1,granted_labels=$2 WHERE host_id=$3")
             .bind(row.try_get::<i64, _>("ephemeral")?)
             .bind(row.try_get::<String, _>("labels")?)
-            .bind(&input.host_id)
+            .bind(&host_id)
             .execute(&mut *transaction)
             .await?;
         for tag in tags {
             sqlx::query("INSERT INTO supertag_v2_host_tags (host_id,tag_id) VALUES ($1,$2)")
-                .bind(&input.host_id)
+                .bind(&host_id)
                 .bind(tag)
                 .execute(&mut *transaction)
                 .await?;
         }
         if reusable {
-            sqlx::query("INSERT INTO supertag_v2_auth_key_enrollments (key_digest,host_id,enrollment_digest,enrolled_at_ms) VALUES ($1,$2,$3,$4)")
-                .bind(&key).bind(&input.host_id).bind(&fingerprint).bind(now).execute(&mut *transaction).await?;
+            sqlx::query("INSERT INTO supertag_v2_auth_key_enrollments (key_digest,host_id,enrollment_digest,enrolled_at_ms,operation_digest) VALUES ($1,$2,$3,$4,$5)")
+                .bind(&key).bind(&host_id).bind(&fingerprint).bind(now).bind(&operation).execute(&mut *transaction).await?;
             sqlx::query("UPDATE supertag_v2_auth_keys SET consumed_at_ms=$1 WHERE key_digest=$2")
                 .bind(now)
                 .bind(key)
@@ -596,6 +607,34 @@ pub(super) async fn current_scope_in(
         .fetch_optional(&mut **transaction).await?.ok_or(StoreError::PermissionDenied)
 }
 
+/// Most suffixes a reusable join tries before it reports the ID unavailable.
+const MAX_HOST_ID_SUFFIX: u32 = 1000;
+
+/// `requested`, or else the first `requested-N` from 2 that is neither enrolled, removed hosts
+/// included, nor reserved by a pending one-time Auth Key.
+async fn available_host_id_in(
+    transaction: &mut Transaction<'_, Any>,
+    requested: &str,
+    now: i64,
+) -> Result<String> {
+    for suffix in 1..=MAX_HOST_ID_SUFFIX {
+        let candidate = if suffix == 1 {
+            requested.to_owned()
+        } else {
+            format!("{requested}-{suffix}")
+        };
+        if host_id(&candidate).is_err() {
+            break;
+        }
+        let reserved: Option<String> = sqlx::query_scalar("SELECT key_digest FROM supertag_v2_auth_keys WHERE reusable=0 AND host_id=$1 AND consumed_at_ms IS NULL AND revoked_at_ms IS NULL AND expires_at_ms>$2")
+            .bind(&candidate).bind(now).fetch_optional(&mut **transaction).await?;
+        if reserved.is_none() && host_in(transaction, &candidate).await?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(StoreError::Conflict("Worker Host ID is not available".into()))
+}
+
 async fn host_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Option<AnyRow>> {
     Ok(
         sqlx::query("SELECT * FROM supertag_v2_hosts WHERE host_id=$1")
@@ -694,12 +733,33 @@ async fn settle_removed_host_in(
         return Ok(());
     }
     let principal = format!("host:{id}");
+    let interrupted: Vec<(String, Option<String>, i64)> = sqlx::query_as("SELECT task_id,attempt_id,state FROM supertag_v2_tasks WHERE host_principal=$1 AND host_generation=$2 AND (state=$3 OR (state=$4 AND cleanup_pending=1)) ORDER BY task_id")
+        .bind(&principal).bind(generation).bind(TaskState::Uncertain as i64).bind(TaskState::Cancelled as i64)
+        .fetch_all(&mut **transaction).await?;
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=NULL,attempt_id=NULL,host_principal=NULL,host_generation=NULL,lease_token=NULL,lease_expires_at_ms=NULL,cleanup_pending=0,cleanup_observed=0,event_sequence_base=0,finish_objective_signal=0 WHERE host_principal=$2 AND host_generation=$3 AND state=$4")
         .bind(TaskState::Queued as i64).bind(&principal).bind(generation).bind(TaskState::Uncertain as i64)
         .execute(&mut **transaction).await?;
     sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending=0,cleanup_observed=1 WHERE host_principal=$1 AND host_generation=$2 AND state=$3 AND cleanup_pending=1")
         .bind(&principal).bind(generation).bind(TaskState::Cancelled as i64)
         .execute(&mut **transaction).await?;
+    // Each interrupted Task records why its Attempt stopped, as TypeScript's
+    // `task.worker-host-removed` event does: a running one was queued again, a cancelled one only
+    // finished its cleanup.
+    for (task_id, attempt_id, state) in interrupted {
+        let text = serde_json::to_string(&serde_json::json!({
+            "type": "task.worker-host-removed",
+            "version": 1,
+            "workerHostId": id,
+            "attemptId": attempt_id,
+            "requeued": state == TaskState::Uncertain as i64,
+        }))?;
+        sqlx::query("INSERT INTO supertag_v2_task_events (task_id,sequence,text) SELECT task_id,next_sequence,$2 FROM supertag_v2_tasks WHERE task_id=$1")
+            .bind(&task_id).bind(&text).execute(&mut **transaction).await?;
+        sqlx::query("UPDATE supertag_v2_tasks SET next_sequence=next_sequence+1 WHERE task_id=$1")
+            .bind(&task_id)
+            .execute(&mut **transaction)
+            .await?;
+    }
     Ok(())
 }
 

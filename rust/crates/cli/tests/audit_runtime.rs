@@ -252,7 +252,8 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
             EnrollHostRequest {
                 host_id: host.into(),
                 operation_id: operation.into(),
-                token_digest: Sha256::digest(format!("credential for {host}")).to_vec(),
+                token_digest: Sha256::digest(format!("credential for {host} {operation}"))
+                    .to_vec(),
             },
             key,
             None,
@@ -277,6 +278,22 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     // A one-time key designates its host; another host may not use it.
     let refused = join(auth_key, "other-host", "other").await?.unwrap_err();
     assert_ne!(refused.code(), Code::Ok);
+    // A reusable key that asks for a taken ID enrolls NAME-2, and the entry names that host.
+    let fleet = services
+        .json(&[
+            "auth-key",
+            "create",
+            "fleet-key",
+            "--reusable",
+            "--tag",
+            "reviewer",
+        ])
+        .await?;
+    let fleet_key = fleet["auth_key"].as_str().context("auth_key")?;
+    let suffixed = join(fleet_key, "review-host", "fleet-join")
+        .await??
+        .into_inner();
+    assert_eq!(suffixed.host_id, "review-host-2");
 
     let actor = format!("auth-key:{key_name}");
     let joins = services
@@ -285,7 +302,17 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .into_iter()
         .filter(|entry| entry[1] == "worker-host.join")
         .collect::<Vec<_>>();
-    assert_eq!(joins.len(), 3, "{joins:?}");
+    assert_eq!(joins.len(), 4, "{joins:?}");
+    assert_eq!(
+        joins[3],
+        entry(
+            "auth-key:fleet-key",
+            "worker-host.join",
+            "WorkerHost/review-host-2",
+            "succeeded",
+            "OK"
+        )
+    );
     assert_eq!(
         joins[0],
         entry(

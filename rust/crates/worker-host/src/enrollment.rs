@@ -26,6 +26,10 @@ struct Enrollment {
     operation_id: String,
     token: String,
     receipt: Option<Receipt>,
+    /// The ID the Control Plane enrolled when a reusable Auth Key found `host_id` taken and
+    /// suffixed it, as `NAME-2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enrolled_host_id: Option<String>,
     /// A replacement credential recorded before the Control Plane was asked to install it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rotation: Option<PendingRotation>,
@@ -59,6 +63,7 @@ pub async fn enroll(
             operation_id: Uuid::new_v4().to_string(),
             token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
             receipt: None,
+            enrolled_host_id: None,
             rotation: None,
         },
     };
@@ -68,7 +73,7 @@ pub async fn enroll(
     );
     if let Some(receipt) = &state.receipt {
         return Ok(HostRecord {
-            host_id,
+            host_id: state.enrolled_id().to_owned(),
             generation: receipt.generation,
             revoked: false,
         });
@@ -101,14 +106,35 @@ pub async fn enroll(
         .await?
         .into_inner();
     ensure!(
-        record.host_id == state.host_id && !record.revoked,
+        !record.revoked && suffixed_or_same(&record.host_id, &state.host_id),
         "invalid Worker Host enrollment receipt"
     );
+    if record.host_id != state.host_id {
+        state.enrolled_host_id = Some(record.host_id.clone());
+    }
     state.receipt = Some(Receipt {
         generation: record.generation,
     });
     save(&journal, &state)?;
     Ok(record)
+}
+
+impl Enrollment {
+    /// The Worker Host ID this state directory is enrolled as.
+    fn enrolled_id(&self) -> &str {
+        self.enrolled_host_id.as_deref().unwrap_or(&self.host_id)
+    }
+}
+
+/// Whether `enrolled` is `requested` or `requested-N` with N of 2 or more.
+fn suffixed_or_same(enrolled: &str, requested: &str) -> bool {
+    enrolled == requested
+        || enrolled
+            .strip_prefix(requested)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|number| {
+                !number.starts_with('0') && number.parse::<u32>().is_ok_and(|number| number >= 2)
+            })
 }
 
 pub(crate) fn host_token(journal: &Journal, gateway: &Target) -> Result<String> {
@@ -135,7 +161,7 @@ pub fn begin_credential_rotation(
     let journal = Journal::open(directory)?;
     let mut state = read(&journal)?.context("this state directory has no enrolled Worker Host")?;
     ensure!(
-        state.host_id == host_id && state.receipt.is_some(),
+        state.enrolled_id() == host_id && state.receipt.is_some(),
         "this state directory holds another Worker Host's enrollment"
     );
     if let Some(pending) = &state.rotation {
@@ -211,4 +237,19 @@ fn save(journal: &Journal, enrollment: &Enrollment) -> Result<()> {
     journal.write(&journal.directory().join("enrollment.json"), |file| {
         Ok(serde_json::to_writer(file, enrollment)?)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::suffixed_or_same;
+
+    #[test]
+    fn accepts_only_the_requested_id_or_its_numbered_suffix() {
+        for enrolled in ["runner", "runner-2", "runner-10"] {
+            assert!(suffixed_or_same(enrolled, "runner"), "{enrolled}");
+        }
+        for enrolled in ["runner-1", "runner-02", "runner-x", "runner2", "other", "runner-2-2"] {
+            assert!(!suffixed_or_same(enrolled, "runner"), "{enrolled}");
+        }
+    }
 }
