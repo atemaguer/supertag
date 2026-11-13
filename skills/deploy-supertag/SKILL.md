@@ -74,8 +74,8 @@ the rest of this skill:
 - **Verify and join.** The native CLI's `verify deployment wss://HOST --env-file DIR/operator.env`,
   then `auth-key create`, `host enroll`, and `worker-host` with `--control-plane wss://HOST`; see
   the platform guide.
-- **Limits.** One instance. Cloudflare transfer files are lost on restart. The terminal UI and
-  desktop app need `https://`, so they cannot connect yet. No webhook-based surface ingress and
+- **Limits.** One instance. Cloudflare transfer files are lost on restart. The desktop app trusts
+  only the system roots, so it cannot reach a certificate from your own CA. No webhook-based surface ingress and
   no Slack: run a Gateway on another host for Slack, GitHub, Linear, or Microsoft Teams.
 
 Docker Compose and the native option need a checkout of the repository for `deploy/compose.yaml` and

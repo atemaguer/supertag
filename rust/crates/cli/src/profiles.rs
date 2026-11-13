@@ -258,22 +258,41 @@ pub struct NewControlPlane {
     pub client_key_file: Option<PathBuf>,
 }
 
-/// The origin form the terminal UI stores: lowercase scheme and host, no default port.
+/// Whether the path of `raw` as typed has no backslash and no `.` or `..` segment, which the
+/// terminal UI and this parser would resolve differently.
+fn plain_path(raw: &str) -> bool {
+    let rest = raw.trim().split_once("://").map_or("", |(_, rest)| rest);
+    let path = rest.find('/').map_or("", |start| &rest[start..]);
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    !rest.contains('\\')
+        && path.split('/').all(|segment| {
+            let segment = segment.to_ascii_lowercase().replace("%2e", ".");
+            segment != "." && segment != ".."
+        })
+}
+
+/// The form the terminal UI stores a Control Plane URL in: lowercase scheme and host and no default
+/// port, plus the path of a `ws://` or `wss://` tunnel URL.
 fn control_plane_origin(raw: &str) -> Result<String> {
     let url = url::Url::parse(raw.trim()).context("enter a Control Plane URL")?;
+    let tunnel = matches!(url.scheme(), "ws" | "wss");
     ensure!(
-        matches!(url.scheme(), "http" | "https")
+        matches!(url.scheme(), "http" | "https" | "ws" | "wss")
             && url.host_str().is_some_and(|host| !host.is_empty())
             && url.username().is_empty()
             && url.password().is_none()
-            && matches!(url.path(), "" | "/")
+            && (tunnel || matches!(url.path(), "" | "/"))
             && url.query().is_none()
             && url.fragment().is_none()
             && raw.len() <= 2048,
-        "enter a Control Plane origin without credentials, path, query or fragment"
+        "enter a Control Plane origin without credentials, path, query or fragment, or a ws or wss tunnel URL without credentials, query or fragment"
+    );
+    ensure!(
+        !tunnel || plain_path(raw),
+        "a tunnel URL path must not contain backslashes or . or .. segments"
     );
     let host = url.host().context("enter a Control Plane URL")?;
-    if url.scheme() == "http" {
+    if matches!(url.scheme(), "http" | "ws") {
         let loopback = match host {
             url::Host::Ipv4(address) => address.is_loopback(),
             url::Host::Ipv6(address) => address.is_loopback(),
@@ -281,16 +300,21 @@ fn control_plane_origin(raw: &str) -> Result<String> {
         };
         ensure!(
             loopback,
-            "remote Control Planes require HTTPS; HTTP requires a loopback IP"
+            "remote Control Planes require HTTPS or WSS; HTTP and WS require a loopback IP"
         );
     }
     let host = match host {
         url::Host::Ipv6(address) => format!("[{address}]"),
         other => other.to_string().to_lowercase(),
     };
+    let path = if tunnel && url.path() != "/" {
+        url.path()
+    } else {
+        ""
+    };
     Ok(match url.port() {
-        Some(port) => format!("{}://{host}:{port}", url.scheme()),
-        None => format!("{}://{host}", url.scheme()),
+        Some(port) => format!("{}://{host}:{port}{path}", url.scheme()),
+        None => format!("{}://{host}{path}", url.scheme()),
     })
 }
 
@@ -334,8 +358,10 @@ fn check(saved: &NewControlPlane) -> Result<Checked> {
         "provide both the client certificate and key"
     );
     ensure!(
-        url.starts_with("https:") || (server_ca.is_empty() && client_cert.is_empty()),
-        "TLS files require an HTTPS Control Plane"
+        url.starts_with("https:")
+            || url.starts_with("wss:")
+            || (server_ca.is_empty() && client_cert.is_empty()),
+        "TLS files require an HTTPS or WSS Control Plane"
     );
     Ok(Checked {
         url,
@@ -506,6 +532,50 @@ mod tests {
         assert_eq!(desktop_matches(desktop, "prod").unwrap()[0].token, "tok");
         assert!(desktop_matches(desktop, "missing").unwrap().is_empty());
         assert!(tui_matches(br#"{"version":2,"control_planes":[]}"#, "prod").is_err());
+    }
+
+    #[test]
+    fn saved_control_planes_accept_tunnel_urls_in_the_terminal_ui_form() {
+        for (raw, saved) in [
+            ("WSS://Cp.Example:443/", "wss://cp.example"),
+            (
+                "wss://cp.example:8443/Supertag",
+                "wss://cp.example:8443/Supertag",
+            ),
+            ("ws://127.0.0.1:80/tunnel/", "ws://127.0.0.1/tunnel/"),
+            ("ws://[::1]:7001", "ws://[::1]:7001"),
+            ("https://Cp.Example:443/", "https://cp.example"),
+        ] {
+            assert_eq!(control_plane_origin(raw).unwrap(), saved, "{raw}");
+        }
+        for raw in [
+            "wss://cp.example/a/../supertag",
+            "wss://cp.example/./supertag",
+            "wss://cp.example/a/%2E%2e/supertag",
+            "wss://cp.example/a\\supertag",
+        ] {
+            assert!(control_plane_origin(raw).is_err(), "{raw}");
+        }
+        for raw in [
+            "ws://cp.example",
+            "ws://localhost:7001",
+            "wss://user:secret@cp.example",
+            "wss://cp.example/?token=secret",
+            "wss://cp.example/#secret",
+            "https://cp.example/path",
+        ] {
+            assert!(control_plane_origin(raw).is_err(), "{raw}");
+        }
+        let saved = |url: &str| NewControlPlane {
+            name: "tunnel".into(),
+            url: url.into(),
+            token: "token".into(),
+            server_ca_file: Some("/ca.pem".into()),
+            client_cert_file: None,
+            client_key_file: None,
+        };
+        assert!(check(&saved("wss://cp.example/supertag")).is_ok());
+        assert!(check(&saved("ws://127.0.0.1:7001")).is_err());
     }
 
     #[test]

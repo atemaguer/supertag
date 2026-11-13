@@ -253,8 +253,8 @@ pub struct CheckArgs {
     after_help = "The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Control Plane's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Control Plane requires client certificates. Verification registers no Worker Host and runs no Task."
 )]
 pub struct VerifyArgs {
-    /// The Control Plane's public origin: https://HOST for native gRPC, or wss://HOST behind a
-    /// platform that forwards only HTTP (Render, Cloudflare, Modal).
+    /// The Control Plane's public URL: an https://HOST origin for native gRPC, or a wss:// tunnel
+    /// URL behind a platform that forwards only HTTP (Render, Cloudflare, Modal).
     url: String,
     /// Private env file that holds SUPERTAG_OPERATOR_TOKEN.
     #[arg(long)]
@@ -680,8 +680,17 @@ fn https_origin(value: &str, path_allowed: bool) -> bool {
 
 /// A Control Plane URL `verify deployment` accepts: an `https://` origin for native gRPC, or a
 /// `wss://` origin for a Control Plane behind an HTTP-only platform edge.
-fn control_plane_origin(value: &str) -> bool {
-    origin(value, "https://", false) || origin(value, "wss://", false)
+/// The URL `verify deployment` dials: an https:// origin without its trailing slash, or a wss://
+/// tunnel URL as written, since a tunnel may sit under a path.
+fn deployment_url(value: &str) -> Option<String> {
+    if value.starts_with("wss://") {
+        // `tunneled_uri` refuses credentials, query, and fragment.
+        supertag_transport::tunneled_uri(value)
+            .is_ok()
+            .then(|| value.to_owned())
+    } else {
+        https_origin(value, false).then(|| value.trim_end_matches('/').to_owned())
+    }
 }
 
 fn origin(value: &str, scheme: &str, path_allowed: bool) -> bool {
@@ -897,10 +906,9 @@ const INVALID_HOST_CREDENTIAL: &str = "supertag-deployment-verification-invalid-
 
 pub async fn verify(command: VerifyCommand) -> Result<()> {
     let VerifyCommand::Deployment(args) = command;
-    ensure!(
-        control_plane_origin(&args.url),
-        "Deployment URL must be an https:// or wss:// origin without credentials, path, query, or fragment"
-    );
+    let origin = deployment_url(&args.url).context(
+        "Deployment URL must be an https:// origin without credentials, path, query, or fragment, or a wss:// URL without credentials, query, or fragment",
+    )?;
     let token = match &args.env_file {
         Some(path) => {
             let environment = read_private(path)?;
@@ -916,7 +924,6 @@ pub async fn verify(command: VerifyCommand) -> Result<()> {
     }
     .filter(|token| !token.trim().is_empty())
     .context("SUPERTAG_OPERATOR_TOKEN is required")?;
-    let origin = args.url.trim_end_matches('/').to_owned();
     // The Control Plane refuses operator calls that skip protocol negotiation.
     let channel = crate::network::operator_channel(
         &crate::network::operator_endpoint(origin, Duration::from_secs(15), None).await?,
@@ -1428,24 +1435,39 @@ mod tests {
             assert!(!https_origin(url, false), "{url}");
         }
         assert!(https_origin("https://vault.example.com/v1", true));
-        // `verify deployment` also takes a wss:// origin behind an HTTP-only platform edge.
-        for url in [
-            "https://supertag.example.com",
-            "wss://supertag-control-plane.onrender.com",
-            "wss://workspace--supertag.modal.run/",
-            "wss://127.0.0.1:8443",
+        // `verify deployment` also takes a wss:// tunnel URL behind an HTTP-only platform edge,
+        // kept as written because a tunnel may sit under a path.
+        for (url, dialed) in [
+            (
+                "https://supertag.example.com/",
+                "https://supertag.example.com",
+            ),
+            (
+                "wss://supertag-control-plane.onrender.com",
+                "wss://supertag-control-plane.onrender.com",
+            ),
+            (
+                "wss://workspace--supertag.modal.run/",
+                "wss://workspace--supertag.modal.run/",
+            ),
+            (
+                "wss://supertag.example.com/tunnel/",
+                "wss://supertag.example.com/tunnel/",
+            ),
+            ("wss://127.0.0.1:8443", "wss://127.0.0.1:8443"),
         ] {
-            assert!(control_plane_origin(url), "{url}");
+            assert_eq!(deployment_url(url).as_deref(), Some(dialed), "{url}");
         }
         for url in [
             "ws://127.0.0.1:8443",
             "http://supertag.example.com",
+            "https://supertag.example.com/path",
             "wss://user:secret@supertag.example.com",
-            "wss://supertag.example.com/tunnel",
             "wss://supertag.example.com?query",
+            "wss://supertag.example.com#fragment",
             "wss://",
         ] {
-            assert!(!control_plane_origin(url), "{url}");
+            assert_eq!(deployment_url(url), None, "{url}");
         }
     }
 

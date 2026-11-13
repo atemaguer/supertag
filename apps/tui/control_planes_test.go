@@ -398,3 +398,42 @@ func TestControlPlaneSwitchCancelsInflightRuntimeRequest(t *testing.T) {
 		t.Fatal("old Control Plane cancellation poisoned the new model")
 	}
 }
+
+func TestSavedControlPlanesAcceptWebSocketTunnelURLs(t *testing.T) {
+	for _, url := range []string{"wss://cp.example", "wss://cp.example:8443/supertag", "ws://127.0.0.1:7001/tunnel", "ws://[::1]:7001"} {
+		if err := validateSavedControlPlane(client.Target{Name: "tunnel", URL: url, Token: "credential"}); err != nil {
+			t.Errorf("%s: %v", url, err)
+		}
+	}
+	tls := client.Target{Name: "tunnel", URL: "wss://cp.example/supertag", Token: "credential", ServerCAFile: "/ca.pem", ClientCertFile: "/c.pem", ClientKeyFile: "/c.key"}
+	if err := validateSavedControlPlane(tls); err != nil {
+		t.Errorf("wss with TLS files: %v", err)
+	}
+	for _, target := range []client.Target{
+		{Name: "tunnel", URL: "ws://cp.example", Token: "credential"},
+		{Name: "tunnel", URL: "ws://localhost:7001", Token: "credential"},
+		{Name: "tunnel", URL: "ws://127.0.0.1:7001", Token: "credential", ServerCAFile: "/ca.pem"},
+		{Name: "tunnel", URL: "wss://user:secret@cp.example", Token: "credential"},
+		{Name: "tunnel", URL: "wss://cp.example/?token=secret", Token: "credential"},
+		{Name: "tunnel", URL: "wss://cp.example/#secret", Token: "credential"},
+		{Name: "tunnel", URL: "https://cp.example/path", Token: "credential"},
+		{Name: "tunnel", URL: "wss://cp.example/a/../supertag", Token: "credential"},
+		{Name: "tunnel", URL: "wss://cp.example/./supertag", Token: "credential"},
+		{Name: "tunnel", URL: "wss://cp.example/a/%2E%2e/supertag", Token: "credential"},
+		{Name: "tunnel", URL: `wss://cp.example/a\supertag`, Token: "credential"},
+	} {
+		if validateSavedControlPlane(target) == nil {
+			t.Errorf("accepted %s", target.URL)
+		}
+	}
+	for raw, want := range map[string]string{
+		"WSS://Cp.Example:443/":          "wss://cp.example",
+		"wss://cp.example:8443/Supertag": "wss://cp.example:8443/Supertag",
+		"ws://127.0.0.1:80/tunnel/":      "ws://127.0.0.1/tunnel/",
+		"https://Cp.Example:443/":        "https://cp.example",
+	} {
+		if got := controlPlaneOrigin(raw); got != want {
+			t.Errorf("controlPlaneOrigin(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

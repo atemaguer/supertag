@@ -529,7 +529,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             None
         } else {
             validate_endpoint(target)?;
-            Some(target.trim_end_matches('/').to_owned())
+            // A tunnel URL's path routes the upgrade, so only an origin loses its trailing slash.
+            if supertag_transport::tunneled_uri(target).is_ok_and(|tunnel| tunnel.is_some()) {
+                Some(target.to_owned())
+            } else {
+                Some(target.trim_end_matches('/').to_owned())
+            }
         };
         ensure!(
             depends_on
@@ -967,13 +972,21 @@ fn provision_files(base: &Path, path: &Path) -> Result<Vec<crate::manifests::Pro
         .map(crate::manifests::ProvisionSource::File)
         .collect())
 }
+/// An `https://` origin or a `wss://` tunnel URL, or the loopback cleartext `http://` and `ws://`
+/// forms. A tunnel URL may carry a path; it dials the native origin `tunneled_uri` names.
 fn validate_endpoint(value: &str) -> Result<()> {
-    let uri: tonic::transport::Uri = value.parse().context("invalid Control Plane endpoint")?;
+    let tunnel = supertag_transport::tunneled_uri(value)
+        .map_err(|error| anyhow::anyhow!("invalid Control Plane endpoint: {error}"))?;
+    let uri: tonic::transport::Uri = tunnel
+        .as_deref()
+        .unwrap_or(value)
+        .parse()
+        .context("invalid Control Plane endpoint")?;
     ensure!(
         uri.authority().is_some_and(|a| !a.as_str().contains('@'))
             && uri.query().is_none()
             && uri.path() == "/",
-        "Control Plane endpoint must be an origin without credentials"
+        "Control Plane endpoint must be an origin or tunnel URL without credentials"
     );
     match uri.scheme_str() {
         Some("https") => {}
@@ -984,7 +997,7 @@ fn validate_endpoint(value: &str) -> Result<()> {
                 .is_ok_and(|ip| ip.is_loopback())),
             "cleartext Control Plane must use a literal loopback address"
         ),
-        _ => bail!("Control Plane must use HTTPS or loopback HTTP"),
+        _ => bail!("Control Plane must use HTTPS, WSS, or loopback HTTP or WS"),
     };
     Ok(())
 }
@@ -1335,6 +1348,57 @@ secrets:
         .unwrap();
         assert!(!format!("{invalid:#}").contains("secret-looking-value"));
     }
+    #[test]
+    fn host_control_plane_tunnel_paths_are_kept_verbatim() {
+        let c = parse(
+            br#"services:
+  tunnel: {type: host, control-plane: "wss://plane.example/supertag/", adapter: ./adapter, workspaces: {app: ./app}}
+  origin: {type: host, control-plane: "https://plane.example/", adapter: ./adapter, workspaces: {app: ./app}}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let control_plane = |name: &str| {
+            c.hosts
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .control_plane
+                .clone()
+        };
+        assert_eq!(
+            control_plane("tunnel").as_deref(),
+            Some("wss://plane.example/supertag/")
+        );
+        assert_eq!(
+            control_plane("origin").as_deref(),
+            Some("https://plane.example")
+        );
+    }
+    #[test]
+    fn host_control_planes_may_be_websocket_tunnels() {
+        for value in [
+            "https://plane.example",
+            "wss://plane.example",
+            "wss://plane.example:8443/supertag",
+            "ws://127.0.0.1:7001/tunnel",
+            "http://[::1]:7001",
+        ] {
+            assert!(validate_endpoint(value).is_ok(), "{value}");
+        }
+        for value in [
+            "ws://plane.example",
+            "ws://localhost:7001",
+            "wss://user:secret@plane.example",
+            "wss://plane.example/?query",
+            "https://plane.example/path",
+            "ftp://plane.example",
+        ] {
+            assert!(validate_endpoint(value).is_err(), "{value}");
+        }
+    }
+
     #[test]
     fn invalid_unsupported_and_credential_bearing_config_fails_closed() {
         for input in [

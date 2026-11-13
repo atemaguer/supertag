@@ -392,7 +392,7 @@ Check a deployed Control Plane: health, authentication, and readiness
 Usage: supertag verify deployment [OPTIONS] <URL>
 
 Arguments:
-  <URL>  The Control Plane's public origin: https://HOST for native gRPC, or wss://HOST behind a platform that forwards only HTTP (Render, Cloudflare, Modal)
+  <URL>  The Control Plane's public URL: an https://HOST origin for native gRPC, or a wss:// tunnel URL behind a platform that forwards only HTTP (Render, Cloudflare, Modal)
 
 Options:
       --env-file <ENV_FILE>  Private env file that holds SUPERTAG_OPERATOR_TOKEN
@@ -2401,7 +2401,7 @@ Save a Control Plane under a name for `--control-plane NAME` and the terminal UI
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
 Arguments:
-  <URL>  The Control Plane origin, such as https://supertag.example.com
+  <URL>  The Control Plane origin, such as https://supertag.example.com, or its wss:// tunnel URL
 
 Options:
       --name <NAME>

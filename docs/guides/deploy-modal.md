@@ -189,9 +189,10 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 
 - One container. Every Control Plane runs the controllers, so do not raise `max_containers`.
 - Modal commits Volume writes in the background; transfer files written just before a container
-  replacement may be lost, and work whose transfer was in progress must be retried.
-- Native gRPC (`https://`) does not reach this deployment. The terminal UI and the desktop app need
-  an `https://` URL, so they cannot connect to it yet.
+  replacement may be lost, and work whose transfer was in progress must be retried. - Native gRPC
+  (`https://`) does not reach this deployment; clients use the `wss://` URL. The terminal UI uses
+  your CA when you save the Control Plane with `supertag connect --server-ca-file`; the desktop app
+  trusts only the system roots, so it cannot connect to a certificate from your own CA.
 - The web endpoint forwards only the tunnel port, so the Gateway here serves Lark and webhook
   notifications only. Slack, GitHub, Linear, and Microsoft Teams need a Gateway on another host.
 

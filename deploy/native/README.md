@@ -323,8 +323,11 @@ unchanged.
 
 Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL instead of
 `https://` wherever a Control Plane URL is expected. That covers operator commands,
-`host enroll`, `worker-host`, `health`, `verify deployment`, and the Gateway's `--control-plane`.
-The terminal UI, the desktop app, and saved Control Planes still need an `https://` URL.
+`host enroll`, `worker-host`, a host's `control-plane` in `supertag.yaml`, `health`,
+`verify deployment`, `connect` and the saved Control Planes it writes, the terminal UI, the
+desktop app, and the Gateway's `--control-plane`. Saved Control Planes keep the tunnel URL's path,
+which may not contain `.` or `..` segments or backslashes. The desktop app trusts only the system
+roots, so its Control Plane needs a publicly trusted certificate.
 
 The tunnel listener also answers one plain HTTP request, `GET /healthz` with no `Upgrade` or
 `Origin` header, with `200 ok`, for a platform's HTTP health check. It reports only that the
@@ -334,7 +337,7 @@ listener accepts connections. Every other request must be a WebSocket upgrade, a
 Security does not depend on the platform's proxy:
 
 - The proxy terminates the outer `wss://` TLS with its own certificate. Clients check it against
-  the system roots and, when set, `SUPERTAG_SERVER_CA_FILE`.
+  the system roots and, when set, `SUPERTAG_SERVER_CA_FILE` or a saved Control Plane's server CA file.
 - SuperTag's own TLS runs end to end inside the tunnel. The service's `SUPERTAG_TLS_*` settings
   apply to tunnelled connections exactly as to native ones, including required client
   certificates, so the proxy sees only ciphertext. The service certificate must name the host in

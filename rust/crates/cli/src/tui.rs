@@ -73,13 +73,10 @@ pub async fn launch(
         ensure!(status.success(), "supertag-tui exited with {status}");
         return Ok(());
     };
+    // Checks the URL and TLS files the way every operator command does. The terminal UI then
+    // dials the same native or tunnelled target itself.
     let endpoint = target.endpoint(Duration::from_secs(15)).await?;
-    // The terminal UI dials native gRPC itself.
-    ensure!(
-        !endpoint.tunnelled(),
-        "the terminal UI connects only to https:// or loopback http:// Control Plane URLs"
-    );
-    let tls = endpoint.url().starts_with("https:");
+    let tls = endpoint.url().starts_with("https:") || endpoint.url().starts_with("wss:");
     let saved = target.tls.clone();
     let certificate = |name: &str| {
         if !tls {

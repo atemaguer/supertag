@@ -552,7 +552,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     /// operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as
     /// client:NAME and saves only the resulting credential.
     Connect {
-        /// The Control Plane origin, such as https://supertag.example.com.
+        /// The Control Plane origin, such as https://supertag.example.com, or its wss:// tunnel URL.
         url: String,
         /// The name to save it under.
         #[arg(long)]

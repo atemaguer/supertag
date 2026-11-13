@@ -10,12 +10,16 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 #[test]
-fn only_origin_urls_and_loopback_plaintext_are_accepted() {
+fn only_origin_or_tunnel_urls_and_loopback_plaintext_are_accepted() {
     for value in [
         "http://127.0.0.1:4545",
         "http://[::1]:4545/",
         "https://control_plane.example.com",
         "https://127.0.0.1:4545",
+        "ws://127.0.0.1:4545",
+        "ws://[::1]:4545/supertag",
+        "wss://control_plane.example.com",
+        "wss://control_plane.example.com:8443/supertag",
     ] {
         assert!(endpoint(value).is_ok(), "{value}");
     }
@@ -31,6 +35,12 @@ fn only_origin_urls_and_loopback_plaintext_are_accepted() {
         "https://control_plane.example.com/#secret",
         "http://127.0.0.1\\@example.com",
         "127.0.0.1:4545",
+        "ws://localhost:4545",
+        "ws://control_plane.example.com",
+        "wss://token@control_plane.example.com",
+        "wss://control_plane.example.com/?token=secret",
+        "wss://control_plane.example.com/#secret",
+        "wss://control_plane.example.com:0",
     ] {
         assert!(endpoint(value).is_err(), "{value}");
     }
@@ -139,10 +149,14 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert!(json["latestTask"].get("prompt").is_none());
 }
 
+/// A Control Plane's API tier in front of its state owner. With `tunnel`, the API tier also
+/// accepts WebSocket tunnels, as with `--websocket-listen`, and the returned URL is a `ws://`
+/// tunnel URL with a path.
 async fn control_plane_fixture(
     database: &std::path::Path,
     tag_id: &str,
     token: &str,
+    tunnel: bool,
 ) -> (
     String,
     tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
@@ -179,6 +193,8 @@ async fn control_plane_fixture(
     .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
+    let websocket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let tunnel_url = format!("ws://{}/supertag", websocket.local_addr().unwrap());
     let control_plane_task = tokio::spawn(
         Server::builder()
             .layer(supertag_protocol::negotiation::fence(
@@ -189,7 +205,7 @@ async fn control_plane_fixture(
             .add_service(control_plane.operator_service())
             .add_service(control_plane.enrollments_service())
             .add_service(control_plane.conversations_service())
-            .serve_with_incoming(TcpListenerStream::new(listener)),
+            .serve_with_incoming(supertag_transport::incoming(listener, Some(websocket))),
     );
     let mut operator = OperatorClient::new(
         supertag_protocol::negotiation::connect(
@@ -222,7 +238,8 @@ async fn control_plane_fixture(
         .await
         .unwrap();
 
-    (address, control_plane_task, cp_task)
+    let url = if tunnel { tunnel_url } else { address };
+    (url, control_plane_task, cp_task)
 }
 
 #[tokio::test]
@@ -232,6 +249,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
         &directory.path().join("state.sqlite"),
         "engineer",
         "operator-test-token",
+        false,
     )
     .await;
     let client = ControlPlaneState::default();
@@ -359,6 +377,8 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
 }
 
 #[tokio::test]
+/// The second Control Plane is saved and reached through a `ws://` tunnel URL, which keeps its
+/// path.
 async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
     let directory = tempfile::tempdir().unwrap();
     let store = directory.path().join("control-planes.json");
@@ -366,12 +386,14 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         &directory.path().join("first.sqlite"),
         "first-tag",
         "first-operator",
+        false,
     )
     .await;
     let (second, second_control_plane, second_plane) = control_plane_fixture(
         &directory.path().join("second.sqlite"),
         "second-tag",
         "second-operator",
+        true,
     )
     .await;
 
@@ -489,6 +511,7 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
         &directory.path().join("state.sqlite"),
         "allowed-tag",
         "join-operator",
+        false,
     )
     .await;
     let mut operator = OperatorClient::new(

@@ -181,8 +181,10 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 - One instance per service. A service with a disk cannot scale, and every Control Plane runs the
   controllers.
 - Back up Render PostgreSQL and both disks; they hold different state.
-- Native gRPC (`https://`) does not reach this deployment. The terminal UI and the desktop app need
-  an `https://` URL, so they cannot connect to it yet.
+- Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
+  terminal UI uses your CA when you save the Control Plane with `supertag connect --server-ca-file`;
+  the desktop app trusts only the system roots, so it cannot connect to a certificate from your own
+  CA.
 - The Gateway is a background worker with no inbound traffic, so it serves Lark and webhook
   notifications only. Slack, GitHub, Linear, and Microsoft Teams need a Gateway on another host.
 

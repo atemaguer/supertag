@@ -7,9 +7,13 @@ and Glamour.
 
 The Rust CLI launches the Go TUI with a Control Plane URL and an operator credential over file
 descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`. The TUI reads descriptor 3 only when that variable
-is set, so a plain launch with no handover never touches a descriptor it does not own. The handover identifies the protocol as `runtime.v2` and can include a trusted
-server certificate authority and client certificate and key paths. The TUI uses the generated
-runtime v2 Go bindings over gRPC and HTTP/2. Cleartext connections require a loopback IP address.
+is set, so a plain launch with no handover never touches a descriptor it does not own. The handover
+identifies the protocol as `runtime.v2` and can include a trusted server certificate authority and
+client certificate and key paths. The TUI uses the generated runtime v2 Go bindings over gRPC and
+HTTP/2. A `wss://` Control Plane URL carries the same connection through a WebSocket tunnel, as the
+Rust CLI does, with the Control Plane's TLS and any client certificate inside it; the server
+certificate authority also checks the tunnel's outer certificate. Cleartext `http://` and `ws://`
+connections require a loopback IP address.
 
 The TUI lists Tags and named conversations, loads conversation history, sends messages, and
 follows replies. Watch keeps the rail and open conversation current across clients. The TUI
