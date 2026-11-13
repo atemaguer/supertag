@@ -43,6 +43,7 @@ class InboxItemKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     INBOX_ITEM_KIND_OBJECTIVE_LIMIT: _ClassVar[InboxItemKind]
     INBOX_ITEM_KIND_TASK_ATTENTION: _ClassVar[InboxItemKind]
     INBOX_ITEM_KIND_APPROVAL: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_MCP_LOGIN: _ClassVar[InboxItemKind]
 
 class ApprovalState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -274,6 +275,7 @@ INBOX_ITEM_KIND_OBJECTIVE_BUDGET: InboxItemKind
 INBOX_ITEM_KIND_OBJECTIVE_LIMIT: InboxItemKind
 INBOX_ITEM_KIND_TASK_ATTENTION: InboxItemKind
 INBOX_ITEM_KIND_APPROVAL: InboxItemKind
+INBOX_ITEM_KIND_MCP_LOGIN: InboxItemKind
 APPROVAL_STATE_UNSPECIFIED: ApprovalState
 APPROVAL_STATE_PENDING: ApprovalState
 APPROVAL_STATE_APPROVED: ApprovalState
@@ -2045,7 +2047,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -2055,6 +2057,7 @@ class HarnessExecutionProfile(_message.Message):
     DECLARED_TASK_OUTPUTS_FIELD_NUMBER: _ClassVar[int]
     TASK_ARTIFACT_INPUTS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_MOUNTS_FIELD_NUMBER: _ClassVar[int]
+    MCP_LOGIN_SERVERS_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -2064,7 +2067,8 @@ class HarnessExecutionProfile(_message.Message):
     declared_task_outputs: bool
     task_artifact_inputs: bool
     workspace_mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceMountCapability]
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ...) -> None: ...
+    mcp_login_servers: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")
@@ -2103,6 +2107,26 @@ class AttemptExecutionSelection(_message.Message):
     mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
     task_artifact_inputs: bool
     def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., task_artifact_inputs: _Optional[bool] = ...) -> None: ...
+
+class WorkspaceMcpRecord(_message.Message):
+    __slots__ = ("digest", "servers")
+    DIGEST_FIELD_NUMBER: _ClassVar[int]
+    SERVERS_FIELD_NUMBER: _ClassVar[int]
+    digest: str
+    servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
+    def __init__(self, digest: _Optional[str] = ..., servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ...) -> None: ...
+
+class RecordWorkspaceMcpRequest(_message.Message):
+    __slots__ = ("attempt", "record")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    RECORD_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    record: WorkspaceMcpRecord
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., record: _Optional[_Union[WorkspaceMcpRecord, _Mapping]] = ...) -> None: ...
+
+class RecordWorkspaceMcpResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class ReserveMcpEffectRequest(_message.Message):
     __slots__ = ("attempt", "operation_id", "server", "tool", "arguments_json", "provider_binding", "tool_schema_sha256")
@@ -2585,16 +2609,18 @@ class CheckpointDownload(_message.Message):
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
-    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts")
+    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts", "mcp_servers")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
     GITHUB_SOURCE_FIELD_NUMBER: _ClassVar[int]
     MOUNTS_FIELD_NUMBER: _ClassVar[int]
+    MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     base_commit: str
     github_source: _github_workspaces_pb2.GithubWorkspace
     mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceCopyMount]
-    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ...) -> None: ...
+    mcp_servers: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class WorkspaceCopyMount(_message.Message):
     __slots__ = ("volume_id", "destination", "max_bytes", "volume")

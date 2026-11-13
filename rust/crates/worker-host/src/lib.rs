@@ -24,7 +24,10 @@ pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
-pub use mcp::McpCatalog;
+pub use mcp::{
+    McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
+    login_command as mcp_login_command, run_mcp_login,
+};
 pub use readiness::{LaneObserver, State as LaneState};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
@@ -43,8 +46,9 @@ use supertag_protocol::{
     v2::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
-        HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, ServiceRole,
-        StartTaskRequest, Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        HostRecord, InspectAttemptRequest, RecordWorkspaceMcpRequest, RegisterHostRequest,
+        ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState,
+        artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
@@ -204,7 +208,10 @@ fn claim_request(
         gateway_workspace_ids: workspaces.gateway_ids(),
         harness_kind: options.harness as i32,
         context_contracts: options.context_catalog.supported_contracts(),
-        execution_profile: Some(options.execution_profile.clone()),
+        execution_profile: Some(McpCatalog::advertised(
+            &options.execution_profile,
+            &options.mcp_catalog.lapsed_logins(),
+        )),
     }
 }
 
@@ -445,7 +452,14 @@ pub async fn run(
                 .into_iter()
                 .chain(workspaces.gateway_ids())
                 .collect(),
-            (options.execution_profile.clone(), labels),
+            (
+                {
+                    let profile = options.execution_profile.clone();
+                    let catalog = options.mcp_catalog.clone();
+                    Arc::new(move || McpCatalog::advertised(&profile, &catalog.lapsed_logins()))
+                },
+                labels,
+            ),
             shutdown.clone(),
         ))),
     };
@@ -1411,6 +1425,45 @@ async fn run_assignment(
             .map(|prepared| Box::new(prepared.clone())),
     })?;
     supertag_protocol::crash_point("worker-host.execute", "journaled");
+    let workspace_mcp = if supertag_protocol::mcp::workspace_servers(&task).is_empty() {
+        None
+    } else {
+        let cancel = shutdown.child_token();
+        let resolved = with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            workspace_mcp(
+                workspaces,
+                workspace.as_ref(),
+                &task,
+                (&coordination.mcp_effects, &attempt, token),
+                &cancel,
+            ),
+        )
+        .await;
+        match resolved {
+            Ok((resolved, expires)) => {
+                valid_until = expires;
+                Some(resolved)
+            }
+            Err(error) => {
+                if let Some(prepared) = workspace.as_ref() {
+                    workspaces.remove_mcp_snapshot(prepared);
+                }
+                let message = if error.code() == Code::InvalidArgument
+                    || error.code() == Code::FailedPrecondition
+                {
+                    error.message().to_owned()
+                } else {
+                    "Workspace MCP servers could not be resolved safely".into()
+                };
+                return save_finish(journal, attempt, adapter::failed(&message));
+            }
+        }
+    };
     let mcp = if supertag_protocol::mcp::grants(&task).next().is_some() {
         let cancel = shutdown.child_token();
         match with_authority(
@@ -1419,7 +1472,7 @@ async fn run_assignment(
             token,
             shutdown,
             &cancel,
-            mcp::AttemptMcp::prepare(&options.mcp_catalog, &task, &cancel),
+            mcp::AttemptMcp::prepare(&options.mcp_catalog, workspace_mcp.as_ref(), &task, &cancel),
         )
         .await
         {
@@ -1428,11 +1481,24 @@ async fn run_assignment(
                 mcp.map(Arc::new)
             }
             Err(_) => {
-                return save_finish(
-                    journal,
-                    attempt,
-                    adapter::failed("Task MCP tools could not be resolved safely"),
-                );
+                if let Some(prepared) = workspace.as_ref().filter(|_| workspace_mcp.is_some()) {
+                    workspaces.remove_mcp_snapshot(prepared);
+                }
+                // A login that lapsed since this host claimed the Task names its command.
+                let lapsed = options.mcp_catalog.lapsed_logins();
+                let message = supertag_protocol::mcp::grants(&task)
+                    .filter_map(|(_, grant)| supertag_protocol::mcp::parse_action(&grant.action))
+                    .find(|(server, _)| lapsed.iter().any(|name| name == server))
+                    .map_or_else(
+                        || "Task MCP tools could not be resolved safely".to_owned(),
+                        |(server, _)| {
+                            format!(
+                                "MCP server {server}: its login lapsed on this Worker Host; run {} there to log in again",
+                                mcp::login_command(server)
+                            )
+                        },
+                    );
+                return save_finish(journal, attempt, adapter::failed(&message));
             }
         }
     } else {
@@ -1628,6 +1694,9 @@ async fn run_assignment(
     if let Some(mcp) = mcp {
         mcp.close().await;
     }
+    if let Some(prepared) = workspace.as_ref().filter(|_| workspace_mcp.is_some()) {
+        workspaces.remove_mcp_snapshot(prepared);
+    }
     let saved = async {
         let mut outcome = outcome?;
         let remote_tree = if let Some(provider) = provider.as_ref().filter(|_| outcome.succeeded) {
@@ -1710,6 +1779,46 @@ async fn run_assignment(
         .await?;
     }
     saved
+}
+
+/// Snapshots the Task's base commit, resolves its Workspace MCP servers there, and records
+/// them with the Control Plane before any of them starts. A digest that differs from the one the
+/// Task's first Attempt recorded is refused, so nothing starts.
+async fn workspace_mcp(
+    workspaces: &workspaces::Workspaces,
+    prepared: Option<&workspaces::PreparedWorkspace>,
+    task: &Task,
+    (client, attempt, token): (
+        &AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
+        &Attempt,
+        &str,
+    ),
+    cancel: &CancellationToken,
+) -> Result<mcp::WorkspaceMcp, Status> {
+    let prepared = prepared.ok_or_else(|| {
+        Status::failed_precondition("Workspace MCP servers need a local Workspace checkout")
+    })?;
+    let snapshot = workspaces
+        .mcp_snapshot(prepared, cancel)
+        .await
+        .map_err(|_| Status::internal("Workspace MCP snapshot failed"))?;
+    let names = supertag_protocol::mcp::workspace_servers(task);
+    let resolved = mcp::WorkspaceMcp::resolve(&snapshot, &names, mcp::workspace_mcp_variable)
+        .map_err(|error| Status::invalid_argument(format!("{error:#}")))?;
+    client
+        .clone()
+        .record_workspace_mcp(
+            request(
+                RecordWorkspaceMcpRequest {
+                    attempt: Some(attempt.inspect()),
+                    record: Some(resolved.record.clone()),
+                },
+                token,
+            )
+            .map_err(|_| Status::internal("Workspace MCP record request failed"))?,
+        )
+        .await?;
+    Ok(resolved)
 }
 
 async fn prepare_context(

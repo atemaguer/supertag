@@ -1,5 +1,8 @@
 mod catalog;
 mod http;
+mod oauth;
+mod stdio;
+mod workspace;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,7 +21,12 @@ use tokio::{sync::Mutex, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
-pub use catalog::McpCatalog;
+pub use catalog::{McpCatalog, McpCatalogEntry};
+pub use oauth::{
+    LoginOptions as McpLoginOptions, McpLogin, McpLoginState, McpLoginStore, login_command,
+    run_login as run_mcp_login,
+};
+pub(crate) use workspace::{WorkspaceMcp, host_variable as workspace_mcp_variable};
 
 const SCHEMA_BYTES: usize = 16 * 1024;
 const DISCOVERY_PAGES: usize = 16;
@@ -62,8 +70,70 @@ pub(crate) struct AttemptMcp {
     secrets: Vec<String>,
 }
 
+/// One server's connection for an Attempt: HTTP, or a stdio process the Worker Host launched.
+enum Session {
+    Http(http::Session),
+    Stdio(stdio::Session),
+}
+
+impl Session {
+    fn open(
+        client: &reqwest::Client,
+        server: &catalog::Server,
+        logins: Option<&McpLoginStore>,
+    ) -> Result<Self, Failure> {
+        Ok(match &server.transport {
+            catalog::Transport::Http(http) => {
+                Self::Http(http::Session::new(client.clone(), http.clone(), logins))
+            }
+            catalog::Transport::Stdio(stdio) => Self::Stdio(stdio::Session::start(stdio)?),
+        })
+    }
+
+    async fn initialize(&mut self) -> Result<(), Failure> {
+        match self {
+            Self::Http(session) => session.initialize().await,
+            Self::Stdio(session) => session.initialize().await,
+        }
+    }
+
+    async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, Failure> {
+        match self {
+            Self::Http(session) => session.rpc(method, params).await,
+            Self::Stdio(session) => session.rpc(method, params).await,
+        }
+    }
+
+    /// Credentials this connection learned: an HTTP session ID and OAuth access tokens.
+    fn credentials(&self) -> Vec<String> {
+        match self {
+            Self::Http(session) => session
+                .session_id()
+                .map(str::to_owned)
+                .into_iter()
+                .chain(session.tokens.iter().cloned())
+                .collect(),
+            Self::Stdio(_) => Vec::new(),
+        }
+    }
+
+    fn unconfirmed_call(&mut self) -> &mut bool {
+        match self {
+            Self::Http(session) => &mut session.unconfirmed_call,
+            Self::Stdio(session) => &mut session.unconfirmed_call,
+        }
+    }
+
+    async fn close(&mut self) {
+        match self {
+            Self::Http(session) => session.close().await,
+            Self::Stdio(session) => session.close().await,
+        }
+    }
+}
+
 struct AttemptServer {
-    session: Arc<Mutex<http::Session>>,
+    session: Arc<Mutex<Session>>,
     resources: BTreeMap<String, Vec<McpResourceRule>>,
     tools: BTreeMap<String, HarnessMcpTool>,
     provider_binding: String,
@@ -76,8 +146,11 @@ pub(crate) struct AdmittedCall {
 }
 
 impl AttemptMcp {
+    /// Opens each granted server: a Workspace server from `workspace`, which this Attempt
+    /// already recorded with the Control Plane, and any other from the host catalog.
     pub(crate) async fn prepare(
         catalog: &McpCatalog,
+        workspace: Option<&WorkspaceMcp>,
         task: &Task,
         cancel: &CancellationToken,
     ) -> Result<Option<Self>, Status> {
@@ -88,36 +161,53 @@ impl AttemptMcp {
         if names.is_empty() {
             return Ok(None);
         }
+        let workspace_names = mcp::workspace_servers(task);
         let mut attempt = Self {
             servers: BTreeMap::new(),
-            secrets: catalog.secrets.clone(),
+            secrets: catalog
+                .secrets
+                .iter()
+                .chain(workspace.iter().flat_map(|workspace| &workspace.secrets))
+                .cloned()
+                .collect(),
         };
         let client = http::client()?;
         let discovery_deadline = Instant::now() + DISCOVERY_TIMEOUT;
         let mut bytes = 0usize;
         let mut count = 0usize;
         for name in names {
-            let Some(config) = catalog.servers.get(name) else {
+            let config = if workspace_names.contains(name) {
+                workspace
+                    .and_then(|workspace| workspace.servers.get(name))
+                    .filter(|config| {
+                        workspace.is_some_and(|workspace| {
+                            workspace.record.servers.contains(&config.capability)
+                        })
+                    })
+            } else {
+                catalog.servers.get(name).filter(|config| {
+                    task.attempt_execution
+                        .as_ref()
+                        .is_some_and(|execution| execution.mcp_servers.contains(&config.capability))
+                })
+            };
+            let Some(config) = config else {
                 attempt.close().await;
                 return Err(Failure::Denied.into());
             };
-            if !task
-                .attempt_execution
-                .as_ref()
-                .is_some_and(|execution| execution.mcp_servers.contains(&config.capability))
-            {
-                attempt.close().await;
-                return Err(Failure::Denied.into());
-            }
-            let mut session = http::Session::new(client.clone(), config.clone());
+            let mut session = match Session::open(&client, config, catalog.logins.as_ref()) {
+                Ok(session) => session,
+                Err(failure) => {
+                    attempt.close().await;
+                    return Err(failure.into());
+                }
+            };
             let tools = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => Err(Failure::Cancelled),
                 result = time::timeout_at(discovery_deadline, discover(&mut session, task, name, config, &attempt.secrets)) => result.unwrap_or(Err(Failure::Unavailable)),
             };
-            if let Some(session_id) = session.session_id() {
-                attempt.secrets.push(session_id.into());
-            }
+            attempt.secrets.extend(session.credentials());
             let tools = match tools {
                 Ok(tools) => tools,
                 Err(failure) => {
@@ -218,10 +308,10 @@ impl AttemptMcp {
     ) -> Result<String, Status> {
         let server = self.servers.get(server).ok_or(Failure::Denied)?;
         let mut session = server.session.lock().await;
-        if session.unconfirmed_call {
+        if *session.unconfirmed_call() {
             return Err(Failure::UnconfirmedCall.into());
         }
-        session.unconfirmed_call = true;
+        *session.unconfirmed_call() = true;
         let result = session
             .rpc("tools/call", json!({"name":tool, "arguments":arguments}))
             .await?;
@@ -247,10 +337,11 @@ impl AttemptMcp {
         if let Some(value) = result.get("structuredContent") {
             sanitized["structuredContent"] = value.clone();
         }
-        if has_secret(&sanitized, &self.secrets) {
+        // A refreshed OAuth access token is as private as the catalog's own credentials.
+        if has_secret(&sanitized, &self.secrets) || has_secret(&sanitized, &session.credentials()) {
             return Err(Failure::InvalidResponse.into());
         }
-        session.unconfirmed_call = false;
+        *session.unconfirmed_call() = false;
         Ok(sanitized.to_string())
     }
 
@@ -259,7 +350,8 @@ impl AttemptMcp {
         for server in self.servers.values() {
             let session = server.session.clone();
             closing.spawn(async move {
-                let _ = tokio::time::timeout(Duration::from_secs(3), async {
+                // A stdio server gets its grace period before SIGKILL.
+                let _ = tokio::time::timeout(Duration::from_secs(5), async {
                     session.lock().await.close().await;
                 })
                 .await;
@@ -281,7 +373,7 @@ fn matches<'a>(
 }
 
 async fn discover(
-    session: &mut http::Session,
+    session: &mut Session,
     task: &Task,
     name: &str,
     config: &catalog::Server,
@@ -329,11 +421,7 @@ async fn discover(
             if input_schema_json.len() > SCHEMA_BYTES || description.len() > 2048 {
                 return Err(Failure::ResponseTooLarge);
             }
-            if has_secret(definition, secrets)
-                || session
-                    .session_id()
-                    .is_some_and(|id| has_secret(definition, &[id.into()]))
-            {
+            if has_secret(definition, secrets) || has_secret(definition, &session.credentials()) {
                 return Err(Failure::InvalidResponse);
             }
             tools.insert(
@@ -373,5 +461,73 @@ fn has_secret(value: &Value, secrets: &[String]) -> bool {
             .iter()
             .any(|(key, value)| contains_secret(key, secrets) || has_secret(value, secrets)),
         _ => false,
+    }
+}
+
+/// A raw loopback HTTP server for tests: answers each request with the next canned response
+/// and reports every request as `METHOD PATH`, its headers, and its body.
+#[cfg(test)]
+pub(super) mod test_http {
+    use std::net::SocketAddr;
+
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+        net::TcpListener,
+        task::JoinHandle,
+    };
+
+    pub(crate) struct Request {
+        pub(crate) line: String,
+        pub(crate) headers: Vec<String>,
+        pub(crate) body: String,
+    }
+
+    pub(crate) async fn serve(
+        responses: Vec<(u16, &'static str, String)>,
+    ) -> (SocketAddr, JoinHandle<Vec<Request>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for (status, content_type, body) in responses {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = BufReader::new(stream);
+                let mut line = String::new();
+                stream.read_line(&mut line).await.unwrap();
+                let mut headers = Vec::new();
+                let mut length = 0;
+                loop {
+                    let mut header = String::new();
+                    stream.read_line(&mut header).await.unwrap();
+                    if header == "\r\n" {
+                        break;
+                    }
+                    let lower = header.to_ascii_lowercase();
+                    if let Some(value) = lower.strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    headers.push(lower.trim().to_owned());
+                }
+                let mut request_body = vec![0u8; length];
+                stream.read_exact(&mut request_body).await.unwrap();
+                requests.push(Request {
+                    line: line.trim().to_owned(),
+                    headers,
+                    body: String::from_utf8(request_body).unwrap(),
+                });
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+        (address, task)
     }
 }

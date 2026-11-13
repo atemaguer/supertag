@@ -55,16 +55,24 @@ impl Store {
         )
         .await?;
         let task = task_row(&owned)?;
-        let server = task
+        let claude = task
             .attempt_execution
             .as_ref()
             .filter(|execution| execution.harness_kind() == HarnessKind::ClaudeCode)
-            .and_then(|execution| {
-                execution
-                    .mcp_servers
-                    .iter()
-                    .find(|server| server.name == input.server)
-            })
+            .ok_or(StoreError::PermissionDenied)?;
+        // A Workspace server is the one this Attempt recorded before it started; the host
+        // catalog cannot supply a server of the same name for this Task.
+        let recorded = if mcp::workspace_servers(&task).contains(input.server.as_str()) {
+            workspace_record_in(&mut tx, &attempt.task_id, &attempt.attempt_id)
+                .await?
+                .ok_or(StoreError::PermissionDenied)?
+                .servers
+        } else {
+            claude.mcp_servers.clone()
+        };
+        let server = recorded
+            .iter()
+            .find(|server| server.name == input.server)
             .filter(|server| server.provider_binding.as_deref() == Some(&input.provider_binding))
             .ok_or(StoreError::PermissionDenied)?;
         let rules = server
@@ -275,6 +283,116 @@ impl Store {
     }
 }
 
+async fn workspace_record_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    task_id: &str,
+    attempt_id: &str,
+) -> Result<Option<WorkspaceMcpRecord>> {
+    let record: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT record FROM supertag_v2_workspace_mcp_attempts WHERE task_id=$1 AND attempt_id=$2",
+    )
+    .bind(task_id)
+    .bind(attempt_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    record
+        .map(|bytes| crate::policy::decode::<WorkspaceMcpRecord>(&bytes))
+        .transpose()
+}
+
+fn valid_workspace_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64 && hex.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+impl Store {
+    /// Records the Workspace MCP servers one Attempt resolved, before any of them starts. The
+    /// first recorded digest of a Task binds every later Attempt: a retry whose selected
+    /// `.mcp.json` entries differ is refused, so the Worker Host starts none of them.
+    pub async fn record_workspace_mcp(
+        &self,
+        host: &HostAuthority,
+        input: &RecordWorkspaceMcpRequest,
+    ) -> Result<()> {
+        let attempt = owned_attempt(&input.attempt)?;
+        let mut record = input
+            .record
+            .clone()
+            .ok_or_else(|| invalid("Workspace MCP record is required"))?;
+        if !valid_workspace_digest(&record.digest)
+            || !mcp::normalize_capabilities(&mut record.servers)
+            || record.servers.iter().any(|server| {
+                server.provider_binding.is_none()
+                    || !server.mapped_tools.is_empty()
+                    || !server.resource_bindings.is_empty()
+            })
+        {
+            return Err(invalid("invalid Workspace MCP record"));
+        }
+        let (mut tx, _) = self.write().await?;
+        let now = self.execution_now_ms();
+        let owned = owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        let task = task_row(&owned)?;
+        if task.state() != TaskState::Running || !lease_is_live(&owned, now)? {
+            return Err(StoreError::FailedPrecondition(
+                "Workspace MCP servers are recorded by a live running Attempt".into(),
+            ));
+        }
+        let selected = mcp::workspace_servers(&task);
+        if task
+            .attempt_execution
+            .as_ref()
+            .is_none_or(|execution| execution.harness_kind() != HarnessKind::ClaudeCode)
+            || selected.is_empty()
+            || !record
+                .servers
+                .iter()
+                .map(|server| server.name.as_str())
+                .eq(selected.iter().copied())
+        {
+            return Err(StoreError::PermissionDenied);
+        }
+        if let Some(prior) =
+            workspace_record_in(&mut tx, &attempt.task_id, &attempt.attempt_id).await?
+        {
+            if prior != record {
+                return Err(StoreError::Conflict(
+                    "this Attempt already recorded different Workspace MCP servers".into(),
+                ));
+            }
+            return Ok(());
+        }
+        let pinned: Option<String> = sqlx::query_scalar(
+            "SELECT digest FROM supertag_v2_workspace_mcp_attempts WHERE task_id=$1 LIMIT 1",
+        )
+        .bind(&attempt.task_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if pinned.is_some_and(|pinned| pinned != record.digest) {
+            return Err(StoreError::FailedPrecondition(
+                "Workspace MCP servers changed since this Task's first Task Attempt; SuperTag started none of them. Start a new Task to use the changed configuration".into(),
+            ));
+        }
+        sqlx::query("INSERT INTO supertag_v2_workspace_mcp_attempts(task_id,attempt_id,digest,record) VALUES($1,$2,$3,$4)")
+            .bind(&attempt.task_id)
+            .bind(&attempt.attempt_id)
+            .bind(&record.digest)
+            .bind(prost::Message::encode_to_vec(&record))
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
 pub(crate) async fn require_no_pending_approval_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     attempt_id: &str,
@@ -322,5 +440,16 @@ impl attempt_mcp_effects_server::AttemptMcpEffects for ControlPlane {
             .settle_mcp_effect(&host, request.get_ref())
             .await?;
         Ok(Response::new(SettleMcpEffectResponse {}))
+    }
+
+    async fn record_workspace_mcp(
+        &self,
+        request: Request<RecordWorkspaceMcpRequest>,
+    ) -> std::result::Result<Response<RecordWorkspaceMcpResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        self.store
+            .record_workspace_mcp(&host, request.get_ref())
+            .await?;
+        Ok(Response::new(RecordWorkspaceMcpResponse {}))
     }
 }

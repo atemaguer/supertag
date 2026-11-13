@@ -14,6 +14,7 @@ mod local;
 mod local_config;
 mod mailbox_grants;
 mod manifests;
+mod mcp;
 mod network;
 mod node_bridges;
 mod objectives;
@@ -186,6 +187,11 @@ enum Command {
         connection: Connection,
         #[command(subcommand)]
         command: inbox::InboxCommand,
+    },
+    /// List this host's catalog MCP servers and log in to OAuth servers.
+    Mcp {
+        #[command(subcommand)]
+        command: mcp::McpCommand,
     },
     /// Read the messages sent to or from a Tag.
     Mailbox {
@@ -380,13 +386,17 @@ enum Command {
             allow_hyphen_values = true
         )]
         modal_workspace_provider_arg: Vec<std::ffi::OsString>,
-        /// Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+        /// Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
         #[arg(
             long,
             conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"],
-            long_help = r#"Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+            long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
 
-Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
+Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
+
+A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+
+The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
@@ -510,6 +520,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts.
         #[arg(long, requires = "workspace_base")]
         workspace_mounts: Option<PathBuf>,
+        /// A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read
+        /// from the Task's base commit. May be repeated.
+        #[arg(long = "workspace-mcp", requires = "workspace_id")]
+        workspace_mcp: Vec<String>,
         /// Required harness for Tasks accepted from this Tag.
         #[arg(long)]
         harness: Option<Harness>,
@@ -782,6 +796,7 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => inbox::run(connection, command).await?,
+        Command::Mcp { command } => mcp::run(command).await?,
         Command::MailboxGrants {
             connection,
             command,
@@ -1059,7 +1074,10 @@ async fn run(command: Command) -> Result<()> {
                 execution_profile.declared_task_outputs = true;
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
-            let mcp_catalog = supertag_worker_host::McpCatalog::load(mcp_catalog.as_deref())?;
+            let mcp_catalog = supertag_worker_host::McpCatalog::load(
+                mcp_catalog.as_deref(),
+                supertag_worker_host::McpLoginStore::default_location().ok(),
+            )?;
             execution_profile.mcp_servers = mcp_catalog.capabilities();
             let shared_execution = if let Some((endpoint, environment)) =
                 shared_execution_endpoint.zip(shared_execution_environment)
@@ -1292,6 +1310,7 @@ async fn run(command: Command) -> Result<()> {
             workspace_id,
             workspace_base,
             workspace_mounts,
+            workspace_mcp,
             harness,
             models,
             efforts,
@@ -1303,6 +1322,7 @@ async fn run(command: Command) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
+                mcp_servers: workspace_mcp,
                 workspace_id,
                 base_commit: workspace_base.unwrap_or_default(),
                 github_source: None,
@@ -2593,6 +2613,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
         "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
+        "workspace_mcp_servers": tag.workspace.as_ref().map(|spec| &spec.mcp_servers),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
         "runs_on": tag.runs_on,
@@ -2612,6 +2633,7 @@ fn task_json(task: &Task) -> serde_json::Value {
         "workspace": task.workspace.as_ref().map(|spec| json!({
             "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
             "mounts": workspace_mounts::describe(&spec.mounts),
+            "mcp_servers": spec.mcp_servers,
             "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
         })),
         "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),

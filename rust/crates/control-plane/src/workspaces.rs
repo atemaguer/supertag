@@ -219,10 +219,30 @@ pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> 
             base_commit,
             github_source,
             mounts: crate::workspace_mounts::decode(row.try_get("workspace_mounts")?)?,
+            mcp_servers: decode_mcp_servers(row.try_get("workspace_mcp_servers")?)?,
         })),
         (None, None) => Ok(None),
         _ => Err(sqlx::Error::Protocol("incomplete stored workspace policy".into()).into()),
     }
+}
+
+/// A Workspace's selected `.mcp.json` servers as stored: absent when it selects none.
+pub(crate) fn encode_mcp_servers(workspace: Option<&WorkspaceSpec>) -> Option<String> {
+    workspace
+        .filter(|spec| !spec.mcp_servers.is_empty())
+        .map(|spec| serde_json::to_string(&spec.mcp_servers).expect("names serialize"))
+}
+
+fn decode_mcp_servers(value: Option<String>) -> Result<Vec<String>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let mut names: Vec<String> = serde_json::from_str(&value)?;
+    let stored = names.clone();
+    if !supertag_protocol::mcp::normalize_workspace_servers(&mut names) || names != stored {
+        return Err(sqlx::Error::Protocol("invalid stored Workspace MCP servers".into()).into());
+    }
+    Ok(names)
 }
 
 pub(crate) fn delivery_from_row(row: &AnyRow) -> Result<Option<WorkspaceDeliveryReference>> {

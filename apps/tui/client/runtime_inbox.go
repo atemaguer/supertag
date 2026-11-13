@@ -53,6 +53,7 @@ func runtimeInboxItem(item *v2.InboxItem) *operatorv1.InboxItem {
 		v2.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:  operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT,
 		v2.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:   operatorv1.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION,
 		v2.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:         operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL,
+		v2.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:        operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN,
 	}[item.GetKind()]
 	out := &operatorv1.InboxItem{
 		Key: item.GetKey(), Occurrence: item.GetOccurrence(), Kind: kind,

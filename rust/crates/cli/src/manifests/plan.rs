@@ -702,7 +702,13 @@ impl<'a> Catalog<'a> {
                     "invalid Workspace commit"
                 );
             }
+            let mut mcp_servers = workspace.mcp;
+            ensure!(
+                supertag_protocol::mcp::normalize_workspace_servers(&mut mcp_servers),
+                "invalid Workspace MCP server name"
+            );
             value.workspace = Some(WorkspaceSpec {
+                mcp_servers,
                 mounts: vec![],
                 workspace_id: workspace.id,
                 base_commit,

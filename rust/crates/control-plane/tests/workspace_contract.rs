@@ -112,6 +112,7 @@ async fn exercise(url: &str) {
     let owner = support::register_host(&store, "primary").await;
     let other = support::register_host(&store, "secondary").await;
     let spec = WorkspaceSpec {
+        mcp_servers: vec![],
         mounts: vec![],
         workspace_id: REPOSITORY.into(),
         base_commit: BASE.into(),

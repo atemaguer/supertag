@@ -15,11 +15,22 @@ pub(super) fn normalize_profile(
     if !supertag_protocol::mcp::normalize_capabilities(&mut profile.mcp_servers) {
         return Err(invalid("invalid Worker Host MCP server capabilities"));
     }
+    if !supertag_protocol::mcp::normalize_workspace_servers(&mut profile.mcp_login_servers)
+        || profile.mcp_login_servers.iter().any(|name| {
+            profile
+                .mcp_servers
+                .iter()
+                .any(|server| &server.name == name)
+        })
+    {
+        return Err(invalid("invalid Worker Host MCP login states"));
+    }
     if let Some(shared) = profile.shared_execution.as_mut()
         && (!supertag_protocol::shared_execution::normalize(shared)
             || profile.remote_file_workspace
             || profile.allow_unsandboxed_commands
-            || !profile.mcp_servers.is_empty())
+            || !profile.mcp_servers.is_empty()
+            || !profile.mcp_login_servers.is_empty())
     {
         return Err(invalid("invalid shared execution Worker Host capabilities"));
     }

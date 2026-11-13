@@ -4,6 +4,8 @@ mod prerequisites;
 #[path = "support/database.rs"]
 mod database;
 
+#[path = "support/mcp_runtime.rs"]
+mod mcp_runtime;
 #[path = "support/python_artifacts_runtime.rs"]
 mod python_artifacts_runtime;
 #[path = "support/task_artifact_inputs_runtime.rs"]
@@ -103,6 +105,9 @@ database_tests! {
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
     python_agents_sdk_restores_session_on_a_fresh_host;
@@ -287,11 +292,23 @@ impl LanguageServices {
     }
 
     fn worker(&self, harness: &str, directory: &Path, runtime: &Path, entry: &Path) -> Command {
+        let mut host = self.serving_worker(harness, directory, runtime, entry);
+        host.arg("--once");
+        host
+    }
+
+    /// A Worker Host that keeps serving until it is stopped.
+    fn serving_worker(
+        &self,
+        harness: &str,
+        directory: &Path,
+        runtime: &Path,
+        entry: &Path,
+    ) -> Command {
         let mut host = command(&[
             "worker-host",
             "--gateway",
             &self.public,
-            "--once",
             "--harness",
             harness,
             "--harness-model",
@@ -542,6 +559,246 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     assert!(exact["consumed_at_ms"].is_i64());
     provider.kill().await?;
     services.stop().await
+}
+
+async fn claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_stdio_mcp(directory.path(), &database).await
+}
+
+/// The Worker Host launches a stdio MCP server for each Attempt with only its catalog `env`,
+/// exposes only granted tools, holds the gated call for exact approval, withholds a result that
+/// reflects the server's credential, and stops the server when the Attempt ends.
+async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
+    let node =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let native = claude_fixture(directory)?;
+    let services = LanguageServices::start(directory, database).await?;
+    let journal = directory.join("mcp-stdio.jsonl");
+    let catalog = directory.join("mcp-catalog.json");
+    let mapping = serde_json::json!([{
+        "prefix":"repository:", "separator":"/",
+        "components":[{"arguments":["owner","org"]},{"arguments":["repo"]}]
+    }]);
+    let config = serde_json::json!({"version":1,"servers":[{
+        "name":"catalog",
+        "command":[
+            Path::new(&node).to_str().context("Node path")?,
+            repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs")?
+                .to_str()
+                .context("fixture path")?,
+            journal.to_str().context("journal path")?,
+        ],
+        "env":{"CATALOG_TOKEN":"CATALOG_MCP_AUTH"},
+        "resources":{"tools":{"list_docs":mapping,"publish":mapping}}
+    }]});
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&catalog)?
+        .write_all(config.to_string().as_bytes())?;
+    let permissions = directory.join("mcp-grants.json");
+    std::fs::write(&permissions, serde_json::json!({
+        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "permissions":[
+            {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
+            {"target":"mcp","action":"catalog/publish"},
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+        ]
+    }).to_string())?;
+    let role = directory.join("mcp-role.json");
+    std::fs::write(&role, serde_json::json!({
+        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+    }).to_string())?;
+    services
+        .operator(&[
+            "put-tag",
+            "mcp-reader",
+            "--harness",
+            "claude-code",
+            "--instructions",
+            "Read the scoped catalog.",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "policy",
+            "put",
+            "permission-set",
+            permissions.to_str().context("permission set path")?,
+        ])
+        .await?;
+    services
+        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .await?;
+    services
+        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .await?;
+    let task = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "mcp-reader",
+            "--session",
+            "mcp",
+            "scoped-http-mcp",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID")?;
+    let configure = |host: &mut Command| {
+        host.arg("--claude-path")
+            .arg(&native)
+            .arg("--mcp-catalog")
+            .arg(&catalog)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key")
+            .env("CATALOG_MCP_AUTH", "synthetic-catalog-credential")
+            .env("WORKER_ONLY_VARIABLE", "worker-only-value");
+    };
+    let catalog_worker = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.join(state),
+            Path::new(&node),
+            &entry,
+        );
+        configure(&mut host);
+        host
+    };
+    success(catalog_worker("catalog-host")).await?;
+    let completed = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
+    assert_eq!(completed["result"], "fixture used one scoped MCP tool");
+    let receipts = std::fs::read_to_string(&journal)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(
+        receipts,
+        [
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs"}}),
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs","mirror":true}}),
+            serde_json::json!({"closed":true}),
+        ]
+    );
+    let waiting = services
+        .operator(&["inbox", "list", "--kind", "approval"])
+        .await?;
+    let approvals = waiting["items"].as_array().context("MCP approvals")?;
+    assert_eq!(approvals.len(), 2);
+    let id_for = |resource| -> Result<&str> {
+        approvals
+            .iter()
+            .find(|item| item["approval"]["resource"] == resource)
+            .and_then(|item| item["approval"]["approval_id"].as_str())
+            .context("MCP approval for the expected resource")
+    };
+    let missing_id = id_for("")?;
+    let exact_id = id_for("repository:acme/docs")?;
+    services
+        .operator(&[
+            "inbox",
+            "deny",
+            missing_id,
+            "--operation-id",
+            "reject-missing-stdio-mcp",
+            "--reason",
+            "The repository was not specified.",
+        ])
+        .await?;
+    let decision = services
+        .operator(&[
+            "inbox",
+            "approve",
+            exact_id,
+            "--operation-id",
+            "approve-exact-stdio-mcp",
+        ])
+        .await?;
+    let resumed_id = decision["continuation_task_id"]
+        .as_str()
+        .context("MCP continuation Task")?;
+    // This Worker Host keeps running after the Attempt, so a stopped server proves the Attempt
+    // closed it, not that the host exited.
+    let mut serving = services.serving_worker(
+        "claude-code",
+        &directory.join("catalog-resume"),
+        Path::new(&node),
+        &entry,
+    );
+    configure(&mut serving);
+    let mut serving = serving.stderr(Stdio::null()).spawn()?;
+    let resumed = wait_for_state(&services, resumed_id, "TASK_STATE_SUCCEEDED").await?;
+    assert_eq!(
+        resumed["result"],
+        "fixture resumed and dispatched one approved MCP effect"
+    );
+    let effects = std::fs::read_to_string(&journal)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(effects.len(), 5);
+    assert_eq!(
+        effects[3],
+        serde_json::json!({"tool":"publish","arguments":{"owner":"acme","repo":"docs"}})
+    );
+    assert_eq!(effects[4], serde_json::json!({"closed":true}));
+    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    assert!(exact["consumed_at_ms"].is_i64());
+    // One launch per Attempt, each with only the catalog env and the minimal default, and each
+    // stopped when its Attempt ended.
+    let prefix = "mcp-stdio.jsonl.";
+    let mut launches = 0;
+    for entry in std::fs::read_dir(directory)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with(prefix) && name.ends_with(".launch")) {
+            continue;
+        }
+        launches += 1;
+        let launch: Value = serde_json::from_slice(&std::fs::read(directory.join(&name))?)?;
+        let environment = launch["env"].as_object().context("launch environment")?;
+        assert_eq!(environment["CATALOG_TOKEN"], "synthetic-catalog-credential");
+        for key in environment.keys() {
+            assert!(
+                matches!(
+                    key.as_str(),
+                    "CATALOG_TOKEN" | "PATH" | "HOME" | "__CF_USER_TEXT_ENCODING"
+                ),
+                "unexpected stdio MCP variable {key}"
+            );
+        }
+        let pid = launch["pid"].as_i64().context("launch pid")?;
+        // SAFETY: signal 0 only checks for the process.
+        assert!(
+            unsafe { libc::kill(pid as libc::pid_t, 0) } != 0,
+            "stdio MCP server outlived its Attempt"
+        );
+    }
+    assert_eq!(launches, 2);
+    assert!(
+        serving.try_wait()?.is_none(),
+        "the Worker Host must still be running"
+    );
+    serving.kill().await?;
+    services.stop().await
+}
+
+/// Polls a Task until it reaches `state`.
+async fn wait_for_state(services: &LanguageServices, task_id: &str, state: &str) -> Result<Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let task = services.operator(&["get-task", task_id]).await?;
+        if task["state"] == state {
+            return Ok(task);
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "Task {task_id} did not reach {state}: {task}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) -> Result<()> {

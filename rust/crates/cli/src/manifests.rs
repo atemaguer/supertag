@@ -98,6 +98,9 @@ struct WorkspaceSpecInput {
 struct WorkspaceBinding {
     id: String,
     base_commit: Option<String>,
+    /// Servers the Workspace's `.mcp.json` declares that the Tag's Tasks may use.
+    #[serde(default)]
+    mcp: Vec<String>,
 }
 
 #[derive(Deserialize)]

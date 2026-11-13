@@ -281,7 +281,14 @@ impl Workspace {
             ),
             None => atomic_json(&config_path, &record)?,
         }
-        for name in ["records", "sessions", "checkouts", "artifacts", "temporary"] {
+        for name in [
+            "records",
+            "sessions",
+            "checkouts",
+            "artifacts",
+            "temporary",
+            "mcp",
+        ] {
             paths::create_private_root(&root.join(name))?;
         }
         Ok(Self {
@@ -648,6 +655,48 @@ impl Workspace {
             .await?;
         repository.sync()?;
         Ok(())
+    }
+
+    /// Materializes the base commit, exactly as pinned, in a Worker-owned directory outside every
+    /// Task checkout, and returns it. A Workspace MCP server is read from and runs in it, so
+    /// nothing the harness writes in its checkout changes what the Worker Host launches. Each call
+    /// recreates the snapshot from Git objects.
+    pub async fn mcp_snapshot(
+        &self,
+        task_id: &str,
+        attempt_id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<PathBuf> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        validate_identity(task_id)?;
+        validate_identity(attempt_id)?;
+        let path = self.mcp_snapshot_path(task_id, attempt_id);
+        if fs::symlink_metadata(&path).is_ok() {
+            paths::remove_owned_directory(&path)?;
+        }
+        let repository = self.repository(cancel).await?;
+        let base = &self.inner.config.base_commit;
+        let entries = repository.tree(base, cancel).await?;
+        repository.checkout(&path, base, &entries, cancel).await?;
+        paths::sync_tree(&path)?;
+        Ok(path)
+    }
+
+    /// Removes an Attempt's MCP snapshot, if any.
+    pub fn remove_mcp_snapshot(&self, task_id: &str, attempt_id: &str) -> Result<()> {
+        let path = self.mcp_snapshot_path(task_id, attempt_id);
+        if fs::symlink_metadata(&path).is_ok() {
+            paths::remove_owned_directory(&path)?;
+        }
+        Ok(())
+    }
+
+    fn mcp_snapshot_path(&self, task_id: &str, attempt_id: &str) -> PathBuf {
+        self.inner
+            .root
+            .join("mcp")
+            .join(identity(task_id, attempt_id))
     }
 
     /// Remove only a finalized working copy. Immutable delivery artifacts remain available.

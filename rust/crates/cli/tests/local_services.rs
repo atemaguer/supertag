@@ -1590,6 +1590,7 @@ async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) ->
                     base_commit: base.clone(),
                     mounts: vec![],
                     github_source: None,
+                    mcp_servers: vec![],
                 }),
                 ..Default::default()
             },

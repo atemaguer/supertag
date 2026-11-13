@@ -323,6 +323,7 @@ async fn contract(url: &str) {
         version: 1,
     }];
     let profile = HarnessExecutionProfile {
+        mcp_login_servers: vec![],
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: vec!["openai/fixture-model".into()],

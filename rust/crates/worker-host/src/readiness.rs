@@ -142,7 +142,7 @@ pub(crate) struct Presence {
     token: String,
     harness: i32,
     workspaces: Vec<String>,
-    profile: HarnessExecutionProfile,
+    profile: Profile,
     disk: DiskSpaceSource,
     labels: Vec<String>,
     reported: watch::Receiver<bool>,
@@ -203,6 +203,9 @@ pub(crate) fn host_labels(declared: &[String]) -> Result<Vec<String>> {
 /// The Control Plane's limit on reported labels.
 const MAX_LABELS: usize = 64;
 
+/// The execution profile to report now; MCP login states change while the host runs.
+pub(crate) type Profile = Arc<dyn Fn() -> HarnessExecutionProfile + Send + Sync>;
+
 impl Presence {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn start(
@@ -212,7 +215,7 @@ impl Presence {
         token: String,
         harness: i32,
         workspaces: Vec<String>,
-        (profile, labels): (HarnessExecutionProfile, Vec<String>),
+        (profile, labels): (Profile, Vec<String>),
         shutdown: CancellationToken,
     ) -> Self {
         let cancel = shutdown.child_token();
@@ -251,7 +254,8 @@ impl Presence {
                         return Err(error);
                     }
                 };
-                let report = state.report(sequence, harness, &workspaces, &profile, &disk, &labels);
+                let report =
+                    state.report(sequence, harness, &workspaces, &profile(), &disk, &labels);
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
@@ -300,7 +304,7 @@ impl Presence {
             self.journal.next_report_sequence()?,
             self.harness,
             &self.workspaces,
-            &self.profile,
+            &(self.profile)(),
             &self.disk,
             &self.labels,
         );

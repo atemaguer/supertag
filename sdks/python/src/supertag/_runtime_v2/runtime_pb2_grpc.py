@@ -6738,6 +6738,11 @@ class AttemptMcpEffectsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.FromString,
                 _registered_method=True)
+        self.RecordWorkspaceMcp = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMcpEffects/RecordWorkspaceMcp',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMcpEffectsServicer:
@@ -6755,6 +6760,14 @@ class AttemptMcpEffectsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RecordWorkspaceMcp(self, request, context):
+        """Records the Workspace MCP servers an Attempt resolved, before any of them starts. The first
+        recorded digest of a Task binds every later Attempt of that Task.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptMcpEffectsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -6767,6 +6780,11 @@ def add_AttemptMcpEffectsServicer_to_server(servicer, server):
                     servicer.Settle,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.SerializeToString,
+            ),
+            'RecordWorkspaceMcp': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordWorkspaceMcp,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -6823,6 +6841,33 @@ class AttemptMcpEffects:
             '/supertag.runtime.v2.AttemptMcpEffects/Settle',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleMcpEffectResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecordWorkspaceMcp(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMcpEffects/RecordWorkspaceMcp',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RecordWorkspaceMcpResponse.FromString,
             options,
             channel_credentials,
             insecure,
