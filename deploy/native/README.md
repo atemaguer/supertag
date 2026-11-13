@@ -1,0 +1,157 @@
+# Native service deployments
+
+Definitions for the native SuperTag services. These are separate from the TypeScript Control
+Plane definitions in the parent directory, which stay until the cutover.
+
+A deployment runs three roles:
+
+| Role | Reachability | State |
+| --- | --- | --- |
+| Control Plane | Private network only, port 3435, mutual TLS | PostgreSQL |
+| Gateway | Public native gRPC with its own TLS certificate, container port 3434 | Volume at `/var/lib/supertag`: checkpoints and the file credential vault |
+| Worker Hosts | Outbound only: each connects to the Gateway | The host's own state directory |
+
+The Gateway terminates TLS itself and speaks gRPC over HTTP/2, so a platform must pass raw TCP to
+it (TLS passthrough). A platform whose public ingress terminates TLS or converts requests to
+HTTP/1.1 cannot host the Gateway.
+
+| Platform | Definitions | Public Gateway path | Private Control Plane path |
+| --- | --- | --- | --- |
+| Docker Compose | [`../compose.native.yaml`](../compose.native.yaml), [`../compose.native.ingress.yaml`](../compose.native.ingress.yaml) | Published port on the Gateway only | Internal Compose network, `control-plane:3435` |
+| Fly.io | [`fly/control-plane.toml`](fly/control-plane.toml), [`fly/gateway.toml`](fly/gateway.toml) | TCP service on 443 with `handlers = []` | 6PN, `supertag-control-plane.internal:3435` |
+| Railway | [`railway/control-plane.json`](railway/control-plane.json), [`railway/gateway.json`](railway/gateway.json) | TCP Proxy to port 3434 | Private network, `supertag-control-plane.railway.internal:3435` |
+
+Render, Cloudflare, and Modal cannot host these roles; see
+[Platforms that cannot host the services](#platforms-that-cannot-host-the-services).
+
+## Configure, check, and verify
+
+```sh
+export SUPERTAG_DATABASE_URL='postgresql://...'   # not needed for Compose
+supertag setup deployment fly --output supertag-deployment
+supertag check deployment fly --directory supertag-deployment
+# deploy, then:
+SUPERTAG_SERVER_CA_FILE=ca.pem supertag verify deployment https://gateway.example.com \
+  --env-file supertag-deployment/operator.env --require-ready
+```
+
+Setup writes a new private directory and never replaces one. Each file is mode 0600:
+
+| File | For | Holds |
+| --- | --- | --- |
+| `control-plane.env` | Control Plane | Database URL and Gateway token |
+| `gateway.env` | Gateway | Gateway token, operator token, state directory, credential vault settings |
+| `operator.env` | Your machine | Operator token, for `verify deployment` and operator commands |
+| `postgres.env` | Compose PostgreSQL | Generated database password (Compose only, when no database URL is supplied) |
+
+Only the Control Plane holds the database credential. Setup generates the Gateway and operator
+tokens unless `SUPERTAG_GATEWAY_TOKEN` or `SUPERTAG_OPERATOR_TOKEN` is set. It reads
+`SUPERTAG_CREDENTIAL_VAULT=vault` and `VAULT_*` to keep connector credentials in HashiCorp Vault
+instead of the Gateway's volume. Without a terminal, or with `--non-interactive`, a missing value
+fails instead of prompting.
+
+`verify deployment` connects only to the public Gateway. It checks gRPC health, that an
+anonymous operator request and an invalid Worker Host credential are refused, and that the
+operator token works through the Gateway's private hop to the Control Plane. Readiness means at
+least one Worker Host is ready; `--require-ready` makes that required. It registers no Worker
+Host and runs no Task.
+
+Worker Hosts are not part of setup. Create an Auth Key with `supertag create-auth-key`, then run
+`supertag enroll-host` and `supertag worker-host` on each host against the Gateway's URL.
+
+## TLS files
+
+Every container reads its TLS files from `/run/supertag-tls`:
+
+| File | Control Plane | Gateway |
+| --- | --- | --- |
+| `server.pem`, `server.key` | Certificate naming its private host | Certificate naming the public host |
+| `client-ca.pem` | CA that issued the Gateway's client certificate | Optional: require client certificates from operators and Worker Hosts |
+| `server-ca.pem` | CA for its own health probe | CA that issued the Control Plane's certificate |
+| `client.pem`, `client.key` | Identity for its own health probe | Identity it presents to the Control Plane |
+
+Compose mounts one directory per role there. Compose's Gateway health probe connects to
+`https://gateway:3434` and trusts `server-ca.pem`, so with Compose the Gateway certificate must
+also name `gateway` and chain to that CA. To use a certificate from a public authority, replace the
+Gateway health check in an override file.
+
+Fly.io and Railway use the image target `hosted` of
+[`../docker/rust-service.Dockerfile`](../docker/rust-service.Dockerfile). Its
+[entrypoint](../docker/rust-hosted-entrypoint.sh) starts as root, gives the root-owned volume to
+UID 10001, writes each `SUPERTAG_<NAME>_PEM` secret to the file above, and then runs the service
+as UID 10001 with no capabilities. Set these secrets per role:
+
+| Secret | Control Plane | Gateway |
+| --- | --- | --- |
+| `SUPERTAG_TLS_CERT_PEM`, `SUPERTAG_TLS_KEY_PEM` | Required | Required |
+| `SUPERTAG_TLS_CLIENT_CA_PEM` | Required | Optional |
+| `SUPERTAG_SERVER_CA_PEM`, `SUPERTAG_CLIENT_CERT_PEM`, `SUPERTAG_CLIENT_KEY_PEM` | Optional | Required |
+
+## Docker Compose
+
+```sh
+supertag setup deployment compose --output supertag-deployment
+export SUPERTAG_CONTROL_IMAGE=... SUPERTAG_GATEWAY_IMAGE=...
+export SUPERTAG_POSTGRES_ENV_FILE=$PWD/supertag-deployment/postgres.env
+export SUPERTAG_CONTROL_ENV_FILE=$PWD/supertag-deployment/control-plane.env
+export SUPERTAG_GATEWAY_ENV_FILE=$PWD/supertag-deployment/gateway.env
+export SUPERTAG_CONTROL_TLS_DIRECTORY=... SUPERTAG_GATEWAY_TLS_DIRECTORY=...
+export SUPERTAG_GATEWAY_PUBLISH=0.0.0.0:443
+docker compose -f deploy/compose.native.yaml -f deploy/compose.native.ingress.yaml up -d --wait
+```
+
+Without the ingress file nothing is published.
+
+## Fly.io
+
+Create two apps, `supertag-control-plane` and `supertag-gateway`, in one organization. Give the
+Control Plane no public IP. Create the Gateway's volume `supertag_gateway_state` and allocate its
+public IP. Then:
+
+```sh
+supertag setup deployment fly --output supertag-deployment
+fly secrets import --app supertag-control-plane < supertag-deployment/control-plane.env
+fly secrets import --app supertag-gateway < supertag-deployment/gateway.env
+fly secrets set --app supertag-control-plane SUPERTAG_TLS_CERT_PEM="$(cat control-plane.pem)" ...
+fly secrets set --app supertag-gateway SUPERTAG_TLS_CERT_PEM="$(cat gateway.pem)" ...
+fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
+fly deploy --config deploy/native/fly/gateway.toml --image IMAGE@sha256:DIGEST
+```
+
+Use the `hosted` image for both apps. Run one Machine per app. If you rename the Control Plane
+app, change `--control-plane` in `fly/gateway.toml` and its certificate name to match.
+
+## Railway
+
+Create two services from the `hosted` image in one environment, named `supertag-control-plane` and
+`supertag-gateway`. Set each service's config file to its JSON definition here. The definition's
+start command replaces the image entrypoint, so it names the entrypoint itself. Paste the matching
+env file into each service's variables and add its PEM variables. Attach a volume at
+`/var/lib/supertag` to the Gateway. Enable a TCP Proxy on the Gateway with target port 3434, and
+use the proxy's host and port as the Gateway URL; its certificate must name that host or a custom
+domain that points to it. The Control Plane has no public networking.
+
+## Platforms that cannot host the services
+
+These are proposed for removal from the native deployment menu. Their TypeScript definitions stay
+until the cutover.
+
+- **Render.** Public web services receive only HTTP through Render's proxy, which terminates TLS
+  and does not deliver gRPC over HTTP/2 to the service, and Render offers no public raw TCP. The
+  Gateway cannot be public there. A private service could host the Control Plane, but its Gateway
+  would then need to run on Render as well.
+- **Cloudflare.** A Container receives requests only through a Worker and Durable Object `fetch`
+  over HTTP. There is no TLS passthrough to the Gateway and no private network between two
+  containers for the mutual-TLS hop.
+- **Modal.** Web endpoints and Servers are HTTP. Raw TCP tunnels get a new address for each
+  container, so Worker Hosts would have no stable Gateway endpoint, and there is no stable private
+  hop to a long-running Control Plane. Modal remains a supported Workspace provider for Worker
+  Hosts.
+
+## Rehearsal
+
+[`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)
+runs a disposable Compose deployment configured by `setup deployment compose`, with PostgreSQL,
+mutual TLS, `verify deployment`, two outbound Worker Hosts placed by label, and a full restart. It
+also runs the `hosted` image with PEM secrets, a root-owned volume, and the Gateway command from
+`fly/gateway.toml`. Fly.io and Railway themselves are not exercised.

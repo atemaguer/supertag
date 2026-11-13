@@ -1,5 +1,6 @@
 mod artifact_publications;
 mod artifacts;
+mod deployment;
 mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
@@ -124,6 +125,21 @@ enum RecoveryDecision {
 enum Command {
     /// Check a public or private gRPC service using the configured TLS trust.
     Health(health::HealthArgs),
+    /// Prepare a deployment of the Control Plane and Gateway.
+    Setup {
+        #[command(subcommand)]
+        command: deployment::SetupCommand,
+    },
+    /// Validate a deployment's configuration without connecting.
+    Check {
+        #[command(subcommand)]
+        command: deployment::CheckCommand,
+    },
+    /// Check a running deployment through its public Gateway.
+    Verify {
+        #[command(subcommand)]
+        command: deployment::VerifyCommand,
+    },
     /// Preview an organization manifest through the Gateway.
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Gateway.
@@ -731,6 +747,9 @@ fn main() -> Result<()> {
             !matches!(
                 command,
                 Command::Health(_)
+                    | Command::Setup { .. }
+                    | Command::Check { .. }
+                    | Command::Verify { .. }
                     | Command::Up { .. }
                     | Command::ControlPlane { .. }
                     | Command::Gateway { .. }
@@ -762,6 +781,9 @@ fn main() -> Result<()> {
 async fn run(command: Command) -> Result<()> {
     match command {
         Command::Health(args) => health::run(args).await?,
+        Command::Setup { command } => deployment::setup(command).await?,
+        Command::Check { command } => deployment::check(command)?,
+        Command::Verify { command } => deployment::verify(command).await?,
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
         Command::Describe { connection, args } => observe::describe(connection, args).await?,
         Command::Watch { connection, args } => observe::watch(connection, args).await?,

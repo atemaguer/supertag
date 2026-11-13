@@ -1,0 +1,28 @@
+# SuperTag Control Plane on Fly.io. Private: it defines no public service and no public IP, so only
+# apps in the same organization reach it, over the 6PN network at
+# supertag-control-plane.internal:3435 with mutual TLS. Deploy the hosted image by digest:
+#   fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
+# Secrets: control-plane.env from `supertag setup deployment fly`, plus SUPERTAG_TLS_CERT_PEM,
+# SUPERTAG_TLS_KEY_PEM, and SUPERTAG_TLS_CLIENT_CA_PEM. Run exactly one Machine.
+app = "supertag-control-plane"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[deploy]
+  strategy = "immediate"
+
+[processes]
+  app = "control-plane --listen [::]:3435"
+
+[checks.control_plane_tls]
+  type = "tcp"
+  port = 3435
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "30s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"

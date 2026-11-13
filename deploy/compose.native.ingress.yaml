@@ -1,0 +1,12 @@
+# Publishes the Gateway, and only the Gateway, from deploy/compose.native.yaml:
+#   docker compose -f deploy/compose.native.yaml -f deploy/compose.native.ingress.yaml up -d
+# The Gateway terminates TLS itself; its certificate must name the host clients use.
+# The Control Plane and PostgreSQL stay on the internal network with no published port.
+services:
+  gateway:
+    networks: [runtime, ingress]
+    ports:
+      - "${SUPERTAG_GATEWAY_PUBLISH:-127.0.0.1:3434}:3434"
+
+networks:
+  ingress: {}
