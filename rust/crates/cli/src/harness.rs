@@ -110,9 +110,9 @@ pub struct AdapterOptions {
     #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
     workspace_source: Vec<PathBuf>,
     /// ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of
-    /// a local Workspace. It runs on this host, outside any harness sandbox, on the
-    /// Workspace's base commit, and again only when that commit or the command changes.
-    #[arg(long, value_name = "ID=COMMAND", requires = "workspace_source")]
+    /// a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the
+    /// Workspace's base commit, with a 10-minute limit.
+    #[arg(long, value_name = "ID=COMMAND", requires = "workspace_id")]
     workspace_setup: Vec<String>,
     /// Retrieve each Workspace's accepted GitHub source from the Gateway.
     #[arg(

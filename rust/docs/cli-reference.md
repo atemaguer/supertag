@@ -1775,7 +1775,7 @@ Options:
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
       --workspace-setup <ID=COMMAND>
-          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, on the Workspace's base commit, and again only when that commit or the command changes
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-gateway
           Retrieve each Workspace's accepted GitHub source from the Gateway
@@ -2084,7 +2084,7 @@ Options:
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
       --workspace-setup <ID=COMMAND>
-          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, on the Workspace's base commit, and again only when that commit or the command changes
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-gateway
           Retrieve each Workspace's accepted GitHub source from the Gateway

@@ -30,7 +30,7 @@ use crate::{checkpoints::Transfers, journal::Attempt, request};
 pub struct WorkspaceMapping {
     pub workspace_id: String,
     pub source: WorkspaceSource,
-    /// Shell command run on each new Task checkout's base commit; local sources only.
+    /// Shell command run in each new Task checkout on its base commit.
     pub setup: Option<String>,
 }
 
@@ -97,10 +97,6 @@ impl Workspaces {
                     mapping.workspace_id
                 );
                 if let Some(command) = &mapping.setup {
-                    ensure!(
-                        matches!(mapping.source, WorkspaceSource::Local(_)),
-                        "Workspace setup runs only for a local source"
-                    );
                     supertag_workspaces::setup::validate_command(command)?;
                 }
                 // An unavailable source cannot be advertised for new work, but

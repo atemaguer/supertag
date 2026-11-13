@@ -683,7 +683,7 @@ fn setup_request(task: &str, attempt: &str, command: &str) -> PrepareRequest {
 }
 
 #[tokio::test]
-async fn setup_runs_once_per_base_and_command_and_leaves_private_ignored_outputs() {
+async fn setup_runs_in_each_checkout_and_leaves_private_ignored_outputs() {
     use std::os::unix::fs::MetadataExt;
 
     let fixture = Fixture::new();
@@ -695,7 +695,8 @@ async fn setup_runs_once_per_base_and_command_and_leaves_private_ignored_outputs
     let command = format!(
         "echo run >> {runs} && mkdir -p node_modules/dep node_modules/.bin && \
          echo dep > node_modules/dep/index.js && ln {store} node_modules/dep/shared.js && \
-         ln -s ../dep/index.js node_modules/.bin/dep && echo \"$TMPDIR\" > node_modules/tmpdir && \
+         ln -s ../dep/index.js node_modules/.bin/dep && ln -s /usr/bin/env node_modules/.bin/env && \
+         pwd -P > node_modules/where && echo \"$TMPDIR\" > node_modules/tmpdir && \
          echo stray > stray.txt && echo changed > README.md && \
          test -z \"$SUPERTAG_SECRET_FIXTURE\"",
         runs = quote(&runs),
@@ -717,6 +718,16 @@ async fn setup_runs_once_per_base_and_command_and_leaves_private_ignored_outputs
     assert_eq!(
         fs::read_link(modules.join(".bin/dep")).unwrap(),
         Path::new("../dep/index.js")
+    );
+    // An absolute link, such as a virtualenv's interpreter, stays as setup made it.
+    assert_eq!(
+        fs::read_link(modules.join(".bin/env")).unwrap(),
+        Path::new("/usr/bin/env")
+    );
+    // Setup ran in the Task checkout itself, so outputs that embed their path keep working.
+    assert_eq!(
+        Path::new(fs::read_to_string(modules.join("where")).unwrap().trim()),
+        checkout.path.canonicalize().unwrap()
     );
     // Setup's tracked edits and unignored files never reach the Task.
     assert_eq!(
@@ -741,13 +752,13 @@ async fn setup_runs_once_per_base_and_command_and_leaves_private_ignored_outputs
     assert!(!Path::new(temporary.trim()).exists(), "{temporary}");
     assert!(!temporary.trim().is_empty());
 
-    // The same base commit and command reuse the prepared outputs.
+    // Like TypeScript, each new checkout runs setup again.
     let second = workspace
         .prepare(setup_request("task-2", "attempt-2", &command), &cancel)
         .await
         .unwrap();
     assert!(second.path.join("node_modules/dep/index.js").exists());
-    assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 1);
+    assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 2);
 
     // Delivery ignores setup outputs; only the Task's own change is captured.
     fs::write(checkout.path.join("README.md"), "task change\n").unwrap();
@@ -757,18 +768,10 @@ async fn setup_runs_once_per_base_and_command_and_leaves_private_ignored_outputs
         .unwrap();
     assert!(delivery.committed);
     assert_eq!(delivery.changed_files, 1);
-
-    // A changed command runs again.
-    let changed = format!("{command} && true");
-    workspace
-        .prepare(setup_request("task-3", "attempt-3", &changed), &cancel)
-        .await
-        .unwrap();
-    assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), 2);
 }
 
 #[tokio::test]
-async fn failed_or_escaping_setup_fails_preparation_with_its_untrusted_output() {
+async fn failed_setup_fails_preparation_with_its_untrusted_output() {
     let fixture = Fixture::new();
     let workspace = fixture.workspace();
     let cancel = CancellationToken::new();
@@ -795,22 +798,5 @@ async fn failed_or_escaping_setup_fails_preparation_with_its_untrusted_output() 
         failed.0.contains("installing") && failed.0.contains("broken"),
         "{}",
         failed.0
-    );
-    let error = workspace
-        .prepare(
-            setup_request(
-                "task-2",
-                "attempt-2",
-                "mkdir node_modules && ln -s /etc node_modules/escape",
-            ),
-            &cancel,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        error
-            .downcast_ref::<supertag_workspaces::setup::SetupFailed>()
-            .is_some_and(|failed| failed.0.contains("links outside the worktree")),
-        "{error:#}"
     );
 }

@@ -1,24 +1,25 @@
 //! A Workspace's `setup` command: one operator-chosen shell command, such as `npm ci`, that
 //! prepares each Task checkout. As in TypeScript, it runs on the Worker Host outside any harness
-//! sandbox, only on the Workspace's base commit, in its own temporary directory, and again only
-//! when the base commit or the command changes. Its ignored outputs, such as `node_modules/`,
-//! are copied into each Task checkout as private files, so a hard link into a package store never
-//! lets a Task change the store.
+//! sandbox, in the Task checkout itself at the Workspace's base commit, with its own temporary
+//! directory and a 10-minute limit. Its untracked outputs, such as `node_modules/`, then stay at
+//! the same absolute paths while the checkout moves to the Task's start commit, so outputs that
+//! embed their own path, such as a virtualenv, keep working. Any output file with another hard
+//! link, such as one into a package store, first gets a private copy, so a Task never changes
+//! the store. Symlinks are kept as setup made them and are never followed.
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, DirBuilder, OpenOptions},
-    io::{Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     process::Stdio,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncReadExt, process::Command};
 use tokio_util::sync::CancellationToken;
 
-use crate::{atomic_json, check_cancelled, git, paths, read_json, sha256};
+use crate::{check_cancelled, git, paths};
 
 /// Setup failed before the harness could start. Its text is untrusted setup output.
 #[derive(Debug)]
@@ -34,11 +35,12 @@ impl std::error::Error for SetupFailed {}
 
 /// The longest setup command accepted.
 pub const MAX_SETUP_COMMAND_BYTES: usize = 4096;
+/// TypeScript's default `setupTimeoutMs`.
+pub const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 /// Setup output kept in a failed Task's result.
 const OUTPUT_TAIL_BYTES: usize = 4096;
-/// Top-level setup outputs, and files copied into one checkout.
+/// Top-level setup outputs.
 const MAX_OUTPUTS: usize = 10_000;
-const MAX_COPIED_ENTRIES: usize = 500_000;
 /// Host variables setup receives; everything else, including provider credentials, is withheld.
 const INHERITED: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "SHELL",
@@ -54,74 +56,90 @@ pub fn validate_command(command: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
-struct Ready {
-    command: String,
-    /// Untracked top-level setup outputs, relative to the base checkout.
+/// Setup outputs moved aside while the checkout moves to the Task's start commit.
+pub(crate) struct Held {
+    directory: PathBuf,
     outputs: Vec<String>,
 }
 
-/// The base checkout with `command`'s outputs, running it first when this base commit has not
-/// run this command yet.
-pub(crate) async fn prepared(
-    root: &Path,
+/// Checks out `base_commit` at `checkout`, runs `command` there, and moves its untracked outputs
+/// into `scratch/held`. The checkout directory is removed; the caller checks out the Task's start
+/// commit at the same path and calls [`Held::restore`].
+pub(crate) async fn run(
     repository: &git::Repository,
+    checkout: &Path,
     base_commit: &str,
     command: &str,
+    scratch: &Path,
     cancel: &CancellationToken,
-) -> Result<(PathBuf, Vec<String>)> {
+) -> Result<Held> {
     validate_command(command)?;
-    let parent = root.join("setup");
-    paths::create_private_root(&parent)?;
-    let key = sha256(command.as_bytes());
-    let ready_directory = parent.join(&key);
-    if let Some(ready) = read_json::<Ready>(&ready_directory.join("ready.json"))?
-        && ready.command == command
-    {
-        return Ok((ready_directory.join("tree"), ready.outputs));
+    // An interrupted run leaves nothing to reuse; start again from a clean base checkout.
+    if fs::symlink_metadata(scratch).is_ok() {
+        paths::remove_owned_directory(scratch)?;
     }
-    // An interrupted run never becomes ready; start again from a clean base checkout.
-    for entry in fs::read_dir(&parent)? {
-        let path = entry?.path();
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == key || name.starts_with(&format!("{key}.run-")))
-        {
-            paths::remove_owned_directory(&path)?;
-        }
-    }
-    let run = tempfile::Builder::new()
-        .prefix(&format!("{key}.run-"))
-        .tempdir_in(&parent)?
-        .keep();
-    let tree = run.join("tree");
+    DirBuilder::new().mode(0o700).create(scratch)?;
     let entries = repository.tree(base_commit, cancel).await?;
     repository
-        .checkout(&tree, base_commit, &entries, cancel)
+        .checkout(checkout, base_commit, &entries, cancel)
         .await?;
-    let temporary = run.join("tmp");
+    let temporary = scratch.join("tmp");
     DirBuilder::new().mode(0o700).create(&temporary)?;
-    let outcome = execute(&tree, &temporary, command, cancel).await;
+    let outcome = execute(checkout, &temporary, command, SETUP_TIMEOUT, cancel).await;
     paths::remove_owned_directory(&temporary)?;
     outcome?;
-    let outputs = untracked(&tree, &entries, cancel)?;
-    atomic_json(
-        &run.join("ready.json"),
-        &Ready {
-            command: command.into(),
-            outputs: outputs.clone(),
-        },
-    )?;
-    fs::rename(&run, &ready_directory)?;
-    fs::File::open(&parent)?.sync_all()?;
-    Ok((ready_directory.join("tree"), outputs))
+    let outputs = untracked(checkout, &entries, cancel)?;
+    for output in &outputs {
+        replace_hard_links(&checkout.join(output), cancel).map_err(|error| {
+            SetupFailed(format!(
+                "Workspace setup output {output} could not get its own copy: {error:#}"
+            ))
+        })?;
+    }
+    let directory = scratch.join("held");
+    DirBuilder::new().mode(0o700).create(&directory)?;
+    for (index, output) in outputs.iter().enumerate() {
+        fs::rename(checkout.join(output), directory.join(index.to_string()))?;
+    }
+    paths::remove_owned_directory(checkout)?;
+    Ok(Held { directory, outputs })
+}
+
+impl Held {
+    /// Moves outputs back to their paths in the Task checkout where the parent directory exists
+    /// and nothing occupies the path. Returns the outputs restored; the rest are discarded.
+    pub(crate) fn restore(
+        self,
+        checkout: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>> {
+        let mut restored = Vec::new();
+        for (index, output) in self.outputs.iter().enumerate() {
+            check_cancelled(cancel)?;
+            let destination = checkout.join(output);
+            let parent_exists = destination
+                .parent()
+                .is_some_and(|parent| paths::verify_directory(parent).is_ok());
+            if !parent_exists || fs::symlink_metadata(&destination).is_ok() {
+                continue;
+            }
+            fs::rename(self.directory.join(index.to_string()), &destination)?;
+            restored.push(output.clone());
+        }
+        let scratch = self
+            .directory
+            .parent()
+            .context("held outputs have no parent")?;
+        paths::remove_owned_directory(scratch)?;
+        Ok(restored)
+    }
 }
 
 async fn execute(
     tree: &Path,
     temporary: &Path,
     command: &str,
+    limit: Duration,
     cancel: &CancellationToken,
 ) -> Result<()> {
     check_cancelled(cancel)?;
@@ -136,6 +154,8 @@ async fn execute(
                 .map(|value| (name, value))
         }))
         .env("TMPDIR", temporary)
+        .env("TMP", temporary)
+        .env("TEMP", temporary)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -156,6 +176,10 @@ async fn execute(
     let outcome = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
+        _ = tokio::time::sleep(limit) => Some(Err(SetupFailed(format!(
+            "Workspace setup failed: it did not finish within {} seconds",
+            limit.as_secs()
+        )).into())),
         outcome = finished => Some(outcome),
     };
     // Setup never leaves processes behind, even ones it started in the background.
@@ -255,138 +279,72 @@ fn untracked(
     Ok(outputs)
 }
 
-/// Copies setup outputs into a fresh Task checkout, where nothing yet exists at their paths.
-/// Returns the outputs copied. Callers keep only those Git ignores at the Task's commit.
-pub(crate) fn copy_outputs(
-    tree: &Path,
-    outputs: &[String],
-    checkout: &Path,
-    cancel: &CancellationToken,
-) -> Result<Vec<String>> {
-    let mut copied = Vec::new();
-    let mut count = 0_usize;
-    for output in outputs {
-        check_cancelled(cancel)?;
-        let destination = checkout.join(output);
-        let parent_exists = destination
-            .parent()
-            .is_some_and(|parent| paths::verify_directory(parent).is_ok());
-        if !parent_exists || fs::symlink_metadata(&destination).is_ok() {
-            continue;
-        }
-        copy_entry(
-            &tree.join(output),
-            &destination,
-            checkout,
-            &mut count,
-            cancel,
-        )?;
-        copied.push(output.clone());
-    }
-    Ok(copied)
-}
-
-fn copy_entry(
-    source: &Path,
-    destination: &Path,
-    checkout: &Path,
-    count: &mut usize,
-    cancel: &CancellationToken,
-) -> Result<()> {
+/// Gives every regular file under `path` that has another hard link its own copy, replacing the
+/// name rather than writing through it. Symlinks are never followed. Sockets, pipes, and devices
+/// are removed: a checkout holds none.
+fn replace_hard_links(path: &Path, cancel: &CancellationToken) -> Result<()> {
     check_cancelled(cancel)?;
-    *count += 1;
-    ensure!(
-        *count <= MAX_COPIED_ENTRIES,
-        "Workspace setup outputs exceed {MAX_COPIED_ENTRIES} files"
-    );
-    let metadata = fs::symlink_metadata(source)?;
-    let file_type = metadata.file_type();
-    let mode = metadata.mode() & 0o777;
-    if file_type.is_dir() {
-        DirBuilder::new().mode(0o700).create(destination)?;
-        for entry in fs::read_dir(source)? {
-            let name = entry?.file_name();
-            copy_entry(
-                &source.join(&name),
-                &destination.join(&name),
-                checkout,
-                count,
-                cancel,
-            )?;
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            replace_hard_links(&entry?.path(), cancel)?;
         }
-        fs::set_permissions(destination, fs::Permissions::from_mode(mode | 0o700))?;
-    } else if file_type.is_file() {
-        // A new file, never a hard link: a Task's edit cannot reach a shared package store.
-        let mut input = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(source)?;
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(destination)?;
-        let mut buffer = vec![0_u8; 65_536];
-        loop {
-            let read = input.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            output.write_all(&buffer[..read])?;
+    } else if metadata.is_file() && metadata.nlink() > 1 {
+        let name = path.file_name().context("setup output has no name")?;
+        let mut copy = name.to_owned();
+        copy.push(".supertag-copy");
+        let copy = path.with_file_name(copy);
+        let copied = (|| {
+            let mut input = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(path)?;
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&copy)?;
+            std::io::copy(&mut input, &mut output)?;
+            output.set_permissions(fs::Permissions::from_mode(metadata.mode() & 0o7777))?;
+            fs::rename(&copy, path)
+        })();
+        if let Err(error) = copied {
+            let _ = fs::remove_file(&copy);
+            return Err(error.into());
         }
-        fs::set_permissions(destination, fs::Permissions::from_mode(mode | 0o600))?;
-    } else if file_type.is_symlink() {
-        let target = fs::read_link(source)?;
-        let relative = destination
-            .strip_prefix(checkout)
-            .context("setup output outside its checkout")?;
-        if !stays_inside(relative, &target) {
-            return Err(SetupFailed(format!(
-                "Workspace setup output {} links outside the worktree",
-                relative.display()
-            ))
-            .into());
-        }
-        std::os::unix::fs::symlink(&target, destination)?;
+    } else if !metadata.is_file() && !metadata.is_symlink() {
+        fs::remove_file(path)?;
     }
-    // Sockets, pipes, and devices are never copied.
     Ok(())
-}
-
-/// Whether a relative link at `path` (relative to the checkout) resolves inside the checkout.
-fn stays_inside(path: &Path, target: &Path) -> bool {
-    if target.is_absolute() {
-        return false;
-    }
-    let mut depth = path.components().count().saturating_sub(1) as isize;
-    for component in target.components() {
-        match component {
-            Component::ParentDir => depth -= 1,
-            Component::Normal(_) => depth += 1,
-            Component::CurDir => {}
-            Component::RootDir | Component::Prefix(_) => return false,
-        }
-        if depth < 0 {
-            return false;
-        }
-    }
-    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn links_must_stay_inside_the_checkout() {
-        let path = Path::new("node_modules/.bin/tool");
-        assert!(stays_inside(path, Path::new("../tool/bin.js")));
-        assert!(stays_inside(path, Path::new("../../package.json")));
-        assert!(!stays_inside(path, Path::new("../../../outside")));
-        assert!(!stays_inside(path, Path::new("/etc/passwd")));
-        assert!(stays_inside(Path::new("link"), Path::new("file")));
-        assert!(!stays_inside(Path::new("link"), Path::new("../file")));
+    #[tokio::test]
+    async fn setup_that_overruns_its_limit_fails_and_leaves_no_process() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("survivor");
+        let command = format!("(sleep 1; touch '{}') & sleep 30", marker.display());
+        let started = std::time::Instant::now();
+        let error = execute(
+            directory.path(),
+            directory.path(),
+            &command,
+            Duration::from_millis(200),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let failed = error
+            .downcast_ref::<SetupFailed>()
+            .expect("a setup failure");
+        assert!(failed.0.contains("did not finish within"), "{}", failed.0);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(!marker.exists(), "a setup process outlived its limit");
     }
 
     #[test]

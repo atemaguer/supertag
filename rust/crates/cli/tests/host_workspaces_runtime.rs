@@ -271,9 +271,9 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
     Ok(())
 }
 
-/// tests/workspace-setup-outputs.test.ts: `setup` prepares each checkout on the base commit,
-/// its ignored outputs reach the Task, it reruns only for a new command, and a failed setup fails
-/// the Task before the harness starts with its untrusted output.
+/// tests/workspace-setup-outputs.test.ts: `setup` prepares each Task checkout on the base commit,
+/// its ignored outputs reach the Task, and a failed setup fails the Task before the harness starts
+/// with its untrusted output.
 async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     database: String,
 ) -> Result<()> {
@@ -316,7 +316,7 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     };
     let runs = root.join("setup-runs");
     let install = format!(
-        "echo run >> '{}' && mkdir deps && echo installed > deps/marker",
+        "pwd -P >> '{}' && mkdir deps && echo installed > deps/marker",
         runs.display()
     );
     let state = root.join("host-state");
@@ -339,13 +339,17 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
             task["workspace_delivery"]["base_commit"]
         );
     }
-    let checkouts = state.join("workspaces");
-    let markers = walk(&checkouts)
-        .into_iter()
-        .filter(|path| path.ends_with("deps/marker"))
-        .count();
-    ensure!(markers >= 1, "setup outputs were not prepared");
-    assert_eq!(std::fs::read_to_string(&runs)?.lines().count(), 1);
+    // Setup ran once in each Task's own checkout in host state, never in the mapped source.
+    let runs = std::fs::read_to_string(&runs)?;
+    let directories = runs.lines().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(directories.len(), 2, "{runs}");
+    let state = state.canonicalize()?;
+    ensure!(
+        directories
+            .iter()
+            .all(|directory| Path::new(directory).starts_with(&state)),
+        "{runs}"
+    );
 
     let failed = field(&json(submit("broken")).await?, "task_id")?.to_owned();
     success(worker(
@@ -362,21 +366,6 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
         "the harness never ran: {result}"
     );
     Ok(())
-}
-
-fn walk(path: &Path) -> Vec<std::path::PathBuf> {
-    let mut found = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && !path.is_symlink() {
-                found.extend(walk(&path));
-            } else {
-                found.push(path);
-            }
-        }
-    }
-    found
 }
 
 async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Result<()> {

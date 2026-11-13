@@ -407,21 +407,28 @@ impl Workspace {
                 "submodules require an explicit workspace implementation"
             );
         }
+        // Setup runs in this checkout on the base commit, so its outputs keep their paths.
+        let held = match &request.setup {
+            None => None,
+            Some(command) => Some(
+                setup::run(
+                    &repository,
+                    &checkout.path,
+                    &self.inner.config.base_commit,
+                    command,
+                    &record_dir.join("setup"),
+                    cancel,
+                )
+                .await?,
+            ),
+        };
         repository
             .checkout(&checkout.path, &start, &entries, cancel)
             .await?;
-        preparation.setup_outputs = match &request.setup {
+        preparation.setup_outputs = match held {
             None => Vec::new(),
-            Some(command) => {
-                let (tree, outputs) = setup::prepared(
-                    &self.inner.root,
-                    &repository,
-                    &self.inner.config.base_commit,
-                    command,
-                    cancel,
-                )
-                .await?;
-                let copied = setup::copy_outputs(&tree, &outputs, &checkout.path, cancel)?;
+            Some(held) => {
+                let copied = held.restore(&checkout.path, cancel)?;
                 // Only what Git ignores at the Task's commit stays, so setup never changes a
                 // delivery.
                 let ignored = repository
