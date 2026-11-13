@@ -106,6 +106,9 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
         );
         return Ok(());
     };
+    if preset == "lark" {
+        return apply_lark_preset(server);
+    }
     ensure!(
         server.url.is_none() && server.command.is_none(),
         "MCP server {}: url must not be set with a preset; the {preset} preset uses its official URL and resource mapping. For another server, drop preset and give url",
@@ -193,7 +196,7 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
             )
         }
         _ => anyhow::bail!(
-            "MCP server {}: preset must be github, slack, linear, or teams",
+            "MCP server {}: preset must be github, slack, linear, teams, or lark",
             server.name
         ),
     };
@@ -209,6 +212,68 @@ fn apply_preset(server: &mut ServerConfig) -> Result<()> {
         .iter()
         .map(|tool| ((*tool).to_owned(), vec![rule.clone()]))
         .collect();
+    Ok(())
+}
+
+/// The official Lark stdio server, as in the TypeScript host service: the pinned
+/// `@larksuiteoapi/lark-mcp` package, run through `npx` on the Worker Host, which gives its App
+/// credentials in `env` (`APP_ID`, `APP_SECRET`, and optionally `LARK_DOMAIN`). Only a chat
+/// recipient is checkable; a user or email recipient names no chat resource.
+pub(super) const LARK_PACKAGE: &str = "@larksuiteoapi/lark-mcp@0.5.1";
+
+fn apply_lark_preset(server: &mut ServerConfig) -> Result<()> {
+    ensure!(
+        server.url.is_none() && server.command.is_none(),
+        "MCP server {}: command must not be set with a preset; the lark preset runs its official server",
+        server.name
+    );
+    ensure!(
+        server.tenant_id.is_none(),
+        "MCP server {}: tenantId belongs only with preset teams",
+        server.name
+    );
+    ensure!(
+        server.resources.tools.is_empty(),
+        "MCP server {}: the lark preset supplies its own resource mapping",
+        server.name
+    );
+    server.command = Some(
+        [
+            "npx",
+            "-y",
+            LARK_PACKAGE,
+            "mcp",
+            "--tool-name-case",
+            "snake",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    );
+    let chat = |argument: &str, equals: &str, component: &str| ResourceRule {
+        prefix: "chat:".into(),
+        separator: String::new(),
+        components: vec![Component {
+            arguments: vec![component.into()],
+        }],
+        when: Some(Condition {
+            argument: argument.into(),
+            equals: equals.into(),
+        }),
+    };
+    server.resources.tools = BTreeMap::from([
+        (
+            "im_v1_message_list".to_owned(),
+            vec![chat(
+                "params.container_id_type",
+                "chat",
+                "params.container_id",
+            )],
+        ),
+        (
+            "im_v1_message_create".to_owned(),
+            vec![chat("params.receive_id_type", "chat_id", "data.receive_id")],
+        ),
+    ]);
     Ok(())
 }
 
@@ -243,7 +308,8 @@ fn read_private(path: &Path) -> Result<Vec<u8>> {
 pub(super) struct ServerConfig {
     pub(super) name: String,
     pub(super) url: Option<String>,
-    /// An official HTTP server SuperTag knows: `github`, `slack`, `linear`, or `teams`.
+    /// An official server SuperTag knows: HTTP `github`, `slack`, `linear`, or `teams`, or
+    /// stdio `lark`.
     pub(super) preset: Option<String>,
     /// The Microsoft Entra tenant, for the `teams` preset only.
     pub(super) tenant_id: Option<String>,
@@ -254,11 +320,26 @@ pub(super) struct ServerConfig {
     /// A stdio server: the executable and its arguments.
     pub(super) command: Option<Vec<String>>,
     /// A stdio server's environment: each variable it receives, mapped to the Worker Host
-    /// variable that holds its value.
+    /// variable that holds its value, or to `{"file": PATH}`, an owner-only file that holds it.
     #[serde(default)]
-    pub(super) env: BTreeMap<String, String>,
+    pub(super) env: BTreeMap<String, EnvSource>,
     #[serde(default)]
     resources: ResourceMapping,
+}
+
+/// Where a stdio server's variable comes from. Never the value itself.
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+pub(super) enum EnvSource {
+    /// A Worker Host environment variable.
+    Variable(String),
+    File(FileSource),
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FileSource {
+    file: std::path::PathBuf,
 }
 
 #[derive(Default, Deserialize)]
@@ -313,17 +394,30 @@ impl McpCatalog {
             .servers
             .into_iter()
             .map(|server| {
-                let sources: Vec<_> = if server.command.is_some() {
-                    server.env.values().cloned().collect()
-                } else {
-                    server.header_env.values().cloned().collect()
+                let variable_missing = |source: &String| {
+                    std::env::var(source).map_or(true, |value| value.trim().is_empty())
                 };
-                let missing = sources
-                    .into_iter()
-                    .filter(|source| {
-                        std::env::var(source).map_or(true, |value| value.trim().is_empty())
-                    })
-                    .collect();
+                let missing = if server.command.is_some() {
+                    server
+                        .env
+                        .values()
+                        .filter_map(|source| match source {
+                            EnvSource::Variable(variable) => {
+                                variable_missing(variable).then(|| variable.clone())
+                            }
+                            EnvSource::File(source) => read_env_file(&source.file)
+                                .is_err()
+                                .then(|| source.file.display().to_string()),
+                        })
+                        .collect()
+                } else {
+                    server
+                        .header_env
+                        .values()
+                        .filter(|source| variable_missing(source))
+                        .cloned()
+                        .collect()
+                };
                 let (target, auth, login_url) = match (&server.url, &server.command) {
                     (_, Some(command)) => (
                         format!(
@@ -642,18 +736,32 @@ fn stdio_server(
     let mut env = BTreeMap::new();
     for (variable, source) in &server.env {
         ensure!(
-            valid_server_env(variable) && valid_env(source),
+            valid_server_env(variable),
             "MCP server {name}: env must map variable names to Worker Host variables not named SUPERTAG_*"
         );
-        let value = environment(source)
-            .filter(|value| {
-                !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0')
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "MCP server {name} reads {source}, which is not set on this Worker Host"
+        let value = match source {
+            EnvSource::Variable(source) => {
+                ensure!(
+                    valid_env(source),
+                    "MCP server {name}: env must map variable names to Worker Host variables not named SUPERTAG_*"
+                );
+                environment(source)
+                    .filter(|value| {
+                        !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0')
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "MCP server {name} reads {source}, which is not set on this Worker Host"
+                        )
+                    })?
+            }
+            EnvSource::File(source) => read_env_file(&source.file).with_context(|| {
+                format!(
+                    "MCP server {name}: {variable} reads {}, which must be an absolute path to an owner-only file holding one value",
+                    source.file.display()
                 )
-            })?;
+            })?,
+        };
         if value.len() >= TRACKED_ENV_VALUE_BYTES {
             secrets.insert(value.clone());
         }
@@ -665,6 +773,37 @@ fn stdio_server(
         cwd: None,
         sandboxed: false,
     })
+}
+
+/// A credential file a stdio server's variable reads: absolute, owner-only, regular, and at
+/// most 4 KiB, holding one value. A trailing line break is not part of the value.
+fn read_env_file(path: &Path) -> Result<String> {
+    ensure!(path.is_absolute(), "credential file path is not absolute");
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    // SAFETY: geteuid takes no parameters and has no caller invariants.
+    let uid = unsafe { libc::geteuid() };
+    ensure!(
+        metadata.is_file()
+            && metadata.uid() == uid
+            && metadata.mode() & 0o077 == 0
+            && metadata.len() <= 4097,
+        "credential file must be a bounded, owner-only regular file"
+    );
+    let mut bytes = Vec::new();
+    file.take(4098).read_to_end(&mut bytes)?;
+    let value = String::from_utf8(bytes)?;
+    let value = value.strip_suffix('\n').map_or(value.as_str(), |value| {
+        value.strip_suffix('\r').unwrap_or(value)
+    });
+    ensure!(
+        !value.trim().is_empty() && value.len() <= 4096 && !value.contains(['\0', '\n']),
+        "credential file must hold one value"
+    );
+    Ok(value.to_owned())
 }
 
 pub(super) fn valid_server_env(value: &str) -> bool {
@@ -860,6 +999,127 @@ mod tests {
         ] {
             let config = json!({"version":1,"servers":[invalid]});
             assert!(parse(&config).is_err(), "{config}");
+        }
+    }
+
+    #[test]
+    fn the_lark_preset_runs_its_pinned_server_with_chat_scoped_resources() {
+        let environment = |name: &str| (name == "LARK_APP_ID").then(|| "cli_app_id_value".into());
+        let catalog = McpCatalog::parse(
+            json!({"version":1,"servers":[
+                {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID"}}
+            ]})
+            .to_string()
+            .as_bytes(),
+            environment,
+        )
+        .unwrap();
+        let Transport::Stdio(server) = &catalog.servers["lark"].transport else {
+            panic!("stdio server expected");
+        };
+        assert_eq!(
+            server.command,
+            [
+                "npx",
+                "-y",
+                "@larksuiteoapi/lark-mcp@0.5.1",
+                "mcp",
+                "--tool-name-case",
+                "snake"
+            ]
+        );
+        assert_eq!(server.env["APP_ID"], "cli_app_id_value");
+        let resource = |tool: &str, arguments: serde_json::Value| {
+            mcp::resource(&catalog.servers["lark"].resources[tool], &arguments).unwrap()
+        };
+        let list =
+            |id: &str, kind: &str| json!({"params":{"container_id_type":kind,"container_id":id}});
+        let create = |id: &str, kind: &str| json!({"params":{"receive_id_type":kind},"data":{"receive_id":id,"msg_type":"text","content":"{}"}});
+        assert_eq!(
+            resource("im_v1_message_list", list("oc_1", "chat")).as_deref(),
+            Some("chat:oc_1")
+        );
+        assert_eq!(resource("im_v1_message_list", list("oc_1", "thread")), None);
+        assert_eq!(
+            resource("im_v1_message_list", json!({"chat_id":"oc_1"})),
+            None
+        );
+        assert_eq!(
+            resource("im_v1_message_create", create("oc_2", "chat_id")).as_deref(),
+            Some("chat:oc_2")
+        );
+        assert_eq!(
+            resource("im_v1_message_create", create("oc_1", "open_id")),
+            None
+        );
+        for refused in [
+            json!({"name":"lark","preset":"lark","command":["lark-mcp"]}),
+            json!({"name":"lark","preset":"lark","url":"https://open.larksuite.com/mcp"}),
+            json!({"name":"lark","preset":"lark","resources":{"tools":{"x":[{"components":[{"arguments":["a"]}]}]}}}),
+            json!({"name":"lark","preset":"lark","tenantId":"contoso"}),
+        ] {
+            assert!(
+                McpCatalog::parse(
+                    json!({"version":1,"servers":[refused]})
+                        .to_string()
+                        .as_bytes(),
+                    |_| None
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn stdio_env_reads_owner_only_credential_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = |name: &str, contents: &str, mode: u32| {
+            let path = directory.path().join(name);
+            fs::write(&path, contents).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            path
+        };
+        let parse = |source: Value| {
+            McpCatalog::parse(
+                json!({"version":1,"servers":[
+                    {"name":"db","command":["db-mcp"],"env":{"DB_TOKEN":source}}
+                ]})
+                .to_string()
+                .as_bytes(),
+                |_| None,
+            )
+        };
+        let private = file("token", "file-secret-value-1c9e\n", 0o600);
+        let catalog = parse(json!({"file": private})).unwrap();
+        let Transport::Stdio(server) = &catalog.servers["db"].transport else {
+            panic!("stdio server expected");
+        };
+        assert_eq!(server.env["DB_TOKEN"], "file-secret-value-1c9e");
+        assert!(
+            catalog
+                .secrets
+                .contains(&"file-secret-value-1c9e".to_owned())
+        );
+        let shared = file("shared", "file-secret-value-1c9e", 0o644);
+        let multiple = file("multiple", "one\ntwo\n", 0o600);
+        let empty = file("empty", "\n", 0o600);
+        for refused in [
+            json!({"file": shared}),
+            json!({"file": multiple}),
+            json!({"file": empty}),
+            json!({"file": "token"}),
+            json!({"file": directory.path().join("absent")}),
+            json!({"file": private, "env": "DB_TOKEN"}),
+            json!({"secretRef": "db"}),
+        ] {
+            let error = parse(refused.clone())
+                .err()
+                .map(|error| format!("{error:#}"));
+            assert!(error.is_some(), "{refused}");
+            assert!(
+                !error.unwrap().contains("file-secret-value-1c9e"),
+                "{refused}"
+            );
         }
     }
 

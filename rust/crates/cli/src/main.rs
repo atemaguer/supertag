@@ -495,11 +495,11 @@ enum Command {
 
 Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
 
-A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/ABSOLUTE/PATH"}, from that owner-only file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
 
 The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
-A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain.
+A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain. The stdio preset lark runs the official Lark server through npx with chat resources: {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}}.
 
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
