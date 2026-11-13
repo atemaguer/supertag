@@ -812,6 +812,13 @@ pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<Stri
             unseen.insert(name.to_owned());
         }
     }
+    // The HTTP proxy every service reaches a remote service through.
+    for name in ["HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"] {
+        if shell(name).is_some() && !unit_has(name) && config.environment.file_value(name).is_none()
+        {
+            unseen.insert(name.to_owned());
+        }
+    }
     // What hosts read when they start: an environment Auth Key and their harness credentials.
     for host in &config.hosts {
         let mut names: Vec<&str> = Vec::new();

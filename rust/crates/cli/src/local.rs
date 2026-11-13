@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fmt::Write as _,
     fs::{self, DirBuilder, File, OpenOptions, TryLockError},
     future::Future,
@@ -40,21 +41,12 @@ const ENDPOINT: &str = "endpoint";
 const CREDENTIALS: &str = "credentials.json";
 const STATE_LOCK: &str = ".lock";
 /// Non-secret variables every local service inherits from the supervisor.
-const BASE_ENVIRONMENT: [&str; 12] = [
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    // A Worker Host that joins a remote Control Plane reaches it through this proxy.
-    "HTTPS_PROXY",
-    "https_proxy",
-    "NO_PROXY",
-    "no_proxy",
+const BASE_ENVIRONMENT: [&str; 8] = [
+    "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 ];
+/// The HTTP proxy every local service reaches a remote service through, from the process
+/// environment, then `env_file`, so a service unit can name it too.
+const PROXY_ENVIRONMENT: [&str; 4] = ["HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
 /// Gateway-owned GitHub credentials, given only when a Host serves a Gateway Workspace.
 const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_ACCOUNT_ID",
@@ -267,6 +259,8 @@ struct Children {
     notify: (Vec<String>, Vec<(String, String)>),
     /// The Control Plane's database: the state directory's SQLite file unless set.
     database: Option<PostgresDatabase>,
+    /// What every service gets from [`PROXY_ENVIRONMENT`].
+    proxy: Vec<(String, OsString)>,
 }
 
 /// A PostgreSQL database for the local Control Plane, and the password it connects with.
@@ -326,6 +320,7 @@ impl Children {
             worker_host: None,
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
             database: None,
+            proxy: proxy_environment(&Environment::default()),
         })
     }
 
@@ -344,6 +339,7 @@ impl Children {
         } = extras;
         let mut plane = command(executable, "control-plane");
         plane
+            .envs(self.proxy.iter().cloned())
             .args(["--listen", "127.0.0.1:0"])
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
         match &self.database {
@@ -375,6 +371,7 @@ impl Children {
 
         let mut gateway = command(executable, "gateway");
         gateway
+            .envs(self.proxy.iter().cloned())
             .args([
                 "--control-plane",
                 &control_plane,
@@ -486,7 +483,8 @@ impl Children {
             )
             .await?;
         let mut host = command(executable, "worker-host");
-        host.args(["--gateway", &endpoint, "--state-directory"])
+        host.envs(self.proxy.iter().cloned())
+            .args(["--gateway", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
             .arg("--wait-for-recovery")
             .args(options.adapter.worker_args())
@@ -578,6 +576,23 @@ impl Children {
         );
         Ok(())
     }
+}
+
+/// The proxy variables a service gets: the process environment's, then `env_file`'s.
+fn proxy_environment(environment: &Environment) -> Vec<(String, OsString)> {
+    environment
+        .selected(PROXY_ENVIRONMENT)
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+}
+
+/// The proxy the supervisor itself reaches a remote service through, as its services do.
+fn proxy(environment: &Environment) -> Option<supertag_transport::Proxy> {
+    supertag_transport::Proxy::from_variables(|name| {
+        environment
+            .variable(name)
+            .and_then(|value| value.into_string().ok())
+    })
 }
 
 fn command(executable: &Path, mode: &str) -> Command {
@@ -1068,7 +1083,9 @@ impl ManagedHost {
 
     /// Register the Host once, report its aggregate presence, then start every lane.
     async fn start(&mut self, executable: &Path) -> Result<()> {
-        let gateway = crate::network::endpoint(self.endpoint.clone(), false).await?;
+        let gateway =
+            crate::network::endpoint_through(self.endpoint.clone(), proxy(&self.environment))
+                .await?;
         let stranded = self.stranded_journals()?;
         let shared = supertag_worker_host::SharedHost::register(
             gateway,
@@ -1127,7 +1144,8 @@ impl ManagedHost {
         let lane = &mut self.lanes[index];
         let adapter = &self.definition.harnesses[lane.harness];
         let mut host = command(executable, "worker-host");
-        host.args(["--gateway", &self.endpoint, "--state-directory"])
+        host.envs(proxy_environment(&self.environment))
+            .args(["--gateway", &self.endpoint, "--state-directory"])
             .arg(&lane.directory)
             .arg("--wait-for-recovery")
             .args(["--supervised-lane", incarnation])
@@ -1385,6 +1403,7 @@ pub async fn configured(
             let listen = stable_listen(&directory, plane.listen)?;
             base.notify = plane.notify.resolve(&environment);
             base.database = postgres_database(plane.database.as_ref(), &environment)?;
+            base.proxy = proxy_environment(&environment);
             let endpoint = base
                 .start_base(
                     &executable,

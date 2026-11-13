@@ -1063,10 +1063,14 @@ fn up_refuses_a_unit_that_cannot_load_the_file_and_warns_about_shell_variables()
     machine
         .extra
         .push(("LIFECYCLE_ADAPTER".into(), link.to_str().unwrap().into()));
+    // So is an HTTP proxy only this shell names.
+    machine
+        .extra
+        .push(("HTTPS_PROXY".into(), "http://proxy.invalid:3128".into()));
     let again = machine.ok(&["up"])?;
     assert!(
         again.contains("Warning: the service unit")
-            && again.contains("cannot see LIFECYCLE_ADAPTER"),
+            && again.contains("cannot see HTTPS_PROXY, LIFECYCLE_ADAPTER"),
         "{again}"
     );
     assert!(again.contains("left alone"), "{again}");

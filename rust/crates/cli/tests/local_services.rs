@@ -98,6 +98,20 @@ fn database_env(database: &str) -> Vec<(&'static str, &str)> {
         Vec::new()
     }
 }
+/// That the local Control Plane in `state` keeps its state in `database`: on PostgreSQL the
+/// state directory has no SQLite file, so `up` cannot have fallen back to one.
+fn uses_database(state: &Path, database: &str) -> Result<()> {
+    ensure!(
+        state.join("runtime.sqlite3").exists() != database.starts_with("postgres"),
+        "the local Control Plane did not use {}",
+        if database.starts_with("postgres") {
+            "PostgreSQL"
+        } else {
+            "SQLite"
+        }
+    );
+    Ok(())
+}
 fn yaml(path: &Path, value: &Value) -> Result<()> {
     fs::write(path, serde_json::to_vec(value)?)?;
     Ok(())
@@ -246,10 +260,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
     let endpoint = supervisor.ready()?;
     // The configured PostgreSQL database replaces the state directory's SQLite file.
-    ensure!(
-        state.join("runtime.sqlite3").exists() != database.starts_with("postgres"),
-        "the local Control Plane did not use the configured database"
-    );
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let mut operator = client(&endpoint).await?;
     let reader = host(&mut operator, &credential, "reader").await?;
@@ -346,6 +357,7 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     )?;
     let mut server = Process::spawn(&central, Some(&central_file), &database_env(&database))?;
     let endpoint = server.ready()?;
+    uses_database(&central, &database)?;
     let credential = token(&central)?;
     let mut operator = client(&endpoint).await?;
     let mut keys = Vec::new();
@@ -431,6 +443,7 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     yaml(&file, &config)?;
     let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
     let endpoint = supervisor.ready()?;
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let channel =
         protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?;
@@ -725,6 +738,7 @@ fn names(environment: &std::collections::BTreeMap<String, String>) -> Vec<&str> 
 async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_them(
     database: String,
 ) -> Result<()> {
+    let postgres = database.starts_with("postgres");
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let home = temp.path().join("home");
@@ -732,14 +746,21 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     let env_file = temp.path().join("services.env");
     fs::write(
         &env_file,
-        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_TOKEN=file-gateway-token\n",
+        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_TOKEN=file-gateway-token\nHTTPS_PROXY=https://proxy.invalid:443\nNO_PROXY=example.test\nLOCAL_DB_PASSWORD=file-db-password\n",
     )?;
     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
     let file = temp.path().join("supertag.yaml");
     yaml(
         &file,
-        &serde_json::json!({"env_file":"services.env","services":{
-            "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"]},
+        // On PostgreSQL the configured database's password secret comes from env_file and
+        // reaches the Control Plane, and only it, as PGPASSWORD.
+        &serde_json::json!({"env_file":"services.env","secrets":{"db":{"environment":"LOCAL_DB_PASSWORD"}},"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"],
+                "database":if postgres {
+                    serde_json::json!({"url": database, "password": "db"})
+                } else {
+                    Value::Null
+                }},
             "codex-host":{"type":"host","harnesses":["codex"],"concurrency":1},
             "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"],"concurrency":1}
         }}),
@@ -764,12 +785,10 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
             ("ANTHROPIC_API_KEY", "shell-anthropic"),
             ("SUPERTAG_GITHUB_TOKEN", "shell-github"),
             ("FIXTURE_UNRELATED", "shell-unrelated"),
-        ]
-        .into_iter()
-        .chain(database_env(&database))
-        .collect::<Vec<_>>(),
+        ],
     )?;
     let endpoint = supervisor.ready()?;
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let mut roles = std::collections::BTreeMap::new();
     for (pid, command) in children(supervisor.child.id())? {
@@ -786,7 +805,16 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         };
         roles.insert(role, process_environment(pid)?);
     }
-    let base = ["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"];
+    // The env_file proxy reaches every service, so a service unit can use one. Its https://
+    // URL is one SuperTag cannot use, which fails only connections that would go through it,
+    // never these loopback ones.
+    let base = [
+        "HOME",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SUPERTAG_LOCAL_SERVICE_LIFELINE",
+    ];
     let expected = |extra: &[&'static str]| {
         let mut names = base.iter().chain(extra).copied().collect::<Vec<_>>();
         names.sort_unstable();
@@ -794,8 +822,20 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     };
     assert_eq!(
         names(&roles["control-plane"]),
-        expected(&["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"])
+        expected(if postgres {
+            &[
+                "PGPASSWORD",
+                "SUPERTAG_DATABASE_URL",
+                "SUPERTAG_GATEWAY_TOKEN",
+            ]
+        } else {
+            &["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"]
+        })
     );
+    if postgres {
+        assert_eq!(roles["control-plane"]["PGPASSWORD"], "file-db-password");
+        assert_eq!(roles["control-plane"]["SUPERTAG_DATABASE_URL"], database);
+    }
     assert_eq!(
         names(&roles["gateway"]),
         expected(&["SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_OPERATOR_TOKEN"])
@@ -815,6 +855,8 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     );
     for environment in roles.values() {
         assert_eq!(environment["HOME"], home_value);
+        assert_eq!(environment["HTTPS_PROXY"], "https://proxy.invalid:443");
+        assert_eq!(environment["NO_PROXY"], "example.test");
         assert!(
             environment
                 .values()
@@ -905,6 +947,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         "file-cursor",
         "shell-codex",
         "file-gateway-token",
+        "file-db-password",
     ] {
         assert!(!log.contains(value));
     }
@@ -1961,6 +2004,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
         .collect::<Vec<_>>(),
     )?;
     supervisor.ready()?;
+    uses_database(&state, &database)?;
     let cli = |args: &[&str]| -> Result<String> {
         let output = Command::new(BIN)
             .arg(args[0])
