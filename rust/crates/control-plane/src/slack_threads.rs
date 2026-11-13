@@ -120,6 +120,14 @@ impl Store {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
+        crate::reply_progress::acknowledge_in(
+            &mut tx,
+            &task,
+            account,
+            &input.channel_id,
+            &input.thread_ts,
+        )
+        .await?;
         if activate {
             sqlx::query("INSERT INTO supertag_v2_slack_threads (account_id,team_id,channel_id,thread_ts,tag_id,session_id) VALUES ($1,$2,$3,$4,$5,$6)")
                 .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.thread_ts).bind(&tag).bind(&session)

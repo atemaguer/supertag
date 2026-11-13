@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../proto/supertag/runtime/v2/mcp.proto",
         "../../proto/supertag/runtime/v2/artifact.proto",
         "../../proto/supertag/runtime/v2/workspace_volume.proto",
+        "../../proto/supertag/runtime/v2/reply_progress.proto",
     ];
     for file in files {
         println!("cargo:rerun-if-changed={file}");

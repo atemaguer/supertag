@@ -25,12 +25,14 @@ impl Store {
         let now = self.execution_now_ms();
         sweep_in(&mut tx, now).await?;
         if let Some(prior) = sqlx::query("SELECT reply_id,lease_token FROM supertag_v2_reply_claims WHERE account_id=$1 AND operation_id=$2").bind(account).bind(operation_id).fetch_optional(&mut *tx).await? {
-            let reply = reply_row(&reply_in(&mut tx, account, &prior.try_get::<String,_>("reply_id")?).await?)?;
+            let mut reply = reply_row(&reply_in(&mut tx, account, &prior.try_get::<String,_>("reply_id")?).await?)?;
+            crate::reply_progress::present_in(&mut tx, &mut reply).await?;
             let result = ClaimReplyResponse { reply: Some(reply), lease_token: prior.try_get("lease_token")? };
             tx.commit().await?;
             return Ok(result);
         }
-        let id: Option<String> = sqlx::query_scalar("SELECT reply_id FROM supertag_v2_replies WHERE account_id=$1 AND state=$2 ORDER BY ready_order LIMIT 1").bind(account).bind(ReplyState::Pending as i64).fetch_optional(&mut *tx).await?;
+        crate::reply_progress::sweep_in(&mut tx, now).await?;
+        let id: Option<String> = sqlx::query_scalar(&format!("SELECT reply_id FROM supertag_v2_replies WHERE account_id=$1 AND state=$2 AND {} ORDER BY ready_order LIMIT 1", crate::reply_progress::FINAL_READY)).bind(account).bind(ReplyState::Pending as i64).bind(now).fetch_optional(&mut *tx).await?;
         let Some(id) = id else {
             tx.commit().await?;
             return Ok(ClaimReplyResponse::default());
@@ -38,8 +40,10 @@ impl Store {
         let lease = Uuid::new_v4().to_string();
         sqlx::query("UPDATE supertag_v2_replies SET state=$1,lease_token=$2,lease_expires_at_ms=$3 WHERE reply_id=$4").bind(ReplyState::Claimed as i64).bind(&lease).bind(now.saturating_add(LEASE_MS)).bind(&id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_reply_claims(account_id,operation_id,reply_id,lease_token) VALUES($1,$2,$3,$4)").bind(account).bind(operation_id).bind(&id).bind(&lease).execute(&mut *tx).await?;
+        let mut reply = reply_row(&reply_in(&mut tx, account, &id).await?)?;
+        crate::reply_progress::present_in(&mut tx, &mut reply).await?;
         let result = ClaimReplyResponse {
-            reply: Some(reply_row(&reply_in(&mut tx, account, &id).await?)?),
+            reply: Some(reply),
             lease_token: lease,
         };
         tx.commit().await?;

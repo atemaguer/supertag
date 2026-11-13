@@ -2211,6 +2211,16 @@ message Reply {
   string text = 5;
   ReplyState state = 6;
   optional string provider_receipt = 7;
+  // Verified delivery data the Surface may show beside the text. Set only on a claim.
+  ReplyResultCard result_card = 1200;
+  // A delivered acknowledgement this final reply replaces in place. Set only on a claim.
+  optional string replace_provider_receipt = 1201;
+}
+
+// A completed Work Session's verified delivery, reported to the Session that started it.
+message ReplyResultCard {
+  optional string branch = 1;
+  optional string pull_request_url = 2;
 }
 
 message ClaimReplyRequest {
