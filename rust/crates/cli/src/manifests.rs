@@ -39,6 +39,10 @@ pub struct ManifestArgs {
     /// Remove the apply set's resources that the input no longer declares.
     #[arg(long, requires = "manager")]
     prune: bool,
+    /// Take ownership of fields another apply set, or a change outside apply,
+    /// set to a different value.
+    #[arg(long)]
+    force_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -453,11 +457,18 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         false,
     )?;
     let changes = catalog.plan(manifests).await?;
+    let conflicts = catalog.field_conflicts(args.force_conflicts).await?;
     if !apply {
         let mut lines = changes
             .iter()
             .map(plan::Change::preview)
             .collect::<Vec<_>>();
+        lines.extend(conflicts.iter().map(|conflict| {
+            format!(
+                "conflict {}  (use --force-conflicts)",
+                crate::terminal::text(conflict)
+            )
+        }));
         if args.prune {
             lines.extend(
                 catalog
@@ -475,6 +486,12 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         }
         return Ok(());
     }
+    if !conflicts.is_empty() {
+        bail!(
+            "Nothing was applied. {}. Use --force-conflicts to take ownership",
+            crate::terminal::text(&conflicts.join("; "))
+        );
+    }
     let unchanged = changes.is_empty();
     catalog.claim_apply_set().await?;
     for change in changes {
@@ -486,6 +503,7 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
             return Err(error);
         }
     }
+    catalog.record_fields().await?;
     let pruned = catalog.reconcile_apply_set(args.prune, false).await?;
     if unchanged && pruned.is_empty() {
         outln!("No changes.");

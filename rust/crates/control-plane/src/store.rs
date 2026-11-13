@@ -197,7 +197,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/sqlite/0067_coordination_safety.sql"),
                 include_str!("../migrations/sqlite/0068_operator_notifications.sql"),
-                include_str!("../migrations/sqlite/0350_manifest_runs_on.sql"),
+                include_str!("../migrations/sqlite/0350_manifest_ownership.sql"),
             ]
         } else {
             [
@@ -271,7 +271,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0066_host_credentials_auth_key_names.sql"),
                 include_str!("../migrations/postgresql/0067_coordination_safety.sql"),
                 include_str!("../migrations/postgresql/0068_operator_notifications.sql"),
-                include_str!("../migrations/postgresql/0350_manifest_runs_on.sql"),
+                include_str!("../migrations/postgresql/0350_manifest_ownership.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

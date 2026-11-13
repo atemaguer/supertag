@@ -404,6 +404,8 @@ Options:
           Apply as this apply set: it owns the Tag relationships it declares and the resources it creates
       --prune
           Remove the apply set's resources that the input no longer declares
+      --force-conflicts
+          Take ownership of fields another apply set, or a change outside apply, set to a different value
   -h, --help
           Print help
 ```
@@ -426,6 +428,8 @@ Options:
           Apply as this apply set: it owns the Tag relationships it declares and the resources it creates
       --prune
           Remove the apply set's resources that the input no longer declares
+      --force-conflicts
+          Take ownership of fields another apply set, or a change outside apply, set to a different value
   -h, --help
           Print help
 ```

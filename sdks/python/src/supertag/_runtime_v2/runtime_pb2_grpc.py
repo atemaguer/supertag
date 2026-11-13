@@ -1225,6 +1225,11 @@ class ManifestRelationshipsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.FromString,
                 _registered_method=True)
+        self.ReconcileManifestFields = channel.unary_unary(
+                '/supertag.runtime.v2.ManifestRelationships/ReconcileManifestFields',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsResponse.FromString,
+                _registered_method=True)
 
 
 class ManifestRelationshipsServicer:
@@ -1251,6 +1256,15 @@ class ManifestRelationshipsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReconcileManifestFields(self, request, context):
+        """Checks and records which manager (an apply set, default apply) owns each
+        field a manifest sets. Changing a field another manager owns, or one
+        changed outside apply since, is a conflict unless forced.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ManifestRelationshipsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1268,6 +1282,11 @@ def add_ManifestRelationshipsServicer_to_server(servicer, server):
                     servicer.ReconcileApplySet,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.SerializeToString,
+            ),
+            'ReconcileManifestFields': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReconcileManifestFields,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1352,6 +1371,33 @@ class ManifestRelationships:
             '/supertag.runtime.v2.ManifestRelationships/ReconcileApplySet',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReconcileManifestFields(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ManifestRelationships/ReconcileManifestFields',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileManifestFieldsResponse.FromString,
             options,
             channel_credentials,
             insecure,

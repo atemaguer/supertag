@@ -402,6 +402,56 @@ REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
 
+class ManifestField(_message.Message):
+    __slots__ = ("path", "current_digest", "desired_digest")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    DESIRED_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    current_digest: str
+    desired_digest: str
+    def __init__(self, path: _Optional[str] = ..., current_digest: _Optional[str] = ..., desired_digest: _Optional[str] = ...) -> None: ...
+
+class ManifestFieldResource(_message.Message):
+    __slots__ = ("kind", "name", "fields")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    FIELDS_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    fields: _containers.RepeatedCompositeFieldContainer[ManifestField]
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., fields: _Optional[_Iterable[_Union[ManifestField, _Mapping]]] = ...) -> None: ...
+
+class ReconcileManifestFieldsRequest(_message.Message):
+    __slots__ = ("manager", "resources", "force_conflicts", "preview")
+    MANAGER_FIELD_NUMBER: _ClassVar[int]
+    RESOURCES_FIELD_NUMBER: _ClassVar[int]
+    FORCE_CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    manager: str
+    resources: _containers.RepeatedCompositeFieldContainer[ManifestFieldResource]
+    force_conflicts: bool
+    preview: bool
+    def __init__(self, manager: _Optional[str] = ..., resources: _Optional[_Iterable[_Union[ManifestFieldResource, _Mapping]]] = ..., force_conflicts: _Optional[bool] = ..., preview: _Optional[bool] = ...) -> None: ...
+
+class ManifestFieldConflict(_message.Message):
+    __slots__ = ("kind", "name", "path", "manager")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    MANAGER_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    path: str
+    manager: str
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., path: _Optional[str] = ..., manager: _Optional[str] = ...) -> None: ...
+
+class ReconcileManifestFieldsResponse(_message.Message):
+    __slots__ = ("conflicts",)
+    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    conflicts: _containers.RepeatedCompositeFieldContainer[ManifestFieldConflict]
+    def __init__(self, conflicts: _Optional[_Iterable[_Union[ManifestFieldConflict, _Mapping]]] = ...) -> None: ...
+
 class ApplySetDeclaration(_message.Message):
     __slots__ = ("kind", "name", "revision", "created")
     KIND_FIELD_NUMBER: _ClassVar[int]

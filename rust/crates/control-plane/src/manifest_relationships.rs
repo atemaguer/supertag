@@ -488,4 +488,16 @@ impl manifest_relationships_server::ManifestRelationships for ControlPlane {
             .insert(crate::audit::AuditChanges(changes));
         Ok(response)
     }
+
+    async fn reconcile_manifest_fields(
+        &self,
+        request: Request<ReconcileManifestFieldsRequest>,
+    ) -> std::result::Result<Response<ReconcileManifestFieldsResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .reconcile_manifest_fields(&principal, request.get_ref())
+                .await?,
+        ))
+    }
 }

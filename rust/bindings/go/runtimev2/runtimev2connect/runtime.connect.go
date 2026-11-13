@@ -158,6 +158,9 @@ const (
 	// ManifestRelationshipsReconcileApplySetProcedure is the fully-qualified name of the
 	// ManifestRelationships's ReconcileApplySet RPC.
 	ManifestRelationshipsReconcileApplySetProcedure = "/supertag.runtime.v2.ManifestRelationships/ReconcileApplySet"
+	// ManifestRelationshipsReconcileManifestFieldsProcedure is the fully-qualified name of the
+	// ManifestRelationships's ReconcileManifestFields RPC.
+	ManifestRelationshipsReconcileManifestFieldsProcedure = "/supertag.runtime.v2.ManifestRelationships/ReconcileManifestFields"
 	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
 	// CreateObjective RPC.
 	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
@@ -1243,6 +1246,10 @@ type ManifestRelationshipsClient interface {
 	// Records an apply set's members and, with prune, removes the members its
 	// input no longer declares, all in one serialized Control Plane write.
 	ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error)
+	// Checks and records which manager (an apply set, default apply) owns each
+	// field a manifest sets. Changing a field another manager owns, or one
+	// changed outside apply since, is a conflict unless forced.
+	ReconcileManifestFields(context.Context, *connect.Request[runtimev2.ReconcileManifestFieldsRequest]) (*connect.Response[runtimev2.ReconcileManifestFieldsResponse], error)
 }
 
 // NewManifestRelationshipsClient constructs a client for the
@@ -1274,14 +1281,21 @@ func NewManifestRelationshipsClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileApplySet")),
 			connect.WithClientOptions(opts...),
 		),
+		reconcileManifestFields: connect.NewClient[runtimev2.ReconcileManifestFieldsRequest, runtimev2.ReconcileManifestFieldsResponse](
+			httpClient,
+			baseURL+ManifestRelationshipsReconcileManifestFieldsProcedure,
+			connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileManifestFields")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // manifestRelationshipsClient implements ManifestRelationshipsClient.
 type manifestRelationshipsClient struct {
-	reconcileTag      *connect.Client[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse]
-	provisionTags     *connect.Client[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse]
-	reconcileApplySet *connect.Client[runtimev2.ReconcileApplySetRequest, runtimev2.ReconcileApplySetResponse]
+	reconcileTag            *connect.Client[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse]
+	provisionTags           *connect.Client[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse]
+	reconcileApplySet       *connect.Client[runtimev2.ReconcileApplySetRequest, runtimev2.ReconcileApplySetResponse]
+	reconcileManifestFields *connect.Client[runtimev2.ReconcileManifestFieldsRequest, runtimev2.ReconcileManifestFieldsResponse]
 }
 
 // ReconcileTag calls supertag.runtime.v2.ManifestRelationships.ReconcileTag.
@@ -1299,6 +1313,11 @@ func (c *manifestRelationshipsClient) ReconcileApplySet(ctx context.Context, req
 	return c.reconcileApplySet.CallUnary(ctx, req)
 }
 
+// ReconcileManifestFields calls supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields.
+func (c *manifestRelationshipsClient) ReconcileManifestFields(ctx context.Context, req *connect.Request[runtimev2.ReconcileManifestFieldsRequest]) (*connect.Response[runtimev2.ReconcileManifestFieldsResponse], error) {
+	return c.reconcileManifestFields.CallUnary(ctx, req)
+}
+
 // ManifestRelationshipsHandler is an implementation of the
 // supertag.runtime.v2.ManifestRelationships service.
 type ManifestRelationshipsHandler interface {
@@ -1307,6 +1326,10 @@ type ManifestRelationshipsHandler interface {
 	// Records an apply set's members and, with prune, removes the members its
 	// input no longer declares, all in one serialized Control Plane write.
 	ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error)
+	// Checks and records which manager (an apply set, default apply) owns each
+	// field a manifest sets. Changing a field another manager owns, or one
+	// changed outside apply since, is a conflict unless forced.
+	ReconcileManifestFields(context.Context, *connect.Request[runtimev2.ReconcileManifestFieldsRequest]) (*connect.Response[runtimev2.ReconcileManifestFieldsResponse], error)
 }
 
 // NewManifestRelationshipsHandler builds an HTTP handler from the service implementation. It
@@ -1334,6 +1357,12 @@ func NewManifestRelationshipsHandler(svc ManifestRelationshipsHandler, opts ...c
 		connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileApplySet")),
 		connect.WithHandlerOptions(opts...),
 	)
+	manifestRelationshipsReconcileManifestFieldsHandler := connect.NewUnaryHandler(
+		ManifestRelationshipsReconcileManifestFieldsProcedure,
+		svc.ReconcileManifestFields,
+		connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileManifestFields")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.ManifestRelationships/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ManifestRelationshipsReconcileTagProcedure:
@@ -1342,6 +1371,8 @@ func NewManifestRelationshipsHandler(svc ManifestRelationshipsHandler, opts ...c
 			manifestRelationshipsProvisionTagsHandler.ServeHTTP(w, r)
 		case ManifestRelationshipsReconcileApplySetProcedure:
 			manifestRelationshipsReconcileApplySetHandler.ServeHTTP(w, r)
+		case ManifestRelationshipsReconcileManifestFieldsProcedure:
+			manifestRelationshipsReconcileManifestFieldsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1361,6 +1392,10 @@ func (UnimplementedManifestRelationshipsHandler) ProvisionTags(context.Context, 
 
 func (UnimplementedManifestRelationshipsHandler) ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ReconcileApplySet is not implemented"))
+}
+
+func (UnimplementedManifestRelationshipsHandler) ReconcileManifestFields(context.Context, *connect.Request[runtimev2.ReconcileManifestFieldsRequest]) (*connect.Response[runtimev2.ReconcileManifestFieldsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields is not implemented"))
 }
 
 // ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
