@@ -33,6 +33,7 @@ mod output_policy;
 mod placement;
 mod policy;
 mod profiles;
+mod removed_hosts;
 mod replies;
 mod resources;
 mod service_manager;
@@ -1184,6 +1185,7 @@ async fn run(command: Command) -> Result<()> {
             );
             #[cfg(feature = "test-fixtures")]
             let (keep_awake, disk_space) = test_host_environment(disk_space)?;
+            let retire = CancellationToken::new();
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -1215,6 +1217,7 @@ async fn run(command: Command) -> Result<()> {
                     observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
                         outln!("state {}", state.as_str());
                     }),
+                    retire: retire.clone(),
                 }),
             };
             let token = CancellationToken::new();
@@ -1223,8 +1226,17 @@ async fn run(command: Command) -> Result<()> {
                 termination_signal().await;
                 shutdown.cancel();
             });
+            // A supervisor lowering the Host's concurrency retires a lane with SIGUSR1.
+            let mut retirement =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())?;
+            let retiring = tokio::spawn(async move {
+                if retirement.recv().await.is_some() {
+                    retire.cancel();
+                }
+            });
             let result = supertag_worker_host::run(options, token, || outln!("ready")).await;
             signal.abort();
+            retiring.abort();
             result?;
         }
         Command::AuthKey {

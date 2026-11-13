@@ -174,11 +174,13 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
                     address: Some(endpoint.clone()),
                     host_id: Some(FLAGS_HOST.into()),
                     remote: false,
+                    concurrency: None,
                 });
             }
             lifecycle::record(
                 &directory,
                 &options.fingerprint,
+                "",
                 lifecycle::DEFAULT_INSTANCE,
                 Some(&endpoint),
                 services,
@@ -456,6 +458,7 @@ impl Children {
                 address: self.control_plane_address.clone(),
                 host_id: None,
                 remote: false,
+                concurrency: None,
             });
         }
         if let Some(service) = &self.gateway {
@@ -466,6 +469,7 @@ impl Children {
                 address: Some(endpoint.to_owned()),
                 host_id: None,
                 remote: false,
+                concurrency: None,
             });
         }
         services
@@ -875,13 +879,23 @@ struct ManagedHost {
 /// One execution lane: a Worker Host process that runs one Attempt of one harness at a time.
 struct ManagedLane {
     harness: usize,
+    /// The lane's number among its harness's lanes, which names its state directory.
+    slot: u32,
     directory: PathBuf,
     service: Option<Service>,
+    /// Lowered `concurrency` asked the lane to stop once it holds no Attempt.
+    retiring: bool,
+    /// Raised `concurrency` wants the retiring lane back once it stopped.
+    respawn: bool,
 }
 
 #[derive(Default)]
 struct LaneStates {
     states: std::sync::Mutex<Vec<LaneState>>,
+    /// Each lane's harness, or `None` for a lane that lowered `concurrency` stopped.
+    harness_of: std::sync::Mutex<Vec<Option<usize>>>,
+    /// The lanes each harness runs, as presence reports them.
+    capacity: std::sync::atomic::AtomicU32,
     changed: tokio::sync::Notify,
     /// Presence reports the Control Plane answered, current or transiently unavailable.
     reports: std::sync::atomic::AtomicU64,
@@ -894,6 +908,26 @@ impl LaneStates {
             states[lane] = state;
             drop(states);
             self.changed.notify_one();
+        }
+    }
+}
+
+impl ManagedLane {
+    fn new(
+        harness: usize,
+        slot: u32,
+        host: &Path,
+        adapter: &crate::harness::AdapterOptions,
+    ) -> Self {
+        Self {
+            harness,
+            slot,
+            directory: host
+                .join("lanes")
+                .join(format!("{}-{slot}", lane_name(adapter.harness_kind()))),
+            service: None,
+            retiring: false,
+            respawn: false,
         }
     }
 }
@@ -914,17 +948,15 @@ impl ManagedHost {
         let mut lanes = Vec::new();
         for (harness, adapter) in definition.harnesses.iter().enumerate() {
             for slot in 0..definition.concurrency {
-                lanes.push(ManagedLane {
-                    harness,
-                    directory: directory
-                        .join("lanes")
-                        .join(format!("{}-{slot}", lane_name(adapter.harness_kind()))),
-                    service: None,
-                });
+                lanes.push(ManagedLane::new(harness, slot, &directory, adapter));
             }
         }
         let states = Arc::new(LaneStates {
             states: std::sync::Mutex::new(vec![LaneState::Pending; lanes.len()]),
+            harness_of: std::sync::Mutex::new(
+                lanes.iter().map(|lane| Some(lane.harness)).collect(),
+            ),
+            capacity: std::sync::atomic::AtomicU32::new(definition.concurrency),
             ..Default::default()
         });
         Self {
@@ -1022,7 +1054,8 @@ impl ManagedHost {
             slots.push(supertag_worker_host::HarnessSlots {
                 harness: adapter.harness_kind(),
                 profile: configured_profile(adapter)?,
-                capacity: self.definition.concurrency,
+                // Reported from the shared lane states, which a concurrency change updates.
+                capacity: 0,
             });
         }
         let workspaces = match self.definition.harnesses.first() {
@@ -1037,11 +1070,9 @@ impl ManagedHost {
                 .collect(),
             None => vec![],
         };
-        let harness_of = self.lanes.iter().map(|lane| lane.harness).collect();
         self.presence = Some(report_presence(
             shared,
             slots,
-            harness_of,
             workspaces,
             self.states.clone(),
         ));
@@ -1178,6 +1209,78 @@ impl ManagedHost {
         self.start_lane(index, executable, &incarnation, &token)
             .await
     }
+
+    /// Run `concurrency` lanes per harness without a restart. Raised lanes start under the
+    /// Host's current registration. Lowered lanes are asked to stop once they hold no Attempt,
+    /// so a running Attempt finishes and the lane's journal is left empty; presence reports the
+    /// new capacity at once, so no new work is admitted beyond it.
+    async fn resize(&mut self, concurrency: u32, executable: &Path) -> Result<()> {
+        self.states
+            .capacity
+            .store(concurrency, std::sync::atomic::Ordering::SeqCst);
+        for harness in 0..self.definition.harnesses.len() {
+            for slot in 0..concurrency {
+                let existing = self
+                    .lanes
+                    .iter()
+                    .position(|lane| lane.harness == harness && lane.slot == slot);
+                match existing {
+                    Some(index) if self.lanes[index].retiring => {
+                        // Still stopping: start it again once it has.
+                        self.lanes[index].respawn = true;
+                    }
+                    Some(index) if self.lanes[index].service.is_none() => {
+                        self.states.harness_of.lock().expect("lane harnesses")[index] =
+                            Some(harness);
+                        self.restart_lane(index, executable).await?;
+                    }
+                    Some(_) => {}
+                    None => {
+                        let lane = ManagedLane::new(
+                            harness,
+                            slot,
+                            &self.directory,
+                            &self.definition.harnesses[harness],
+                        );
+                        self.lanes.push(lane);
+                        self.states
+                            .states
+                            .lock()
+                            .expect("lane states")
+                            .push(LaneState::Pending);
+                        self.states
+                            .harness_of
+                            .lock()
+                            .expect("lane harnesses")
+                            .push(Some(harness));
+                        let index = self.lanes.len() - 1;
+                        self.restart_lane(index, executable).await?;
+                    }
+                }
+            }
+        }
+        for lane in self
+            .lanes
+            .iter_mut()
+            .filter(|lane| lane.slot >= concurrency && lane.service.is_some())
+        {
+            lane.respawn = false;
+            if !lane.retiring {
+                lane.retiring = true;
+                if let Some(pid) = lane
+                    .service
+                    .as_ref()
+                    .and_then(|service| service.process.id())
+                {
+                    // SAFETY: the PID belongs to a child whose wait handle we hold.
+                    unsafe { libc::kill(pid as i32, libc::SIGUSR1) };
+                }
+            }
+        }
+        self.definition.concurrency = concurrency;
+        self.states.changed.notify_one();
+        Ok(())
+    }
 }
 
 fn lane_name(kind: supertag_protocol::v2::HarnessKind) -> String {
@@ -1214,8 +1317,7 @@ fn configured_profile(
 /// A replaced or revoked registration ends the task with an error.
 fn report_presence(
     mut shared: supertag_worker_host::SharedHost,
-    slots: Vec<supertag_worker_host::HarnessSlots>,
-    harness_of: Vec<usize>,
+    mut slots: Vec<supertag_worker_host::HarnessSlots>,
     workspaces: Vec<String>,
     states: Arc<LaneStates>,
 ) -> Presence {
@@ -1233,21 +1335,26 @@ fn report_presence(
             };
             let lanes = {
                 let current = states.states.lock().expect("lane states");
+                let harness_of = states.harness_of.lock().expect("lane harnesses");
                 harness_of
                     .iter()
                     .zip(current.iter())
-                    .map(|(harness, state)| {
-                        (
-                            *harness,
+                    .filter_map(|(harness, state)| {
+                        Some((
+                            (*harness)?,
                             if stopping {
                                 LaneState::Stopping
                             } else {
                                 *state
                             },
-                        )
+                        ))
                     })
                     .collect::<Vec<_>>()
             };
+            let capacity = states.capacity.load(std::sync::atomic::Ordering::SeqCst);
+            for slot in &mut slots {
+                slot.capacity = capacity;
+            }
             let reported = shared.report(&slots, &lanes, &workspaces).await;
             if stopping {
                 // Best effort: an unreported stop expires with the presence lease.
@@ -1298,6 +1405,7 @@ pub async fn configured(
     let mut base = Children::new(&directory)?;
     let logs = base.logs.clone();
     let fingerprint = config.digest.clone();
+    let shape = config.shape.clone();
     let instance = config.name.clone();
     let mut announced: Option<String> = None;
     let mut hosts = Vec::new();
@@ -1428,7 +1536,7 @@ pub async fn configured(
         Ok::<_, anyhow::Error>(())
     };
     let started = tokio::select! {result=startup=>result.map(|()|true),_=&mut shutdown=>Ok(false)};
-    let status = |base: &Children, hosts: &[ManagedHost]| {
+    let status = |base: &Children, hosts: &[ManagedHost], fingerprint: &str| {
         let mut services = announced
             .as_deref()
             .map(|endpoint| base.base_status(endpoint))
@@ -1446,11 +1554,13 @@ pub async fn configured(
                 address: Some(host.endpoint.clone()),
                 host_id: Some(host.definition.name.clone()),
                 remote: host.definition.gateway.is_some(),
+                concurrency: Some(host.definition.concurrency),
             });
         }
         lifecycle::record(
             &directory,
-            &fingerprint,
+            fingerprint,
+            &shape,
             &instance,
             announced.as_deref(),
             services,
@@ -1458,12 +1568,12 @@ pub async fn configured(
     };
     let result = match started.and_then(|started| {
         if started {
-            status(&base, &hosts)?;
+            status(&base, &hosts, &fingerprint)?;
         }
         Ok(started)
     }) {
         Ok(true) => {
-            tokio::select! {result=wait_configured(&mut base,&mut hosts,&executable,&status)=>result,_=&mut shutdown=>Ok(())}
+            tokio::select! {result=wait_configured(&mut base,&mut hosts,&executable,&directory,fingerprint.clone(),&status)=>result,_=&mut shutdown=>Ok(())}
         }
         Ok(false) => Ok(()),
         Err(error) => Err(error),
@@ -1602,10 +1712,35 @@ async fn wait_configured(
     base: &mut Children,
     hosts: &mut [ManagedHost],
     executable: &Path,
-    status: &impl Fn(&Children, &[ManagedHost]) -> Result<()>,
+    directory: &Path,
+    mut fingerprint: String,
+    status: &impl Fn(&Children, &[ManagedHost], &str) -> Result<()>,
 ) -> Result<()> {
     loop {
         let mut restarted = false;
+        // `supertag up` asks for a different `concurrency` when nothing else changed.
+        if let Some(request) = lifecycle::take_concurrency_request(directory) {
+            for host in hosts.iter_mut() {
+                if let Some(&concurrency) = request.hosts.get(&host.definition.name)
+                    && concurrency != host.definition.concurrency
+                    && (1..=crate::local_config::MAX_CONCURRENCY).contains(&concurrency)
+                {
+                    note_line(
+                        &host.logs,
+                        &host.definition.name,
+                        &format!(
+                            "concurrency changes from {} to {concurrency} without a restart",
+                            host.definition.concurrency
+                        ),
+                    )?;
+                    host.resize(concurrency, executable)
+                        .await
+                        .with_context(|| format!("Worker Host {}", host.definition.name))?;
+                }
+            }
+            fingerprint = request.fingerprint;
+            restarted = true;
+        }
         for (name, service) in [
             ("Control Plane", base.control_plane.as_mut()),
             ("Gateway", base.gateway.as_mut()),
@@ -1630,17 +1765,27 @@ async fn wait_configured(
                 bail!("Worker Host {}: {error:#}", host.definition.name);
             }
             for index in 0..host.lanes.len() {
-                let Some(status) = host.lanes[index]
-                    .service
-                    .as_mut()
-                    .expect("started lane")
-                    .process
-                    .try_wait()?
-                else {
+                let Some(service) = host.lanes[index].service.as_mut() else {
+                    // A lane a lowered `concurrency` stopped.
                     continue;
                 };
-                // A fenced registration stops every lane; report that, not this lane's exit.
+                let Some(status) = service.process.try_wait()? else {
+                    continue;
+                };
                 host.lanes[index].service.take();
+                if host.lanes[index].retiring && status.success() {
+                    let lane = &mut host.lanes[index];
+                    lane.retiring = false;
+                    if std::mem::take(&mut lane.respawn) {
+                        host.restart_lane(index, executable).await?;
+                    } else {
+                        host.states.harness_of.lock().expect("lane harnesses")[index] = None;
+                        host.states.changed.notify_one();
+                    }
+                    restarted = true;
+                    continue;
+                }
+                // A fenced registration stops every lane; report that, not this lane's exit.
                 host.confirm_registration()
                     .await
                     .with_context(|| format!("Worker Host {}", host.definition.name))?;
@@ -1657,7 +1802,7 @@ async fn wait_configured(
             }
         }
         if restarted {
-            status(base, hosts)?;
+            status(base, hosts, &fingerprint)?;
         }
         time::sleep(Duration::from_millis(100)).await;
     }

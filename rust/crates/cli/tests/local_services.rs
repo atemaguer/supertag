@@ -1112,6 +1112,27 @@ impl SharedHost {
         self.temp.path().join("source")
     }
 
+    /// Rewrite supertag.yaml with `settings` and run `supertag up` against the running
+    /// supervisor; returns what it printed.
+    fn up(&self, settings: &Value) -> Result<String> {
+        let file = configure(self.temp.path(), &self.control_plane, settings)?;
+        let output = Command::new(BIN)
+            .args(["up", "--state-directory"])
+            .arg(&self.state)
+            .arg("--file")
+            .arg(&file)
+            .env_clear()
+            .envs(self.environment.iter().map(|(name, value)| (*name, value)))
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "supertag up failed: {}{}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(&self.supervisor.log).unwrap_or_default()
+        );
+        Ok(String::from_utf8(output.stdout)?)
+    }
+
     /// The marker and working directory a gated Codex harness process recorded.
     fn codex_start(&self, pid: i32) -> Result<(String, PathBuf)> {
         let text = fs::read_to_string(self.gate.join("started").join(format!("codex-{pid}")))?;
@@ -1170,6 +1191,18 @@ fn launch(
     settings: &Value,
     environment: &[(&'static str, String)],
 ) -> Result<Process> {
+    let file = configure(directory, control_plane, settings)?;
+    let environment = environment
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    let supervisor = Process::spawn(state, Some(&file), &environment)?;
+    assert_eq!(supervisor.ready()?, "ready");
+    Ok(supervisor)
+}
+
+/// Write the shared Host's supertag.yaml with `settings` over its defaults.
+fn configure(directory: &Path, control_plane: &str, settings: &Value) -> Result<PathBuf> {
     let mut host = serde_json::json!({
         "type":"host","control-plane":control_plane,"auth-key":"join",
         "harnesses":["codex","openai-agents"],"concurrency":1,
@@ -1184,13 +1217,7 @@ fn launch(
         &serde_json::json!({"env_file":"services.env","services":{"shared":host},
             "secrets":{"join":{"environment":"FIXTURE_JOIN_KEY"}}}),
     )?;
-    let environment = environment
-        .iter()
-        .map(|(name, value)| (*name, value.as_str()))
-        .collect::<Vec<_>>();
-    let supervisor = Process::spawn(state, Some(&file), &environment)?;
-    assert_eq!(supervisor.ready()?, "ready");
-    Ok(supervisor)
+    Ok(file)
 }
 
 fn git(directory: &Path, arguments: &[&str]) -> Result<String> {
@@ -1773,6 +1800,121 @@ async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Resul
     assert_eq!(again.generation, replaced.generation);
     shared.supervisor.stop().await?;
     Ok(())
+}
+
+/// `tests/concurrency-request.test.ts`: `supertag up` with only a host's `concurrency` changed
+/// raises or lowers its lanes in place. Running work continues, the registration and its
+/// generation stay, and a lowered lane finishes its Attempt before it stops.
+async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let shared = SharedHost::start(&central, 1).await?;
+    let ready = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.capacity == 2
+    })
+    .await?;
+    tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
+    let first = submit(&mut operator, &token, "coder", "Task-c1").await?;
+    settled(&mut operator, &token, &first, TaskState::Running).await?;
+    shared.wait_started(1, 0).await?;
+    let second = submit(&mut operator, &token, "coder", "Task-c2").await?;
+    sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        task(&mut operator, &token, &second).await?.state(),
+        TaskState::Queued,
+        "one Codex lane runs one Attempt"
+    );
+    let supervisor = shared.supervisor.child.id();
+
+    // Raised: a second Codex lane starts under the same registration and takes the queued Task
+    // while the first keeps running.
+    let printed = shared.up(&serde_json::json!({"concurrency": 2}))?;
+    ensure!(
+        printed.contains(
+            "Worker Host shared runs up to 2 Task Attempts per harness at once, changed from 1 without a restart."
+        ),
+        "{printed}"
+    );
+    settled(&mut operator, &token, &second, TaskState::Running).await?;
+    shared.wait_started(2, 0).await?;
+    let raised = host_until(&mut operator, &token, |status| status.capacity == 4).await?;
+    assert_eq!(raised.generation, ready.generation);
+    assert_eq!(
+        task(&mut operator, &token, &first).await?.state(),
+        TaskState::Running
+    );
+    // An unchanged file leaves everything alone.
+    let printed = shared.up(&serde_json::json!({"concurrency": 2}))?;
+    ensure!(printed.contains("left alone"), "{printed}");
+
+    // Lowered: capacity drops at once, and the extra lane stops once its Attempt finished.
+    let printed = shared.up(&serde_json::json!({"concurrency": 1}))?;
+    ensure!(
+        printed.contains("changed from 2 without a restart"),
+        "{printed}"
+    );
+    host_until(&mut operator, &token, |status| status.capacity == 2).await?;
+    assert_eq!(
+        task(&mut operator, &token, &second).await?.state(),
+        TaskState::Running,
+        "a lowered lane keeps its running Attempt"
+    );
+    fs::write(shared.gate.join("release"), "")?;
+    settled(&mut operator, &token, &first, TaskState::Succeeded).await?;
+    settled(&mut operator, &token, &second, TaskState::Succeeded).await?;
+    timeout(WAIT, async {
+        loop {
+            let codex = shared
+                .lanes()?
+                .into_iter()
+                .filter(|(_, command)| command.contains("/lanes/codex-"))
+                .count();
+            if codex == 1 {
+                break Ok::<_, anyhow::Error>(());
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("the lowered Codex lane did not stop")??;
+    assert!(
+        !shared
+            .state
+            .join("hosts/shared/lanes/codex-1/attempt.json")
+            .exists()
+    );
+    let third = submit(&mut operator, &token, "coder", "Task-c3").await?;
+    settled(&mut operator, &token, &third, TaskState::Succeeded).await?;
+    assert_eq!(shared.supervisor.child.id(), supervisor);
+    let lowered = host(&mut operator, &token, "shared").await?;
+    assert_eq!(lowered.generation, ready.generation);
+    // The supervisor reports what it now runs.
+    let status: Value = serde_json::from_slice(&fs::read(shared.state.join("supervisor.json"))?)?;
+    assert_eq!(status["pid"], supervisor);
+    assert_eq!(status["services"][0]["concurrency"], 1);
+    let mut shared = shared;
+    shared.supervisor.stop().await?;
+    // Nothing was stranded: a restart keeps the registration.
+    shared.relaunch(&serde_json::json!({"concurrency": 1}))?;
+    let again = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.capacity == 2
+    })
+    .await?;
+    assert_eq!(again.generation, ready.generation);
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_concurrency_changes_without_a_restart() -> Result<()> {
+    with_database(false, concurrency_changes_without_a_restart).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_concurrency_changes_without_a_restart() -> Result<()> {
+    with_database(true, concurrency_changes_without_a_restart).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

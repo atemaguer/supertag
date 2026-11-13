@@ -79,6 +79,9 @@ pub struct SupervisorStatus {
     pub version: String,
     pub instance: String,
     pub fingerprint: String,
+    /// The configuration's digest without host `concurrency`; see `local_config::Config::shape`.
+    #[serde(default)]
+    pub shape: String,
     pub started_at_ms: u64,
     pub endpoint: Option<String>,
     pub services: Vec<ServiceStatus>,
@@ -95,6 +98,9 @@ pub struct ServiceStatus {
     pub host_id: Option<String>,
     /// A host connected to a Gateway this supervisor does not run.
     pub remote: bool,
+    /// A host's Attempts per harness at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
 }
 
 fn now_ms() -> u64 {
@@ -112,6 +118,7 @@ fn started_at_ms() -> u64 {
 pub fn record(
     directory: &Path,
     fingerprint: &str,
+    shape: &str,
     instance: &str,
     endpoint: Option<&str>,
     services: Vec<ServiceStatus>,
@@ -122,6 +129,7 @@ pub fn record(
         version: env!("CARGO_PKG_VERSION").into(),
         instance: instance.into(),
         fingerprint: fingerprint.into(),
+        shape: shape.into(),
         started_at_ms: started_at_ms(),
         endpoint: endpoint.map(str::to_owned),
         services,
@@ -331,6 +339,16 @@ pub async fn up(options: Background) -> Result<()> {
             if status.fingerprint == fingerprint && unit_current {
                 outln!("SuperTag already runs with these settings, so it was left alone.");
                 summary(&options.state, &status);
+                retire_removed_hosts(&options.state, options.config.as_ref()).await;
+                return Ok(());
+            }
+            if let Some(config) = &options.config
+                && unit_current
+                && !status.shape.is_empty()
+                && status.shape == config.shape
+            {
+                change_concurrency(&options.state, &status, config).await?;
+                retire_removed_hosts(&options.state, Some(config)).await;
                 return Ok(());
             }
             outln!("SuperTag's settings changed, so it restarts.");
@@ -401,6 +419,135 @@ pub async fn up(options: Background) -> Result<()> {
     outln!(
         "Follow the logs with supertag logs -f, list services with supertag ps, and stop with supertag down."
     );
+    retire_removed_hosts(&state, options.config.as_ref()).await;
+    Ok(())
+}
+
+/// Removes the state of host services supertag.yaml no longer names once their Worker Host is
+/// revoked, and says what retires the others. A failure here leaves SuperTag running.
+async fn retire_removed_hosts(state: &Path, config: Option<&local_config::Config>) {
+    let Some(config) = config else {
+        return;
+    };
+    let configured = config.hosts.iter().map(|host| host.name.clone()).collect();
+    let local = local::connection(state).ok();
+    let check = async |host_id: &str| {
+        use crate::removed_hosts::Registration;
+        let (url, token) = local
+            .as_ref()
+            .context("the local Control Plane is not running")?;
+        let endpoint = crate::network::endpoint(url.clone(), false).await?;
+        let mut client = OperatorClient::new(crate::network::operator_channel(&endpoint).await?);
+        match client
+            .get_host(crate::request(
+                GetHostRequest {
+                    host_id: host_id.into(),
+                },
+                token,
+            )?)
+            .await
+        {
+            Ok(host) => {
+                let host = host.into_inner();
+                Ok(
+                    if host.revoked_at_ms.is_some() || host.removed_at_ms.is_some() {
+                        Registration::Retired
+                    } else {
+                        Registration::Active
+                    },
+                )
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(Registration::Retired),
+            Err(status) => Err(anyhow::Error::from(status)),
+        }
+    };
+    match crate::removed_hosts::retire(
+        state,
+        &configured,
+        local.as_ref().map(|(url, _)| url.as_str()),
+        check,
+    )
+    .await
+    {
+        Ok(lines) => {
+            for line in lines {
+                outln!("{line}");
+            }
+        }
+        Err(error) => outln!(
+            "Could not check for host services supertag.yaml no longer names: {}",
+            crate::terminal::text(&format!("{error:#}"))
+        ),
+    }
+}
+
+/// A running supervisor's request to run a different number of lanes for some hosts, written
+/// by `supertag up` when nothing else in supertag.yaml changed.
+#[derive(Serialize, Deserialize)]
+pub struct ConcurrencyRequest {
+    /// The file digest the supervisor records once it applied the request.
+    pub fingerprint: String,
+    /// Each configured host's `concurrency`.
+    pub hosts: std::collections::BTreeMap<String, u32>,
+}
+
+pub const CONCURRENCY_REQUEST: &str = "concurrency-request.json";
+
+/// Read and remove a pending request. A request that cannot be read is removed and ignored:
+/// the next `supertag up` writes it again.
+pub fn take_concurrency_request(directory: &Path) -> Option<ConcurrencyRequest> {
+    let path = directory.join(CONCURRENCY_REQUEST);
+    fs::symlink_metadata(&path).ok()?;
+    let request = read_bounded(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let _ = remove_if_present(&path);
+    request
+}
+
+/// Change the running hosts' concurrency in place: raised lanes start under the host's current
+/// registration, and lowered lanes finish their Attempt and stop, so running work is neither
+/// drained nor restarted.
+async fn change_concurrency(
+    state: &Path,
+    status: &SupervisorStatus,
+    config: &local_config::Config,
+) -> Result<()> {
+    let request = ConcurrencyRequest {
+        fingerprint: config.digest.clone(),
+        hosts: config
+            .hosts
+            .iter()
+            .map(|host| (host.name.clone(), host.concurrency))
+            .collect(),
+    };
+    write_private(state, CONCURRENCY_REQUEST, &serde_json::to_vec(&request)?)?;
+    let pid = status.pid;
+    let applied = wait_ready(state, |status| status.pid == pid && status.fingerprint == request.fingerprint, None)
+        .await
+        .context("the running supervisor did not apply the concurrency change; run supertag up --force to restart it")?;
+    let mut changed = false;
+    for host in &config.hosts {
+        let before = status
+            .services
+            .iter()
+            .find(|service| service.kind == HOST && service.name == host.name)
+            .and_then(|service| service.concurrency);
+        if let Some(before) = before
+            && before != host.concurrency
+        {
+            changed = true;
+            outln!(
+                "Worker Host {} runs up to {} Task Attempts per harness at once, changed from {before} without a restart.",
+                host.name,
+                host.concurrency
+            );
+        }
+    }
+    if !changed {
+        outln!("SuperTag already runs with these settings, so it was left alone.");
+    }
+    summary(state, &applied);
     Ok(())
 }
 

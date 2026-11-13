@@ -161,6 +161,9 @@ pub struct Config {
     pub path: PathBuf,
     /// SHA-256 of the file, so `supertag up` can leave an unchanged supervisor alone.
     pub digest: String,
+    /// SHA-256 of the resolved configuration without any host's `concurrency`: when only this
+    /// is unchanged, `supertag up` changes the running hosts' lanes instead of restarting.
+    pub shape: String,
     /// Some service sets `restart: unless-stopped`, so `up` installs a per-user service unit.
     pub service_unit: bool,
     pub plane: Option<Plane>,
@@ -224,7 +227,7 @@ pub struct Host {
     pub session_branches: crate::delivery_branches::Repositories,
 }
 /// The largest per-harness concurrency a Worker Host may declare.
-const MAX_CONCURRENCY: u32 = 16;
+pub const MAX_CONCURRENCY: u32 = 16;
 /// Distinct built-in harnesses one named Host may serve.
 const MAX_HARNESSES: usize = 5;
 #[derive(Parser)]
@@ -336,9 +339,31 @@ fn resolved(
     }
     Ok((value, environment))
 }
+/// The digest of a resolved configuration with each host's `concurrency` removed. Only a digest
+/// is kept, never the resolved values, which may hold secrets.
+fn shape_digest(value: &serde_json::Value) -> String {
+    let mut shape = value.clone();
+    if let Some(services) = shape
+        .get_mut("services")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for service in services.values_mut() {
+            if service.get("type").and_then(serde_json::Value::as_str) == Some("host")
+                && let Some(service) = service.as_object_mut()
+            {
+                service.remove("concurrency");
+            }
+        }
+    }
+    crate::lifecycle::hex(&<sha2::Sha256 as sha2::Digest>::digest(
+        shape.to_string().as_bytes(),
+    ))
+}
+
 fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> Result<Config> {
     let invalid = || anyhow::anyhow!("invalid or unsupported local service configuration");
     let (value, environment) = resolved(bytes, base, lookup)?;
+    let shape = shape_digest(&value);
     // Interpolated values may be secrets, so deserialization errors stay generic too.
     let document: Document = serde_json::from_value(value).map_err(|_| invalid())?;
     ensure!(
@@ -660,6 +685,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         name: instance,
         path: PathBuf::new(),
         digest: String::new(),
+        shape,
         service_unit,
         plane,
         hosts,
@@ -1430,5 +1456,29 @@ secrets:
                 .read(&Environment::default())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn shape_ignores_only_host_concurrency() {
+        let shape = |text: &str| {
+            parse(text.as_bytes(), Path::new("/trusted"), |_| None)
+                .unwrap()
+                .shape
+        };
+        let two = shape(
+            "services:\n  cp: {type: control-plane}\n  laptop: {type: host, harnesses: [codex], concurrency: 2}\n",
+        );
+        let six = shape(
+            "services:\n  cp: {type: control-plane}\n  laptop: {type: host, harnesses: [codex], concurrency: 6}\n",
+        );
+        let unset = shape(
+            "services:\n  cp: {type: control-plane}\n  laptop: {type: host, harnesses: [codex]}\n",
+        );
+        let other = shape(
+            "services:\n  cp: {type: control-plane}\n  laptop: {type: host, harnesses: [claude-code], concurrency: 2}\n",
+        );
+        assert_eq!(two, six);
+        assert_eq!(two, unset);
+        assert_ne!(two, other);
     }
 }
