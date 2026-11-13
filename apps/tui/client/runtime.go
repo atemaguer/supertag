@@ -83,9 +83,14 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 			if dialer.outer, err = outerTLS(serverCA); err != nil {
 				return nil, err
 			}
+			dialer.inner = transport.TLSClientConfig.Clone()
+			dialer.inner.ServerName = base.Hostname()
+			dialer.inner.NextProtos = []string{"h2"}
+			transport.DialTLSContext = dialer.DialTLSContext
+		} else {
+			transport.DialContext = dialer.DialContext
 		}
 		transport.Proxy = nil
-		transport.DialContext = dialer.DialContext
 		origin = tunnelURI(base)
 	}
 	if target.Token == "" {

@@ -111,6 +111,9 @@ func validateSavedGateway(target client.Target) error {
 	if err != nil || u.Hostname() == "" || u.User != nil || (!tunnel && u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https" && !tunnel) || len(target.URL) > 2048 {
 		return errors.New("enter a Gateway origin without credentials, path, query or fragment, or a ws or wss tunnel URL without credentials, query or fragment")
 	}
+	if tunnel && !plainTunnelPath(target.URL, u) {
+		return errors.New("a tunnel URL path must not contain backslashes or . or .. segments")
+	}
 	if u.Scheme == "http" || u.Scheme == "ws" {
 		if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
 			return errors.New("remote Gateways require HTTPS or WSS; HTTP and WS require a loopback IP")
@@ -131,6 +134,20 @@ func validateSavedGateway(target client.Target) error {
 		return errors.New("enter a valid operator token")
 	}
 	return nil
+}
+
+// plainTunnelPath reports whether a tunnel URL's path has no backslash and no . or .. segment,
+// which this client and the Rust CLI would resolve differently.
+func plainTunnelPath(raw string, u *url.URL) bool {
+	if strings.Contains(raw, `\`) {
+		return false
+	}
+	for segment := range strings.SplitSeq(u.Path, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // gatewayOrigin is the form a Gateway URL is saved and compared in: lowercase scheme and host

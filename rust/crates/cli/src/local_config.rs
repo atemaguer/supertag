@@ -526,7 +526,12 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             None
         } else {
             validate_endpoint(target)?;
-            Some(target.trim_end_matches('/').to_owned())
+            // A tunnel URL's path routes the upgrade, so only an origin loses its trailing slash.
+            if supertag_transport::tunneled_uri(target).is_ok_and(|tunnel| tunnel.is_some()) {
+                Some(target.to_owned())
+            } else {
+                Some(target.trim_end_matches('/').to_owned())
+            }
         };
         ensure!(
             depends_on
@@ -1336,6 +1341,31 @@ secrets:
         .err()
         .unwrap();
         assert!(!format!("{invalid:#}").contains("secret-looking-value"));
+    }
+    #[test]
+    fn host_control_plane_tunnel_paths_are_kept_verbatim() {
+        let c = parse(
+            br#"services:
+  tunnel: {type: host, control-plane: "wss://plane.example/supertag/", adapter: ./adapter, workspaces: {app: ./app}}
+  origin: {type: host, control-plane: "https://plane.example/", adapter: ./adapter, workspaces: {app: ./app}}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let gateway = |name: &str| {
+            c.hosts
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .gateway
+                .clone()
+        };
+        assert_eq!(
+            gateway("tunnel").as_deref(),
+            Some("wss://plane.example/supertag/")
+        );
+        assert_eq!(gateway("origin").as_deref(), Some("https://plane.example"));
     }
     #[test]
     fn host_control_planes_may_be_websocket_tunnels() {

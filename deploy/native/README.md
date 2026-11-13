@@ -155,8 +155,9 @@ Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL i
 `https://` wherever a Gateway or Control Plane URL is expected. That covers operator commands,
 `host enroll`, `worker-host`, a host's `control-plane` in `supertag.yaml`, `health`,
 `verify deployment`, `connect` and the saved Gateways it writes, the terminal UI, the desktop
-app, and the Gateway's `--control-plane`. Saved Gateways keep the tunnel URL's path. The desktop
-app trusts only the system roots, so its Gateway needs a publicly trusted certificate.
+app, and the Gateway's `--control-plane`. Saved Gateways keep the tunnel URL's path, which may
+not contain `.` or `..` segments or backslashes. The desktop app trusts only the system roots, so
+its Gateway needs a publicly trusted certificate.
 
 Security does not depend on the platform's proxy:
 

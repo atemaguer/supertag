@@ -352,6 +352,10 @@ func TestSavedGatewaysAcceptWebSocketTunnelURLs(t *testing.T) {
 		{Name: "tunnel", URL: "wss://gateway.example/?token=secret", Token: "credential"},
 		{Name: "tunnel", URL: "wss://gateway.example/#secret", Token: "credential"},
 		{Name: "tunnel", URL: "https://gateway.example/path", Token: "credential"},
+		{Name: "tunnel", URL: "wss://gateway.example/a/../supertag", Token: "credential"},
+		{Name: "tunnel", URL: "wss://gateway.example/./supertag", Token: "credential"},
+		{Name: "tunnel", URL: "wss://gateway.example/a/%2E%2e/supertag", Token: "credential"},
+		{Name: "tunnel", URL: `wss://gateway.example/a\supertag`, Token: "credential"},
 	} {
 		if validateSavedGateway(target) == nil {
 			t.Errorf("accepted %s", target.URL)

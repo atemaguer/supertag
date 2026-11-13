@@ -29,9 +29,10 @@ import (
 // tunnelMaxMessage is the largest WebSocket message either side sends or accepts.
 const tunnelMaxMessage = 256 * 1024
 
-// tunnelDialTimeout bounds opening a tunnel: the TCP connection, the outer TLS and the upgrade.
-// A platform proxy may hold the upgrade while it starts a service that scaled to zero.
-const tunnelDialTimeout = 30 * time.Second
+// tunnelDialTimeout bounds opening a tunnel: the TCP connection, the outer TLS, the upgrade and,
+// for `wss://`, the Gateway's TLS inside it. A platform proxy may hold the upgrade while it
+// starts a service that scaled to zero.
+var tunnelDialTimeout = 30 * time.Second
 
 // tunnelPing is how often the client pings the Gateway. A peer that sends nothing, not even a
 // pong, for three intervals is gone.
@@ -79,11 +80,34 @@ func outerTLS(serverCA []byte) (*tls.Config, error) {
 type tunnelDialer struct {
 	url   *url.URL
 	outer *tls.Config // nil for ws://
+	inner *tls.Config // the Gateway's TLS inside a wss:// tunnel
 }
 
+// DialContext opens a ws:// tunnel for cleartext HTTP/2.
 func (d tunnelDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, tunnelDialTimeout)
 	defer cancel()
+	return d.dial(ctx)
+}
+
+// DialTLSContext opens a wss:// tunnel and completes the Gateway's TLS inside it, both within
+// tunnelDialTimeout.
+func (d tunnelDialer) DialTLSContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, tunnelDialTimeout)
+	defer cancel()
+	conn, err := d.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	secure := tls.Client(conn, d.inner.Clone())
+	if err := secure.HandshakeContext(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return secure, nil
+}
+
+func (d tunnelDialer) dial(ctx context.Context) (net.Conn, error) {
 	port := d.url.Port()
 	if port == "" {
 		port = "80"
@@ -250,7 +274,7 @@ func (c *tunnelConn) Read(p []byte) (int, error) {
 }
 
 // readFrame reads one frame and handles it: a data frame's payload becomes pending bytes, a ping
-// is answered, and a close ends the stream.
+// is answered unless a write is in progress, and a close ends the stream.
 func (c *tunnelConn) readFrame() error {
 	var header [2]byte
 	if _, err := io.ReadFull(c.reader, header[:]); err != nil {
@@ -302,15 +326,21 @@ func (c *tunnelConn) readFrame() error {
 		c.fragmented = !fin
 		c.pending = payload
 	case opPing:
-		c.writes.Lock()
-		err := c.writeFrame(opPong, payload)
-		c.writes.Unlock()
-		return err
+		// The reader never waits for a blocked writer: a peer that stops reading while its own
+		// writes cannot flush would otherwise stall both directions. A write in progress already
+		// proves to the peer that this side is alive, so the pong is skipped then.
+		if c.writes.TryLock() {
+			err := c.writeFrame(opPong, payload)
+			c.writes.Unlock()
+			return err
+		}
 	case opPong:
 	case opClose:
-		c.writes.Lock()
-		c.writeFrame(opClose, payload[:min(len(payload), 2)])
-		c.writes.Unlock()
+		// The close reply is likewise skipped while a write is in progress.
+		if c.writes.TryLock() {
+			c.writeFrame(opClose, payload[:min(len(payload), 2)])
+			c.writes.Unlock()
+		}
 		return io.EOF
 	case opText:
 		return errors.New("the WebSocket tunnel carries only binary messages")

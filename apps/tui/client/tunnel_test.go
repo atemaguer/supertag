@@ -348,6 +348,30 @@ func TestTunnelSplitsLargeWritesIntoMaskedBinaryMessages(t *testing.T) {
 	}
 }
 
+func TestTunnelReadsMaximumSizeServerMessages(t *testing.T) {
+	c, peer := tunnelPair(t, time.Minute)
+	// The Rust listener sends up to tunnelMaxMessage bytes per message, with 16- and 64-bit
+	// lengths and in fragments.
+	largest := bytes.Repeat([]byte{9}, tunnelMaxMessage)
+	medium := bytes.Repeat([]byte{8}, 0xffff)
+	go func() {
+		writeTestFrame(peer, true, opBinary, largest)
+		writeTestFrame(peer, true, opBinary, medium)
+		writeTestFrame(peer, false, opBinary, largest[:tunnelMaxMessage/2])
+		writeTestFrame(peer, true, opContinuation, largest[tunnelMaxMessage/2:])
+		writeTestFrame(peer, true, opClose, []byte{0x03, 0xe8})
+		io.Copy(io.Discard, peer)
+	}()
+	received, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(append(append([]byte{}, largest...), medium...), largest...)
+	if !bytes.Equal(received, want) {
+		t.Fatalf("read %d bytes, want %d", len(received), len(want))
+	}
+}
+
 func TestTunnelRefusesTextAndOversizedMessages(t *testing.T) {
 	c, peer := tunnelPair(t, time.Minute)
 	go func(peer net.Conn) {
@@ -404,6 +428,45 @@ func TestTunnelAnswersPingsAndStaysOpenWithAnAnsweringPeer(t *testing.T) {
 	}
 }
 
+func TestTunnelReadsPastAPingWhileAWriteIsBlocked(t *testing.T) {
+	c, peer := tunnelPair(t, time.Minute)
+	// The peer stops reading, so this write blocks and holds the write side.
+	go c.Write(bytes.Repeat([]byte{1}, 1024))
+	for c.writes.TryLock() {
+		c.writes.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	sent := make(chan error, 1)
+	go func() {
+		peer.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := writeTestFrame(peer, true, opPing, []byte("p")); err != nil {
+			sent <- err
+			return
+		}
+		sent <- writeTestFrame(peer, true, opBinary, []byte("!"))
+	}()
+	read := make(chan error, 1)
+	go func() {
+		var one [1]byte
+		_, err := io.ReadFull(c, one[:])
+		if err == nil && one[0] != '!' {
+			err = errors.New("read the wrong byte")
+		}
+		read <- err
+	}()
+	if err := <-sent; err != nil {
+		t.Fatalf("the peer could not write past a ping: %v", err)
+	}
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reader stalled behind the blocked writer")
+	}
+}
+
 func TestTunnelFailsAPeerThatStopsAnswering(t *testing.T) {
 	ping := 20 * time.Millisecond
 	c, peer := tunnelPair(t, ping)
@@ -440,5 +503,45 @@ func TestTunnelDialRefusesABadUpgrade(t *testing.T) {
 	}
 	if _, err := (tunnelDialer{url: u}).DialContext(t.Context(), "tcp", ""); err == nil {
 		t.Fatal("an upgrade with the wrong accept key was used")
+	}
+}
+
+func TestTunnelDialTimeoutCoversTheInnerTLS(t *testing.T) {
+	previous := tunnelDialTimeout
+	tunnelDialTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { tunnelDialTimeout = previous })
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	// The edge completes the upgrade, then never answers the Gateway's TLS inside it.
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		request, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+		digest := sha1.Sum([]byte(request.Header.Get("Sec-WebSocket-Key") + websocketGUID))
+		io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+
+			base64.StdEncoding.EncodeToString(digest[:])+"\r\n\r\n")
+		io.Copy(io.Discard, reader)
+	}()
+	u, err := url.Parse("ws://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := tunnelDialer{url: u, inner: &tls.Config{ServerName: "gateway.example", NextProtos: []string{"h2"}}}
+	started := time.Now()
+	if _, err := dialer.DialTLSContext(t.Context(), "tcp", ""); err == nil {
+		t.Fatal("a tunnel without the Gateway's TLS opened")
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("the inner TLS outlived the tunnel dial timeout: %v", elapsed)
 	}
 }

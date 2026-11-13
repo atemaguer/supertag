@@ -254,6 +254,19 @@ pub struct NewGateway {
     pub client_key_file: Option<PathBuf>,
 }
 
+/// Whether the path of `raw` as typed has no backslash and no `.` or `..` segment, which the
+/// terminal UI and this parser would resolve differently.
+fn plain_path(raw: &str) -> bool {
+    let rest = raw.trim().split_once("://").map_or("", |(_, rest)| rest);
+    let path = rest.find('/').map_or("", |start| &rest[start..]);
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    !rest.contains('\\')
+        && path.split('/').all(|segment| {
+            let segment = segment.to_ascii_lowercase().replace("%2e", ".");
+            segment != "." && segment != ".."
+        })
+}
+
 /// The form the terminal UI stores a Gateway URL in: lowercase scheme and host and no default
 /// port, plus the path of a `ws://` or `wss://` tunnel URL.
 fn gateway_origin(raw: &str) -> Result<String> {
@@ -269,6 +282,10 @@ fn gateway_origin(raw: &str) -> Result<String> {
             && url.fragment().is_none()
             && raw.len() <= 2048,
         "enter a Gateway origin without credentials, path, query or fragment, or a ws or wss tunnel URL without credentials, query or fragment"
+    );
+    ensure!(
+        !tunnel || plain_path(raw),
+        "a tunnel URL path must not contain backslashes or . or .. segments"
     );
     let host = url.host().context("enter a Gateway URL")?;
     if matches!(url.scheme(), "http" | "ws") {
@@ -503,6 +520,14 @@ mod tests {
             ("https://Gateway.Example:443/", "https://gateway.example"),
         ] {
             assert_eq!(gateway_origin(raw).unwrap(), saved, "{raw}");
+        }
+        for raw in [
+            "wss://gateway.example/a/../supertag",
+            "wss://gateway.example/./supertag",
+            "wss://gateway.example/a/%2E%2e/supertag",
+            "wss://gateway.example/a\\supertag",
+        ] {
+            assert!(gateway_origin(raw).is_err(), "{raw}");
         }
         for raw in [
             "ws://gateway.example",
