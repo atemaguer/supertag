@@ -527,6 +527,14 @@ async fn main() -> Result<()> {
         task.prompt,
         task.allowed_actions.join(",")
     );
+    if std::env::args().any(|arg| arg == "--report-environment") {
+        // Names only: a fixture result must never carry a credential value.
+        let mut names = std::env::vars_os()
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        result = format!("environment: {}", names.join(","));
+    }
     if work_flow {
         result = if may_start {
             "Started the investigation.".into()

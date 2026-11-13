@@ -10,8 +10,11 @@ use std::{
     },
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
+    sync::Arc,
     time::Duration,
 };
+
+use crate::local_config::Environment;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -28,6 +31,27 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 const ENDPOINT: &str = "endpoint";
 const CREDENTIALS: &str = "credentials.json";
 const STATE_LOCK: &str = ".lock";
+/// Non-secret variables every local service inherits from the supervisor.
+const BASE_ENVIRONMENT: [&str; 8] = [
+    "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+];
+/// Gateway-owned GitHub credentials, given only when a Host serves a Gateway Workspace.
+const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
+    "SUPERTAG_GITHUB_ACCOUNT_ID",
+    "SUPERTAG_GITHUB_REPOSITORY_ID",
+    "SUPERTAG_GITHUB_REPOSITORY",
+    "SUPERTAG_GITHUB_TOKEN",
+    "SUPERTAG_GITHUB_APP_ID",
+    "SUPERTAG_GITHUB_INSTALLATION_ID",
+    "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+];
+/// TLS files a Worker Host uses to reach a remote Gateway. The supervisor's own enrollment reads
+/// the same process variables, so these never come from `env_file`.
+const HOST_TLS_ENVIRONMENT: [&str; 3] = [
+    "SUPERTAG_SERVER_CA_FILE",
+    "SUPERTAG_CLIENT_CERT_FILE",
+    "SUPERTAG_CLIENT_KEY_FILE",
+];
 pub const LOCAL_SERVICE_LIFELINE: &str = "SUPERTAG_LOCAL_SERVICE_LIFELINE";
 
 pub struct LocalOptions {
@@ -129,7 +153,8 @@ impl Children {
         directory: &Path,
         credentials: &Credentials,
         gateway_listen: SocketAddr,
-        uses_gateway_workspace: bool,
+        // Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
+        gateway_workspace: Option<&Environment>,
         bootstrap_host: bool,
     ) -> Result<String> {
         let database = directory.join("runtime.sqlite3");
@@ -158,23 +183,11 @@ impl Children {
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
-        if uses_gateway_workspace {
+        if let Some(environment) = gateway_workspace {
             gateway
                 .arg("--github-workspace-directory")
                 .arg(directory.join("github-sources"));
-            for name in [
-                "SUPERTAG_GITHUB_ACCOUNT_ID",
-                "SUPERTAG_GITHUB_REPOSITORY_ID",
-                "SUPERTAG_GITHUB_REPOSITORY",
-                "SUPERTAG_GITHUB_TOKEN",
-                "SUPERTAG_GITHUB_APP_ID",
-                "SUPERTAG_GITHUB_INSTALLATION_ID",
-                "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
-            ] {
-                if let Some(value) = std::env::var_os(name) {
-                    gateway.env(name, value);
-                }
-            }
+            gateway.envs(environment.selected(GATEWAY_GITHUB_ENVIRONMENT));
             #[cfg(feature = "test-fixtures")]
             for name in [
                 "SUPERTAG_TEST_GITHUB_API_URL",
@@ -204,7 +217,10 @@ impl Children {
                 directory,
                 credentials,
                 options.gateway_listen,
-                options.adapter.uses_gateway_workspace(),
+                options
+                    .adapter
+                    .uses_gateway_workspace()
+                    .then_some(&Environment::default()),
                 true,
             )
             .await?;
@@ -218,11 +234,8 @@ impl Children {
             host.arg("--skill-catalog").arg(catalog);
         }
         host.envs(
-            options
-                .adapter
-                .provider_environment()?
-                .iter()
-                .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
+            Environment::default()
+                .selected(options.adapter.provider_environment()?.iter().copied()),
         );
         let ready = start_child(&mut self.worker_host, &mut host, "Worker Host").await?;
         ensure!(ready == "ready", "invalid Worker Host readiness signal");
@@ -279,11 +292,9 @@ fn command(executable: &Path, mode: &str) -> Command {
         .arg(mode)
         .env_clear()
         .envs(
-            [
-                "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
-            ]
-            .into_iter()
-            .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
+            BASE_ENVIRONMENT
+                .into_iter()
+                .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
         )
         .env(LOCAL_SERVICE_LIFELINE, "1")
         .stdin(Stdio::piped())
@@ -536,6 +547,7 @@ fn sqlite_url(database: &Path) -> Result<String> {
 
 struct ManagedHost {
     definition: crate::local_config::Host,
+    environment: Arc<Environment>,
     endpoint: String,
     directory: PathBuf,
     service: Option<Service>,
@@ -550,22 +562,22 @@ impl ManagedHost {
         if let Some(path) = &self.definition.skills {
             host.arg("--skill-catalog").arg(path);
         }
-        for name in self
-            .definition
-            .adapter
-            .provider_environment()?
-            .iter()
-            .copied()
-            .chain([
-                "SUPERTAG_SERVER_CA_FILE",
-                "SUPERTAG_CLIENT_CERT_FILE",
-                "SUPERTAG_CLIENT_KEY_FILE",
-            ])
-        {
-            if let Some(value) = std::env::var_os(name) {
-                host.env(name, value);
-            }
-        }
+        // Only this harness's provider credentials, from the shell or env_file. Service tokens
+        // and other harnesses' credentials never reach the Worker Host or its harness children.
+        host.envs(
+            self.environment.selected(
+                self.definition
+                    .adapter
+                    .provider_environment()?
+                    .iter()
+                    .copied(),
+            ),
+        );
+        host.envs(
+            HOST_TLS_ENVIRONMENT
+                .into_iter()
+                .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
+        );
         let ready = start_child(
             &mut self.service,
             &mut host,
@@ -592,6 +604,7 @@ pub async fn configured(
     lock.try_lock().context("local state is already in use")?;
     remove_endpoint(&directory)?;
     let executable = std::env::current_exe()?;
+    let environment = Arc::new(config.environment);
     let mut base = Children::default();
     let mut hosts = Vec::new();
     tokio::pin!(shutdown);
@@ -614,7 +627,8 @@ pub async fn configured(
                     config
                         .hosts
                         .iter()
-                        .any(|h| h.adapter.uses_gateway_workspace()),
+                        .any(|h| h.adapter.uses_gateway_workspace())
+                        .then_some(&*environment),
                     false,
                 )
                 .await?;
@@ -651,6 +665,7 @@ pub async fn configured(
             let host_directory = directory.join("hosts").join(&definition.name);
             enroll_configured(
                 &definition,
+                &environment,
                 &target,
                 &host_directory,
                 credentials
@@ -661,6 +676,7 @@ pub async fn configured(
             let index = hosts.len();
             hosts.push(ManagedHost {
                 definition,
+                environment: environment.clone(),
                 endpoint: target,
                 directory: host_directory,
                 service: None,
@@ -745,6 +761,7 @@ fn stable_listen(directory: &Path, configured: SocketAddr) -> Result<SocketAddr>
 }
 async fn enroll_configured(
     definition: &crate::local_config::Host,
+    environment: &Environment,
     endpoint: &str,
     state: &Path,
     local: Option<&Credentials>,
@@ -781,7 +798,7 @@ async fn enroll_configured(
             .key
             .as_ref()
             .context("remote Worker Host needs an Auth Key secret for its first enrollment")?
-            .read()?
+            .read(environment)?
     };
     supertag_worker_host::enroll(gateway, state, definition.name.clone(), Some(&key)).await?;
     Ok(())

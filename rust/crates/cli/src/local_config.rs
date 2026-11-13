@@ -1,7 +1,10 @@
 //! Bounded local process configuration. Credentials are references, never rendered values.
+mod environment;
+
 use crate::harness::AdapterOptions;
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
+pub use environment::Environment;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -113,6 +116,8 @@ pub struct FileSecret {
 pub struct Config {
     pub plane: Option<Plane>,
     pub hosts: Vec<Host>,
+    /// `env_file` values behind the process environment, read only by the supervisor.
+    pub environment: Environment,
 }
 pub struct Plane {
     pub listen: SocketAddr,
@@ -170,7 +175,7 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
         .parent()
         .context("configuration directory missing")?
         .to_owned();
-    let config = parse(&bytes, &base)?;
+    let config = parse(&bytes, &base, |name| std::env::var(name).ok())?;
     if config
         .plane
         .as_ref()
@@ -183,11 +188,19 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
     }
     Ok(Some(config))
 }
-fn parse(bytes: &[u8], base: &Path) -> Result<Config> {
+fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> Result<Config> {
     let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000,max_total_scalar_bytes:MAX_BYTES}};
     // Do not echo YAML parse input: a mistaken inline secret must not reach logs.
-    let document: Document = serde_saphyr::from_slice_with_options(bytes, options)
-        .map_err(|_| anyhow::anyhow!("invalid or unsupported local service configuration"))?;
+    let invalid = || anyhow::anyhow!("invalid or unsupported local service configuration");
+    let mut value: serde_json::Value =
+        serde_saphyr::from_slice_with_options(bytes, options).map_err(|_| invalid())?;
+    let environment = environment::resolve(&mut value, base, lookup)?;
+    if let Some(object) = value.as_object_mut() {
+        // Top-level x-* keys hold YAML anchors and are otherwise ignored.
+        object.retain(|key, _| !key.starts_with("x-"));
+    }
+    // Interpolated values may be secrets, so deserialization errors stay generic too.
+    let document: Document = serde_json::from_value(value).map_err(|_| invalid())?;
     ensure!(
         document.version == 1,
         "local configuration version must be 1"
@@ -417,7 +430,11 @@ fn parse(bytes: &[u8], base: &Path) -> Result<Config> {
         plane.is_some() || !hosts.is_empty(),
         "configuration has no runnable services"
     );
-    Ok(Config { plane, hosts })
+    Ok(Config {
+        plane,
+        hosts,
+        environment,
+    })
 }
 fn identifier(value: &str) -> Result<()> {
     ensure!(
@@ -528,9 +545,12 @@ fn validate_endpoint(value: &str) -> Result<()> {
     Ok(())
 }
 impl Secret {
-    pub fn read(&self) -> Result<String> {
+    /// Read the secret when a service starts: an `environment` secret falls back to `env_file`.
+    pub fn read(&self, environment: &Environment) -> Result<String> {
         let value = match self {
-            Self::Environment(source) => std::env::var(&source.environment)
+            Self::Environment(source) => environment
+                .variable(&source.environment)
+                .and_then(|value| value.into_string().ok())
                 .context("Auth Key environment variable is unavailable")?,
             Self::File(source) => {
                 let file = OpenOptions::new()
@@ -571,7 +591,7 @@ services:
   control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
   reviewer: {type: host, harnesses: [codex], models: {codex: [model-a, model-b]}, workspaces: {repo: ./source}}
   writer: {type: host, harnesses: [claude-code], skills: ./skills, restart: unless-stopped}
-"#,Path::new("/trusted")).unwrap();
+"#,Path::new("/trusted"), |_| None).unwrap();
         assert_eq!(c.hosts.len(), 2);
         assert_eq!(c.plane.unwrap().listen.port(), 0);
         assert_eq!(
@@ -592,10 +612,84 @@ secrets:
   key: {environment: JOIN_KEY}
 "#,
             Path::new("/trusted"),
+            |_| None,
         )
         .unwrap();
         assert!(c.plane.is_none());
         assert!(c.hosts[0].key.is_some());
+    }
+    #[test]
+    fn env_file_interpolates_services_and_backs_environment_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let env = temp.path().join("fixture.env");
+        fs::write(
+            &env,
+            "GATEWAY=https://gateway.example\nJOIN_KEY=file-join-key\nMODEL=from-file\n",
+        )
+        .unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o600)).unwrap();
+        let input = br#"env_file: fixture.env
+x-defaults: &host {type: host, harnesses: [codex]}
+services:
+  laptop:
+    <<: *host
+    control-plane: ${GATEWAY}
+    auth-key: key
+    models: {codex: ["${MODEL}", "${SECOND:-fallback-model}"]}
+secrets:
+  key: {environment: JOIN_KEY}
+"#;
+        let config = parse(input, temp.path(), |name| {
+            (name == "MODEL").then(|| "from-shell".to_owned())
+        })
+        .unwrap();
+        let host = &config.hosts[0];
+        assert_eq!(host.gateway.as_deref(), Some("https://gateway.example"));
+        assert_eq!(
+            host.adapter.execution_profile().unwrap().model_ids,
+            ["fallback-model", "from-shell"]
+        );
+        // The process environment wins over env_file, and the first listed model is the default.
+        assert!(
+            host.adapter
+                .worker_args()
+                .windows(2)
+                .any(|pair| pair[0] == "--harness-model" && pair[1] == "from-shell")
+        );
+        // The environment secret falls back to env_file when the process lacks it.
+        assert_eq!(
+            host.key
+                .as_ref()
+                .unwrap()
+                .read(&config.environment)
+                .unwrap(),
+            "file-join-key"
+        );
+        assert!(
+            host.key
+                .as_ref()
+                .unwrap()
+                .read(&Environment::default())
+                .is_err()
+        );
+        // Missing variables and values that fail validation never echo resolved values.
+        let missing = parse(
+            b"services: {laptop: {type: host, control-plane: '${ABSENT}', harnesses: [codex]}}",
+            temp.path(),
+            |_| None,
+        )
+        .err()
+        .unwrap();
+        assert!(missing.to_string().contains("${ABSENT} is not set"));
+        let invalid = parse(
+            b"services: {laptop: {type: host, control-plane: https://gateway.example, harnesses: [codex], concurrency: '${N}'}}",
+            temp.path(),
+            |_| Some("secret-looking-value".into()),
+        )
+        .err()
+        .unwrap();
+        assert!(!format!("{invalid:#}").contains("secret-looking-value"));
     }
     #[test]
     fn invalid_unsupported_and_credential_bearing_config_fails_closed() {
@@ -608,7 +702,7 @@ secrets:
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], environment: e2b}}",
             "version: 2\nservices: {control-plane: {type: control-plane}}",
         ] {
-            let error = parse(input.as_bytes(), Path::new("/trusted"))
+            let error = parse(input.as_bytes(), Path::new("/trusted"), |_| None)
                 .err()
                 .expect("must reject");
             assert!(!error.to_string().contains("literal-secret"));
@@ -684,11 +778,15 @@ secrets:
         fs::write(&file, "fixture-key\n").unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
         let source = Secret::File(FileSecret { file: file.clone() });
-        assert!(source.read().is_err());
+        assert!(source.read(&Environment::default()).is_err());
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(source.read().unwrap(), "fixture-key");
+        assert_eq!(source.read(&Environment::default()).unwrap(), "fixture-key");
         let link = temp.path().join("link");
         std::os::unix::fs::symlink(file, &link).unwrap();
-        assert!(Secret::File(FileSecret { file: link }).read().is_err());
+        assert!(
+            Secret::File(FileSecret { file: link })
+                .read(&Environment::default())
+                .is_err()
+        );
     }
 }
