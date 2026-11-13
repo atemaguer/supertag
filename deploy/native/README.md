@@ -145,8 +145,11 @@ domain that points to it. The Control Plane has no public networking.
 Several Control Plane processes can share one PostgreSQL database. Replicas may start together:
 one migrates the schema while the others wait. Any replica serves any call, and one replica runs
 each periodic maintenance pass. Keep replica clocks synchronized, run the same release on every
-replica, and stop all of them before an upgrade that changes the schema. A Gateway connects to one
-Control Plane address, so put the replicas behind a TCP load balancer or private DNS name. A SQLite
+replica, and stop all of them before an upgrade that changes the schema. A replica that freezes or
+loses its network during a write stalls every write for up to 15 seconds, until PostgreSQL ends its
+session; connect replicas to PostgreSQL directly or through a session-mode pooler, because a
+transaction-mode pooler drops those session limits. A Gateway connects to one Control Plane
+address, so put the replicas behind a TCP load balancer or private DNS name. A SQLite
 database serves one Control Plane process; a second one on the same file refuses to start. See
 [Control Plane replicas](../../rust/docs/control-plane-replicas.md) for the concurrency audit.
 

@@ -6,7 +6,9 @@
 //! notifications from the shared outbox, and a Watch stream follows each replica. Replicas are
 //! killed mid-operation and restarted. The lane asserts that no work is lost or repeated: each
 //! Task runs exactly once, each operator notification is delivered once, and every Watch stream
-//! sees the same gap-free positions, resuming on another replica after its own is killed.
+//! sees the same gap-free positions, resuming on another replica after its own is killed. With
+//! two replicas killed, the survivor runs the periodic maintenance pass that expires a stranded
+//! Attempt.
 //!
 //! SQLite serves one Control Plane process; a second process on the same file is refused.
 
@@ -517,6 +519,15 @@ async fn first_running(database: &str) -> Result<()> {
     }
 }
 
+async fn task_state(connection: &mut sqlx::AnyConnection, task_id: &str) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT state FROM supertag_v2_tasks WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_one(connection)
+            .await?,
+    )
+}
+
 /// A Worker Host adapter that records each launch, then runs the fixture adapter.
 fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
@@ -780,7 +791,53 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
         followed[1].resumed > 0 && followed[2].resumed > 0,
         "the killed replicas' Watch streams never resumed elsewhere"
     );
-    drop(host);
+
+    // Maintenance moves to whichever replica survives. A Worker Host is killed while its
+    // Attempt runs; only the periodic maintenance pass expires that Attempt's lease, and two of
+    // the three replicas are killed before it is due.
+    host.kill()?;
+    let never = directory.join("never");
+    let mut stranding = credentials.command();
+    stranding
+        .args(["worker-host", "--gateway", &endpoints[0], "--adapter"])
+        .arg(&adapter)
+        .arg(format!("--adapter-arg=--wait-for-file={}", never.display()))
+        .arg("--state-directory")
+        .arg(directory.join("stranding-host"));
+    let mut stranding = Process::spawn(stranding, directory, "stranding-host", false)?;
+    let stranded = submit(&endpoints, &credentials, 0, 2, "stranded".into()).await?;
+    let deadline = Instant::now() + WAIT;
+    // The Attempt runs once its adapter launched.
+    while task_state(&mut connection, &stranded.task_id).await? != TaskState::Running as i64
+        || std::fs::read_to_string(&launches)?.lines().count() <= all.len()
+    {
+        ensure!(
+            Instant::now() < deadline,
+            "the stranded Task never ran: {}",
+            stranding.logs()
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    stranding.kill()?;
+    replicas[0].control_plane.kill()?;
+    replicas[1].control_plane.kill()?;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while task_state(&mut connection, &stranded.task_id).await? != TaskState::Uncertain as i64 {
+        ensure!(
+            Instant::now() < deadline,
+            "no surviving replica expired the stranded Attempt: {}",
+            replicas[2].control_plane.logs()
+        );
+        sleep(Duration::from_millis(200)).await;
+    }
+    let launched = std::fs::read_to_string(&launches)?.lines().count();
+    ensure!(
+        launched == all.len() + 1,
+        "{launched} adapter launches for {} Tasks",
+        all.len() + 1
+    );
+    // Release the killed host's orphaned adapter.
+    std::fs::write(&never, b"")?;
     drop(replicas);
     Ok(())
 }

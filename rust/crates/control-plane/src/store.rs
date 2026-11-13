@@ -16,6 +16,8 @@ mod linear_events;
 #[path = "microsoft_teams.rs"]
 mod microsoft_teams;
 mod readiness;
+#[cfg(test)]
+mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
@@ -61,6 +63,15 @@ pub enum StoreError {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, StoreError>;
+/// Every write holds the one `supertag_v2_write_order` row lock until commit, so a replica that
+/// froze or lost its network inside a transaction would stall every replica. PostgreSQL ends a
+/// session left idle inside a transaction after 15 seconds and probes a silent client, which
+/// releases the lock. No Control Plane transaction waits on anything but its own statements.
+const POSTGRES_SESSION_LIMITS: &str = "SELECT \
+     set_config('idle_in_transaction_session_timeout', '15s', false), \
+     set_config('tcp_keepalives_idle', '15', false), \
+     set_config('tcp_keepalives_interval', '5', false), \
+     set_config('tcp_keepalives_count', '3', false)";
 pub(crate) const MAX_TASK_PROMPT_BYTES: usize = 262_144;
 // Reserve framing space for the enclosing conversation and execution messages.
 pub(crate) const MAX_TASK_MESSAGE_BYTES: usize = supertag_protocol::MAX_MESSAGE_BYTES - 4096;
@@ -90,11 +101,18 @@ impl Store {
             sqlite_files::make_private(url)?;
         }
         let options = AnyConnectOptions::from_str(url)?;
-        let pool = AnyPoolOptions::new()
+        let mut pool = AnyPoolOptions::new()
             .max_connections(if sqlite { 1 } else { 8 })
-            .acquire_timeout(Duration::from_secs(10))
-            .connect_with(options)
-            .await?;
+            .acquire_timeout(Duration::from_secs(10));
+        if !sqlite {
+            pool = pool.after_connect(|connection, _| {
+                Box::pin(async move {
+                    sqlx::Executor::execute(&mut *connection, POSTGRES_SESSION_LIMITS).await?;
+                    Ok(())
+                })
+            });
+        }
+        let pool = pool.connect_with(options).await?;
         let process_lock = if sqlite {
             match sqlite_files::lock_single_process(url) {
                 Ok(lock) => lock,
