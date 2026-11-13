@@ -4,6 +4,9 @@ This directory owns the configuration and build files for hosting SuperTag's Con
 the base image for Workspace sandboxes.
 Follow the [deployment setup guide](../docs/guides/deployment-setup.md) for the shared CLI workflow.
 
+The native services (separate Control Plane, Gateway, and Worker Hosts) use the definitions in
+[`native/`](native/README.md), `compose.native.yaml`, and `compose.native.ingress.yaml`.
+
 ```text
 deploy/
   shared/                 Common runtime and environment contract (private workspace package)

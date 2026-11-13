@@ -50,6 +50,8 @@ axum = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 hmac.workspace = true
+http-body = "1"
+http-body-util = "0.1"
 reqwest.workspace = true
 sqlx.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
@@ -204,4 +206,9 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "coordination_runtime"
 path = "tests/coordination_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "deployment_runtime"
+path = "tests/deployment_runtime.rs"
 required-features = ["test-fixtures"]

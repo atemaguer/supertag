@@ -3,6 +3,7 @@ mod terminal;
 mod artifact_publications;
 mod artifacts;
 mod delivery_branches;
+mod deployment;
 mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
@@ -128,10 +129,37 @@ enum RecoveryDecision {
     Retry,
 }
 
+/// `supertag setup`: a hosted deployment, or a collaboration surface account.
+#[derive(Subcommand)]
+enum SetupCommand {
+    #[command(flatten)]
+    Deployment(deployment::SetupCommand),
+    /// Connect a surface account: verify it, save its credentials in the credential vault, and
+    /// record it in supertag.yaml.
+    #[command(flatten)]
+    Surface(surface_setup::SetupCommand),
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Check a public or private gRPC service using the configured TLS trust.
     Health(health::HealthArgs),
+    /// Prepare a deployment of the Control Plane and Gateway, or connect a collaboration
+    /// surface account.
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommand,
+    },
+    /// Validate a deployment's configuration without connecting.
+    Check {
+        #[command(subcommand)]
+        command: deployment::CheckCommand,
+    },
+    /// Check a running deployment through its public Gateway.
+    Verify {
+        #[command(subcommand)]
+        command: deployment::VerifyCommand,
+    },
     /// Preview an organization manifest through the Gateway.
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Gateway.
@@ -170,12 +198,6 @@ enum Command {
         connection: Connection,
         #[command(flatten)]
         args: surface_policy::SurfacePolicyArgs,
-    },
-    /// Connect a collaboration surface account: verify it, save its credentials in the
-    /// credential vault, and record it in supertag.yaml.
-    Setup {
-        #[command(subcommand)]
-        command: surface_setup::SetupCommand,
     },
     /// Change a Tag's surface locations.
     Update {
@@ -951,6 +973,11 @@ fn dispatch(cli: Cli) -> Result<()> {
             !matches!(
                 command,
                 Command::Health(_)
+                    | Command::Setup {
+                        command: SetupCommand::Deployment(_)
+                    }
+                    | Command::Check { .. }
+                    | Command::Verify { .. }
                     | Command::Up { .. }
                     | Command::ControlPlane { .. }
                     | Command::Gateway { .. }
@@ -982,6 +1009,11 @@ fn dispatch(cli: Cli) -> Result<()> {
 async fn run(command: Command) -> Result<()> {
     match command {
         Command::Health(args) => health::run(args).await?,
+        Command::Setup {
+            command: SetupCommand::Deployment(command),
+        } => deployment::setup(command).await?,
+        Command::Check { command } => deployment::check(command)?,
+        Command::Verify { command } => deployment::verify(command).await?,
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
         Command::Metrics { connection, args } => observe::metrics(connection, args).await?,
         Command::Test { command } => notifications::run(command).await?,
@@ -1002,7 +1034,9 @@ async fn run(command: Command) -> Result<()> {
             surface_policy::run(client, &token, args).await?;
         }
         Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
-        Command::Setup { command } => surface_setup::setup(command).await?,
+        Command::Setup {
+            command: SetupCommand::Surface(command),
+        } => surface_setup::setup(command).await?,
         Command::Update { command } => surface_setup::update(command).await?,
         Command::Activate(args) => surface_setup::activation(true, args).await?,
         Command::Deactivate(args) => surface_setup::activation(false, args).await?,

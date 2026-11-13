@@ -14,6 +14,9 @@ Usage: supertag [OPTIONS] [COMMAND]
 
 Commands:
   health                  Check a public or private gRPC service using the configured TLS trust
+  setup                   Prepare a deployment of the Control Plane and Gateway, or connect a collaboration surface account
+  check                   Validate a deployment's configuration without connecting
+  verify                  Check a running deployment through its public Gateway
   diff                    Preview an organization manifest through the Gateway
   apply                   Apply an organization manifest through the Gateway
   github-publication      Read GitHub publications of verified Workspace results and stop further provider writes
@@ -21,7 +24,6 @@ Commands:
   replies                 Inspect connector deliveries and resolve uncertain replies from provider evidence
   policy                  Manage reusable Permission Sets, Context Sets, and Roles
   surface-policy          Bind verified connector accounts and locations to Tag policy
-  setup                   Connect a collaboration surface account: verify it, save its credentials in the credential vault, and record it in supertag.yaml
   update                  Change a Tag's surface locations
   activate                Apply a Permission Set or Context Set to a Tag's work at a surface location
   deactivate              Stop applying a Permission Set or Context Set at a surface location
@@ -104,6 +106,296 @@ Options:
           Bound the entire connection and health request [default: 5]
   -h, --help
           Print help
+```
+
+## `supertag setup`
+
+```text
+Prepare a deployment of the Control Plane and Gateway, or connect a collaboration surface account
+
+Usage: supertag setup <COMMAND>
+
+Commands:
+  deployment  Write private per-role environment files for a hosted deployment
+  surface     Connect a Slack, GitHub, Lark, Linear, or Microsoft Teams account
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag setup deployment`
+
+```text
+Write private per-role environment files for a hosted deployment
+
+Usage: supertag setup deployment [OPTIONS] <PLATFORM>
+
+Arguments:
+  <PLATFORM>
+          Possible values:
+          - compose: Docker Compose on your own server: deploy/compose.native.yaml
+          - fly:     Two Fly.io apps: deploy/native/fly
+          - railway: Two Railway services: deploy/native/railway
+
+Options:
+      --output <OUTPUT>
+          New private directory for the environment files
+          
+          [default: supertag-deployment]
+
+      --non-interactive
+          Fail instead of prompting when a required value is missing
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
+```
+
+## `supertag setup surface`
+
+```text
+Connect a Slack, GitHub, Lark, Linear, or Microsoft Teams account
+
+Usage: supertag setup surface <COMMAND>
+
+Commands:
+  slack   Enroll a Slack app for HTTP events: its bot token and signing secret
+  github  Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App
+  linear  Enroll a Linear workspace API key and webhook signing secret
+  lark    Enroll a Lark or Feishu app for long-connection events and thread replies
+  teams   Enroll the Microsoft Entra application and tenant of a Teams bot
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag setup surface slack`
+
+```text
+Enroll a Slack app for HTTP events: its bot token and signing secret
+
+Usage: supertag setup surface slack [OPTIONS]
+
+Options:
+      --name <NAME>
+          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+      --listen <LISTEN>
+          Loopback address of this account's webhook listener on the local Gateway
+      --transport <TRANSPORT>
+          Event transport. The Gateway receives Slack events over HTTP [default: http]
+  -h, --help
+          Print help
+
+Guide: docs/surfaces/slack.md (app manifest: docs/surfaces/slack-app-manifest.yaml)
+
+Optional environment variables:
+  SLACK_BOT_TOKEN
+  SLACK_SIGNING_SECRET
+```
+
+## `supertag setup surface github`
+
+```text
+Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App
+
+Usage: supertag setup surface github [OPTIONS]
+
+Options:
+      --name <NAME>
+          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+      --listen <LISTEN>
+          Loopback address of this account's webhook listener on the local Gateway
+      --auth <AUTH>
+          How SuperTag authenticates to GitHub: a personal access token or a GitHub App [default: token] [possible values: token, app]
+      --webhook
+          With token authentication, also enroll a repository webhook secret
+  -h, --help
+          Print help
+
+With token authentication, --webhook also enrolls a repository webhook secret.
+Guide: docs/surfaces/github.md
+
+Optional environment variables:
+  SUPERTAG_GITHUB_TOKEN
+  GITHUB_APP_ID
+  GITHUB_INSTALLATION_ID
+  GITHUB_PRIVATE_KEY_PATH
+  GITHUB_WEBHOOK_SECRET
+```
+
+## `supertag setup surface linear`
+
+```text
+Enroll a Linear workspace API key and webhook signing secret
+
+Usage: supertag setup surface linear [OPTIONS]
+
+Options:
+      --name <NAME>
+          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+      --listen <LISTEN>
+          Loopback address of this account's webhook listener on the local Gateway
+  -h, --help
+          Print help
+
+Team locations and webhooks are configured separately.
+Guide: docs/surfaces/linear.md
+
+Optional environment variables:
+  LINEAR_API_KEY
+  LINEAR_WEBHOOK_SECRET
+```
+
+## `supertag setup surface lark`
+
+```text
+Enroll a Lark or Feishu app for long-connection events and thread replies
+
+Usage: supertag setup surface lark [OPTIONS]
+
+Options:
+      --name <NAME>
+          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+      --domain <DOMAIN>
+          The app's platform: Lark, or Feishu in mainland China [default: lark] [possible values: lark, feishu]
+  -h, --help
+          Print help
+
+Create and publish the app separately. Guide: docs/surfaces/lark.md
+
+Optional environment variables:
+  LARK_APP_ID
+  LARK_APP_SECRET
+  LARK_TENANT_KEY
+```
+
+## `supertag setup surface teams`
+
+```text
+Enroll the Microsoft Entra application and tenant of a Teams bot
+
+Usage: supertag setup surface teams [OPTIONS]
+
+Options:
+      --name <NAME>
+          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+      --listen <LISTEN>
+          Loopback address of this account's webhook listener on the local Gateway
+  -h, --help
+          Print help
+
+Create and install the Teams app separately. Guide: docs/surfaces/teams.md
+
+Optional environment variables:
+  TEAMS_APP_ID
+  TEAMS_APP_SECRET
+  TEAMS_TENANT_ID
+  TEAMS_TENANT_NAME
+```
+
+## `supertag check`
+
+```text
+Validate a deployment's configuration without connecting
+
+Usage: supertag check <COMMAND>
+
+Commands:
+  deployment  Validate a deployment's environment files without connecting
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag check deployment`
+
+```text
+Validate a deployment's environment files without connecting
+
+Usage: supertag check deployment [OPTIONS] <PLATFORM>
+
+Arguments:
+  <PLATFORM>
+          Possible values:
+          - compose: Docker Compose on your own server: deploy/compose.native.yaml
+          - fly:     Two Fly.io apps: deploy/native/fly
+          - railway: Two Railway services: deploy/native/railway
+
+Options:
+      --directory <DIRECTORY>
+          Directory written by `supertag setup deployment`
+          
+          [default: supertag-deployment]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag verify`
+
+```text
+Check a running deployment through its public Gateway
+
+Usage: supertag verify <COMMAND>
+
+Commands:
+  deployment  Check a deployed Gateway: health, authentication, the Control Plane hop, and readiness
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag verify deployment`
+
+```text
+Check a deployed Gateway: health, authentication, the Control Plane hop, and readiness
+
+Usage: supertag verify deployment [OPTIONS] <URL>
+
+Arguments:
+  <URL>  The Gateway's public HTTPS origin, such as https://supertag.example.com
+
+Options:
+      --env-file <ENV_FILE>  Private env file that holds SUPERTAG_OPERATOR_TOKEN
+      --require-ready        Fail unless at least one Worker Host is ready
+  -h, --help                 Print help
+
+The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Gateway's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Gateway requires client certificates. Verification registers no Worker Host and runs no Task.
 ```
 
 ## `supertag diff`
@@ -632,194 +924,6 @@ Options:
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help
           Print help
-```
-
-## `supertag setup`
-
-```text
-Connect a collaboration surface account: verify it, save its credentials in the credential vault, and record it in supertag.yaml
-
-Usage: supertag setup <COMMAND>
-
-Commands:
-  surface  Connect a Slack, GitHub, Lark, Linear, or Microsoft Teams account
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
-```
-
-## `supertag setup surface`
-
-```text
-Connect a Slack, GitHub, Lark, Linear, or Microsoft Teams account
-
-Usage: supertag setup surface <COMMAND>
-
-Commands:
-  slack   Enroll a Slack app for HTTP events: its bot token and signing secret
-  github  Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App
-  linear  Enroll a Linear workspace API key and webhook signing secret
-  lark    Enroll a Lark or Feishu app for long-connection events and thread replies
-  teams   Enroll the Microsoft Entra application and tenant of a Teams bot
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
-```
-
-## `supertag setup surface slack`
-
-```text
-Enroll a Slack app for HTTP events: its bot token and signing secret
-
-Usage: supertag setup surface slack [OPTIONS]
-
-Options:
-      --name <NAME>
-          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-      --listen <LISTEN>
-          Loopback address of this account's webhook listener on the local Gateway
-      --transport <TRANSPORT>
-          Event transport. The Gateway receives Slack events over HTTP [default: http]
-  -h, --help
-          Print help
-
-Guide: docs/surfaces/slack.md (app manifest: docs/surfaces/slack-app-manifest.yaml)
-
-Optional environment variables:
-  SLACK_BOT_TOKEN
-  SLACK_SIGNING_SECRET
-```
-
-## `supertag setup surface github`
-
-```text
-Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App
-
-Usage: supertag setup surface github [OPTIONS]
-
-Options:
-      --name <NAME>
-          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-      --listen <LISTEN>
-          Loopback address of this account's webhook listener on the local Gateway
-      --auth <AUTH>
-          How SuperTag authenticates to GitHub: a personal access token or a GitHub App [default: token] [possible values: token, app]
-      --webhook
-          With token authentication, also enroll a repository webhook secret
-  -h, --help
-          Print help
-
-With token authentication, --webhook also enrolls a repository webhook secret.
-Guide: docs/surfaces/github.md
-
-Optional environment variables:
-  SUPERTAG_GITHUB_TOKEN
-  GITHUB_APP_ID
-  GITHUB_INSTALLATION_ID
-  GITHUB_PRIVATE_KEY_PATH
-  GITHUB_WEBHOOK_SECRET
-```
-
-## `supertag setup surface linear`
-
-```text
-Enroll a Linear workspace API key and webhook signing secret
-
-Usage: supertag setup surface linear [OPTIONS]
-
-Options:
-      --name <NAME>
-          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-      --listen <LISTEN>
-          Loopback address of this account's webhook listener on the local Gateway
-  -h, --help
-          Print help
-
-Team locations and webhooks are configured separately.
-Guide: docs/surfaces/linear.md
-
-Optional environment variables:
-  LINEAR_API_KEY
-  LINEAR_WEBHOOK_SECRET
-```
-
-## `supertag setup surface lark`
-
-```text
-Enroll a Lark or Feishu app for long-connection events and thread replies
-
-Usage: supertag setup surface lark [OPTIONS]
-
-Options:
-      --name <NAME>
-          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-      --domain <DOMAIN>
-          The app's platform: Lark, or Feishu in mainland China [default: lark] [possible values: lark, feishu]
-  -h, --help
-          Print help
-
-Create and publish the app separately. Guide: docs/surfaces/lark.md
-
-Optional environment variables:
-  LARK_APP_ID
-  LARK_APP_SECRET
-  LARK_TENANT_KEY
-```
-
-## `supertag setup surface teams`
-
-```text
-Enroll the Microsoft Entra application and tenant of a Teams bot
-
-Usage: supertag setup surface teams [OPTIONS]
-
-Options:
-      --name <NAME>
-          The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-      --listen <LISTEN>
-          Loopback address of this account's webhook listener on the local Gateway
-  -h, --help
-          Print help
-
-Create and install the Teams app separately. Guide: docs/surfaces/teams.md
-
-Optional environment variables:
-  TEAMS_APP_ID
-  TEAMS_APP_SECRET
-  TEAMS_TENANT_ID
-  TEAMS_TENANT_NAME
 ```
 
 ## `supertag update`
