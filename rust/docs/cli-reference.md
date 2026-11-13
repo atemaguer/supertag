@@ -52,7 +52,7 @@ Commands:
   tui                   Open the terminal UI for a saved or explicitly configured Gateway
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts
-  connect               Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+  connect               Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -1912,6 +1912,8 @@ Options:
           Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
+      --audit-log <stderr|PATH>
+          Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
   -h, --help
           Print help
 ```
@@ -2196,7 +2198,7 @@ Options:
       --host <HOST_ID>
           Worker Host ID a one-time key enrolls. Omit with --reusable
       --reusable
-          Enroll any number of Worker Hosts, each choosing its own ID
+          Enroll any number of Worker Hosts, each choosing its own ID. A taken ID enrolls as ID-2, ID-3, and so on
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --ephemeral
@@ -2235,7 +2237,7 @@ Options:
 ## `supertag connect`
 
 ```text
-Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
