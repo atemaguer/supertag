@@ -2825,6 +2825,7 @@ name = "supertag-transport"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "http 1.5.0",

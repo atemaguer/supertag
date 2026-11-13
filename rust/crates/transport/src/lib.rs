@@ -6,7 +6,13 @@
 //! only ciphertext and cannot impersonate either side. A `wss://` target always requires
 //! that inner TLS; a `ws://` target is cleartext and, like `http://`, is limited to loopback
 //! by the caller.
+//!
+//! Every target can reach its service through an HTTP `CONNECT` proxy ([`Proxy`]), and
+//! every connection sends HTTP/2 keepalive pings, so a connection that a proxy or NAT
+//! drops without closing it fails within [`KEEPALIVE_INTERVAL`] plus
+//! [`KEEPALIVE_TIMEOUT`] instead of at a call's deadline.
 
+mod proxy;
 mod websocket;
 
 use std::{
@@ -34,12 +40,19 @@ use tonic::transport::{
 use tower_service::Service;
 use url::Url;
 
+pub use proxy::Proxy;
 pub use websocket::WebSocketIo;
 
 /// How often each end of a tunnel pings the other. Platform proxies close idle
 /// connections (about 100 seconds on Cloudflare, five minutes on Render), and a
 /// peer that stops answering for three intervals is treated as gone.
 pub const PING_INTERVAL: Duration = Duration::from_secs(20);
+
+/// How often an HTTP/2 connection is pinged, idle or not. Servers use the same values
+/// for the connections they accept.
+pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
+/// How long a ping may go unanswered before the connection is treated as gone.
+pub const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -49,7 +62,8 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone)]
 pub struct Target {
     endpoint: Endpoint,
-    tunnel: Option<Dialer>,
+    /// `None` uses tonic's own TCP connector: a native target reached directly.
+    dialer: Option<Dialer>,
 }
 
 impl fmt::Debug for Target {
@@ -62,8 +76,8 @@ impl Target {
     /// A native gRPC endpoint.
     pub fn native(endpoint: Endpoint) -> Self {
         Self {
-            endpoint,
-            tunnel: None,
+            endpoint: keepalive(endpoint, KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT),
+            dialer: None,
         }
     }
 
@@ -84,28 +98,91 @@ impl Target {
             "wss" => Some(Arc::new(outer_tls(extra_roots)?)),
             _ => None,
         };
+        let host = parsed.host().ok_or("a tunnel URL needs a host")?.to_owned();
+        let port = parsed
+            .port_or_known_default()
+            .ok_or("a tunnel URL needs a port")?;
         Ok(Self {
-            endpoint,
-            tunnel: Some(Dialer {
-                url: Arc::new(parsed),
-                outer,
-                ping: PING_INTERVAL,
+            endpoint: keepalive(endpoint, KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT),
+            dialer: Some(Dialer {
+                host,
+                port,
+                proxy: None,
+                tunnel: Some(Tunnel {
+                    url: Arc::new(parsed),
+                    outer,
+                    ping: PING_INTERVAL,
+                }),
             }),
         })
+    }
+
+    /// The same target reached through `proxy`, unless the proxy's exceptions or a
+    /// loopback address exclude its host. `None` leaves the target unchanged.
+    pub fn proxy(mut self, proxy: Option<Proxy>) -> Result<Self, Error> {
+        let Some(proxy) = proxy else {
+            return Ok(self);
+        };
+        let (host, port) = match &self.dialer {
+            Some(dialer) => (dialer.host.clone(), dialer.port),
+            None => {
+                let uri = self.endpoint.uri();
+                let host = url::Host::parse(uri.host().ok_or("the endpoint needs a host")?)?;
+                let port = uri
+                    .port_u16()
+                    .unwrap_or(if uri.scheme_str() == Some("https") {
+                        443
+                    } else {
+                        80
+                    });
+                (host, port)
+            }
+        };
+        if !proxy.applies_to(&host) {
+            return Ok(self);
+        }
+        let dialer = self.dialer.get_or_insert(Dialer {
+            host,
+            port,
+            proxy: None,
+            tunnel: None,
+        });
+        dialer.proxy = Some(Arc::new(proxy));
+        Ok(self)
+    }
+
+    /// The same target with other HTTP/2 keepalive timing than [`KEEPALIVE_INTERVAL`]
+    /// and [`KEEPALIVE_TIMEOUT`].
+    pub fn keepalive(mut self, interval: Duration, timeout: Duration) -> Self {
+        self.endpoint = keepalive(self.endpoint, interval, timeout);
+        self
+    }
+
+    /// Whether connections go through an HTTP proxy.
+    pub fn proxied(&self) -> bool {
+        self.dialer
+            .as_ref()
+            .is_some_and(|dialer| dialer.proxy.is_some())
     }
 
     /// The URL this target was configured with. Stable across connections, so it can
     /// identify the target in saved state.
     pub fn url(&self) -> String {
-        match &self.tunnel {
-            Some(dialer) => dialer.url.to_string(),
+        match self
+            .dialer
+            .as_ref()
+            .and_then(|dialer| dialer.tunnel.as_ref())
+        {
+            Some(tunnel) => tunnel.url.to_string(),
             None => self.endpoint.uri().to_string(),
         }
     }
 
     /// Whether connections go through a WebSocket tunnel.
     pub fn tunnelled(&self) -> bool {
-        self.tunnel.is_some()
+        self.dialer
+            .as_ref()
+            .is_some_and(|dialer| dialer.tunnel.is_some())
     }
 
     /// The same target with a different per-call timeout.
@@ -115,7 +192,7 @@ impl Target {
     }
 
     pub async fn connect(&self) -> Result<Channel, tonic::transport::Error> {
-        match &self.tunnel {
+        match &self.dialer {
             Some(dialer) => self.endpoint.connect_with_connector(dialer.clone()).await,
             None => self.endpoint.connect().await,
         }
@@ -123,7 +200,7 @@ impl Target {
 
     /// A channel that connects on first use and reconnects after a failure.
     pub fn connect_lazy(&self) -> Channel {
-        match &self.tunnel {
+        match &self.dialer {
             Some(dialer) => self.endpoint.connect_with_connector_lazy(dialer.clone()),
             None => self.endpoint.connect_lazy(),
         }
@@ -157,6 +234,13 @@ pub fn tunneled_uri(url: &str) -> Result<Option<String>, Error> {
     Ok(Some(format!("{scheme}://{host}:{port}")))
 }
 
+fn keepalive(endpoint: Endpoint, interval: Duration, timeout: Duration) -> Endpoint {
+    endpoint
+        .http2_keep_alive_interval(interval)
+        .keep_alive_timeout(timeout)
+        .keep_alive_while_idle(true)
+}
+
 /// The system roots, loaded once per process: loading them can block for a while
 /// (the macOS keychain), and clients build a new target on every reconnect.
 fn system_roots() -> &'static RootCertStore {
@@ -186,50 +270,53 @@ fn outer_tls(extra_roots: Option<&[u8]>) -> Result<ClientConfig, Error> {
     )
 }
 
-/// Opens one tunnel per HTTP/2 connection tonic asks for.
+/// Opens each HTTP/2 connection tonic asks for: TCP to the service or, through an HTTP
+/// proxy, `CONNECT` to it, then the WebSocket upgrade when the target is a tunnel.
 #[derive(Clone)]
 struct Dialer {
+    host: url::Host<String>,
+    port: u16,
+    proxy: Option<Arc<Proxy>>,
+    tunnel: Option<Tunnel>,
+}
+
+#[derive(Clone)]
+struct Tunnel {
     url: Arc<Url>,
     outer: Option<Arc<ClientConfig>>,
     ping: Duration,
 }
 
 impl Dialer {
-    async fn dial(self) -> io::Result<TokioIo<WebSocketIo<MaybeTlsStream<TcpStream>>>> {
-        let port = self
-            .url
-            .port_or_known_default()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "tunnel port missing"))?;
-        let stream = match self.url.host() {
-            Some(url::Host::Domain(domain)) => TcpStream::connect((domain, port)).await?,
-            Some(url::Host::Ipv4(address)) => TcpStream::connect((address, port)).await?,
-            Some(url::Host::Ipv6(address)) => TcpStream::connect((address, port)).await?,
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "tunnel host missing",
-                ));
-            }
+    async fn dial(self) -> io::Result<TokioIo<Dialed>> {
+        let stream = match &self.proxy {
+            Some(proxy) => proxy.connect(&self.host, self.port).await?,
+            None => proxy::open(&self.host, self.port).await?,
         };
-        stream.set_nodelay(true)?;
-        let connector = match &self.outer {
+        let Some(tunnel) = self.tunnel else {
+            return Ok(TokioIo::new(Dialed::Tcp(stream)));
+        };
+        let connector = match &tunnel.outer {
             Some(config) => Connector::Rustls(config.clone()),
             None => Connector::Plain,
         };
         let (socket, _) = tokio_tungstenite::client_async_tls_with_config(
-            self.url.as_str(),
+            tunnel.url.as_str(),
             stream,
             Some(websocket::config()),
             Some(connector),
         )
         .await
         .map_err(websocket::io_error)?;
-        Ok(TokioIo::new(WebSocketIo::new(socket, self.ping)))
+        Ok(TokioIo::new(Dialed::Tunnel(Box::new(WebSocketIo::new(
+            socket,
+            tunnel.ping,
+        )))))
     }
 }
 
 impl Service<http::Uri> for Dialer {
-    type Response = TokioIo<WebSocketIo<MaybeTlsStream<TcpStream>>>;
+    type Response = TokioIo<Dialed>;
     type Error = io::Error;
     type Future = Pin<Box<dyn Future<Output = io::Result<Self::Response>> + Send>>;
 
@@ -239,6 +326,70 @@ impl Service<http::Uri> for Dialer {
 
     fn call(&mut self, _: http::Uri) -> Self::Future {
         Box::pin(self.clone().dial())
+    }
+}
+
+/// A connection a [`Dialer`] opened.
+enum Dialed {
+    Tcp(TcpStream),
+    Tunnel(Box<WebSocketIo<MaybeTlsStream<TcpStream>>>),
+}
+
+impl tokio::io::AsyncRead for Dialed {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Tunnel(stream) => Pin::new(stream.as_mut()).poll_read(cx, buf),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for Dialed {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Tunnel(stream) => Pin::new(stream.as_mut()).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tcp(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            Self::Tunnel(stream) => Pin::new(stream.as_mut()).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Tcp(stream) => stream.is_write_vectored(),
+            Self::Tunnel(stream) => stream.is_write_vectored(),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Tunnel(stream) => Pin::new(stream.as_mut()).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Tunnel(stream) => Pin::new(stream.as_mut()).poll_shutdown(cx),
+        }
     }
 }
 

@@ -40,8 +40,20 @@ const ENDPOINT: &str = "endpoint";
 const CREDENTIALS: &str = "credentials.json";
 const STATE_LOCK: &str = ".lock";
 /// Non-secret variables every local service inherits from the supervisor.
-const BASE_ENVIRONMENT: [&str; 8] = [
-    "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+const BASE_ENVIRONMENT: [&str; 12] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    // A Worker Host that joins a remote Control Plane reaches it through this proxy.
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
 ];
 /// Gateway-owned GitHub credentials, given only when a Host serves a Gateway Workspace.
 const GATEWAY_GITHUB_ENVIRONMENT: [&str; 7] = [
