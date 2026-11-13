@@ -262,6 +262,56 @@ function unpack(bytes: Uint8Array) {
   return entries;
 }
 
+/**
+ * A Workspace MCP server that ignores SIGTERM and forks a child that ignores it too and holds
+ * the server's output open. Returns the server's start and the child's pid, once written.
+ */
+async function forkingMcpServer() {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-mcp-fork-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const pidFile = join(directory, "child.pid");
+  const script = `trap '' TERM; sh -c 'trap "" TERM; echo $$ > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60' "${pidFile}" & echo ready; while :; do sleep 1; done`;
+  const childPid = async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const text = await readFile(pidFile, "utf8").catch(() => "");
+      if (text.trim()) return Number(text.trim());
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("the forked child never started");
+  };
+  const exited = async (pid: number) => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return false;
+  };
+  return { start: { name: "tools", command: "sh", args: ["-c", script] }, childPid, exited };
+}
+
+it("stops a Workspace MCP server's process group before capture without ending the sandbox", async () => {
+  const f = await fixture();
+  const { header, bytes } = await bundle();
+  await f.session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await f.session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const { start, childPid, exited } = await forkingMcpServer();
+  const server = await f.session.startMcpServer(start);
+  const pid = await childPid();
+  const started = Date.now();
+  // On Modal a process's terminate is the sandbox's, so the stop goes through the input.
+  const captured = await f.session.capture();
+  expect(Date.now() - started).toBeLessThan(4_500);
+  expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  expect(await exited(pid)).toBe(true);
+  await expect(server.wait()).resolves.toBeDefined();
+  expect(f.terminate).not.toHaveBeenCalled();
+  expect(f.inventory.terminate).not.toHaveBeenCalled();
+}, 20_000);
+
 it("allocates once with create-time ownership and a bounded whole-second lifetime, without sandbox credentials", async () => {
   vi.stubEnv("MODAL_TOKEN_ID", "synthetic-modal-id");
   vi.stubEnv("MODAL_TOKEN_SECRET", "synthetic-modal-secret");

@@ -500,6 +500,50 @@ mod tests {
         }
     }
 
+    /// A server that ignores SIGTERM and forks a child that ignores it too and holds its output
+    /// open is stopped with its whole process group within the grace period, on Linux and macOS.
+    #[tokio::test]
+    async fn close_stops_the_process_group_of_a_server_whose_children_ignore_sigterm() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("child.pid");
+        let server = StdioServer {
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"trap '' TERM; sh -c 'trap "" TERM; echo $$ > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60' "$1" & while :; do sleep 1; done"#.into(),
+                "server".into(),
+                pid_file.display().to_string(),
+            ],
+            env: BTreeMap::new(),
+            cwd: None,
+            sandboxed: false,
+        };
+        let mut session = Session::start(&server).unwrap();
+        let mut child = None;
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse::<i64>()
+            {
+                child = Some(pid);
+                break;
+            }
+            time::sleep(Duration::from_millis(25)).await;
+        }
+        let child = child.expect("the forked child never started");
+        let started = Instant::now();
+        session.close().await;
+        assert!(started.elapsed() < TERMINATE_GRACE + Duration::from_millis(1500));
+        let mut stopped = false;
+        for _ in 0..100 {
+            if !alive(child) {
+                stopped = true;
+                break;
+            }
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(stopped, "the forked child outlived close");
+    }
+
     #[tokio::test]
     async fn reports_a_server_that_cannot_start() {
         let missing = StdioServer {
