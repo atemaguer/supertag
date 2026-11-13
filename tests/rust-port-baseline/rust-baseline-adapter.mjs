@@ -3,6 +3,8 @@
  * `supertag-ai/harness` entry point (built `dist/`), never Control Plane internals.
  *
  * Arguments: --mode=complete|hold|produce|review --record=ABSOLUTE_FILE [--revision=SHA]
+ * [--gate=ABSOLUTE_FILE]. With a gate, the adapter publishes all its events and then waits for
+ * that file to exist before reporting completion to its Worker Host.
  */
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -79,6 +81,8 @@ if (mode === "hold") {
 }
 await publish("output ready");
 await publish(result);
+const gate = option("gate");
+if (gate) while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 10));
 note("finished");
 await harness.client.complete({
   result,
