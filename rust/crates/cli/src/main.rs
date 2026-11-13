@@ -332,6 +332,10 @@ enum Command {
         /// Placement label for this host, such as gpu. Repeat for more labels.
         #[arg(long = "label")]
         labels: Vec<String>,
+        /// Run as one execution lane of a supervised Host, replaying the Host's incarnation.
+        /// The lane reports its state on stdout; its supervisor reports the Host's presence.
+        #[arg(long, hide = true, value_name = "INCARNATION_ID")]
+        supervised_lane: Option<String>,
         #[command(flatten)]
         adapter: Box<AdapterOptions>,
         /// Owner-controlled JSON mappings for read-only Workspace Volume copies.
@@ -922,6 +926,7 @@ async fn run(command: Command) -> Result<()> {
             gateway,
             state_directory,
             labels,
+            supervised_lane,
             adapter,
             e2b_workspace_provider,
             e2b_workspace_provider_arg,
@@ -1111,6 +1116,12 @@ async fn run(command: Command) -> Result<()> {
                 disk_space,
                 keep_awake,
                 labels,
+                lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
+                    incarnation_id,
+                    observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
+                        println!("state {}", state.as_str());
+                    }),
+                }),
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();

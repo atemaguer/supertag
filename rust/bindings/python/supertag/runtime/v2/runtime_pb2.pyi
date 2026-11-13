@@ -1107,7 +1107,7 @@ class ReadMailboxRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class ReportHostRequest(_message.Message):
-    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels")
+    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels", "harnesses")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     CAPACITY_FIELD_NUMBER: _ClassVar[int]
     AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
@@ -1118,6 +1118,7 @@ class ReportHostRequest(_message.Message):
     EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     DISK_SPACE_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
+    HARNESSES_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     capacity: int
     available_slots: int
@@ -1128,7 +1129,8 @@ class ReportHostRequest(_message.Message):
     execution_profile: HarnessExecutionProfile
     disk_space: HostDiskSpace
     labels: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ...) -> None: ...
+    harnesses: _containers.RepeatedCompositeFieldContainer[HostHarnessCapacity]
+    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ...) -> None: ...
 
 class HostDiskSpace(_message.Message):
     __slots__ = ("free_bytes", "total_bytes")
@@ -1138,8 +1140,26 @@ class HostDiskSpace(_message.Message):
     total_bytes: int
     def __init__(self, free_bytes: _Optional[int] = ..., total_bytes: _Optional[int] = ...) -> None: ...
 
+class HostHarnessCapacity(_message.Message):
+    __slots__ = ("harness_kind", "execution_profile", "capacity", "available_slots")
+    HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    CAPACITY_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
+    harness_kind: HarnessKind
+    execution_profile: HarnessExecutionProfile
+    capacity: int
+    available_slots: int
+    def __init__(self, harness_kind: _Optional[_Union[HarnessKind, str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ...) -> None: ...
+
+class HostHarnessCapacities(_message.Message):
+    __slots__ = ("harnesses",)
+    HARNESSES_FIELD_NUMBER: _ClassVar[int]
+    harnesses: _containers.RepeatedCompositeFieldContainer[HostHarnessCapacity]
+    def __init__(self, harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ...) -> None: ...
+
 class WorkerHostStatus(_message.Message):
-    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space", "labels", "granted_labels", "ephemeral", "removed_at_ms")
+    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space", "labels", "granted_labels", "ephemeral", "removed_at_ms", "harnesses")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
@@ -1160,6 +1180,7 @@ class WorkerHostStatus(_message.Message):
     GRANTED_LABELS_FIELD_NUMBER: _ClassVar[int]
     EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     REMOVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    HARNESSES_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     generation: int
     phase: HostPhase
@@ -1180,7 +1201,8 @@ class WorkerHostStatus(_message.Message):
     granted_labels: _containers.RepeatedScalarFieldContainer[str]
     ephemeral: bool
     removed_at_ms: int
-    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., granted_labels: _Optional[_Iterable[str]] = ..., ephemeral: _Optional[bool] = ..., removed_at_ms: _Optional[int] = ...) -> None: ...
+    harnesses: _containers.RepeatedCompositeFieldContainer[HostHarnessCapacity]
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., granted_labels: _Optional[_Iterable[str]] = ..., ephemeral: _Optional[bool] = ..., removed_at_ms: _Optional[int] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ...) -> None: ...
 
 class ListHostsRequest(_message.Message):
     __slots__ = ("limit", "cursor")

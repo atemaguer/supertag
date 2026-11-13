@@ -14,6 +14,7 @@ mod readiness;
 mod remote;
 mod remote_provider;
 mod shared_execution;
+mod shared_host;
 mod task_artifact_inputs;
 mod task_outputs;
 mod workspace_mounts;
@@ -24,8 +25,10 @@ pub use credentials::{provider_environment, provider_environment_for, validate_o
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::McpCatalog;
+pub use readiness::{LaneObserver, State as LaneState};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
+pub use shared_host::{HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable};
 pub use workspace_mounts::WorkspaceMounts;
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
@@ -88,6 +91,17 @@ pub struct HostOptions {
     /// Operator-declared placement labels. The host adds its operating system
     /// and architecture; the Control Plane derives harness and Workspace labels.
     pub labels: Vec<String>,
+    /// Set when a supervisor runs this process as one execution lane of a shared Host.
+    pub lane: Option<Lane>,
+}
+
+/// One supervised execution lane. Every lane of a Host registers the Host's single
+/// incarnation, so sibling lanes never replace each other's generation. The supervisor
+/// owns the Host's presence report and receives this lane's state instead.
+#[derive(Clone)]
+pub struct Lane {
+    pub incarnation_id: String,
+    pub observer: LaneObserver,
 }
 
 #[derive(Clone)]
@@ -291,9 +305,16 @@ pub async fn run(
     let token = match &options.token {
         Some(token) if !token.is_empty() => token.clone(),
         Some(_) => bail!("Worker Host credential is empty"),
+        None if options.lane.is_some() => bail!("a supervised lane needs its Host credential"),
         None => enrollment::host_token(&journal, &options.gateway)?,
     };
-    let incarnation_id = journal.incarnation()?;
+    let incarnation_id = match &options.lane {
+        Some(lane) => {
+            Uuid::parse_str(&lane.incarnation_id).context("invalid shared Host incarnation")?;
+            lane.incarnation_id.clone()
+        }
+        None => journal.incarnation()?,
+    };
     let channel = options.gateway.clone().connect_lazy();
     let mut registration = WorkerHostClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -410,20 +431,24 @@ pub async fn run(
         eprintln!("{warning}");
     }
     let keep_awake = environment::KeepAwake::start(options.keep_awake.clone(), shutdown.clone());
-    let presence = readiness::Presence::start(
-        journal.clone(),
-        options.disk_space.clone(),
-        host.clone(),
-        token.clone(),
-        options.harness as i32,
-        workspaces
-            .ids()
-            .into_iter()
-            .chain(workspaces.gateway_ids())
-            .collect(),
-        (options.execution_profile.clone(), labels),
-        shutdown.clone(),
-    );
+    let presence = match &options.lane {
+        // A supervised lane's supervisor reports the Host's presence, disk space, and labels.
+        Some(lane) => readiness::Reporter::lane(lane.observer.clone()),
+        None => readiness::Reporter::Host(Box::new(readiness::Presence::start(
+            journal.clone(),
+            options.disk_space.clone(),
+            host.clone(),
+            token.clone(),
+            options.harness as i32,
+            workspaces
+                .ids()
+                .into_iter()
+                .chain(workspaces.gateway_ids())
+                .collect(),
+            (options.execution_profile.clone(), labels),
+            shutdown.clone(),
+        ))),
+    };
     let outcome = async {
     let mut ready = Some(ready);
     while !shutdown.is_cancelled() {

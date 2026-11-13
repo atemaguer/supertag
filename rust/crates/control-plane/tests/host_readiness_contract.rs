@@ -49,6 +49,242 @@ fn report(sequence: u64) -> ReportHostRequest {
     }
 }
 
+fn shared_report(sequence: u64, codex_ready: u32, agents_ready: u32) -> ReportHostRequest {
+    let profile = |model: &str| HarnessExecutionProfile {
+        model_ids: vec![model.into()],
+        default_model: Some(model.into()),
+        ..Default::default()
+    };
+    ReportHostRequest {
+        sequence,
+        capacity: 4,
+        available_slots: codex_ready + agents_ready,
+        readiness: HostReadiness::Ready as i32,
+        reason: HostReadinessReason::Unspecified as i32,
+        harness_kind: HarnessKind::Unspecified as i32,
+        workspace_ids: vec![],
+        execution_profile: None,
+        // Reported out of order; the stored form is ordered by harness.
+        harnesses: vec![
+            HostHarnessCapacity {
+                harness_kind: HarnessKind::OpenaiAgents as i32,
+                execution_profile: Some(profile("agents-model")),
+                capacity: 2,
+                available_slots: agents_ready,
+            },
+            HostHarnessCapacity {
+                harness_kind: HarnessKind::Codex as i32,
+                execution_profile: Some(profile("codex-model")),
+                capacity: 2,
+                available_slots: codex_ready,
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// One registration advertises several harnesses, each with its own slots, and the totals and
+/// summary fields stay consistent with them.
+async fn shared_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    let registered = support::register_host(&store, "shared").await;
+    let ready = store
+        .report_host(&registered, &shared_report(1, 2, 1))
+        .await
+        .unwrap();
+    assert_eq!(ready.phase(), HostPhase::Ready);
+    assert_eq!((ready.capacity, ready.available_slots), (4, 3));
+    assert_eq!(ready.harness_kind(), HarnessKind::Unspecified);
+    let slots = ready
+        .harnesses
+        .iter()
+        .map(|h| (h.harness_kind(), h.capacity, h.available_slots))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        slots,
+        [
+            (HarnessKind::Codex, 2, 2),
+            (HarnessKind::OpenaiAgents, 2, 1)
+        ]
+    );
+    // An exact replay is idempotent; the same sequence with other slots conflicts.
+    assert_eq!(
+        store
+            .report_host(&registered, &shared_report(1, 2, 1))
+            .await
+            .unwrap(),
+        ready
+    );
+    assert!(matches!(
+        store
+            .report_host(&registered, &shared_report(1, 1, 1))
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    for invalid in [
+        // Totals differ from the harness entries.
+        ReportHostRequest {
+            capacity: 5,
+            ..shared_report(2, 2, 1)
+        },
+        ReportHostRequest {
+            available_slots: 2,
+            ..shared_report(2, 2, 1)
+        },
+        // Several harnesses never claim one summary harness or profile.
+        ReportHostRequest {
+            harness_kind: HarnessKind::Codex as i32,
+            ..shared_report(2, 2, 1)
+        },
+        {
+            let mut duplicate = shared_report(2, 2, 1);
+            duplicate.harnesses[0].harness_kind = HarnessKind::Codex as i32;
+            duplicate
+        },
+        {
+            let mut overfull = shared_report(2, 2, 1);
+            overfull.harnesses[0].available_slots = 3;
+            overfull.available_slots = 4;
+            overfull
+        },
+    ] {
+        assert!(matches!(
+            store.report_host(&registered, &invalid).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    store.close().await;
+
+    // Slots survive a restart and stop being available once presence is not Ready.
+    let store = open(url, &clock).await;
+    let stored = store.get_host("shared").await.unwrap();
+    assert_eq!(stored.harnesses, ready.harnesses);
+    store.set_host_draining("shared", true).await.unwrap();
+    let drained = store.get_host("shared").await.unwrap();
+    assert_eq!(drained.phase(), HostPhase::Draining);
+    assert!(drained.harnesses.iter().all(|h| h.available_slots == 0));
+    assert_eq!(drained.harnesses.iter().map(|h| h.capacity).sum::<u32>(), 4);
+    // A single-harness Host may also report its slots, with a matching summary.
+    let single = support::register_host(&store, "single").await;
+    let mut one = report(1);
+    one.capacity = 3;
+    one.available_slots = 2;
+    one.harnesses = vec![HostHarnessCapacity {
+        harness_kind: HarnessKind::Codex as i32,
+        execution_profile: one.execution_profile.clone(),
+        capacity: 3,
+        available_slots: 2,
+    }];
+    assert_eq!(
+        store
+            .report_host(&single, &one)
+            .await
+            .unwrap()
+            .harnesses
+            .len(),
+        1
+    );
+    one.sequence = 2;
+    one.harness_kind = HarnessKind::ClaudeCode as i32;
+    assert!(matches!(
+        store.report_host(&single, &one).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+
+    // An occupying Attempt holds its own harness's slot even when a lane still reports it
+    // free, so per-harness slots never exceed the Host's clamped total.
+    store.set_host_draining("shared", false).await.unwrap();
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "coder".into(),
+            instructions: "Code".into(),
+            harness_kind: HarnessKind::Codex as i32,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                tag_id: "coder".into(),
+                session_id: "occupied".into(),
+                operation_id: "occupied".into(),
+                prompt: "Hold a slot".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let claimed = store
+        .claim_task_for_host(&registered, "occupy", &[], HarnessKind::Codex)
+        .await
+        .unwrap();
+    assert!(claimed.is_some());
+    let stale = store
+        .report_host(&registered, &shared_report(2, 2, 2))
+        .await
+        .unwrap();
+    assert_eq!(stale.phase(), HostPhase::Ready);
+    assert_eq!((stale.active_attempts, stale.available_slots), (1, 3));
+    let slots = stale
+        .harnesses
+        .iter()
+        .map(|h| (h.harness_kind(), h.available_slots))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        slots,
+        [(HarnessKind::Codex, 1), (HarnessKind::OpenaiAgents, 2)]
+    );
+    assert_eq!(
+        stale
+            .harnesses
+            .iter()
+            .map(|h| h.available_slots)
+            .sum::<u32>(),
+        stale.available_slots
+    );
+    store.close().await;
+}
+
+#[tokio::test]
+async fn sqlite_host_reports_several_harness_slots_under_one_registration() {
+    let directory = tempfile::tempdir().unwrap();
+    shared_contract(&format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("shared.db").display()
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_host_reports_several_harness_slots_under_one_registration() {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .expect("PostgreSQL test URL file required");
+    let admin_url = std::fs::read_to_string(path).unwrap();
+    let name = format!("supertag_shared_slots_{}", Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await
+        .unwrap();
+    let mut url = url::Url::parse(admin_url.trim()).unwrap();
+    url.set_path(&name);
+    let outcome = tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(async move { shared_contract(url.as_str()).await }).await
+        })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await
+        .unwrap();
+    admin.close().await.unwrap();
+    outcome.expect("PostgreSQL shared Host contract failed");
+}
+
 async fn contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;

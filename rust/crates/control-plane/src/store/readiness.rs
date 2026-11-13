@@ -83,6 +83,7 @@ impl Store {
             .map(|profile| execution::normalize_profile(Some(profile)))
             .transpose()?
             .map(|profile| profile.encode_to_vec());
+        let harnesses = harness_capacities(input)?;
         let observed = (
             input.capacity,
             input.available_slots,
@@ -91,10 +92,12 @@ impl Store {
             input.harness_kind,
             &workspaces,
         );
-        let digest_input = match (&execution_profile, disk) {
-            (Some(profile), None) => serde_json::to_vec(&(observed, profile, &labels))?,
-            (None, None) => serde_json::to_vec(&(observed, &labels))?,
-            (profile, Some(disk)) => serde_json::to_vec(&(observed, profile, disk, &labels))?,
+        let digest_input = match (&execution_profile, disk, &harnesses) {
+            (Some(profile), None, None) => serde_json::to_vec(&(observed, profile, &labels))?,
+            (None, None, None) => serde_json::to_vec(&(observed, &labels))?,
+            (profile, disk, harnesses) => {
+                serde_json::to_vec(&(observed, profile, disk, harnesses, &labels))?
+            }
         };
         let digest = format!("{:x}", Sha256::digest(digest_input));
         let (mut transaction, _) = self.write().await?;
@@ -126,11 +129,11 @@ impl Store {
         let expires = now
             .checked_add(PRESENCE_MS)
             .ok_or_else(|| invalid("presence expiry is out of range"))?;
-        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile,disk_free_bytes,disk_total_bytes,labels) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile,disk_free_bytes=excluded.disk_free_bytes,disk_total_bytes=excluded.disk_total_bytes,labels=excluded.labels")
+        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile,disk_free_bytes,disk_total_bytes,labels,harnesses) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile,disk_free_bytes=excluded.disk_free_bytes,disk_total_bytes=excluded.disk_total_bytes,labels=excluded.labels,harnesses=excluded.harnesses")
             .bind(host.id()).bind(host.generation).bind(sequence).bind(digest)
             .bind(i64::from(input.capacity)).bind(i64::from(input.available_slots)).bind(i64::from(input.readiness))
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
-            .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1)).bind(labels)
+            .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1)).bind(labels).bind(harnesses)
             .execute(&mut *transaction).await?;
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;
@@ -224,8 +227,9 @@ pub(crate) async fn status_in(
     // Reservations and unconfirmed cleanup consume capacity, including a replaced
     // generation. Once cleanup is proven the Session can still require recovery,
     // but that stopped process no longer occupies a native execution slot.
-    let occupied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks WHERE host_principal=$1 AND (state IN (2,6) OR ((state=7 OR cleanup_pending=1) AND cleanup_observed=0))")
-        .bind(format!("host:{id}")).fetch_one(&mut **transaction).await?;
+    let occupied_by_harness: Vec<(i64, i64)> = sqlx::query_as("SELECT harness_kind,COUNT(*) FROM supertag_v2_tasks WHERE host_principal=$1 AND (state IN (2,6) OR ((state=7 OR cleanup_pending=1) AND cleanup_observed=0)) GROUP BY harness_kind")
+        .bind(format!("host:{id}")).fetch_all(&mut **transaction).await?;
+    let occupied: i64 = occupied_by_harness.iter().map(|(_, count)| count).sum();
     let mut view = WorkerHostStatus {
         host_id: id.into(),
         generation: generation as u64,
@@ -259,11 +263,29 @@ pub(crate) async fn status_in(
             }),
             _ => None,
         };
+        if let Some(bytes) = row.try_get::<Option<Vec<u8>>, _>("harnesses")? {
+            view.harnesses = HostHarnessCapacities::decode(bytes.as_slice())
+                .map_err(|_| invalid("stored Worker Host harness capacity is invalid"))?
+                .harnesses;
+            clamp_harness_slots(
+                &mut view.harnesses,
+                &occupied_by_harness,
+                view.available_slots,
+            );
+        }
         labels.extend(crate::placement::derived_labels(
             view.harness_kind(),
             &view.workspace_ids,
             view.execution_profile.as_ref(),
         ));
+        // A Host serving several harnesses carries each one's derived labels.
+        for harness in &view.harnesses {
+            labels.extend(crate::placement::derived_labels(
+                harness.harness_kind(),
+                &view.workspace_ids,
+                harness.execution_profile.as_ref(),
+            ));
+        }
         labels.extend(serde_json::from_str::<Vec<String>>(
             &row.try_get::<String, _>("labels")?,
         )?);
@@ -290,8 +312,93 @@ pub(crate) async fn status_in(
     }
     if phase != HostPhase::Ready {
         view.available_slots = 0;
+        for harness in &mut view.harnesses {
+            harness.available_slots = 0;
+        }
     }
     view.phase = phase as i32;
     view.labels = labels.into_iter().collect();
     Ok(view)
+}
+
+/// Per-harness slots never show more than the Host's occupancy leaves: each harness loses the
+/// slots its own occupying Attempts hold, and the entries never sum past the Host's total.
+fn clamp_harness_slots(harnesses: &mut [HostHarnessCapacity], occupied: &[(i64, i64)], total: u32) {
+    let mut remaining = total;
+    for harness in harnesses {
+        let held = occupied
+            .iter()
+            .filter(|(kind, _)| *kind == i64::from(harness.harness_kind))
+            .map(|(_, count)| u32::try_from(*count).unwrap_or(u32::MAX))
+            .sum::<u32>();
+        harness.available_slots = harness
+            .available_slots
+            .min(harness.capacity.saturating_sub(held))
+            .min(remaining);
+        remaining -= harness.available_slots;
+    }
+}
+
+/// A Host that runs several harnesses or concurrent Attempts reports one slot entry per harness.
+/// The totals above must equal their sum, and a single summary harness is never ambiguous.
+fn harness_capacities(input: &ReportHostRequest) -> Result<Option<Vec<u8>>> {
+    if input.harnesses.is_empty() {
+        return Ok(None);
+    }
+    if input.harnesses.len() > 16 {
+        return Err(invalid("host must report at most 16 harnesses"));
+    }
+    let mut harnesses = Vec::with_capacity(input.harnesses.len());
+    let (mut capacity, mut available) = (0_u32, 0_u32);
+    for harness in &input.harnesses {
+        HarnessKind::try_from(harness.harness_kind).map_err(|_| invalid("unknown host harness"))?;
+        if harness.capacity == 0 || harness.available_slots > harness.capacity {
+            return Err(invalid(
+                "each host harness needs capacity and cannot exceed it",
+            ));
+        }
+        capacity = capacity.saturating_add(harness.capacity);
+        available = available.saturating_add(harness.available_slots);
+        harnesses.push(HostHarnessCapacity {
+            harness_kind: harness.harness_kind,
+            execution_profile: Some(execution::normalize_profile(
+                harness.execution_profile.as_ref(),
+            )?),
+            capacity: harness.capacity,
+            available_slots: harness.available_slots,
+        });
+    }
+    harnesses.sort_by_key(|harness| harness.harness_kind);
+    if harnesses
+        .windows(2)
+        .any(|pair| pair[0].harness_kind == pair[1].harness_kind)
+    {
+        return Err(invalid("host harnesses must be distinct"));
+    }
+    if capacity != input.capacity || available != input.available_slots {
+        return Err(invalid(
+            "host capacity and available slots must equal their harness totals",
+        ));
+    }
+    let summary = match harnesses.as_slice() {
+        [single] => {
+            input.harness_kind == single.harness_kind
+                && input
+                    .execution_profile
+                    .as_ref()
+                    .map(|profile| execution::normalize_profile(Some(profile)))
+                    .transpose()?
+                    == single.execution_profile
+        }
+        _ => {
+            input.harness_kind == HarnessKind::Unspecified as i32
+                && input.execution_profile.is_none()
+        }
+    };
+    if !summary {
+        return Err(invalid(
+            "a Host with several harnesses reports them only as harness entries",
+        ));
+    }
+    Ok(Some(HostHarnessCapacities { harnesses }.encode_to_vec()))
 }

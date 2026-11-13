@@ -139,10 +139,17 @@ pub struct Host {
     pub name: String,
     pub gateway: Option<String>,
     pub key: Option<Secret>,
-    pub adapter: AdapterOptions,
+    /// One entry per configured harness, or the single protocol adapter.
+    pub harnesses: Vec<AdapterOptions>,
+    /// Attempts each harness runs at once; each is a separate execution lane.
+    pub concurrency: u32,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
 }
+/// The largest per-harness concurrency a Worker Host may declare.
+const MAX_CONCURRENCY: u32 = 16;
+/// Distinct built-in harnesses one named Host may serve.
+const MAX_HARNESSES: usize = 5;
 #[derive(Parser)]
 struct AdapterArguments {
     #[command(flatten)]
@@ -365,10 +372,18 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             .contains(&name.as_str()),
             "a host cannot be named {name}; that name belongs to a fixed local service"
         );
-        ensure!(
-            concurrency.is_none_or(|n| n == 1),
-            "each native Worker Host currently runs one Attempt; use independent named hosts for more capacity"
-        );
+        let concurrency = match concurrency {
+            Some(n) => {
+                ensure!(
+                    (1..=MAX_CONCURRENCY).contains(&n),
+                    "concurrency must be a whole number from 1 through {MAX_CONCURRENCY}"
+                );
+                n
+            }
+            // Each slot is a lane process with its own claim loop, so extra lanes cost Control
+            // Plane polling even when idle. More than one Attempt per harness is opt-in.
+            None => 1,
+        };
         let target = gateway
             .as_deref()
             .or(plane_name.as_deref())
@@ -400,80 +415,98 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         );
         ensure!(
             (adapter.is_some() && harnesses.is_empty())
-                || (adapter.is_none() && harnesses.len() == 1),
-            "configure one harness or protocol adapter per named host; multiple harnesses under one identity are not supported"
+                || (adapter.is_none() && (1..=MAX_HARNESSES).contains(&harnesses.len())),
+            "configure one to {MAX_HARNESSES} harnesses or one protocol adapter per named host"
+        );
+        let mut distinct = harnesses.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        ensure!(
+            distinct.len() == harnesses.len(),
+            "each harness may be listed once per named host"
         );
         ensure!(
             workspaces.len() <= 1,
             "each native Worker Host currently supports one Workspace mapping"
         );
-        let mut args = vec![OsString::from("host")];
+        let mut mapping = Vec::new();
+        for (id, path) in &workspaces {
+            identifier(id)?;
+            mapping.extend([
+                OsString::from("--workspace-id"),
+                id.into(),
+                "--workspace-source".into(),
+                resolve_path(base, path)?.into_os_string(),
+            ]);
+        }
+        let mut selections = Vec::new();
         if let Some(adapter) = adapter {
             ensure!(
                 models.is_empty() && unsandboxed.is_empty(),
                 "protocol adapters cannot configure native models or unsandboxed commands"
             );
-            args.extend([
+            let mut args = vec![
+                OsString::from("host"),
                 "--adapter".into(),
                 resolve_path(base, &adapter)?.into_os_string(),
-            ]);
+            ];
             for arg in adapter_args {
                 args.push(format!("--adapter-arg={arg}").into());
             }
+            selections.push(args);
         } else {
             ensure!(
                 adapter_args.is_empty(),
                 "adapter-args requires a protocol adapter"
             );
-            let harness = &harnesses[0];
-            args.extend(["--harness".into(), harness.into()]);
             ensure!(
-                models.keys().all(|name| name == harness),
-                "model settings must name the selected harness"
+                models.keys().all(|name| harnesses.contains(name)),
+                "model settings must name a selected harness"
             );
-            if let Some(models) = models.get(harness) {
-                let values = match models {
-                    Models::One(s) => vec![s.clone()],
-                    Models::Many(v) => v.clone(),
-                };
-                ensure!(!values.is_empty(), "model list must not be empty");
-                args.extend(["--harness-model".into(), values[0].clone().into()]);
-                for model in values {
-                    args.extend(["--harness-models".into(), model.into()]);
+            ensure!(
+                unsandboxed.iter().all(|h| harnesses.contains(h)),
+                "unsandboxed command consent must name a selected harness"
+            );
+            for harness in &harnesses {
+                let mut args = vec![OsString::from("host"), "--harness".into(), harness.into()];
+                if let Some(models) = models.get(harness) {
+                    let values = match models {
+                        Models::One(s) => vec![s.clone()],
+                        Models::Many(v) => v.clone(),
+                    };
+                    ensure!(!values.is_empty(), "model list must not be empty");
+                    args.extend(["--harness-model".into(), values[0].clone().into()]);
+                    for model in values {
+                        args.extend(["--harness-models".into(), model.into()]);
+                    }
                 }
-            }
-            ensure!(
-                unsandboxed.len() <= 1 && unsandboxed.iter().all(|h| h == harness),
-                "unsandboxed command consent must name the selected harness"
-            );
-            if !unsandboxed.is_empty() {
-                ensure!(
-                    matches!(harness.as_str(), "opencode" | "cursor"),
-                    "only OpenCode and Cursor accept unsandboxed command consent"
-                );
-                args.push("--allow-unsandboxed-commands".into());
+                if unsandboxed.contains(harness) {
+                    ensure!(
+                        matches!(harness.as_str(), "opencode" | "cursor"),
+                        "only OpenCode and Cursor accept unsandboxed command consent"
+                    );
+                    args.push("--allow-unsandboxed-commands".into());
+                }
+                selections.push(args);
             }
         }
-        for (id, path) in workspaces {
-            identifier(&id)?;
-            args.extend([
-                "--workspace-id".into(),
-                id.into(),
-                "--workspace-source".into(),
-                resolve_path(base, &path)?.into_os_string(),
-            ]);
+        let mut selected = Vec::new();
+        for mut args in selections {
+            args.extend(mapping.iter().cloned());
+            let adapter = AdapterArguments::try_parse_from(args)
+                .map_err(|_| anyhow::anyhow!("invalid configured harness or adapter options"))?
+                .adapter;
+            adapter.execution_profile()?;
+            adapter.provider_environment()?;
+            selected.push(adapter);
         }
-        let adapter = AdapterArguments::try_parse_from(args)
-            .map_err(|_| anyhow::anyhow!("invalid configured harness or adapter options"))?
-            .adapter;
-        adapter.execution_profile()?;
-        adapter.provider_environment()?;
         let skills = skills.map(|p| resolve_path(base, &p)).transpose()?;
         hosts.push(Host {
             name,
             gateway: remote,
             key,
-            adapter,
+            harnesses: selected,
+            concurrency,
             skills,
             restart,
         });
@@ -543,7 +576,10 @@ pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<Stri
     }
     // What hosts read when they start: an environment Auth Key and their harness credentials.
     for host in &config.hosts {
-        let mut names: Vec<&str> = host.adapter.provider_environment()?.to_vec();
+        let mut names: Vec<&str> = Vec::new();
+        for adapter in &host.harnesses {
+            names.extend(adapter.provider_environment()?);
+        }
         if let Some(Secret::Environment(secret)) = &host.key {
             names.push(&secret.environment);
         }
@@ -835,12 +871,14 @@ services:
         assert_eq!(c.hosts.len(), 2);
         assert_eq!(c.plane.unwrap().listen.port(), 0);
         assert_eq!(
-            c.hosts[0].adapter.execution_profile().unwrap().model_ids,
+            c.hosts[0].harnesses[0]
+                .execution_profile()
+                .unwrap()
+                .model_ids,
             ["model-a", "model-b"]
         );
         assert!(
-            c.hosts[0]
-                .adapter
+            c.hosts[0].harnesses[0]
                 .worker_args()
                 .iter()
                 .any(|v| v == "/trusted/./source")
@@ -857,6 +895,61 @@ secrets:
         .unwrap();
         assert!(c.plane.is_none());
         assert!(c.hosts[0].key.is_some());
+    }
+    #[test]
+    fn one_host_serves_several_harnesses_with_per_harness_settings() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
+  shared:
+    type: host
+    harnesses: [codex, cursor, openai-agents]
+    concurrency: 3
+    models: {codex: [model-a], cursor: cursor-model}
+    allow-unsandboxed-commands: [cursor]
+    workspaces: {repo: ./source}
+  default: {type: host, adapter: ./adapter}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let shared = c.hosts.iter().find(|h| h.name == "shared").unwrap();
+        assert_eq!(shared.concurrency, 3);
+        let kinds = shared
+            .harnesses
+            .iter()
+            .map(AdapterOptions::harness_kind)
+            .collect::<Vec<_>>();
+        use supertag_protocol::v2::HarnessKind;
+        assert_eq!(
+            kinds,
+            [
+                HarnessKind::Codex,
+                HarnessKind::Cursor,
+                HarnessKind::OpenaiAgents
+            ]
+        );
+        let profiles = shared
+            .harnesses
+            .iter()
+            .map(|h| h.execution_profile().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(profiles[0].model_ids, ["model-a"]);
+        assert_eq!(profiles[1].model_ids, ["cursor-model"]);
+        assert!(profiles[2].model_ids.is_empty());
+        assert!(!profiles[0].allow_unsandboxed_commands && profiles[1].allow_unsandboxed_commands);
+        // Every harness shares the Host's one Workspace mapping.
+        assert!(
+            shared
+                .harnesses
+                .iter()
+                .all(|h| h.worker_args().iter().any(|v| v == "/trusted/./source"))
+        );
+        // An unset concurrency runs one Attempt per harness.
+        let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
+        assert_eq!(default.concurrency, 1);
+        assert_eq!(default.harnesses.len(), 1);
     }
     #[test]
     fn env_file_interpolates_services_and_backs_environment_secrets() {
@@ -887,12 +980,12 @@ secrets:
         let host = &config.hosts[0];
         assert_eq!(host.gateway.as_deref(), Some("https://gateway.example"));
         assert_eq!(
-            host.adapter.execution_profile().unwrap().model_ids,
+            host.harnesses[0].execution_profile().unwrap().model_ids,
             ["fallback-model", "from-shell"]
         );
         // The process environment wins over env_file, and the first listed model is the default.
         assert!(
-            host.adapter
+            host.harnesses[0]
                 .worker_args()
                 .windows(2)
                 .any(|pair| pair[0] == "--harness-model" && pair[1] == "from-shell")
@@ -936,7 +1029,11 @@ secrets:
         for input in [
             "services: {host: {type: host, control-plane: http://example.com, harnesses: [codex]}}",
             "services: {host: {type: host, control-plane: https://user:secret@example.com, harnesses: [codex]}}",
-            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, cursor]}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, codex]}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 0}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], concurrency: 17}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], models: {cursor: [m]}}}",
+            "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex, cursor], allow-unsandboxed-commands: [codex]}}",
             "services: {control-plane: {type: control-plane, ports: ['0.0.0.0:3434']}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], auth-key: literal-secret}}",
             "services: {host: {type: host, control-plane: https://example.com, harnesses: [codex], environment: e2b}}",
