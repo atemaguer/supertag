@@ -1,4 +1,10 @@
 //! Actual split processes preserve consent and verified-copy recovery across restart.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -71,15 +77,9 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, root: &Path, listen: &str) -> Command {
+fn plane(credentials: &Credentials, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
-    c.env(
-        "SUPERTAG_DATABASE_URL",
-        format!(
-            "sqlite://{}?mode=rwc",
-            root.join("control.sqlite").display()
-        ),
-    );
+    c.env("SUPERTAG_DATABASE_URL", database);
     c
 }
 fn gateway(credentials: &Credentials, root: &Path, private: &str, mapped: bool) -> Command {
@@ -366,15 +366,21 @@ async fn read_dynamic(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes() -> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes;
+}
+
+async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes(
+    database: String,
+) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
     let volume_path = root.join("volume");
     std::fs::create_dir(&volume_path)?;
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private, false)).await?;
     let (artifact_id, bytes, blob) = capture(&credentials, &public).await?;
     let source = format!("file://{}", volume_path.display());
@@ -443,7 +449,7 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     stop(&mut control).await?;
     // The durable Volume remains usable after both service replacement and CAS loss.
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (next, new_private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (next, new_private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     control = next;
     let (next, new_public) = service(gateway(&credentials, &root, &new_private, true)).await?;
     ingress = next;

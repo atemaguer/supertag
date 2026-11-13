@@ -1,4 +1,11 @@
 //! Actual idle presence expiry and restart through separate CP/Gateway/Host processes.
+
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use anyhow::{Context, Result, ensure};
 use std::{
     fs::File,
@@ -140,13 +147,17 @@ fn host_command(credentials: &Credentials, gateway: &str, state: &Path) -> Comma
     command
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes() -> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    idle_host_expires_and_restart_preserves_drain_until_operator_resumes;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    executing_capacity_and_recovery_suppression_are_reported_by_the_actual_host;
+}
+
+async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("control.db").display()
-    );
     let credentials = Credentials::new();
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", &database);
@@ -259,14 +270,10 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes() 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_host() -> Result<()>
-{
+async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_host(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("control.db").display()
-    );
     let credentials = Credentials::new();
     let mut command = credentials.command(&["control-plane"]);
     command.env("SUPERTAG_DATABASE_URL", &database);

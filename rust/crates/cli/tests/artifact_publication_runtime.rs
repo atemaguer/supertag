@@ -1,4 +1,15 @@
 //! Operator publication and consumption approvals through real split services.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    cross_objective_publication_is_explicit_and_durable;
+}
+
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -71,15 +82,9 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, root: &Path, listen: &str) -> Command {
+fn plane(credentials: &Credentials, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
-    c.env(
-        "SUPERTAG_DATABASE_URL",
-        format!(
-            "sqlite://{}?mode=rwc",
-            root.join("control.sqlite").display()
-        ),
-    );
+    c.env("SUPERTAG_DATABASE_URL", database);
     c
 }
 fn gateway(credentials: &Credentials, root: &Path, private: &str) -> Command {
@@ -95,15 +100,14 @@ fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Comman
     c.args(args);
     c
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
+async fn cross_objective_publication_is_explicit_and_durable(database: String) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
     let volume = root.join("volume");
     std::fs::create_dir(&volume)?;
     std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
     let channel = Channel::from_shared(public.clone())?.connect().await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -362,7 +366,7 @@ async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
     stop(&mut ingress).await?;
     stop(&mut control).await?;
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
     let replay = json(publication(
         &credentials,

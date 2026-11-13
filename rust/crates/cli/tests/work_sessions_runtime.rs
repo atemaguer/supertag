@@ -1,5 +1,11 @@
 #![cfg(feature = "test-fixtures")]
 
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -122,8 +128,20 @@ async fn wait_for_work(
     .context("Work Session did not reach expected state")?
 }
 
-#[tokio::test]
-async fn private_harness_work_session_reports_once_after_service_restart() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    private_harness_work_session_reports_once_after_service_restart;
+    #[tokio::test]
+    private_child_question_continues_once_and_keeps_both_parent_reports;
+    #[tokio::test]
+    objective_owner_delegates_to_team_tag_with_frozen_action_ceiling;
+    #[tokio::test]
+    objective_pool_allocates_real_attempt_reports_and_reopens_when_raised;
+}
+
+async fn private_harness_work_session_reports_once_after_service_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let alice_token = Uuid::new_v4().to_string();
@@ -134,13 +152,7 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
         command
             .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env(
-                "SUPERTAG_DATABASE_URL",
-                format!(
-                    "sqlite://{}?mode=rwc",
-                    directory.path().join("control.db").display()
-                ),
-            );
+            .env("SUPERTAG_DATABASE_URL", &database);
         command
     };
     let (mut plane, private) = service(plane_command()).await?;
@@ -463,8 +475,9 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
     Ok(())
 }
 
-#[tokio::test]
-async fn private_child_question_continues_once_and_keeps_both_parent_reports() -> Result<()> {
+async fn private_child_question_continues_once_and_keeps_both_parent_reports(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -474,13 +487,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
         command
             .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env(
-                "SUPERTAG_DATABASE_URL",
-                format!(
-                    "sqlite://{}?mode=rwc",
-                    directory.path().join("control.db").display()
-                ),
-            );
+            .env("SUPERTAG_DATABASE_URL", &database);
         command
     };
     let (mut plane, private) = service(plane_command()).await?;
@@ -833,8 +840,9 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     Ok(())
 }
 
-#[tokio::test]
-async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> Result<()> {
+async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -843,13 +851,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> R
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(plane).await?;
     let (mut gateway_process, public) = service(gateway(
         &private,
@@ -1196,8 +1198,9 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> R
     Ok(())
 }
 
-#[tokio::test]
-async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised() -> Result<()> {
+async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -1206,13 +1209,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised()
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(plane).await?;
     let (mut gateway_process, public) = service(gateway(
         &private,

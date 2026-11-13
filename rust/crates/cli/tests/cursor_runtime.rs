@@ -1,4 +1,10 @@
 //! Cursor's private adapter and runner through real split services and disposable Workspaces.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -236,10 +242,9 @@ struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
-    async fn start(root: &Path, credentials: &'a Credentials) -> Result<Self> {
-        let database = format!("sqlite://{}?mode=rwc", root.join("cursor.sqlite").display());
+    async fn start(root: &Path, credentials: &'a Credentials, database: &str) -> Result<Self> {
         let mut control = credentials.command(&["control-plane"]);
-        control.env("SUPERTAG_DATABASE_URL", &database);
+        control.env("SUPERTAG_DATABASE_URL", database);
         let (control, private) = service(control).await?;
         let mut gateway = credentials.command(&["gateway", "--control-plane", &private]);
         gateway
@@ -255,7 +260,7 @@ impl<'a> Runtime<'a> {
             control,
             endpoint,
             operator: OperatorClient::new(channel),
-            database,
+            database: database.to_owned(),
             credentials,
         })
     }
@@ -528,8 +533,24 @@ impl<'a> Runtime<'a> {
     }
 }
 
-#[tokio::test]
-async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access;
+    #[tokio::test]
+    cursor_remote_workspace_delivers_and_resumes_from_the_approved_head;
+    #[tokio::test]
+    cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_credentials;
+    #[tokio::test]
+    cursor_streams_scoped_tools_and_resumes_after_services_restart;
+    #[tokio::test]
+    cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint;
+    #[tokio::test]
+    cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed;
+}
+
+async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
+    database: String,
+) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use supertag_shared_execution::{Config, Provider, v2::AccessState};
 
@@ -562,7 +583,7 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
             .await
     });
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     runtime
         .operator
         .put_tag(runtime.credentials.request(PutTagRequest {
@@ -668,18 +689,19 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
     Ok(())
 }
 
-#[tokio::test]
-async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -> Result<()> {
-    remote_workspace_round_trip(RemoteWorkspace::E2b).await
+async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head(
+    database: String,
+) -> Result<()> {
+    remote_workspace_round_trip(RemoteWorkspace::E2b, &database).await
 }
 
-#[tokio::test]
-async fn cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_credentials()
--> Result<()> {
-    remote_workspace_round_trip(RemoteWorkspace::Modal).await
+async fn cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_credentials(
+    database: String,
+) -> Result<()> {
+    remote_workspace_round_trip(RemoteWorkspace::Modal, &database).await
 }
 
-async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
+async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     let provider_name = match provider {
@@ -688,7 +710,7 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
     };
     std::fs::write(fixture.root.join("provider-kind"), provider_name)?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
     runtime
         .tag(
             &fixture,
@@ -720,11 +742,11 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
         sleep(Duration::from_millis(20)).await;
     }
     sqlx::any::install_default_drivers();
-    let mut database = sqlx::AnyConnection::connect(&runtime.database).await?;
+    let mut connection = sqlx::AnyConnection::connect(&runtime.database).await?;
     let before: i64 =
         sqlx::query_scalar("SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
             .bind(&first.task_id)
-            .fetch_one(&mut database)
+            .fetch_one(&mut connection)
             .await?;
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
@@ -732,7 +754,7 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
             "SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1",
         )
         .bind(&first.task_id)
-        .fetch_one(&mut database)
+        .fetch_one(&mut connection)
         .await?;
         if renewed > before + 500 {
             break;
@@ -762,7 +784,7 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
     let checkpoint = runtime.checkpoint().await?;
     runtime.stop().await?;
 
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
     assert_eq!(runtime.checkpoint().await?, checkpoint);
     runtime
         .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
@@ -886,12 +908,13 @@ async fn gone(pid: i32) -> Result<()> {
     }
 }
 
-#[tokio::test]
-async fn cursor_streams_scoped_tools_and_resumes_after_services_restart() -> Result<()> {
+async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     runtime
         .tag(
             &fixture,
@@ -943,7 +966,7 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart() -> Res
     assert!(valid_sha256(&checkpoint.3) && checkpoint.4 > 0);
     runtime.stop().await?;
 
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     assert_eq!(runtime.checkpoint().await?, checkpoint);
     runtime
         .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
@@ -965,12 +988,13 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart() -> Res
     runtime.stop().await
 }
 
-#[tokio::test]
-async fn cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint() -> Result<()> {
+async fn cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     runtime
         .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
         .await?;
@@ -1020,15 +1044,15 @@ async fn cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint(
     runtime.stop().await
 }
 
-#[tokio::test]
-async fn cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed()
--> Result<()> {
+async fn cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     std::fs::write(fixture.root.join("lose-allocate-ack"), b"enabled")?;
     std::fs::write(fixture.root.join("refuse-stop"), b"enabled")?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
     runtime
         .tag(
             &fixture,

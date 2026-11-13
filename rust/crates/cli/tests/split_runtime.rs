@@ -1,4 +1,11 @@
 //! Exercises the shipped binary entry points in independent OS processes.
+
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     error::Error as _,
     fs::File,
@@ -6,7 +13,6 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    str::FromStr,
     sync::{Arc, mpsc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,7 +21,6 @@ use anyhow::{Context, Result, anyhow, ensure};
 use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha2::Sha256;
-use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
 use supertag_protocol::{
     HOST_GENERATION_HEADER, authenticated_request,
     v2::{
@@ -554,40 +559,21 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_separate_processes_preserve_work_and_cancel_execution() -> Result<()> {
-    let directory = TempDir::new()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("state.db").display()
-    );
-    exercise_split_runtime(&database, directory.path()).await
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    separate_processes_preserve_work_and_cancel_execution;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "exercises the real 30-second execution authority deadline"]
+    gateway_partition_expires_execution_and_requires_audited_retry_before_replay;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_separate_processes_preserve_work_and_cancel_execution() -> Result<()> {
-    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
-        .context("PostgreSQL process integration requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")?;
-    let admin_url = std::fs::read_to_string(path)?;
-    let options = PgConnectOptions::from_str(admin_url.trim())?;
-    let mut admin = PgConnection::connect_with(&options).await?;
-    let name = format!("supertag_rust_split_{}", Uuid::new_v4().simple());
-    admin
-        .execute(format!("CREATE DATABASE {name}").as_str())
-        .await?;
-    let database = options.database(&name).to_url_lossy().to_string();
+async fn separate_processes_preserve_work_and_cancel_execution(database: String) -> Result<()> {
     let directory = TempDir::new()?;
-    let path = directory.path().to_owned();
-    // Isolate assertion panics so database cleanup also runs when a behavioral check fails.
-    let result = tokio::spawn(async move { exercise_split_runtime(&database, &path).await }).await;
-    // Every process has been reaped before the disposable database is removed.
-    let cleanup = admin
-        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-        .await;
-    admin.close().await?;
-    cleanup?;
-    result.context("PostgreSQL process test panicked")?
+    exercise_split_runtime(&database, directory.path()).await
 }
 
 fn local_command() -> Command {
@@ -752,16 +738,12 @@ impl Drop for DescendantCleanup {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning() -> Result<()>
-{
+async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning(
+    database: String,
+) -> Result<()> {
     use std::os::unix::process::ExitStatusExt;
 
     let directory = TempDir::new()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("host-death.db").display()
-    );
     let credentials = Credentials::new();
     let services = Services::start(&database, directory.path(), &credentials).await?;
     let mut client = services.client().await?;
@@ -1460,9 +1442,9 @@ async fn wait_for_reply_journal(path: &Path, stage: &str) -> Result<Value> {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending()
--> Result<()> {
+async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending(
+    database: String,
+) -> Result<()> {
     use supertag_protocol::v2::{
         AcceptSlackEventRequest, DeleteSurfaceLocationRequest, PutSurfaceAccountRequest,
         PutSurfaceLocationRequest, SlackSurfaceChannel, SlackSurfaceIdentity, SurfaceAccount,
@@ -1470,10 +1452,6 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         surface_location_scope, surface_policy_catalog_client::SurfacePolicyCatalogClient,
     };
     let directory = TempDir::new()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("slack.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockSlackApi::start().await?;
     let mut command = credentials.command();
@@ -2028,15 +2006,10 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "exercises the real 30-second execution authority deadline"]
-async fn gateway_partition_expires_execution_and_requires_audited_retry_before_replay() -> Result<()>
-{
+async fn gateway_partition_expires_execution_and_requires_audited_retry_before_replay(
+    database: String,
+) -> Result<()> {
     let directory = TempDir::new()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("partition.db").display()
-    );
     let credentials = Credentials::new();
     let mut command = credentials.command();
     command

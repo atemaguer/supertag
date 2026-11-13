@@ -176,8 +176,14 @@ async fn refused(mut command: Command, reason: &str) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    s3_volume_copy_checks_mapping_sigv4_and_immutable_readback;
+}
+
+async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
+    database: String,
+) -> Result<()> {
     let object_state = Arc::new(Mutex::new(Object {
         // A provider can persist the write and lose its successful response.
         put_result: Some(StatusCode::SERVICE_UNAVAILABLE),
@@ -201,7 +207,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<
     std::fs::create_dir(&volume_path)?;
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(mapped_gateway(
         &credentials,
         &root,
@@ -330,7 +336,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<
     stop(&mut ingress).await?;
     stop(&mut control).await?;
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(mapped_gateway(
         &credentials,
         &root,

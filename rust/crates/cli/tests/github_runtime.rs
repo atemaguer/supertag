@@ -1,5 +1,11 @@
 //! Signed HTTP GitHub ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -16,7 +22,6 @@ use anyhow::{Context, Result, ensure};
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use sqlx::Connection;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -279,7 +284,7 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
 }
 
 async fn task_count(database: &str) -> Result<i64> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
         .fetch_one(&mut connection)
         .await?)
@@ -485,11 +490,11 @@ async fn execute(
     Ok(())
 }
 async fn settled(database: &str, task: &Task, expected: ReplyState) -> Result<Option<String>> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     let deadline = Instant::now() + WAIT;
     loop {
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=?",
+            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=$1",
         )
         .bind(&task.task_id)
         .fetch_optional(&mut connection)
@@ -525,14 +530,21 @@ async fn saved_stage(directory: &Path, states: &[&str], stage: &str) -> Result<V
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn concurrent_github_gateways_deduplicate_and_replay_saved_receipt_after_restart()
--> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    concurrent_github_gateways_deduplicate_and_replay_saved_receipt_after_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    github_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_token;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    github_app_cli_rejects_ambiguous_env_and_unsafe_private_key_files;
+}
+
+async fn concurrent_github_gateways_deduplicate_and_replay_saved_receipt_after_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("github.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockGithub::start().await?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
@@ -623,14 +635,10 @@ async fn concurrent_github_gateways_deduplicate_and_replay_saved_receipt_after_r
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn github_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart()
--> Result<()> {
+async fn github_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("github.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockGithub::start().await?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
@@ -852,13 +860,10 @@ fn app_gateway_command(
     command
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_token() -> Result<()> {
+async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_token(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("app.db").display()
-    );
     let credentials = Credentials::new();
     let key = private_app_key(directory.path())?;
     let mock = MockGithubApp::start(directory.path().join("app-gateway/reply.json")).await?;
@@ -939,13 +944,10 @@ async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_tok
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn github_app_cli_rejects_ambiguous_env_and_unsafe_private_key_files() -> Result<()> {
+async fn github_app_cli_rejects_ambiguous_env_and_unsafe_private_key_files(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("configuration.db").display()
-    );
     let credentials = Credentials::new();
     let key = private_app_key(directory.path())?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;

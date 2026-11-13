@@ -33,12 +33,12 @@ async fn submit(
         .into_inner())
 }
 
-async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
+async fn contract(provider: RemoteWorkspace, name: &str, database: &str) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
     std::fs::write(fixture.root.join("provider-kind"), name)?;
     let credentials = Credentials::new();
-    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
     runtime
         .tag(
             &fixture,
@@ -200,12 +200,17 @@ async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
     runtime.stop().await
 }
 
-#[tokio::test]
-async fn cursor_stages_exact_e2b_task_artifact_inputs() -> Result<()> {
-    Box::pin(contract(RemoteWorkspace::E2b, "e2b")).await
+database_tests! {
+    #[tokio::test]
+    cursor_stages_exact_e2b_task_artifact_inputs;
+    #[tokio::test]
+    cursor_stages_exact_modal_task_artifact_inputs;
 }
 
-#[tokio::test]
-async fn cursor_stages_exact_modal_task_artifact_inputs() -> Result<()> {
-    Box::pin(contract(RemoteWorkspace::Modal, "modal")).await
+async fn cursor_stages_exact_e2b_task_artifact_inputs(database: String) -> Result<()> {
+    Box::pin(contract(RemoteWorkspace::E2b, "e2b", &database)).await
+}
+
+async fn cursor_stages_exact_modal_task_artifact_inputs(database: String) -> Result<()> {
+    Box::pin(contract(RemoteWorkspace::Modal, "modal", &database)).await
 }
