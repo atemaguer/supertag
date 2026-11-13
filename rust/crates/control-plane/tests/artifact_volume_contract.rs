@@ -379,6 +379,13 @@ async fn exercise(url: &str) {
     sqlx::raw_sql(
         "DROP INDEX supertag_v2_artifact_verified_file_locations;
          ALTER TABLE supertag_v2_artifact_volume_copies DROP COLUMN file_path;
+         DROP TABLE supertag_v2_manifest_relationships;
+         DROP TABLE supertag_v2_artifact_transfer_grants;
+         DROP TABLE supertag_v2_artifact_host_copies;
+         DROP TABLE supertag_v2_artifact_sources;
+         DROP TABLE supertag_v2_workspace_volumes;
+         ALTER TABLE supertag_v2_tags DROP COLUMN workspace_mounts;
+         ALTER TABLE supertag_v2_tasks DROP COLUMN workspace_mounts;
          UPDATE supertag_v2_schema SET version=51;",
     )
     .execute(&mut connection)
