@@ -77,6 +77,11 @@ impl GithubCatalog {
         self
     }
 
+    /// Names this catalog's source; Skills with one key are pinned to one commit per Task.
+    pub(super) fn key(&self) -> String {
+        super::hex_digest(format!("{}\0{}\0{}", self.url, self.repository, self.path).as_bytes())
+    }
+
     /// The Skill's cached tree and its commit: `pinned` when a Task already pinned one,
     /// otherwise the catalog revision as it is now.
     pub(super) fn pin(
@@ -97,9 +102,7 @@ impl GithubCatalog {
             );
         }
         create_private(cache)?;
-        let repository = cache.join(super::hex_digest(
-            format!("{}\0{}\0{}", self.url, self.repository, self.path).as_bytes(),
-        ));
+        let repository = cache.join(self.key());
         create_private(&repository)?;
         if let Some(commit) = pinned {
             let target = repository.join(commit).join(skill);
@@ -158,15 +161,32 @@ impl GithubCatalog {
             "GitHub Skill catalog {}: revision {revision} did not resolve to the expected commit",
             self.repository
         );
-        let target = repository.join(&commit).join(skill);
-        if target.is_dir() {
-            return Ok((target, commit));
+        // Every Skill of the catalog is taken from this one commit, as TypeScript pins a
+        // catalog, so a Task's Skills from one catalog never mix commits.
+        for name in &self.skills {
+            if !repository.join(&commit).join(name).is_dir() {
+                self.extract(work.path(), &git_dir, &repository, &commit, name, cancel)?;
+            }
         }
+        Ok((repository.join(&commit).join(skill), commit))
+    }
+
+    /// Writes one Skill's tree at `commit` into the cache.
+    fn extract(
+        &self,
+        directory: &Path,
+        git_dir: &Path,
+        repository: &Path,
+        commit: &str,
+        skill: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let target = repository.join(commit).join(skill);
         let prefix = format!("{}/{skill}", self.path);
         let listing = git(
-            work.path(),
-            &git_dir,
-            &["ls-tree", "-rz", &commit, "--", &prefix],
+            directory,
+            git_dir,
+            &["ls-tree", "-rz", commit, "--", &prefix],
             cancel,
         )?;
         let rows: Vec<&[u8]> = listing
@@ -183,7 +203,7 @@ impl GithubCatalog {
             rows.len() <= MAX_FILES,
             "GitHub Skill catalog Skill {skill} exceeds {MAX_FILES} files"
         );
-        let staged = work.path().join("skill");
+        let staged = directory.join(format!("skill-{skill}"));
         create_private(&staged)?;
         let mut bytes = 0usize;
         let mut has_instructions = false;
@@ -219,7 +239,7 @@ impl GithubCatalog {
                 valid_commit(oid),
                 "GitHub Skill catalog Skill {skill} lists an invalid object"
             );
-            let content = git(work.path(), &git_dir, &["cat-file", "blob", oid], cancel)?;
+            let content = git(directory, git_dir, &["cat-file", "blob", oid], cancel)?;
             bytes = bytes.saturating_add(content.len());
             ensure!(
                 bytes <= MAX_BYTES,
@@ -239,7 +259,7 @@ impl GithubCatalog {
             has_instructions,
             "GitHub Skill catalog Skill {skill} needs SKILL.md"
         );
-        let parent = repository.join(&commit);
+        let parent = repository.join(commit);
         create_private(&parent)?;
         match fs::rename(&staged, &target) {
             Ok(()) => {}
@@ -247,7 +267,7 @@ impl GithubCatalog {
             Err(_) if target.is_dir() => {}
             Err(error) => return Err(error.into()),
         }
-        Ok((target, commit))
+        Ok(())
     }
 }
 
@@ -273,15 +293,41 @@ fn create_private(path: &Path) -> Result<()> {
     }
 }
 
+/// Answers Git's credential requests from `SUPERTAG_GIT_USERNAME` and `SUPERTAG_GIT_PASSWORD`.
+const CREDENTIAL_HELPER: &str = r#"!f() { test "$1" = get || exit 0; printf "username=%s\npassword=%s\n" "$SUPERTAG_GIT_USERNAME" "$SUPERTAG_GIT_PASSWORD"; }; f"#;
+
+/// With a token (the Worker Host's `GITHUB_TOKEN`), Git authenticates as `x-access-token` with
+/// it in place of the operator's credential helper, as TypeScript does; the token reaches Git
+/// only through the environment.
+fn credentials(command: &mut Command, token: Option<&str>) {
+    match token.filter(|token| !token.is_empty()) {
+        Some(token) => {
+            command
+                .args(["-c", "credential.helper=", "-c"])
+                .arg(format!("credential.helper={CREDENTIAL_HELPER}"))
+                .env("SUPERTAG_GIT_USERNAME", "x-access-token")
+                .env("SUPERTAG_GIT_PASSWORD", token);
+        }
+        None => {
+            command
+                .env_remove("SUPERTAG_GIT_USERNAME")
+                .env_remove("SUPERTAG_GIT_PASSWORD");
+        }
+    }
+}
+
 /// Runs Git in the fetch's private directory with hooks, prompts, and the system configuration
-/// off. The operator's global configuration stays, so its GitHub credential helper applies.
+/// off. The operator's global configuration stays, so its GitHub credential helper applies
+/// unless the Worker Host has `GITHUB_TOKEN`.
 fn git(
     directory: &Path,
     git_dir: &Path,
     args: &[&str],
     cancel: &CancellationToken,
 ) -> Result<Vec<u8>> {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    credentials(&mut command, std::env::var("GITHUB_TOKEN").ok().as_deref());
+    let mut child = command
         .current_dir(directory)
         .env("GIT_DIR", git_dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -336,4 +382,45 @@ fn git(
         args[0]
     );
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fill(token: Option<&str>) -> String {
+        let directory = tempfile::tempdir().unwrap();
+        let mut command = Command::new("git");
+        credentials(&mut command, token);
+        let mut child = command
+            .current_dir(directory.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args(["credential", "fill"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=github.com\npath=acme/skills.git\n\n")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn github_token_answers_git_credential_requests() {
+        let answer = fill(Some("ghs_fixture-token"));
+        assert!(answer.contains("username=x-access-token\n"), "{answer}");
+        assert!(answer.contains("password=ghs_fixture-token\n"), "{answer}");
+        // Without a token Git has no credential to offer, and never prompts.
+        assert!(!fill(None).contains("password="));
+        assert!(!fill(Some("")).contains("password="));
+    }
 }

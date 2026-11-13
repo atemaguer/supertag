@@ -235,6 +235,8 @@ impl ContextCatalog {
         let mut manifest = ContextResolutionManifest::default();
         let mut delivered: BTreeMap<String, (String, String)> = BTreeMap::new();
         let mut total = 0usize;
+        // The commit each GitHub catalog resolved to for this Task, by catalog.
+        let mut catalog_commits: BTreeMap<String, String> = BTreeMap::new();
         if let Some(snapshot) = &task.policy_snapshot {
             for set in &snapshot.context_sets {
                 for item in &set.items {
@@ -275,36 +277,50 @@ impl ContextCatalog {
                         );
                         (version.clone(), digest.clone())
                     } else {
-                        let (path, version) =
-                            if let Some(entry) = self.entries.get(&config.reference) {
-                                if let Some(version) = &config.version {
-                                    ensure!(
-                                        entry.version.as_ref() == Some(version),
-                                        "Skill catalog version differs from the admitted version"
-                                    );
-                                }
-                                (
-                                    entry.path.clone(),
-                                    entry.version.clone().unwrap_or_default(),
-                                )
-                            } else {
-                                let source = self.github.get(&config.reference).context(
-                                    "Skill reference is not present in the host catalog",
-                                )?;
-                                // A retry keeps its Task's commit; a new Task may name one.
-                                let pinned = expected
-                                    .pins
-                                    .iter()
-                                    .find(|pin| pin.reference == config.reference)
-                                    .map(|pin| pin.version.as_str())
-                                    .or(config.version.as_deref());
-                                source.pin(
-                                    &config.reference,
-                                    pinned,
-                                    &prepared.state_root.join("skill-catalogs"),
-                                    cancel,
-                                )?
-                            };
+                        let (path, version) = if let Some(entry) =
+                            self.entries.get(&config.reference)
+                        {
+                            if let Some(version) = &config.version {
+                                ensure!(
+                                    entry.version.as_ref() == Some(version),
+                                    "Skill catalog version differs from the admitted version"
+                                );
+                            }
+                            (
+                                entry.path.clone(),
+                                entry.version.clone().unwrap_or_default(),
+                            )
+                        } else {
+                            let source = self
+                                .github
+                                .get(&config.reference)
+                                .context("Skill reference is not present in the host catalog")?;
+                            // A retry keeps its Task's commit; a new Task may name one.
+                            // Every Skill of one catalog takes the commit the first resolved.
+                            let key = source.key();
+                            let resolved = catalog_commits.get(&key);
+                            let pinned = expected
+                                .pins
+                                .iter()
+                                .find(|pin| pin.reference == config.reference)
+                                .map(|pin| pin.version.as_str())
+                                .or(config.version.as_deref());
+                            ensure!(
+                                resolved.is_none_or(
+                                    |commit| pinned.is_none_or(|pinned| pinned == commit)
+                                ),
+                                "Skills from GitHub Skill catalog are pinned to different commits"
+                            );
+                            let pinned = pinned.or(resolved.map(String::as_str));
+                            let (path, commit) = source.pin(
+                                &config.reference,
+                                pinned,
+                                &prepared.state_root.join("skill-catalogs"),
+                                cancel,
+                            )?;
+                            catalog_commits.insert(key, commit.clone());
+                            (path, commit)
+                        };
                         ensure!(
                             delivered.len() < MAX_SKILLS,
                             "context exceeds Skill package count limit"
@@ -857,6 +873,85 @@ mod tests {
                 && error.contains("new Task to re-pin"),
             "{error}"
         );
+    }
+    #[test]
+    fn github_catalog_pins_every_skill_of_a_task_to_one_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let repository = root.join("skills");
+        for skill in ["review", "lint"] {
+            fs::create_dir_all(repository.join("catalog").join(skill)).unwrap();
+            fs::write(
+                repository.join("catalog").join(skill).join("SKILL.md"),
+                "first",
+            )
+            .unwrap();
+        }
+        git(&repository, &["init", "--quiet", "--initial-branch=main"]);
+        git(&repository, &["add", "catalog"]);
+        git(&repository, &["commit", "--quiet", "-m", "Add Skills"]);
+        let first_commit = git(&repository, &["rev-parse", "HEAD"]);
+        fs::write(repository.join("catalog/lint/SKILL.md"), "second").unwrap();
+        git(&repository, &["commit", "--quiet", "-am", "Move main"]);
+        let file = root.join("catalog.json");
+        fs::write(
+            &file,
+            serde_json::json!({"version":1,"github":[{
+                "repository":"acme/skills","path":"catalog","revision":"main","skills":["review","lint"]
+            }]})
+            .to_string(),
+        )
+        .unwrap();
+        let mut resolver = ContextCatalog::load(Some(&file)).unwrap();
+        for source in resolver.github.values_mut() {
+            *source = source.clone().with_url(repository.to_str().unwrap());
+        }
+        // `review` names the first commit; `lint`, named without one, takes the same commit
+        // rather than main as it is now.
+        let mut task = task(true, TYPE);
+        let items = &mut task.policy_snapshot.as_mut().unwrap().context_sets[0].items;
+        items[0].config_json =
+            serde_json::json!({"reference":"review","version":first_commit}).to_string();
+        let mut lint = items[0].clone();
+        lint.item_id = "lint-item".into();
+        lint.item_key = "lint".into();
+        lint.config_json = r#"{"reference":"lint"}"#.into();
+        items.push(lint);
+        let host = root.join("host");
+        fs::create_dir_all(&host).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let prepared = resolver
+            .prepare_blocking(
+                &task,
+                &host,
+                "one",
+                &Default::default(),
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        let manifest = prepared.manifest().unwrap();
+        assert_eq!(manifest.pins.len(), 2);
+        assert!(manifest.pins.iter().all(|pin| pin.version == first_commit));
+        for delivered in prepared.delivery().unwrap() {
+            let path = PathBuf::from(&delivered.local_path);
+            assert_eq!(fs::read_to_string(path.join("SKILL.md")).unwrap(), "first");
+        }
+        // Two Skills of one catalog naming different commits are refused.
+        let main = git(&repository, &["rev-parse", "HEAD"]);
+        let items = &mut task.policy_snapshot.as_mut().unwrap().context_sets[0].items;
+        items[1].config_json = serde_json::json!({"reference":"lint","version":main}).to_string();
+        let error = resolver
+            .prepare_blocking(
+                &task,
+                &host,
+                "two",
+                &Default::default(),
+                &CancellationToken::new(),
+            )
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("pinned to different commits"), "{error}");
     }
     #[test]
     fn github_catalog_reports_missing_skills_revisions_and_access() {

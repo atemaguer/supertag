@@ -746,8 +746,9 @@ fn stdio_server(
                     "MCP server {name}: env must map variable names to Worker Host variables not named SUPERTAG_*"
                 );
                 environment(source)
+                    .map(|value| value.trim().to_owned())
                     .filter(|value| {
-                        !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0')
+                        !value.is_empty() && value.len() <= 4096 && !value.contains('\0')
                     })
                     .ok_or_else(|| {
                         anyhow::anyhow!(
@@ -776,7 +777,8 @@ fn stdio_server(
 }
 
 /// A credential file a stdio server's variable reads: absolute, owner-only, regular, and at
-/// most 4 KiB, holding one value. A trailing line break is not part of the value.
+/// most 4 KiB, holding one value. Surrounding whitespace is not part of the value, as in
+/// TypeScript.
 fn read_env_file(path: &Path) -> Result<String> {
     ensure!(path.is_absolute(), "credential file path is not absolute");
     let file = OpenOptions::new()
@@ -796,11 +798,9 @@ fn read_env_file(path: &Path) -> Result<String> {
     let mut bytes = Vec::new();
     file.take(4098).read_to_end(&mut bytes)?;
     let value = String::from_utf8(bytes)?;
-    let value = value.strip_suffix('\n').map_or(value.as_str(), |value| {
-        value.strip_suffix('\r').unwrap_or(value)
-    });
+    let value = value.trim();
     ensure!(
-        !value.trim().is_empty() && value.len() <= 4096 && !value.contains(['\0', '\n']),
+        !value.is_empty() && value.len() <= 4096 && !value.contains(['\0', '\n']),
         "credential file must hold one value"
     );
     Ok(value.to_owned())
@@ -963,7 +963,7 @@ mod tests {
             "env":{"DB_TOKEN":"ACME_DB_TOKEN"}
         }]});
         let environment =
-            |name: &str| (name == "ACME_DB_TOKEN").then(|| "stdio-secret-value-7f3a".into());
+            |name: &str| (name == "ACME_DB_TOKEN").then(|| " stdio-secret-value-7f3a\n".into());
         let parse = |value: &Value| McpCatalog::parse(value.to_string().as_bytes(), environment);
         let catalog = parse(&valid).unwrap();
         let Transport::Stdio(server) = &catalog.servers["db"].transport else {
@@ -1089,7 +1089,8 @@ mod tests {
                 |_| None,
             )
         };
-        let private = file("token", "file-secret-value-1c9e\n", 0o600);
+        // Surrounding whitespace is trimmed, as TypeScript trims a file reference.
+        let private = file("token", "  file-secret-value-1c9e \r\n", 0o600);
         let catalog = parse(json!({"file": private})).unwrap();
         let Transport::Stdio(server) = &catalog.servers["db"].transport else {
             panic!("stdio server expected");
@@ -1102,7 +1103,7 @@ mod tests {
         );
         let shared = file("shared", "file-secret-value-1c9e", 0o644);
         let multiple = file("multiple", "one\ntwo\n", 0o600);
-        let empty = file("empty", "\n", 0o600);
+        let empty = file("empty", " \n\t", 0o600);
         for refused in [
             json!({"file": shared}),
             json!({"file": multiple}),
