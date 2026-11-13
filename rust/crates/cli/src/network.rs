@@ -4,14 +4,21 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use supertag_protocol::{
     negotiation::{ProtocolChannel, connect},
     v2::ServiceRole,
 };
+use supertag_transport::{Target, tunneled_uri};
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig};
 
-pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
+/// A gRPC server builder for a service listening on `listen` and, when set, accepting
+/// WebSocket tunnels on `websocket`. TLS configured here also runs inside each tunnel.
+pub async fn server(
+    listen: SocketAddr,
+    websocket: Option<SocketAddr>,
+    private: bool,
+) -> Result<Server> {
     let identity = identity("SUPERTAG_TLS_CERT_FILE", "SUPERTAG_TLS_KEY_FILE").await?;
     let client_ca = read_pem("SUPERTAG_TLS_CLIENT_CA_FILE").await?;
     if let Some(identity) = identity {
@@ -30,7 +37,7 @@ pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
         "client CA configuration requires server TLS"
     );
     ensure!(
-        listen.ip().is_loopback(),
+        listen.ip().is_loopback() && websocket.is_none_or(|address| address.ip().is_loopback()),
         "listeners outside loopback require TLS"
     );
     Ok(Server::builder())
@@ -38,12 +45,12 @@ pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
 
 /// Connects to a Gateway as an operator client and negotiates the protocol
 /// version every later call names; the Gateway refuses calls that skip this.
-pub async fn operator_channel(endpoint: &Endpoint) -> Result<ProtocolChannel> {
-    let channel = endpoint.connect().await?;
+pub async fn operator_channel(target: &Target) -> Result<ProtocolChannel> {
+    let channel = target.connect().await?;
     Ok(connect(channel, ServiceRole::Operator, ServiceRole::Gateway).await?)
 }
 
-pub async fn endpoint(uri: String, private: bool) -> Result<Endpoint> {
+pub async fn endpoint(uri: String, private: bool) -> Result<Target> {
     endpoint_with_timeout(uri, private, Duration::from_secs(15)).await
 }
 
@@ -61,7 +68,7 @@ pub async fn operator_endpoint(
     uri: String,
     timeout: Duration,
     files: Option<&TlsFiles>,
-) -> Result<Endpoint> {
+) -> Result<Target> {
     configured_endpoint(uri, false, timeout, files).await
 }
 
@@ -69,27 +76,33 @@ pub async fn endpoint_with_timeout(
     uri: String,
     private: bool,
     timeout: Duration,
-) -> Result<Endpoint> {
+) -> Result<Target> {
     configured_endpoint(uri, private, timeout, None).await
 }
 
+/// `https://` and `http://` dial native gRPC. `wss://` and `ws://` carry the same gRPC
+/// connection through a WebSocket tunnel; `wss://` always runs SuperTag's TLS inside it,
+/// and `ws://` is cleartext and loopback-only, like `http://`.
 async fn configured_endpoint(
     uri: String,
     private: bool,
     timeout: Duration,
     files: Option<&TlsFiles>,
-) -> Result<Endpoint> {
-    let mut endpoint = Endpoint::from_shared(uri)?
+) -> Result<Target> {
+    let tunnel = tunneled_uri(&uri).map_err(|error| anyhow!("invalid endpoint URL: {error}"))?;
+    let native = tunnel.clone().unwrap_or_else(|| uri.clone());
+    let mut endpoint = Endpoint::from_shared(native)?
         .connect_timeout(Duration::from_secs(5))
         .timeout(timeout);
+    let mut server_ca = None;
     match endpoint.uri().scheme_str() {
         Some("https") => {
             let mut tls = ClientTlsConfig::new();
-            let ca = match files {
+            server_ca = match files {
                 Some(files) => read_file(files.server_ca.as_ref()).await?,
                 None => read_pem("SUPERTAG_SERVER_CA_FILE").await?,
             };
-            if let Some(ca) = ca {
+            if let Some(ca) = server_ca.clone() {
                 tls = tls.ca_certificate(Certificate::from_pem(ca));
             } else if private {
                 bail!("private Control Plane TLS requires SUPERTAG_SERVER_CA_FILE");
@@ -127,9 +140,15 @@ async fn configured_endpoint(
                 "cleartext endpoint must use a loopback IP address"
             );
         }
-        _ => bail!("endpoint must use http or https"),
+        _ => bail!("endpoint must use https, wss, or a loopback http or ws URL"),
     }
-    Ok(endpoint)
+    if tunnel.is_none() {
+        return Ok(Target::native(endpoint));
+    }
+    // The platform's edge certificate is checked against the system roots and, for a
+    // private platform, the same server CA the inner TLS trusts.
+    Target::tunnel(&uri, endpoint, server_ca.as_deref())
+        .map_err(|error| anyhow!("invalid tunnel endpoint: {error}"))
 }
 
 async fn identity(cert: &str, key: &str) -> Result<Option<Identity>> {

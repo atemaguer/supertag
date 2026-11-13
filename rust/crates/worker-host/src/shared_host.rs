@@ -17,8 +17,9 @@ use supertag_protocol::{
         worker_host_client::WorkerHostClient,
     },
 };
+use supertag_transport::Target;
 use tokio_util::sync::CancellationToken;
-use tonic::{Status, transport::Endpoint};
+use tonic::Status;
 
 use crate::{
     HostHeaders, RegisteredHost, enrollment,
@@ -53,7 +54,7 @@ impl SharedHost {
     /// Control Plane fences every Attempt held under the previous generation. A supervisor
     /// does this when Attempt journals exist that no configured lane will read.
     pub async fn register(
-        gateway: Endpoint,
+        gateway: Target,
         state_directory: &Path,
         replace: bool,
         shutdown: &CancellationToken,

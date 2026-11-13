@@ -12,8 +12,8 @@ A deployment runs three roles:
 | Worker Hosts | Outbound only: each connects to the Gateway | The host's own state directory |
 
 The Gateway terminates TLS itself and speaks gRPC over HTTP/2, so a platform must pass raw TCP to
-it (TLS passthrough). A platform whose public ingress terminates TLS or converts requests to
-HTTP/1.1 cannot host the Gateway.
+it (TLS passthrough). A platform whose ingress terminates TLS and forwards only HTTP/1.1 reaches
+the services through the [WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) instead.
 
 | Platform | Definitions | Public Gateway path | Private Control Plane path |
 | --- | --- | --- | --- |
@@ -21,8 +21,8 @@ HTTP/1.1 cannot host the Gateway.
 | Fly.io | [`fly/control-plane.toml`](fly/control-plane.toml), [`fly/gateway.toml`](fly/gateway.toml) | TCP service on 443 with `handlers = []` | 6PN, `supertag-control-plane.internal:3435` |
 | Railway | [`railway/control-plane.json`](railway/control-plane.json), [`railway/gateway.json`](railway/gateway.json) | TCP Proxy to port 3434 | Private network, `supertag-control-plane.railway.internal:3435` |
 
-Render, Cloudflare, and Modal cannot host these roles; see
-[Platforms that cannot host the services](#platforms-that-cannot-host-the-services).
+Render, Cloudflare, and Modal forward only HTTP and need the WebSocket tunnel; their definitions
+are not written yet. See [Platforms behind an HTTP proxy](#platforms-behind-an-http-proxy).
 
 ## Configure, check, and verify
 
@@ -140,22 +140,53 @@ env file into each service's variables and add its PEM variables. Attach a volum
 use the proxy's host and port as the Gateway URL; its certificate must name that host or a custom
 domain that points to it. The Control Plane has no public networking.
 
-## Platforms that cannot host the services
+## WebSocket tunnel for HTTP-only platforms
 
-These are proposed for removal from the native deployment menu. Their TypeScript definitions stay
-until the cutover.
+Some platforms terminate TLS at their own proxy and forward only HTTP/1.1: Render web services,
+a Cloudflare Worker in front of a Container, Modal web endpoints, and many ingress controllers.
+For these, start the Gateway or Control Plane with `--websocket-listen ADDRESS` in addition to
+`--listen`, and route the platform's HTTP traffic to that address. The listener accepts a
+WebSocket upgrade on any path and serves the upgraded connection as an ordinary gRPC connection,
+so every call works as it does natively. With `--websocket-listen`, the service prints the
+tunnel listener's address on the line after its gRPC address. Native gRPC on `--listen` is
+unchanged.
 
-- **Render.** Public web services receive only HTTP through Render's proxy, which terminates TLS
-  and does not deliver gRPC over HTTP/2 to the service, and Render offers no public raw TCP. The
-  Gateway cannot be public there. A private service could host the Control Plane, but its Gateway
-  would then need to run on Render as well.
-- **Cloudflare.** A Container receives requests only through a Worker and Durable Object `fetch`
-  over HTTP. There is no TLS passthrough to the Gateway and no private network between two
-  containers for the mutual-TLS hop.
-- **Modal.** Web endpoints and Servers are HTTP. Raw TCP tunnels get a new address for each
-  container, so Worker Hosts would have no stable Gateway endpoint, and there is no stable private
-  hop to a long-running Control Plane. Modal remains a supported Workspace provider for Worker
-  Hosts.
+Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL instead of
+`https://` wherever a Gateway or Control Plane URL is expected. That covers operator commands,
+`enroll-host`, `worker-host`, `health`, and the Gateway's `--control-plane`. The terminal UI,
+the desktop app, saved Gateways, and `verify deployment` still need an `https://` URL.
+
+Security does not depend on the platform's proxy:
+
+- The proxy terminates the outer `wss://` TLS with its own certificate. Clients check it against
+  the system roots and, when set, `SUPERTAG_SERVER_CA_FILE`.
+- SuperTag's own TLS runs end to end inside the tunnel. The service's `SUPERTAG_TLS_*` settings
+  apply to tunnelled connections exactly as to native ones, including required client
+  certificates, so the proxy sees only ciphertext. The service certificate must name the host in
+  the `wss://` URL.
+- A `wss://` target never falls back to cleartext: if the inner TLS cannot complete, or the
+  service refuses the client certificate, the connection fails.
+- `ws://` is cleartext and, like `http://`, allowed only for a loopback IP address. A service
+  without TLS accepts tunnels only on a loopback address.
+
+Both ends send a WebSocket ping every 20 seconds, which keeps an idle tunnel open through proxies
+that close idle connections (about 100 seconds on Cloudflare), and both treat a peer that sends
+nothing for 60 seconds as gone. A dropped tunnel fails calls in flight the same way a dropped TCP
+connection does, and Worker Hosts and the Gateway reconnect and retry as they do with native gRPC.
+
+## Platforms behind an HTTP proxy
+
+The tunnel carries the services' traffic on these platforms; definitions and live runs are still
+to come. Their TypeScript definitions stay until the cutover.
+
+- **Render.** A public web service runs the Gateway with `--websocket-listen` on the web port.
+  The Control Plane can be a private service reached at its internal `https://` address, or
+  another web service reached through `wss://`.
+- **Cloudflare.** A Worker forwards WebSocket upgrades to each Container through its Durable
+  Object `fetch`. The Gateway reaches the Control Plane's Worker through `wss://`, with mutual TLS
+  inside the tunnel because there is no private network between Containers.
+- **Modal.** A web endpoint gives each service a stable HTTPS origin, which raw TCP tunnels do not.
+  Modal also remains a supported Workspace provider for Worker Hosts.
 
 ## Rehearsal
 

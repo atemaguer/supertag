@@ -141,7 +141,8 @@ Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites 
 or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
 `postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
 `agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`), `tui` (`SUPERTAG_RUST_TEST_TUI` and tmux),
-and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
+`docker` (`SUPERTAG_RUST_TEST_DOCKER`, the `docker` executable; the WebSocket tunnel's nginx case
+pulls `nginx:1.27-alpine`), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
 container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
 `supertag-shared-execution`. The `linux-root` job in `.github/workflows/rust-port.yml` runs them.
 

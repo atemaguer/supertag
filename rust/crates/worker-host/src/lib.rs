@@ -69,12 +69,12 @@ use tonic::{
     Code, Request, Status,
     metadata::{Ascii, MetadataValue},
     service::{Interceptor, interceptor::InterceptedService},
-    transport::{Channel, Endpoint},
+    transport::Channel,
 };
 use uuid::Uuid;
 
 pub struct HostOptions {
-    pub gateway: Endpoint,
+    pub gateway: supertag_transport::Target,
     pub token: Option<String>,
     pub state_directory: PathBuf,
     pub adapter_guardian: PathBuf,

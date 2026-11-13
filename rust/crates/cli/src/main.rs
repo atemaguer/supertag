@@ -93,7 +93,6 @@ use supertag_protocol::{
 };
 use supertag_worker_host::HostOptions;
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
 use uuid::Uuid;
@@ -339,12 +338,22 @@ enum Command {
         /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
+        /// Also accept gRPC carried in a WebSocket on this address, for hosts that only
+        /// forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address
+        /// is reported after the gRPC address.
+        #[arg(long)]
+        websocket_listen: Option<SocketAddr>,
     },
     /// Run the public gRPC service for operators and Worker Hosts.
     Gateway {
         /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
+        /// Also accept gRPC carried in a WebSocket on this address, for hosts that only
+        /// forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address
+        /// is reported after the gRPC address.
+        #[arg(long)]
+        websocket_listen: Option<SocketAddr>,
         /// Private Control Plane URL that this Gateway forwards to.
         #[arg(long)]
         control_plane: String,
@@ -1195,9 +1204,13 @@ async fn run(command: Command) -> Result<()> {
                 .await?;
             }
         }
-        Command::ControlPlane { listen } => control_plane(listen).await?,
+        Command::ControlPlane {
+            listen,
+            websocket_listen,
+        } => control_plane(listen, websocket_listen).await?,
         Command::Gateway {
             listen,
+            websocket_listen,
             control_plane,
             checkpoint_directory,
             artifact_volumes,
@@ -1216,6 +1229,7 @@ async fn run(command: Command) -> Result<()> {
         } => {
             gateway(
                 listen,
+                websocket_listen,
                 control_plane,
                 checkpoint_directory,
                 GatewayConnectors {
@@ -1920,8 +1934,8 @@ async fn run(command: Command) -> Result<()> {
     Ok(())
 }
 
-async fn control_plane(listen: SocketAddr) -> Result<()> {
-    let builder = network::server(listen, true).await?;
+async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result<()> {
+    let builder = network::server(listen, websocket, true).await?;
     let plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
         required_env("SUPERTAG_GATEWAY_TOKEN")?,
@@ -2000,6 +2014,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .await;
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
+    let tunnel = bind_websocket(websocket).await?;
     let maintenance = plane.clone();
     let sweep = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -2117,7 +2132,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .serve_with_incoming_shutdown(
-            TcpListenerStream::new(listener),
+            supertag_transport::incoming(listener, tunnel),
             watch_shutdown.clone().cancelled_owned(),
         );
     tokio::pin!(served);
@@ -2136,6 +2151,16 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     result
 }
 
+/// Binds the optional WebSocket tunnel listener and reports its address.
+async fn bind_websocket(address: Option<SocketAddr>) -> Result<Option<TcpListener>> {
+    let Some(address) = address else {
+        return Ok(None);
+    };
+    let listener = TcpListener::bind(address).await?;
+    outln!("{}", listener.local_addr()?);
+    Ok(Some(listener))
+}
+
 struct GatewayConnectors {
     artifact_volumes: Vec<String>,
     artifact_s3_volumes: Option<PathBuf>,
@@ -2150,12 +2175,13 @@ struct GatewayConnectors {
 
 async fn gateway(
     listen: SocketAddr,
+    websocket: Option<SocketAddr>,
     control_plane: String,
     checkpoint_directory: Option<PathBuf>,
     connectors: GatewayConnectors,
 ) -> Result<()> {
     // Refuse every call from a peer that skipped protocol negotiation.
-    let mut builder = network::server(listen, false)
+    let mut builder = network::server(listen, websocket, false)
         .await?
         .layer(fence(ServiceRole::Gateway));
     let channel = network::endpoint(control_plane, true)
@@ -2313,6 +2339,7 @@ async fn gateway(
         .await;
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
+    let tunnel = bind_websocket(websocket).await?;
     if let Some((_, listener)) = &slack {
         outln!("{}", listener.local_addr()?);
     }
@@ -2371,7 +2398,7 @@ async fn gateway(
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
-                TcpListenerStream::new(listener),
+                supertag_transport::incoming(listener, tunnel),
                 shutdown.clone().cancelled_owned(),
             )
             .await;
@@ -2967,7 +2994,7 @@ struct OperatorTarget {
 }
 
 impl OperatorTarget {
-    async fn endpoint(&self, timeout: Duration) -> Result<tonic::transport::Endpoint> {
+    async fn endpoint(&self, timeout: Duration) -> Result<supertag_transport::Target> {
         network::operator_endpoint(self.url.clone(), timeout, self.tls.as_ref()).await
     }
 }

@@ -1,8 +1,9 @@
 //! Prerequisite gates shared by ignored fixture tests.
 //!
 //! Ignored tests need local fixtures such as an isolated PostgreSQL server, Node, the Python
-//! agents runtime, the terminal UI, or an isolated Linux root. Without one, a test reports the
-//! skip on stderr and passes, so `--include-ignored` stays usable on a partial workstation.
+//! agents runtime, the terminal UI, an isolated Linux root, or Docker. Without one, a test
+//! reports the skip on stderr and passes, so `--include-ignored` stays usable on a partial
+//! workstation.
 //! Required lanes set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of prerequisite
 //! names (or `all`); any listed prerequisite that is absent then fails the test.
 #![allow(dead_code)]
@@ -14,7 +15,14 @@ use anyhow::{Result, bail};
 pub const REQUIRE: &str = "SUPERTAG_RUST_TEST_REQUIRE";
 
 /// Every prerequisite a lane may require. `all` names all of them.
-pub const KNOWN: &[&str] = &["postgres", "node", "agents-python", "tui", "linux-root"];
+pub const KNOWN: &[&str] = &[
+    "postgres",
+    "node",
+    "agents-python",
+    "tui",
+    "linux-root",
+    "docker",
+];
 
 /// Whether the running lane requires `name`. Unknown names in the require list fail so a typo
 /// cannot silently weaken a required lane.

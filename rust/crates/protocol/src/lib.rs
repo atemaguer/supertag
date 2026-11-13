@@ -77,9 +77,12 @@ pub fn interrupted_transport(status: &Status) -> bool {
 }
 
 /// Report an interrupted upstream connection as `Unavailable`, so a downstream
-/// client applies its existing retry rules instead of failing permanently.
+/// client applies its existing retry rules instead of failing permanently. The
+/// local cause does not cross the wire, so a forwarded `Unknown` would otherwise
+/// look like a definitive answer from the peer; this includes a connection that
+/// broke while a response body was being read, such as a dropped WebSocket tunnel.
 pub fn upstream_status(status: Status) -> Status {
-    if interrupted_transport(&status) {
+    if local_transport_failure(&status) {
         Status::unavailable("upstream connection was interrupted")
     } else {
         status

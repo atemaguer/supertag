@@ -14,7 +14,7 @@ use supertag_protocol::{
         EnrollHostRequest, HostRecord, ServiceRole, host_enrollment_client::HostEnrollmentClient,
     },
 };
-use tonic::transport::Endpoint;
+use supertag_transport::Target;
 use uuid::Uuid;
 
 use crate::{journal::Journal, request};
@@ -45,7 +45,7 @@ struct Receipt {
 }
 
 pub async fn enroll(
-    gateway: Endpoint,
+    gateway: Target,
     directory: &Path,
     host_id: String,
     auth_key: Option<&str>,
@@ -54,7 +54,7 @@ pub async fn enroll(
     let mut state = match read(&journal)? {
         Some(state) => state,
         None => Enrollment {
-            gateway: gateway.uri().to_string(),
+            gateway: gateway.url(),
             host_id: host_id.clone(),
             operation_id: Uuid::new_v4().to_string(),
             token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
@@ -63,7 +63,7 @@ pub async fn enroll(
         },
     };
     ensure!(
-        state.gateway == gateway.uri().to_string() && state.host_id == host_id,
+        state.gateway == gateway.url() && state.host_id == host_id,
         "Worker Host state belongs to another enrollment"
     );
     if let Some(receipt) = &state.receipt {
@@ -111,10 +111,10 @@ pub async fn enroll(
     Ok(record)
 }
 
-pub(crate) fn host_token(journal: &Journal, gateway: &Endpoint) -> Result<String> {
+pub(crate) fn host_token(journal: &Journal, gateway: &Target) -> Result<String> {
     let state = read(journal)?.context("enroll this Worker Host first")?;
     ensure!(
-        state.gateway == gateway.uri().to_string(),
+        state.gateway == gateway.url(),
         "Worker Host state belongs to another Gateway endpoint"
     );
     ensure!(

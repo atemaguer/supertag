@@ -2085,8 +2085,12 @@ Run the private service that stores work and schedules execution
 Usage: supertag control-plane [OPTIONS]
 
 Options:
-      --listen <LISTEN>  Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
-  -h, --help             Print help
+      --listen <LISTEN>
+          Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
+      --websocket-listen <WEBSOCKET_LISTEN>
+          Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
+  -h, --help
+          Print help
 ```
 
 ## `supertag gateway`
@@ -2101,6 +2105,9 @@ Options:
           Address this service listens on. Port 0 picks a free port
           
           [default: 127.0.0.1:0]
+
+      --websocket-listen <WEBSOCKET_LISTEN>
+          Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
 
       --control-plane <CONTROL_PLANE>
           Private Control Plane URL that this Gateway forwards to
