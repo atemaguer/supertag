@@ -778,19 +778,20 @@ impl<'a> Catalog<'a> {
         });
         // Provisioning only creates Tags, so it sets their labels outright; an apply merges its
         // labels by value with those other managers and the CLI added.
-        if let Some(runs_on) = runs_on.clone().filter(|_| self.create_only) {
-            if !runs_on.is_empty() {
-                followups.push(Change {
-                    key: None,
-                    label: format!("Tag/{name} runsOn"),
-                    action: "set",
-                    details: vec![format!("set Tag/{name} runsOn to [{}]", runs_on.join(", "))],
-                    write: Write::RunsOn(SetTagRunsOnRequest {
-                        tag_id: name.into(),
-                        runs_on,
-                    }),
-                });
-            }
+        if let Some(runs_on) = runs_on
+            .clone()
+            .filter(|labels| self.create_only && !labels.is_empty())
+        {
+            followups.push(Change {
+                key: None,
+                label: format!("Tag/{name} runsOn"),
+                action: "set",
+                details: vec![format!("set Tag/{name} runsOn to [{}]", runs_on.join(", "))],
+                write: Write::RunsOn(SetTagRunsOnRequest {
+                    tag_id: name.into(),
+                    runs_on,
+                }),
+            });
         }
         let mut reconciliation = ReconcileTagRelationshipsRequest {
             tag_id: name.into(),

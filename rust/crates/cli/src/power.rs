@@ -55,7 +55,7 @@ pub fn parse_linux(supplies: &[LinuxSupply], logind: &str) -> Option<LaptopPower
                     .then(|| value.split_whitespace().next())
                     .flatten()
             })
-            .last()
+            .next_back()
     };
     let action = (!on_battery)
         .then(|| setting("HandleLidSwitchExternalPower"))
