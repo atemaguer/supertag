@@ -330,35 +330,27 @@ Priority reflects risk to accepted work and to the cutover, not effort.
    Linux root, and no portable test can observe an `fsync`. The settings that decide it are
    guarded instead (a pragma check that SQLite opens with `synchronous = FULL`, and the durable
    PostgreSQL lane); on macOS SQLite's `fullfsync` stays off, as in TypeScript.
-3. **Unported coordination and safety features**: the first half is ported: `supertag metrics`
-   recovery (including blocked Sessions and unknown live inputs), queue-latency, age, and
-   utilization figures (area 2); changing a running host's `concurrency` without a restart,
-   clearing an unapplied request at startup, and surviving a raised lane that fails to start
-   (area 3); `supertag watch objective ID` with every turn, every Team post, and retried reads,
-   and the overview's delivery and failure-explanation sections (area 3); uncertain Attempts in
-   `supertag ps` and retiring a removed host service (area 5). Cleanup-unknown capacity is
-   reported only (area 5): the host-side reservation across a host restart has no Rust test.
-   Awaiting a decision: the proposed drops in those rows (TypeScript's metrics admission
-   rejections, inbox section, native subagent figures, reservations, reply retries, RPC counters,
-   and separate placement latency; high findings and volume write totals in the overview;
-   redacting host-supplied uncertainty reasons) and the unapproved change that revocation of a
-   removed host stays an explicit `supertag host revoke`.
+3. **Unported coordination and safety features**: ported. `supertag metrics` recovery
+   (including blocked Sessions and unknown live inputs), queue-latency, age, and utilization
+   figures (area 2); changing a running host's `concurrency` without a restart, clearing an
+   unapplied request at startup, and surviving a raised lane that fails to start (area 3);
+   `supertag watch objective ID` with every turn, every Team post (an operator's watch; a
+   client's prints the latest posts its overview carries), and retried reads, and the
+   overview's delivery and failure-explanation sections (area 3); uncertain Attempts in
+   `supertag ps` and retiring a removed host service (area 5); the GitHub-hosted Skill catalog,
+   the Lark stdio preset, and `{ file: }` stdio env references (area 1); `runsOn` ownership by
+   value and field managers with `--force-conflicts` (area 2); bundle refusal cases (area 9).
    Overlap warnings (area 4), Worker-managed effect receipts and in-doubt effects (area 8), and
    message-selected GitHub repository Workspaces (area 9) are ported on both databases; startup
-   model and harness CLI checks are ported for configured hosts (area 8).
-   Still open from the second re-verification of areas 1, 2, 5, and 9: the GitHub-hosted Skill
-   catalog and stdio presets and secret references (area 1); manifest field ownership and
-   list-watch invalidation (area 2); source clones for local Workspaces and bundle refusal cases
-   (area 9). Decide whether each is ported or dropped, and record the decision.
-   Found in the second re-verification of areas 1, 2, 5, and 9, and now decided: the
-   GitHub-hosted Skill catalog, the Lark stdio preset, `{ file: }` env references (area 1),
-   `runsOn` ownership by value and field managers with `--force-conflicts` (area 2), and the
-   bundle refusal cases (area 9) are ported.
-   Proposed drops awaiting approval, each with its reason in its row: `{ secretRef: }` stdio
-   references (area 1); list-watch invalidation by list version (area 2); source clones for
-   local Workspaces (area 9). Still
-   open: uncertain Attempts in `supertag ps`, retiring a removed host service, and
-   cleanup-unknown capacity reservation (area 5).
+   model and harness CLI checks are ported for configured hosts (area 8). Cleanup-unknown
+   capacity is reported only (area 5): the host-side reservation across a host restart has no
+   Rust test. Awaiting a decision, each with its reason in its row: the proposed drops of
+   TypeScript's metrics admission rejections, inbox section, native subagent figures,
+   reservations, reply retries, RPC counters, and separate placement latency; high findings and
+   volume write totals in the overview; redacting host-supplied uncertainty reasons;
+   `{ secretRef: }` stdio references (area 1); list-watch invalidation by list version (area 2);
+   source clones for local Workspaces (area 9); and the unapproved change that revocation of a
+   removed host stays an explicit `supertag host revoke`.
 4. **Workspace mounts** (area 9): read-only and read-write copy mounts of `file://` and `s3://`
    Workspace Volumes for local Codex and Claude Code Tasks, direct write-back with a per-Attempt
    summary in `get|describe task`, and Volume credential names with host credential mappings are
@@ -382,13 +374,14 @@ Priority reflects risk to accepted work and to the cutover, not effort.
    differences are recorded there: `supertag up` does not pass the deployment default, owner
    turn replies stay in the start thread, and a plain message in a chosen thread of another Tag
    stays that Tag's conversation. A chosen thread carries notices for Slack destinations and
-   takes `@SuperTag approve|pause|resume`. Operator notifications (durable batched outbox; Slack,
+   takes `@SuperTag approve|pause|resume`. Only an operator may choose an Objective's notice thread. Operator notifications (durable batched outbox; Slack,
    webhook, and desktop senders; `supertag test notification`), Codex plan progress, Slack cards,
    report cards, acknowledgement/progress replacement, failed-Task error replies, surface-started
    Objectives, and Gateway connector drain were ported earlier.
 7. **Placement**: done for several Workspace mappings per Worker Host, Worker Host credential
-   rotation, named, listed Auth Keys, and TypeScript's `NAME-2` host ID suffixing for reusable Auth
-   Keys (ported 2026-11-13, both databases; area 10 "Auth Keys"). The `task.worker-host-removed`
+   rotation, named, listed Auth Keys, and TypeScript's `NAME-2` suffixing for a reusable Auth Key's
+   host joins (ported 2026-11-13 onto the role-based `Enrollments.Enroll`, both databases; area 10
+   "Auth Keys"). The `task.worker-host-removed`
    Task event is a proposed drop (needs approval): Rust Task events are reply text, and the
    removal's outcome is in the Task's state (same row). Worker Host labels, `runsOn`, label diagnosis, and
    reusable and ephemeral Auth Keys are covered (G6 part 1), including Auth Key revocation and lifetime caps and
@@ -409,24 +402,23 @@ Priority reflects risk to accepted work and to the cutover, not effort.
    --workspace|--dry-run`, `list objective --owner`). Needs approval: those proposed drops.
 9. **MCP**: done (areas 1 and 8). The last host MCP auth forms (`tokenUrl`, client credentials
    with a secret or JWT assertion, GitHub App installation tokens, helpers, `--export`, and
-   `oauth.refreshToken` from a Worker Host variable) and the Lark stdio preset are ported, beside
-   host stdio servers, `supertag mcp login`/`list`, the lapsed-login hold and `mcp_login` Inbox
-   item, Workspace MCP snapshots, HTTP presets, and sandbox MCP for Cursor on E2B and Modal. A
-   sandbox MCP server's stop is bounded: a supervisor in the sandbox stops its process group when
-   its input ends, capture waits at most five seconds and then refuses, and stopping a server
-   never ends a Modal sandbox, and a server that has stopped reading its input is still stopped.
-   `file` and `secretRef` credential references are a Proposed drop (needs approval); the reason
-   and the deliberate differences are in the MCP sign-in and Environment MCP rows.
-   from a reference) (areas 1 and 8). The Lark stdio preset is ported. Host stdio servers,
+   `oauth.refreshToken` from a Worker Host variable) and the Lark stdio preset (`lark-mcp` from
+   the Worker Host's PATH) are ported, beside host stdio servers, `supertag mcp login`/`list`,
+   the lapsed-login hold and `mcp_login` Inbox item, Workspace MCP snapshots, HTTP presets, and
+   sandbox MCP for Cursor on E2B and Modal. A sandbox MCP server's stop is bounded: a supervisor
+   in the sandbox stops its process group when its input ends, capture waits at most five
+   seconds and then refuses, stopping a server never ends a Modal sandbox, and a server that has
+   stopped reading its input is still stopped. `file` and `secretRef` references for host auth
+   credentials are a Proposed drop (needs approval); the reason and the deliberate differences
+   are in the MCP sign-in and Environment MCP rows.
 10. **Interface changes**: the CLI grammar (G9 part 1) is Changed, approved by the user
     2026-11-12, and applied (see "Resource reads", area 10). Decided 2026-11-13 and kept rather
     than matched to TypeScript, with reasons in "CLI help, plain language, terminal safety":
     clap's usage-error wording and exit code 2, and JSON that writes terminal controls as `\u`
-    escapes instead of raw characters. Needs the user's confirmation: those two decisions, and
-    Volume sources without connection settings or credential names (area 9).
-    Volume sources without connection settings (area 10 and area 9; Proposed drop (needs
-    approval), with no credential name on artifact Volumes; Workspace Volumes now carry
-    credential names). The CLI
+    escapes instead of raw characters. Needs the user's confirmation: those two decisions.
+    Volume sources: Workspace Volumes carry credential names; connection settings in any Volume
+    source and a credential name on artifact Volumes are a Proposed drop (needs approval; area 9,
+    "Volume manifests and source settings").
 11. **Transport at scale**: done on both databases (`transport_runtime.rs`, `transport/tests/tunnel.rs`):
     per-RPC protocol fencing, operator-client negotiation, adapter calls during a partition
     (Work Session ask and continue included), TLS through an idle-closing TCP proxy, HTTP
@@ -461,14 +453,13 @@ Priority reflects risk to accepted work and to the cutover, not effort.
     a separate PostgreSQL database per case. `supertag up` can keep local state in PostgreSQL
     (the control-plane service's `database`, or `SUPERTAG_DATABASE_URL`), so `local_services.rs`,
     the `supertag up` cases in `split_runtime.rs` and `session_branch_runtime.rs`, the six tmux
-    TUI journeys, and the captured-artifact-bytes check (a scan of every PostgreSQL row) run on
+    TUI journeys in `operator_runtime.rs`, and the captured-artifact-bytes check (a scan of every PostgreSQL row) run on
     both databases. Each PostgreSQL `local_services.rs` `up` case asserts that no SQLite file was
     created, and a `database.password` secret from `env_file` reaches the Control Plane as
     `PGPASSWORD`. Still SQLite only: the background and service-manager cases in
     `lifecycle_runtime.rs`. Required CI lanes set `SUPERTAG_RUST_TEST_REQUIRE` so a missing
-    fixture fails instead of skipping.
-    `supertag up` cases in `split_runtime.rs` (local state chooses SQLite), the seven tmux TUI
-    journeys, and `captured_artifact_bytes_survive_control_plane_restart_with_private_metadata`, which
+    fixture fails instead of skipping. The `wss://` terminal UI journey in `tunnel_runtime.rs`
+    is SQLite only.
 15. **Docs switch**: rewrite `docs/` for the Rust CLI at cutover. `rust/docs/cli-reference.md`
     is generated from the Rust help and checked by `cli/tests/cli_help.rs`; move or link it then.
 16. **Detached processes on macOS** (area 8): **Proposed drop (needs approval)**. The adapter
