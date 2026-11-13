@@ -1087,6 +1087,8 @@ message CreateAuthKeyRequest {
   string host_id = 1;
   string operation_id = 2;
   bytes key_digest = 3;
+  // Zero means the fixed maximum lifetime: one hour for a one-time key and
+  // 90 days for a reusable key. A shorter positive lifetime is allowed.
   uint64 expires_in_ms = 4;
   repeated string allowed_tag_ids = 5;
   bool all_tags = 6;
@@ -1106,6 +1108,10 @@ message AuthKey {
   bool reusable = 1400;
   bool ephemeral = 1401;
   repeated string labels = 1402;
+  // Public name of the key, for revocation. It does not authorize anything.
+  string key_id = 1403;
+  // A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
+  bool revoked = 1404;
 }
 
 message RevokeHostRequest {

@@ -375,9 +375,33 @@ async fn placement_contract(url: &str) {
     store.close().await;
 }
 
+async fn start_running(store: &Store, host: &HostAuthority, operation: &str) -> String {
+    let claim = store
+        .claim_task_for_host(host, operation, &[], HarnessKind::Codex)
+        .await
+        .unwrap()
+        .unwrap();
+    let task = claim.task.unwrap().task_id;
+    let running = store
+        .start_task(
+            host,
+            &StartTaskRequest {
+                task_id: task.clone(),
+                attempt_id: claim.attempt_id,
+                lease_token: claim.lease_token,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(running.state, TaskState::Running as i32);
+    task
+}
+
 async fn ephemeral_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
+    // The Control Plane starts watching ephemeral hosts.
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
     store.put_tag("builder", "Build", vec![]).await.unwrap();
     let ci = key(&store, "ci", &["builder"], &["linux-ci"], true).await;
     let laptop_key = key(&store, "laptop", &["builder"], &[], false).await;
@@ -387,10 +411,8 @@ async fn ephemeral_contract(url: &str) {
     report(&store, &laptop, 1, &[]).await;
     assert!(store.get_host("runner").await.unwrap().ephemeral);
     let task = submit(&store, "builder", "build").await;
-    assert_eq!(
-        claim(&store, &runner, "runner-1").await.as_deref(),
-        Some(task.as_str())
-    );
+    // The removed host's Attempt is running, not just claimed.
+    assert_eq!(start_running(&store, &runner, "runner-1").await, task);
     // Joined at the same instant, never came online.
     store
         .enroll_host(
@@ -414,7 +436,8 @@ async fn ephemeral_contract(url: &str) {
     assert!(removed.ephemeral);
     assert_eq!(removed.phase, HostPhase::Revoked as i32);
     assert_eq!(removed.removed_at_ms, Some(NOW + 30_000));
-    // Removal fences the claim, unbinds the host, and hides it from the list.
+    // A removed host cannot report again, so its running Attempt counts as
+    // stopped and the Task waits for another host without operator recovery.
     let queued = store.get_task(&task).await.unwrap();
     assert_eq!(queued.state, TaskState::Queued as i32);
     assert!(queued.attempt_id.is_none());
@@ -460,6 +483,212 @@ async fn ephemeral_contract(url: &str) {
     store.close().await;
 }
 
+/// Time the Control Plane is down never counts as a host being offline.
+async fn ephemeral_restart_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+    let ci = key(&store, "ci", &["builder"], &[], true).await;
+    let runner = join(&store, &ci, "runner").await;
+    let silent = join(&store, &ci, "silent").await;
+    report(&store, &runner, 1, &[]).await;
+    report(&store, &silent, 1, &[]).await;
+    store.close().await;
+
+    // Down for two minutes, far past every presence window.
+    let restarted = NOW + 120_000;
+    clock.store(restarted, Ordering::SeqCst);
+    let store = open(url, &clock).await;
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    clock.store(restarted + 5_000, Ordering::SeqCst);
+    report(&store, &runner, 2, &[]).await;
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    // A host that stays silent for a full window after the restart is removed.
+    clock.store(restarted + 29_999, Ordering::SeqCst);
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    clock.store(restarted + 30_000, Ordering::SeqCst);
+    assert_eq!(store.sweep_ephemeral_hosts().await.unwrap(), ["silent"]);
+    // The host that reported keeps its full presence window.
+    clock.store(restarted + 34_999, Ordering::SeqCst);
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    assert_eq!(
+        store.get_host("runner").await.unwrap().phase,
+        HostPhase::Ready as i32
+    );
+    clock.store(restarted + 35_000, Ordering::SeqCst);
+    assert_eq!(store.sweep_ephemeral_hosts().await.unwrap(), ["runner"]);
+    store.close().await;
+}
+
+fn create(
+    operation: &str,
+    host_id: &str,
+    reusable: bool,
+    expires_in_ms: u64,
+) -> CreateAuthKeyRequest {
+    CreateAuthKeyRequest {
+        host_id: host_id.into(),
+        operation_id: operation.into(),
+        key_digest: digest(&format!("key:{operation}")),
+        expires_in_ms,
+        all_tags: true,
+        reusable,
+        ..Default::default()
+    }
+}
+
+async fn auth_key_lifecycle_contract(url: &str) {
+    const HOUR: u64 = 3_600_000;
+    const NINETY_DAYS: u64 = 90 * 24 * HOUR;
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+
+    // Lifetimes are capped: one hour for a one-time key, 90 days for a reusable key.
+    for request in [
+        create("long-reusable", "", true, NINETY_DAYS + 1),
+        create("long-one-time", "named", false, HOUR + 1),
+    ] {
+        assert!(matches!(
+            store.create_auth_key(OPERATOR, &request).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    let pool = create("pool", "", true, 0);
+    let issued = store.create_auth_key(OPERATOR, &pool).await.unwrap();
+    assert_eq!(issued.expires_at_ms, NOW + NINETY_DAYS as i64);
+    assert_eq!(issued.key_id.len(), 16);
+    assert!(!issued.revoked);
+    assert_eq!(
+        store
+            .create_auth_key(OPERATOR, &create("one-time", "one-time-host", false, 0))
+            .await
+            .unwrap()
+            .expires_at_ms,
+        NOW + HOUR as i64
+    );
+
+    // An expired reusable key enrolls nothing.
+    let short = create("short", "", true, 1_000);
+    store.create_auth_key(OPERATOR, &short).await.unwrap();
+    clock.store(NOW + 1_000, Ordering::SeqCst);
+    assert!(matches!(
+        store
+            .enroll_host(
+                &EnrollHostRequest {
+                    host_id: "late".into(),
+                    operation_id: "join-late".into(),
+                    token_digest: digest("token:late"),
+                },
+                &short.key_digest,
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+
+    // A pending one-time key reserves its host ID against reusable joins.
+    let reserved = create("reserved", "reserved-host", false, 0);
+    store.create_auth_key(OPERATOR, &reserved).await.unwrap();
+    assert!(matches!(
+        store
+            .enroll_host(
+                &EnrollHostRequest {
+                    host_id: "reserved-host".into(),
+                    operation_id: "steal".into(),
+                    token_digest: digest("token:steal"),
+                },
+                &pool.key_digest,
+            )
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    join(&store, &reserved.key_digest, "reserved-host").await;
+
+    // Revocation blocks new joins and replays; joined hosts stay enrolled.
+    join(&store, &pool.key_digest, "first").await;
+    assert!(matches!(
+        store.revoke_auth_key("host:first", &issued.key_id).await,
+        Err(StoreError::PermissionDenied)
+    ));
+    for key_id in ["", "XYZ", "0123456789ABCDEF", "0123456789abcdef0"] {
+        assert!(matches!(
+            store.revoke_auth_key(OPERATOR, key_id).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    assert!(matches!(
+        store.revoke_auth_key(OPERATOR, "0000000000000000").await,
+        Err(StoreError::NotFound(_))
+    ));
+    let revoked = store
+        .revoke_auth_key(OPERATOR, &issued.key_id)
+        .await
+        .unwrap();
+    assert!(revoked.revoked && revoked.reusable);
+    assert_eq!(
+        store
+            .revoke_auth_key(OPERATOR, &issued.key_id)
+            .await
+            .unwrap(),
+        revoked
+    );
+    assert_eq!(
+        store.create_auth_key(OPERATOR, &pool).await.unwrap(),
+        revoked
+    );
+    for (host, operation) in [("second", "join-second"), ("first", "join-first")] {
+        assert!(matches!(
+            store
+                .enroll_host(
+                    &EnrollHostRequest {
+                        host_id: host.into(),
+                        operation_id: operation.into(),
+                        token_digest: digest(&format!("token:{host}")),
+                    },
+                    &pool.key_digest,
+                )
+                .await,
+            Err(StoreError::PermissionDenied)
+        ));
+    }
+    assert_eq!(
+        store
+            .authenticate_host(&digest("token:first"))
+            .await
+            .unwrap()
+            .host_id,
+        "first"
+    );
+    store.close().await;
+}
+
+/// A restarted host claims with the labels it reports in its new generation.
+async fn restarted_host_labels_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    store.put_tag("trainer", "Train", vec![]).await.unwrap();
+    runs_on(&store, "trainer", &["tpu"]).await;
+    let pool = key(&store, "pool", &["trainer"], &[], false).await;
+    let first = join(&store, &pool, "tpu-host").await;
+    report(&store, &first, 1, &["tpu"]).await;
+    let record = store
+        .register_host("tpu-host", "second-incarnation")
+        .await
+        .unwrap();
+    let second = HostAuthority::new("host:tpu-host", record.generation).unwrap();
+    let task = submit(&store, "trainer", "train").await;
+    assert_eq!(claim(&store, &second, "before-report").await, None);
+    let diagnosis = store.diagnose_task_placement(&task).await.unwrap();
+    assert_eq!(diagnosis.missing_labels, ["tpu"]);
+    report(&store, &second, 1, &["tpu"]).await;
+    assert_eq!(
+        claim(&store, &second, "after-report").await.as_deref(),
+        Some(task.as_str())
+    );
+    store.close().await;
+}
+
 fn sqlite_url(directory: &tempfile::TempDir) -> String {
     format!(
         "sqlite://{}?mode=rwc",
@@ -477,6 +706,24 @@ async fn sqlite_placement_contract() {
 async fn sqlite_ephemeral_host_contract() {
     let directory = tempfile::tempdir().unwrap();
     ephemeral_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
+async fn sqlite_ephemeral_restart_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    ephemeral_restart_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
+async fn sqlite_auth_key_lifecycle_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    auth_key_lifecycle_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
+async fn sqlite_restarted_host_labels_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    restarted_host_labels_contract(&sqlite_url(&directory)).await;
 }
 
 async fn on_postgres<F, Fut>(run: F)
@@ -516,4 +763,22 @@ async fn postgres_placement_contract() {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_ephemeral_host_contract() {
     on_postgres(|url| async move { ephemeral_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_ephemeral_restart_contract() {
+    on_postgres(|url| async move { ephemeral_restart_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_auth_key_lifecycle_contract() {
+    on_postgres(|url| async move { auth_key_lifecycle_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_restarted_host_labels_contract() {
+    on_postgres(|url| async move { restarted_host_labels_contract(&url).await }).await;
 }

@@ -137,11 +137,11 @@ pub(crate) async fn runs_on_in(
     value.as_deref().map_or_else(|| Ok(vec![]), decode)
 }
 
-/// The labels a host carries when it claims: its latest reported labels, the
+/// The labels a host carries when it claims: its labels reported in this generation, the
 /// labels its Auth Key granted, and the labels derived from the claim itself.
 pub(crate) async fn claim_labels_in(
     transaction: &mut Transaction<'_, Any>,
-    host_id: &str,
+    (host_id, generation): (&str, i64),
     harness: HarnessKind,
     workspace_ids: &[String],
     profile: &HarnessExecutionProfile,
@@ -152,10 +152,14 @@ pub(crate) async fn claim_labels_in(
             .fetch_one(&mut **transaction)
             .await?;
     let reported: Option<String> =
-        sqlx::query_scalar("SELECT labels FROM supertag_v2_host_readiness WHERE host_id=$1")
-            .bind(host_id)
-            .fetch_optional(&mut **transaction)
-            .await?;
+        // A restarted host's labels from its previous run no longer apply.
+        sqlx::query_scalar(
+            "SELECT labels FROM supertag_v2_host_readiness WHERE host_id=$1 AND generation=$2",
+        )
+        .bind(host_id)
+        .bind(generation)
+        .fetch_optional(&mut **transaction)
+        .await?;
     let mut labels = derived_labels(harness, workspace_ids, Some(profile));
     labels.extend(decode(&granted)?);
     if let Some(reported) = reported {
@@ -330,6 +334,21 @@ impl placement_server::Placement for ControlPlane {
         Ok(Response::new(
             self.store
                 .diagnose_task_placement(&request.get_ref().task_id)
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl auth_keys_server::AuthKeys for ControlPlane {
+    async fn revoke_auth_key(
+        &self,
+        request: Request<RevokeAuthKeyRequest>,
+    ) -> std::result::Result<Response<AuthKey>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .revoke_auth_key(&principal, &request.get_ref().key_id)
                 .await?,
         ))
     }

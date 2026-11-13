@@ -69,7 +69,9 @@ pub(crate) struct Presence {
 }
 
 /// Declared labels plus this machine's operating system and architecture.
-pub(crate) fn host_labels(declared: &[String]) -> Vec<String> {
+/// Invalid or reserved declared labels fail at startup rather than at the
+/// first report, which the Control Plane would refuse.
+pub(crate) fn host_labels(declared: &[String]) -> Result<Vec<String>> {
     let os = match std::env::consts::OS {
         "macos" => Some("macos"),
         "linux" => Some("linux"),
@@ -81,15 +83,45 @@ pub(crate) fn host_labels(declared: &[String]) -> Vec<String> {
         "aarch64" => Some("arm64"),
         _ => None,
     };
-    let mut labels: Vec<String> = declared
-        .iter()
-        .map(|label| label.trim().to_ascii_lowercase())
-        .chain(os.into_iter().chain(arch).map(str::to_owned))
-        .collect();
+    let mut labels = Vec::with_capacity(declared.len() + 2);
+    for value in declared {
+        let label = value.trim().to_ascii_lowercase();
+        let bytes = label.as_bytes();
+        anyhow::ensure!(
+            value.is_ascii()
+                && !bytes.is_empty()
+                && bytes.len() <= 63
+                && bytes[0].is_ascii_alphanumeric()
+                && bytes.iter().all(|byte| byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || b".:_-".contains(byte)),
+            "label {value:?} is invalid: a label is 1-63 lowercase letters, digits, dots, colons, hyphens, or underscores, starting with a letter or digit"
+        );
+        anyhow::ensure!(
+            ![
+                "mcp:",
+                "mcp-login:",
+                "volume-credential:",
+                "artifact-volume:"
+            ]
+            .iter()
+            .any(|prefix| label.starts_with(prefix)),
+            "label {value:?} is reserved: the Control Plane derives it from host configuration"
+        );
+        labels.push(label);
+    }
+    labels.extend(os.into_iter().chain(arch).map(str::to_owned));
     labels.sort_unstable();
     labels.dedup();
-    labels
+    anyhow::ensure!(
+        labels.len() <= MAX_LABELS,
+        "a Worker Host carries at most {MAX_LABELS} labels, including its operating system and architecture"
+    );
+    Ok(labels)
 }
+
+/// The Control Plane's limit on reported labels.
+const MAX_LABELS: usize = 64;
 
 impl Presence {
     pub(crate) fn start(
@@ -201,5 +233,36 @@ impl Drop for Presence {
         if let Some(task) = &self.task {
             task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::host_labels;
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn validates_declared_labels_before_the_first_report() {
+        let labels = host_labels(&strings(&[" GPU ", "team:infra", "gpu"])).unwrap();
+        assert!(labels.contains(&"gpu".to_owned()));
+        assert!(labels.contains(&"team:infra".to_owned()));
+        for invalid in [
+            "gpu large",
+            "-gpu",
+            "mcp:github",
+            "volume-credential:x",
+            "gpü",
+            "",
+        ] {
+            assert!(host_labels(&strings(&[invalid])).is_err(), "{invalid}");
+        }
+        // Operating system and architecture labels count toward the limit.
+        let many: Vec<String> = (0..64).map(|index| format!("label-{index}")).collect();
+        assert!(host_labels(&many).is_err());
+        let fits: Vec<String> = (0..62).map(|index| format!("label-{index}")).collect();
+        assert!(host_labels(&fits).is_ok());
     }
 }

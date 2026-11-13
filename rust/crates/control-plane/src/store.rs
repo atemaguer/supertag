@@ -68,6 +68,8 @@ pub(crate) const MAX_TASK_MESSAGE_BYTES: usize = supertag_protocol::MAX_MESSAGE_
 pub struct Store {
     pub(crate) pool: AnyPool,
     execution_clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+    /// When this process first swept ephemeral Worker Hosts.
+    ephemeral_watch_since: Arc<std::sync::OnceLock<i64>>,
 }
 
 impl Store {
@@ -271,6 +273,7 @@ impl Store {
         Ok(Self {
             pool,
             execution_clock: None,
+            ephemeral_watch_since: Arc::default(),
         })
     }
 
@@ -727,7 +730,7 @@ impl Store {
         let Some((id, attempt_execution)) = authority::claim_candidate(
             &mut transaction,
             now,
-            host.id(),
+            (host.id(), host.generation),
             all_tags,
             (&workspace_ids, &gateway_workspace_ids),
             (harness, &profile),

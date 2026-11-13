@@ -164,6 +164,25 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(issued["reusable"], true);
     assert_eq!(issued["labels"], json!(["team:infra"]));
     let key = issued["auth_key"].as_str().context("missing Auth Key")?;
+    let key_id = issued["key_id"].as_str().context("missing Auth Key ID")?;
+    // Without --expires-in-seconds a reusable key lives 90 days, never longer.
+    let lifetime = issued["expires_at_ms"].as_i64().context("missing expiry")?
+        - std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64;
+    ensure!((90 * 86_400_000 - 60_000..=90 * 86_400_000).contains(&lifetime));
+    let too_long = output(op(
+        &[
+            "create-auth-key",
+            "--reusable",
+            "--all-tags",
+            "--expires-in-seconds",
+            "7776001",
+        ],
+        &[],
+    ))
+    .await?;
+    ensure!(!too_long.status.success(), "a 90-day-plus key was issued");
     let gpu_state = directory.join("gpu-host");
     let cpu_state = directory.join("cpu-host");
     for (host, state) in [("gpu-host", &gpu_state), ("cpu-host", &cpu_state)] {
@@ -245,6 +264,39 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         "TASK_STATE_SUCCEEDED"
     );
 
+    // Revoking the key stops new joins; hosts that joined keep working.
+    let revoked = json(op(&["revoke-auth-key", key_id], &[])).await?;
+    assert_eq!(revoked["revoked"], true);
+    let refused = output(enroll(
+        &public,
+        &directory.join("late-host"),
+        "late-host",
+        key,
+    ))
+    .await?;
+    ensure!(!refused.status.success(), "a revoked key enrolled a host");
+    run_once(&public, &cpu_state, &["cpu"]).await?;
+
+    // Invalid declared labels fail before the host contacts the Gateway.
+    let mut invalid = binary(&[
+        "worker-host",
+        "--gateway",
+        &public,
+        "--adapter",
+        ADAPTER,
+        "--once",
+        "--label",
+        "mcp:github",
+    ]);
+    invalid.arg("--state-directory").arg(&cpu_state);
+    let invalid = output(invalid).await?;
+    ensure!(!invalid.status.success());
+    ensure!(
+        String::from_utf8_lossy(&invalid.stderr).contains("reserved"),
+        "{}",
+        String::from_utf8_lossy(&invalid.stderr)
+    );
+
     // An ephemeral key marks the hosts that join with it.
     let ephemeral = json(op(
         &["create-auth-key", "--reusable", "--ephemeral", "--all-tags"],
@@ -267,6 +319,121 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     gateway.kill().await?;
     control.kill().await?;
     Ok(())
+}
+
+async fn host_get(op: &impl Fn(&[&str], &[&str]) -> Command, host: &str) -> Result<Value> {
+    json(op(&["host"], &["get", host])).await
+}
+
+/// The real sweep loop removes an ephemeral host that went away, but a Control
+/// Plane restart, however long, does not count as the host being offline.
+async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
+    std::fs::create_dir_all(directory)?;
+    let gateway_token = Uuid::new_v4().to_string();
+    let token = Uuid::new_v4().to_string();
+    let control_command = |listen: &str| {
+        let mut control = binary(&["control-plane", "--listen", listen]);
+        control
+            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_DATABASE_URL", database);
+        control
+    };
+    let (mut control, private) = service(control_command("127.0.0.1:0")).await?;
+    let mut gateway = binary(&["gateway", "--control-plane", &private]);
+    gateway
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &token);
+    let (mut gateway, public) = service(gateway).await?;
+    let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
+    json(op(&["put-tag", "builder", "--instructions", "Build"], &[])).await?;
+    let issued = json(op(
+        &["create-auth-key", "--reusable", "--ephemeral", "--all-tags"],
+        &[],
+    ))
+    .await?;
+    let key = issued["auth_key"].as_str().context("missing Auth Key")?;
+    let state = directory.join("runner");
+    json(enroll(&public, &state, "runner", key)).await?;
+    let mut runner = binary(&["worker-host", "--gateway", &public, "--adapter", ADAPTER]);
+    runner.arg("--state-directory").arg(&state);
+    let mut runner = runner.stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while host_get(&op, "runner").await?["phase"] != "ready" {
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "runner never reported"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // Down longer than a presence window plus one report interval.
+    control.kill().await?;
+    tokio::time::sleep(Duration::from_secs(36)).await;
+    let (mut control, restarted) =
+        service(control_command(private.trim_start_matches("http://"))).await?;
+    assert_eq!(restarted, private);
+    // The host reports again and stays enrolled through the restart grace.
+    let seen = host_get(&op, "runner").await?["last_seen_at_ms"].as_i64();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let status = host_get(&op, "runner").await?;
+        ensure!(
+            status["removed_at_ms"].is_null(),
+            "restart removed the host: {status}"
+        );
+        if status["last_seen_at_ms"].as_i64() > seen && status["phase"] == "ready" {
+            break;
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "runner never reported again"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    ensure!(
+        runner.try_wait()?.is_none(),
+        "the Worker Host exited after the restart"
+    );
+    ensure!(host_get(&op, "runner").await?["removed_at_ms"].is_null());
+
+    // An ephemeral host that goes away is removed by the sweep loop.
+    runner.kill().await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    loop {
+        let status = host_get(&op, "runner").await?;
+        if !status["removed_at_ms"].is_null() {
+            assert_eq!(status["phase"], "revoked");
+            break;
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "runner was never removed: {status}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let listed = json(op(&["host"], &["list"])).await?;
+    ensure!(
+        !listed["hosts"]
+            .as_array()
+            .context("missing hosts")?
+            .iter()
+            .any(|host| host["host_id"] == "runner"),
+        "a removed host is still listed: {listed}"
+    );
+    gateway.kill().await?;
+    control.kill().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn sqlite_ephemeral_host_survives_restart_and_is_removed_when_gone() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("control.db").display()
+    );
+    ephemeral(&database, directory.path()).await
 }
 
 #[tokio::test]
@@ -294,7 +461,11 @@ async fn postgres_labelled_hosts_share_a_reusable_key_and_take_only_matching_wor
     let database = options.database(&name).to_url_lossy().to_string();
     let directory = tempfile::tempdir()?;
     let path = directory.path().to_owned();
-    let result = tokio::spawn(async move { exercise(&database, &path).await }).await;
+    let result = tokio::spawn(async move {
+        exercise(&database, &path).await?;
+        ephemeral(&database, &path.join("ephemeral")).await
+    })
+    .await;
     let cleanup = admin
         .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
         .await;

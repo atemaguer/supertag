@@ -8648,13 +8648,15 @@ func (x *SettleInputRequest) GetReceipt() LiveInputReceipt {
 }
 
 type CreateAuthKeyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HostId        string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	OperationId   string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	KeyDigest     []byte                 `protobuf:"bytes,3,opt,name=key_digest,json=keyDigest,proto3" json:"key_digest,omitempty"`
-	ExpiresInMs   uint64                 `protobuf:"varint,4,opt,name=expires_in_ms,json=expiresInMs,proto3" json:"expires_in_ms,omitempty"`
-	AllowedTagIds []string               `protobuf:"bytes,5,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
-	AllTags       bool                   `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	HostId      string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	OperationId string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	KeyDigest   []byte                 `protobuf:"bytes,3,opt,name=key_digest,json=keyDigest,proto3" json:"key_digest,omitempty"`
+	// Zero means the fixed maximum lifetime: one hour for a one-time key and
+	// 90 days for a reusable key. A shorter positive lifetime is allowed.
+	ExpiresInMs   uint64   `protobuf:"varint,4,opt,name=expires_in_ms,json=expiresInMs,proto3" json:"expires_in_ms,omitempty"`
+	AllowedTagIds []string `protobuf:"bytes,5,rep,name=allowed_tag_ids,json=allowedTagIds,proto3" json:"allowed_tag_ids,omitempty"`
+	AllTags       bool     `protobuf:"varint,6,opt,name=all_tags,json=allTags,proto3" json:"all_tags,omitempty"`
 	// A reusable key leaves host_id empty and enrolls any number of hosts.
 	Reusable bool `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
 	// Hosts that join with an ephemeral key are removed once they go offline.
@@ -8767,6 +8769,10 @@ type AuthKey struct {
 	Reusable      bool                   `protobuf:"varint,1400,opt,name=reusable,proto3" json:"reusable,omitempty"`
 	Ephemeral     bool                   `protobuf:"varint,1401,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	Labels        []string               `protobuf:"bytes,1402,rep,name=labels,proto3" json:"labels,omitempty"`
+	// Public name of the key, for revocation. It does not authorize anything.
+	KeyId string `protobuf:"bytes,1403,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	// A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
+	Revoked       bool `protobuf:"varint,1404,opt,name=revoked,proto3" json:"revoked,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8848,6 +8854,20 @@ func (x *AuthKey) GetLabels() []string {
 		return x.Labels
 	}
 	return nil
+}
+
+func (x *AuthKey) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *AuthKey) GetRevoked() bool {
+	if x != nil {
+		return x.Revoked
+	}
+	return false
 }
 
 type RevokeHostRequest struct {
@@ -19917,7 +19937,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\tephemeral\x18\xf9\n" +
 	" \x01(\bR\tephemeral\x12\x17\n" +
 	"\x06labels\x18\xfa\n" +
-	" \x03(\tR\x06labels\"\xde\x01\n" +
+	" \x03(\tR\x06labels\"\x91\x02\n" +
 	"\aAuthKey\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\"\n" +
 	"\rexpires_at_ms\x18\x02 \x01(\x03R\vexpiresAtMs\x12&\n" +
@@ -19928,7 +19948,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\tephemeral\x18\xf9\n" +
 	" \x01(\bR\tephemeral\x12\x17\n" +
 	"\x06labels\x18\xfa\n" +
-	" \x03(\tR\x06labels\",\n" +
+	" \x03(\tR\x06labels\x12\x16\n" +
+	"\x06key_id\x18\xfb\n" +
+	" \x01(\tR\x05keyId\x12\x19\n" +
+	"\arevoked\x18\xfc\n" +
+	" \x01(\bR\arevoked\",\n" +
 	"\x11RevokeHostRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\"<\n" +
 	"\x13RegisterHostRequest\x12%\n" +

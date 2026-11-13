@@ -147,3 +147,81 @@ class Placement:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class AuthKeysStub:
+    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
+    replays of earlier joins; hosts that already joined keep their enrollment.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.RevokeAuthKey = channel.unary_unary(
+                '/supertag.runtime.v2.AuthKeys/RevokeAuthKey',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+                _registered_method=True)
+
+
+class AuthKeysServicer:
+    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
+    replays of earlier joins; hosts that already joined keep their enrollment.
+    """
+
+    def RevokeAuthKey(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AuthKeysServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'RevokeAuthKey': grpc.unary_unary_rpc_method_handler(
+                    servicer.RevokeAuthKey,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AuthKeys', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AuthKeys', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AuthKeys:
+    """Auth Key lifecycle beyond creation. Revocation blocks new joins, including
+    replays of earlier joins; hosts that already joined keep their enrollment.
+    """
+
+    @staticmethod
+    def RevokeAuthKey(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AuthKeys/RevokeAuthKey',
+            supertag_dot_runtime_dot_v2_dot_placement__pb2.RevokeAuthKeyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

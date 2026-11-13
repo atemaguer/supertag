@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { HostPhase, TagSchema, TaskState } from "./runtime_pb.js";
+import type { AuthKeySchema, HostPhase, TagSchema, TaskState } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,24 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/placement.proto.
  */
 export const file_supertag_runtime_v2_placement: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiI2ChNTZXRUYWdSdW5zT25SZXF1ZXN0Eg4KBnRhZ19pZBgBIAEoCRIPCgdydW5zX29uGAIgAygJIi8KHERpYWdub3NlVGFza1BsYWNlbWVudFJlcXVlc3QSDwoHdGFza19pZBgBIAEoCSKJAQoNSG9zdFBsYWNlbWVudBIPCgdob3N0X2lkGAEgASgJEi0KBXBoYXNlGAIgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGhhc2USDgoGbGFiZWxzGAMgAygJEhYKDm1pc3NpbmdfbGFiZWxzGAQgAygJEhAKCGVsaWdpYmxlGAUgASgIIvIBChZUYXNrUGxhY2VtZW50RGlhZ25vc2lzEg8KB3Rhc2tfaWQYASABKAkSDgoGdGFnX2lkGAIgASgJEi0KBXN0YXRlGAMgASgOMh4uc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrU3RhdGUSFwoPcmVxdWlyZWRfbGFiZWxzGAQgAygJEhYKDm1pc3NpbmdfbGFiZWxzGAUgAygJEhMKC3JlcXVpcmVtZW50GAYgASgJEg8KB3N1bW1hcnkYByABKAkSMQoFaG9zdHMYCCADKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RQbGFjZW1lbnQyzwEKCVBsYWNlbWVudBJSCgxTZXRUYWdSdW5zT24SKC5zdXBlcnRhZy5ydW50aW1lLnYyLlNldFRhZ1J1bnNPblJlcXVlc3QaGC5zdXBlcnRhZy5ydW50aW1lLnYyLlRhZxJuCgxEaWFnbm9zZVRhc2sSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkRpYWdub3NlVGFza1BsYWNlbWVudFJlcXVlc3QaKy5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tQbGFjZW1lbnREaWFnbm9zaXNiBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiImChRSZXZva2VBdXRoS2V5UmVxdWVzdBIOCgZrZXlfaWQYASABKAkiNgoTU2V0VGFnUnVuc09uUmVxdWVzdBIOCgZ0YWdfaWQYASABKAkSDwoHcnVuc19vbhgCIAMoCSIvChxEaWFnbm9zZVRhc2tQbGFjZW1lbnRSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiiQEKDUhvc3RQbGFjZW1lbnQSDwoHaG9zdF9pZBgBIAEoCRItCgVwaGFzZRgCIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuSG9zdFBoYXNlEg4KBmxhYmVscxgDIAMoCRIWCg5taXNzaW5nX2xhYmVscxgEIAMoCRIQCghlbGlnaWJsZRgFIAEoCCLyAQoWVGFza1BsYWNlbWVudERpYWdub3NpcxIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRItCgVzdGF0ZRgDIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1N0YXRlEhcKD3JlcXVpcmVkX2xhYmVscxgEIAMoCRIWCg5taXNzaW5nX2xhYmVscxgFIAMoCRITCgtyZXF1aXJlbWVudBgGIAEoCRIPCgdzdW1tYXJ5GAcgASgJEjEKBWhvc3RzGAggAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGxhY2VtZW50Ms8BCglQbGFjZW1lbnQSUgoMU2V0VGFnUnVuc09uEiguc3VwZXJ0YWcucnVudGltZS52Mi5TZXRUYWdSdW5zT25SZXF1ZXN0Ghguc3VwZXJ0YWcucnVudGltZS52Mi5UYWcSbgoMRGlhZ25vc2VUYXNrEjEuc3VwZXJ0YWcucnVudGltZS52Mi5EaWFnbm9zZVRhc2tQbGFjZW1lbnRSZXF1ZXN0Gisuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrUGxhY2VtZW50RGlhZ25vc2lzMmQKCEF1dGhLZXlzElgKDVJldm9rZUF1dGhLZXkSKS5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZUF1dGhLZXlSZXF1ZXN0Ghwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5YgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+
+/**
+ * @generated from message supertag.runtime.v2.RevokeAuthKeyRequest
+ */
+export type RevokeAuthKeyRequest = Message<"supertag.runtime.v2.RevokeAuthKeyRequest"> & {
+  /**
+   * @generated from field: string key_id = 1;
+   */
+  keyId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.RevokeAuthKeyRequest.
+ * Use `create(RevokeAuthKeyRequestSchema)` to create a new message.
+ */
+export const RevokeAuthKeyRequestSchema: GenMessage<RevokeAuthKeyRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 0);
 
 /**
  * @generated from message supertag.runtime.v2.SetTagRunsOnRequest
@@ -34,7 +51,7 @@ export type SetTagRunsOnRequest = Message<"supertag.runtime.v2.SetTagRunsOnReque
  * Use `create(SetTagRunsOnRequestSchema)` to create a new message.
  */
 export const SetTagRunsOnRequestSchema: GenMessage<SetTagRunsOnRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 0);
+  messageDesc(file_supertag_runtime_v2_placement, 1);
 
 /**
  * @generated from message supertag.runtime.v2.DiagnoseTaskPlacementRequest
@@ -51,7 +68,7 @@ export type DiagnoseTaskPlacementRequest = Message<"supertag.runtime.v2.Diagnose
  * Use `create(DiagnoseTaskPlacementRequestSchema)` to create a new message.
  */
 export const DiagnoseTaskPlacementRequestSchema: GenMessage<DiagnoseTaskPlacementRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 1);
+  messageDesc(file_supertag_runtime_v2_placement, 2);
 
 /**
  * @generated from message supertag.runtime.v2.HostPlacement
@@ -92,7 +109,7 @@ export type HostPlacement = Message<"supertag.runtime.v2.HostPlacement"> & {
  * Use `create(HostPlacementSchema)` to create a new message.
  */
 export const HostPlacementSchema: GenMessage<HostPlacement> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 2);
+  messageDesc(file_supertag_runtime_v2_placement, 3);
 
 /**
  * @generated from message supertag.runtime.v2.TaskPlacementDiagnosis
@@ -156,7 +173,7 @@ export type TaskPlacementDiagnosis = Message<"supertag.runtime.v2.TaskPlacementD
  * Use `create(TaskPlacementDiagnosisSchema)` to create a new message.
  */
 export const TaskPlacementDiagnosisSchema: GenMessage<TaskPlacementDiagnosis> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 3);
+  messageDesc(file_supertag_runtime_v2_placement, 4);
 
 /**
  * Worker Host placement. Labels narrow the hosts bound to a Tag; they never
@@ -187,3 +204,21 @@ export const Placement: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_placement, 0);
+
+/**
+ * Auth Key lifecycle beyond creation. Revocation blocks new joins, including
+ * replays of earlier joins; hosts that already joined keep their enrollment.
+ *
+ * @generated from service supertag.runtime.v2.AuthKeys
+ */
+export const AuthKeys: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.AuthKeys.RevokeAuthKey
+   */
+  revokeAuthKey: {
+    methodKind: "unary";
+    input: typeof RevokeAuthKeyRequestSchema;
+    output: typeof AuthKeySchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_placement, 1);

@@ -74,3 +74,24 @@ pub async fn run(connection: Connection, command: PlacementCommand) -> Result<()
     println!("{output}");
     Ok(())
 }
+
+pub async fn revoke_auth_key(connection: Connection, key_id: String) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let key = auth_keys_client::AuthKeysClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+        .revoke_auth_key(request(RevokeAuthKeyRequest { key_id }, &token)?)
+        .await?
+        .into_inner();
+    println!(
+        "{}",
+        json!({
+            "key_id": key.key_id,
+            "revoked": key.revoked,
+            "reusable": key.reusable,
+            "ephemeral": key.ephemeral,
+            "expires_at_ms": key.expires_at_ms,
+        })
+    );
+    Ok(())
+}

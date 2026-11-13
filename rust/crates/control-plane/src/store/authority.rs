@@ -292,7 +292,7 @@ fn supports_runtime_actions(harness: HarnessKind, task: &Task) -> bool {
 pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
-    host_id: &str,
+    (host_id, generation): (&str, i64),
     all_tags: i64,
     (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
     (harness, profile): (HarnessKind, &HarnessExecutionProfile),
@@ -309,7 +309,7 @@ pub(super) async fn claim_candidate(
     // Labels narrow the bound hosts; they never add a Tag to this host's scope.
     let labels = crate::placement::claim_labels_in(
         transaction,
-        host_id,
+        (host_id, generation),
         harness,
         &[workspace_ids, gateway_workspace_ids].concat(),
         profile,

@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// PlacementName is the fully-qualified name of the Placement service.
 	PlacementName = "supertag.runtime.v2.Placement"
+	// AuthKeysName is the fully-qualified name of the AuthKeys service.
+	AuthKeysName = "supertag.runtime.v2.AuthKeys"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -37,6 +39,8 @@ const (
 	PlacementSetTagRunsOnProcedure = "/supertag.runtime.v2.Placement/SetTagRunsOn"
 	// PlacementDiagnoseTaskProcedure is the fully-qualified name of the Placement's DiagnoseTask RPC.
 	PlacementDiagnoseTaskProcedure = "/supertag.runtime.v2.Placement/DiagnoseTask"
+	// AuthKeysRevokeAuthKeyProcedure is the fully-qualified name of the AuthKeys's RevokeAuthKey RPC.
+	AuthKeysRevokeAuthKeyProcedure = "/supertag.runtime.v2.AuthKeys/RevokeAuthKey"
 )
 
 // PlacementClient is a client for the supertag.runtime.v2.Placement service.
@@ -137,4 +141,74 @@ func (UnimplementedPlacementHandler) SetTagRunsOn(context.Context, *connect.Requ
 
 func (UnimplementedPlacementHandler) DiagnoseTask(context.Context, *connect.Request[runtimev2.DiagnoseTaskPlacementRequest]) (*connect.Response[runtimev2.TaskPlacementDiagnosis], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Placement.DiagnoseTask is not implemented"))
+}
+
+// AuthKeysClient is a client for the supertag.runtime.v2.AuthKeys service.
+type AuthKeysClient interface {
+	RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+}
+
+// NewAuthKeysClient constructs a client for the supertag.runtime.v2.AuthKeys service. By default,
+// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
+// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
+// or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAuthKeysClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AuthKeysClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	authKeysMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("AuthKeys").Methods()
+	return &authKeysClient{
+		revokeAuthKey: connect.NewClient[runtimev2.RevokeAuthKeyRequest, runtimev2.AuthKey](
+			httpClient,
+			baseURL+AuthKeysRevokeAuthKeyProcedure,
+			connect.WithSchema(authKeysMethods.ByName("RevokeAuthKey")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// authKeysClient implements AuthKeysClient.
+type authKeysClient struct {
+	revokeAuthKey *connect.Client[runtimev2.RevokeAuthKeyRequest, runtimev2.AuthKey]
+}
+
+// RevokeAuthKey calls supertag.runtime.v2.AuthKeys.RevokeAuthKey.
+func (c *authKeysClient) RevokeAuthKey(ctx context.Context, req *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return c.revokeAuthKey.CallUnary(ctx, req)
+}
+
+// AuthKeysHandler is an implementation of the supertag.runtime.v2.AuthKeys service.
+type AuthKeysHandler interface {
+	RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+}
+
+// NewAuthKeysHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAuthKeysHandler(svc AuthKeysHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	authKeysMethods := runtimev2.File_supertag_runtime_v2_placement_proto.Services().ByName("AuthKeys").Methods()
+	authKeysRevokeAuthKeyHandler := connect.NewUnaryHandler(
+		AuthKeysRevokeAuthKeyProcedure,
+		svc.RevokeAuthKey,
+		connect.WithSchema(authKeysMethods.ByName("RevokeAuthKey")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AuthKeys/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AuthKeysRevokeAuthKeyProcedure:
+			authKeysRevokeAuthKeyHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAuthKeysHandler returns CodeUnimplemented from all methods.
+type UnimplementedAuthKeysHandler struct{}
+
+func (UnimplementedAuthKeysHandler) RevokeAuthKey(context.Context, *connect.Request[runtimev2.RevokeAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AuthKeys.RevokeAuthKey is not implemented"))
 }

@@ -11,6 +11,14 @@ service Placement {
   rpc DiagnoseTask(DiagnoseTaskPlacementRequest) returns (TaskPlacementDiagnosis);
 }
 
+// Auth Key lifecycle beyond creation. Revocation blocks new joins, including
+// replays of earlier joins; hosts that already joined keep their enrollment.
+service AuthKeys {
+  rpc RevokeAuthKey(RevokeAuthKeyRequest) returns (AuthKey);
+}
+
+message RevokeAuthKeyRequest { string key_id = 1; }
+
 message SetTagRunsOnRequest {
   string tag_id = 1;
   repeated string runs_on = 2;

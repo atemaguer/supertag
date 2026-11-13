@@ -1587,7 +1587,7 @@ class CreateAuthKeyRequest(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AuthKey(_message.Message):
-    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels")
+    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "key_id", "revoked")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -1595,6 +1595,8 @@ class AuthKey(_message.Message):
     REUSABLE_FIELD_NUMBER: _ClassVar[int]
     EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
+    KEY_ID_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     expires_at_ms: int
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
@@ -1602,7 +1604,9 @@ class AuthKey(_message.Message):
     reusable: bool
     ephemeral: bool
     labels: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ...) -> None: ...
+    key_id: str
+    revoked: bool
+    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., key_id: _Optional[str] = ..., revoked: _Optional[bool] = ...) -> None: ...
 
 class RevokeHostRequest(_message.Message):
     __slots__ = ("host_id",)

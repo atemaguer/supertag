@@ -7,6 +7,12 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RevokeAuthKeyRequest(_message.Message):
+    __slots__ = ("key_id",)
+    KEY_ID_FIELD_NUMBER: _ClassVar[int]
+    key_id: str
+    def __init__(self, key_id: _Optional[str] = ...) -> None: ...
+
 class SetTagRunsOnRequest(_message.Message):
     __slots__ = ("tag_id", "runs_on")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]

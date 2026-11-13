@@ -205,6 +205,7 @@ pub async fn run(
         "MCP tools require a local Claude Code Worker Host with the matching catalog"
     );
     provider_environment_for(options.harness, options.provider_model.as_deref())?;
+    let labels = readiness::host_labels(&options.labels)?;
     ensure!(
         options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
             && (options.remote_provider.is_none()
@@ -393,10 +394,7 @@ pub async fn run(
             .into_iter()
             .chain(workspaces.gateway_ids())
             .collect(),
-        (
-            options.execution_profile.clone(),
-            readiness::host_labels(&options.labels),
-        ),
+        (options.execution_profile.clone(), labels),
         shutdown.clone(),
     );
     let outcome = async {
