@@ -2,6 +2,7 @@ import { harnessClient, readBootstrap } from "../../runtime/sdk/src/rust-harness
 
 export { Code, ConnectError } from "@connectrpc/connect";
 export { receipt } from "../../runtime/sdk/src/rust-harness/client.js";
+export { EffectReceiptState } from "../../runtime/sdk/src/rust-harness/gen/supertag/runtime/v2/effects_pb.js";
 export {
   ExecutionLimitEnforcement,
   LiveInputReceipt,

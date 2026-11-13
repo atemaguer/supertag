@@ -1,5 +1,6 @@
 pub(crate) mod artifact_acquisition;
 mod artifact_capture;
+mod effects;
 mod inputs;
 mod limits;
 mod mcp;
@@ -514,6 +515,7 @@ pub(crate) async fn execute(
             .add_service(bridge.workspace_service())
             .add_service(bridge.mcp_service())
             .add_service(bridge.artifact_capture_service())
+            .add_service(bridge.effects_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

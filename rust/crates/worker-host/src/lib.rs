@@ -2,6 +2,7 @@ mod adapter;
 mod artifact_direct;
 mod artifact_inputs;
 mod artifact_snapshots;
+mod changed_paths;
 mod checkpoints;
 pub mod context;
 mod credentials;
@@ -53,7 +54,9 @@ use supertag_protocol::{
         ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState,
         artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
-        attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
+        attempt_changed_paths_client::AttemptChangedPathsClient,
+        attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
+        attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
@@ -152,6 +155,8 @@ pub(crate) struct CoordinationClients {
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
     mcp_effects: AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
+    changed_paths: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
+    effects: AttemptEffectsClient<InterceptedService<Channel, HostHeaders>>,
 }
 
 impl Attempt {
@@ -430,6 +435,15 @@ pub async fn run(
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
         mcp_effects: AttemptMcpEffectsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        changed_paths: AttemptChangedPathsClient::with_interceptor(
+            channel.clone(),
+            headers.clone(),
+        )
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        effects: AttemptEffectsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
         workspace_mounts: AttemptWorkspaceMountsClient::with_interceptor(
@@ -1672,6 +1686,20 @@ async fn run_assignment(
         ));
     }
     let has_inputs = !task.input_artifacts.is_empty();
+    // Overlap warnings compare the changed paths of local checkouts only.
+    let stop_reports = shutdown.child_token();
+    let reports = workspace
+        .as_ref()
+        .filter(|_| adapter_workspace.is_some())
+        .map(|prepared| {
+            tokio::spawn(changed_paths::report(
+                coordination.changed_paths.clone(),
+                attempt.inspect(),
+                token.to_owned(),
+                prepared.checkout.clone(),
+                stop_reports.clone(),
+            ))
+        });
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -1700,6 +1728,10 @@ async fn run_assignment(
             attempt.task_id, attempt.attempt_id
         )
     });
+    stop_reports.cancel();
+    if let Some(reports) = reports {
+        let _ = reports.await;
+    }
     drop(mounted);
     if let Some(mcp) = mcp {
         mcp.close().await;

@@ -1370,6 +1370,9 @@ message Task {
   // Optional output requirements frozen when the Task is accepted.
   TaskOutputPolicy output_policy = 20;
   repeated AcceptedTaskArtifactInput input_artifacts = 21;
+  // How a surface message selected this Task's GitHub Workspace: request, origin or default.
+  // Absent when the Tag's configured Workspace (or none) was used.
+  optional string workspace_selection = 3500;
 }
 
 message TaskArtifactInputSelection {

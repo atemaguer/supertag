@@ -1928,6 +1928,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.attempt_mcp_effects_service())
+        .add_service(plane.attempt_changed_paths_service())
+        .add_service(plane.attempt_effects_service())
         .add_service(plane.spend_service())
         .add_service(plane.metrics_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
@@ -2162,6 +2164,8 @@ async fn gateway(
         .add_service(gateway.attempt_work_sessions_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.attempt_mcp_effects_service())
+        .add_service(gateway.attempt_changed_paths_service())
+        .add_service(gateway.attempt_effects_service())
         .add_service(gateway.spend_service())
         .add_service(gateway.metrics_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
@@ -2809,6 +2813,7 @@ fn task_json(task: &Task) -> serde_json::Value {
             "mcp_servers": spec.mcp_servers,
             "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
         })),
+        "workspace_selection": task.workspace_selection,
         "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
         "artifacts": task.artifacts.iter().map(|selection| json!({
             "artifact_id": selection.artifact_id,

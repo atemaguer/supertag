@@ -154,6 +154,14 @@ mod tests {
                     channel.clone(),
                     headers.clone(),
                 ),
+                changed_paths: supertag_protocol::v2::attempt_changed_paths_client::AttemptChangedPathsClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
+                effects: supertag_protocol::v2::attempt_effects_client::AttemptEffectsClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
                 transfers: crate::checkpoints::Transfers::new(channel.clone(), headers.clone()),
                 artifact_source: None,
                 artifact_peers: crate::ArtifactPeers::default(),

@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// Worker-managed effect receipts. A harness that performs an external write itself names the
+// intended effect with a stable idempotency key, begins a receipt before calling the provider,
+// and completes or fails it afterwards. Receipts are durable in the Control Plane and scoped to
+// the Tag, so a later Attempt or Task of that Tag replays a completed result instead of calling
+// the provider again. A receipt that was begun but never settled is in doubt: SuperTag never
+// acquires it again, and the integration must reconcile it with the provider and settle it.
+// While the Attempt that began it is still running, the receipt is in flight instead and only
+// that Attempt may settle it.
+//
+// Execution-local interface served by the Worker Host to its harness adapter.
+service HarnessEffects {
+  rpc Begin(HarnessBeginEffectRequest) returns (EffectReceipt);
+  rpc Complete(HarnessCompleteEffectRequest) returns (EffectReceipt);
+  rpc Fail(HarnessFailEffectRequest) returns (EffectReceipt);
+}
+
+// Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+service AttemptEffects {
+  rpc Begin(BeginEffectRequest) returns (EffectReceipt);
+  rpc Complete(CompleteEffectRequest) returns (EffectReceipt);
+  rpc Fail(FailEffectRequest) returns (EffectReceipt);
+}
+
+enum EffectReceiptState {
+  EFFECT_RECEIPT_STATE_UNSPECIFIED = 0;
+  // This Begin reserved the effect. The caller may now call the provider once.
+  EFFECT_RECEIPT_STATE_ACQUIRED = 1;
+  // The provider call completed; result_json is the recorded result to replay.
+  EFFECT_RECEIPT_STATE_COMPLETED = 2;
+  // A Begin found an earlier receipt that was never settled. Do not call the provider:
+  // reconcile with it, then settle the receipt with Complete or Fail.
+  EFFECT_RECEIPT_STATE_IN_DOUBT = 3;
+  // The provider call failed without effect. The next Begin may acquire the effect again.
+  EFFECT_RECEIPT_STATE_FAILED = 4;
+  // A Begin found an unsettled receipt whose Attempt is still running, so its provider call may
+  // be in progress. Do not call the provider or settle the receipt; Begin again later. Another
+  // Attempt cannot Complete or Fail the receipt while this lasts.
+  EFFECT_RECEIPT_STATE_IN_FLIGHT = 5;
+}
+
+message EffectReceipt {
+  string idempotency_key = 1;
+  // SHA-256 of the operation and its canonical JSON arguments.
+  string fingerprint = 2;
+  EffectReceiptState state = 3;
+  string operation = 4;
+  // Set when completed.
+  string result_json = 5;
+  // Set when failed.
+  string error = 6;
+  // The Task and Attempt that last began the effect.
+  string task_id = 7;
+  string attempt_id = 8;
+  int64 started_at_ms = 9;
+  optional int64 settled_at_ms = 10;
+  // Begin returned an earlier completed receipt instead of acquiring the effect.
+  bool replayed = 11;
+}
+
+message HarnessBeginEffectRequest {
+  string idempotency_key = 1;
+  string operation = 2;
+  // A JSON object; canonicalized before it is fingerprinted.
+  string arguments_json = 3;
+}
+
+message HarnessCompleteEffectRequest {
+  string idempotency_key = 1;
+  string operation = 2;
+  string arguments_json = 3;
+  // A JSON value recorded and replayed to later callers. Never include credentials.
+  string result_json = 4;
+}
+
+message HarnessFailEffectRequest {
+  string idempotency_key = 1;
+  string operation = 2;
+  string arguments_json = 3;
+  string error = 4;
+}
+
+message BeginEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  HarnessBeginEffectRequest effect = 2;
+}
+
+message CompleteEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  HarnessCompleteEffectRequest effect = 2;
+}
+
+message FailEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  HarnessFailEffectRequest effect = 2;
+}

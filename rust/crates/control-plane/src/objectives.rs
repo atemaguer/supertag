@@ -1165,6 +1165,26 @@ pub(crate) async fn commit_review_notice_in(
     .await?)
 }
 
+/// Tells a working Objective's owner Session about overlapping Attempts, once per `key`. A paused
+/// or limit-blocked Objective is not told; the overlap stays recorded and is not repeated.
+pub(crate) async fn overlap_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    key: &str,
+    prompt: &str,
+    now_ms: i64,
+) -> Result<()> {
+    reconcile_in(tx, objective_id, now_ms).await?;
+    let record = get_in(tx, objective_id).await?;
+    if record.value.status != ObjectiveStatus::Working as i32
+        || record.value.paused_at_ms.is_some()
+        || limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some()
+    {
+        return Ok(());
+    }
+    internal_turn_in(tx, &record, key, prompt, "notice", now_ms).await
+}
+
 async fn reported_in(
     tx: &mut Transaction<'_, Any>,
     record: &Record,

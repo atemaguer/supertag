@@ -130,6 +130,19 @@ pub async fn advertised_output_remote(
     git::advertised_output_remote(source, disposable, commit, cancel).await
 }
 
+/// Paths the checkout changed since its start commit, sorted, at most `maximum` of them, and
+/// whether more were changed. Git metadata and paths `keep` rejects are never counted.
+pub async fn changed_paths(
+    checkout: &Checkout,
+    keep: impl Fn(&str) -> bool,
+    maximum: usize,
+    cancel: &CancellationToken,
+) -> Result<(Vec<String>, bool)> {
+    let paths = git::Repository::changed_paths(checkout, keep, cancel).await?;
+    let truncated = paths.len() > maximum;
+    Ok((paths.into_iter().take(maximum).collect(), truncated))
+}
+
 /// The pinned commit identifies the tracked paths the provider received at Stage.
 pub async fn prepared_tracked_paths(
     checkout: &Checkout,

@@ -75,7 +75,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 66;
+        const SCHEMA_VERSION: i64 = 67;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -195,6 +195,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0064_workspace_mcp.sql"),
                 include_str!("../migrations/sqlite/0065_audit_calls.sql"),
                 include_str!("../migrations/sqlite/0066_host_credentials_auth_key_names.sql"),
+                include_str!("../migrations/sqlite/0067_coordination_safety.sql"),
             ]
         } else {
             [
@@ -266,6 +267,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0064_workspace_mcp.sql"),
                 include_str!("../migrations/postgresql/0065_audit_calls.sql"),
                 include_str!("../migrations/postgresql/0066_host_credentials_auth_key_names.sql"),
+                include_str!("../migrations/postgresql/0067_coordination_safety.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1203,6 +1205,30 @@ pub(crate) async fn insert_task_with_surface(
     .await
 }
 
+/// A surface message's Task. Its text may select one of the Tag's GitHub Workspaces.
+pub(crate) async fn insert_surface_message_task(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+    surface: Option<&crate::surface_policy::AdmissionSurface>,
+) -> Result<Task> {
+    Box::pin(insert_task_options(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        TaskAdmission {
+            surface,
+            surface_message: true,
+            ..Default::default()
+        },
+    ))
+    .await
+}
+
 pub(crate) async fn insert_task_with_requirements(
     transaction: &mut Transaction<'_, Any>,
     order: i64,
@@ -1253,6 +1279,7 @@ pub(crate) async fn insert_owed_task(
 #[derive(Default)]
 struct TaskAdmission<'a> {
     surface: Option<&'a crate::surface_policy::AdmissionSurface>,
+    surface_message: bool,
     execution_limits: Option<&'a ExecutionLimits>,
     output_policy: Option<&'a supertag_protocol::v2::TaskOutputPolicy>,
     requested_execution: Option<&'a ExecutionSelection>,
@@ -1296,6 +1323,14 @@ async fn insert_task_options(
             serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?,
         )?;
     }
+    let (selection, refusal) = Box::pin(select_workspace_in(
+        transaction,
+        (tag_id, session_id),
+        prompt,
+        options.surface_message,
+        &mut accepted,
+    ))
+    .await?;
     crate::github_workspaces::refs::bind_in(
         transaction,
         tag_id,
@@ -1316,7 +1351,9 @@ async fn insert_task_options(
             "declared Task outputs require a Workspace and accepted file read access".into(),
         ));
     }
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,workspace_mounts,workspace_mcp_servers,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+    // A refused Task never runs, so it cannot change its Session's Workspace.
+    if refusal.is_none()
+        && let Some(previous) = sqlx::query(&format!("SELECT workspace_id,workspace_base_commit,workspace_github_source,workspace_mounts,workspace_mcp_servers,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND {SESSION_WORKSPACE_TASK} ORDER BY accepted_order LIMIT 1"))
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await? {
         let prior_policy = previous.try_get::<Option<Vec<u8>>,_>("policy_snapshot")?.as_deref()
             .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
@@ -1358,7 +1395,132 @@ async fn insert_task_options(
             return Err(invalid("accepted Task exceeds the transport limit"));
         }
     }
+    if let Some(selection) = selection {
+        // A refused request never runs: it fails at admission with the reason, and its surface
+        // reply says so (TypeScript fails the Attempt before credentials or retrieval).
+        sqlx::query("UPDATE supertag_v2_tasks SET workspace_selection=$1 WHERE task_id=$2")
+            .bind(selection)
+            .bind(&task.task_id)
+            .execute(&mut **transaction)
+            .await?;
+        task.workspace_selection = Some(selection.into());
+        if let Some(refusal) = refusal {
+            sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=$2 WHERE task_id=$3")
+                .bind(TaskState::Failed as i64)
+                .bind(&refusal)
+                .bind(&task.task_id)
+                .execute(&mut **transaction)
+                .await?;
+            task.state = TaskState::Failed as i32;
+            task.result = Some(refusal);
+        }
+    }
     Ok(task)
+}
+
+/// SQL condition: a Task that fixes its Session's Workspace. A Task refused at admission, or one
+/// that asked its requester to name a repository, leaves the next message free to select one.
+const SESSION_WORKSPACE_TASK: &str =
+    "(workspace_selection IS NULL OR workspace_selection NOT IN ('refused','required'))";
+
+/// For a Tag that configures no Workspace: a later turn keeps the GitHub Workspace its Session's
+/// first message selected, and the first message of a surface Session selects one. Returns the
+/// selection label and, for a refused request, the reason the Task fails with.
+async fn select_workspace_in(
+    transaction: &mut Transaction<'_, Any>,
+    (tag_id, session_id): (&str, &str),
+    prompt: &str,
+    surface_message: bool,
+    accepted: &mut AcceptedTag,
+) -> Result<(Option<&'static str>, Option<String>)> {
+    use crate::github_workspaces::selection::{self, Selection};
+    if accepted.workspace.is_some()
+        || supertag_protocol::shared_execution::environment(Some(&accepted.policy.snapshot))
+            .is_some()
+    {
+        return Ok((None, None));
+    }
+    let prior = sqlx::query(&format!("SELECT workspace_id,workspace_selection FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND {SESSION_WORKSPACE_TASK} ORDER BY accepted_order LIMIT 1"))
+        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?;
+    let name: Option<String> =
+        sqlx::query_scalar("SELECT name FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    let tag_name = name.as_deref().unwrap_or(tag_id);
+    let (workspace_id, by, later) = if let Some(prior) = prior {
+        let workspace: Option<String> = prior.try_get("workspace_id")?;
+        let by = match prior
+            .try_get::<Option<String>, _>("workspace_selection")?
+            .as_deref()
+        {
+            Some(selection::BY_REQUEST) => selection::BY_REQUEST,
+            Some(selection::BY_ORIGIN) => selection::BY_ORIGIN,
+            Some(selection::BY_DEFAULT) => selection::BY_DEFAULT,
+            _ => return Ok((None, None)),
+        };
+        // The current policy must still grant the read; admission below checks it again.
+        (
+            workspace.ok_or_else(|| invalid("selected Workspace is missing"))?,
+            by,
+            true,
+        )
+    } else if surface_message {
+        match selection::select_in(transaction, tag_name, &accepted.policy.snapshot, prompt).await?
+        {
+            Selection::None => return Ok((None, None)),
+            Selection::Selected { workspace_id, by } => (workspace_id, by, false),
+            Selection::Required(guidance) => {
+                accepted.policy.instructions.push_str(&guidance);
+                return Ok((Some(selection::REQUIRED), None));
+            }
+            Selection::Refused(reason) => return Ok((Some(selection::REFUSED), Some(reason))),
+        }
+    } else {
+        return Ok((None, None));
+    };
+    accepted.workspace = Some(WorkspaceSpec {
+        workspace_id: workspace_id.clone(),
+        ..Default::default()
+    });
+    let admitted = crate::github_workspaces::admission_in(
+        transaction,
+        &mut accepted.workspace,
+        &accepted.policy.snapshot,
+    )
+    .await;
+    let reason = match admitted {
+        Ok(())
+            if accepted
+                .workspace
+                .as_ref()
+                .is_some_and(|spec| spec.github_source.is_some()) =>
+        {
+            return Ok((Some(by), None));
+        }
+        // A first message selects only Workspaces that pass admission.
+        Err(error) if !later => return Err(error),
+        Ok(()) if !later => {
+            return Err(StoreError::FailedPrecondition(
+                "the selected GitHub Workspace no longer exists".into(),
+            ));
+        }
+        Ok(()) => {
+            format!("The GitHub Workspace {workspace_id} this Session selected no longer exists")
+        }
+        Err(StoreError::PermissionDenied) => format!(
+            "Tag {tag_name} is no longer allowed to use the GitHub Workspace {workspace_id} this Session selected"
+        ),
+        Err(StoreError::FailedPrecondition(detail)) => format!(
+            "The GitHub Workspace {workspace_id} this Session selected cannot be used: {detail}"
+        ),
+        Err(error) => return Err(error),
+    };
+    // A later turn whose selected Workspace became unusable fails at admission with the reason,
+    // so its surface replies instead of retrying the message (TypeScript fails it at
+    // resolution). It does not run, so it never fixes the Session's Workspace.
+    accepted.workspace = None;
+    Ok((Some(selection::REFUSED), Some(reason)))
 }
 
 struct AcceptedTag {
@@ -1665,9 +1827,9 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers,workspace_selection)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers,workspace_selection
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
@@ -1864,6 +2026,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         artifacts: crate::artifact_captures::submitted_from_row(row)?,
         output_policy: output_policy_from_row(row)?,
         input_artifacts: crate::task_artifact_inputs::from_row(row)?,
+        workspace_selection: row.try_get("workspace_selection")?,
     })
 }
 

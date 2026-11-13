@@ -12,11 +12,12 @@ if TYPE_CHECKING:
     import grpc
 
 from ._runtime_v2 import artifact_pb2 as artifacts
+from ._runtime_v2 import effects_pb2 as effects
 from ._runtime_v2 import mcp_pb2 as mcp
 from ._runtime_v2 import policy_pb2 as policy
 from ._runtime_v2 import runtime_pb2 as runtime
 
-__all__ = ["HarnessConnection", "artifacts", "mcp", "open_harness", "policy", "runtime"]
+__all__ = ["HarnessConnection", "artifacts", "effects", "mcp", "open_harness", "policy", "runtime"]
 
 MAX_BOOTSTRAP_BYTES = 4_096
 MAX_HARNESS_MESSAGE_BYTES = 17 * 1024 * 1024
@@ -41,7 +42,7 @@ class HarnessConnection:
     """Generated gRPC services scoped to one Task Attempt."""
 
     def __init__(self, channel: grpc.aio.Channel) -> None:
-        from ._runtime_v2 import artifact_pb2_grpc, mcp_pb2_grpc, runtime_pb2_grpc
+        from ._runtime_v2 import artifact_pb2_grpc, effects_pb2_grpc, mcp_pb2_grpc, runtime_pb2_grpc
 
         self.client = runtime_pb2_grpc.HarnessStub(channel)
         self.questions = runtime_pb2_grpc.HarnessQuestionsStub(channel)
@@ -51,6 +52,8 @@ class HarnessConnection:
         self.workspace = runtime_pb2_grpc.HarnessWorkspaceStub(channel)
         self.artifacts = artifact_pb2_grpc.HarnessArtifactsStub(channel)
         self.mcp = mcp_pb2_grpc.HarnessMcpStub(channel)
+        # Worker-managed effect receipts: begin before an external write, then complete or fail.
+        self.effects = effects_pb2_grpc.HarnessEffectsStub(channel)
 
 
 @asynccontextmanager

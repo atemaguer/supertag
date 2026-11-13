@@ -114,7 +114,7 @@ Each `supertag-ai` import path has its own stability level:
 | `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
 | `supertag-ai/coordination` | Experimental | `CoordinationClient`, which lists the operator inbox through `InboxService`, and the inbox messages it returns |
 | `supertag-ai/gateway` | Experimental | `createGatewayClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
-| `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, and execution-scoped `supertag.runtime.v2` clients |
+| `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), and execution-scoped `supertag.runtime.v2` clients |
 | `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
 | `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |
 | `supertag-ai/harnesses/codex`, `/claude-code`, `/cursor`, `/opencode` | Experimental | Shipped Codex, Claude Code, Cursor, and OpenCode harnesses |

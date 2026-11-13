@@ -1,6 +1,7 @@
 //! Public gRPC ingress for operators and Worker Hosts.
 
 mod artifact_publications;
+mod attempt_safety;
 
 mod conversations;
 pub mod credential_vault;
