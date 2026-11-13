@@ -23,6 +23,7 @@ mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
 pub mod objective_limits;
+mod objective_overview;
 mod objectives;
 mod operator_access;
 mod placement;

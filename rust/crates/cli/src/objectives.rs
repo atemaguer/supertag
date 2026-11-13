@@ -5,8 +5,8 @@ use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        CommitReview, CommitReviewDecision, CreateObjectiveRequest, GetObjectiveRequest,
-        ListObjectiveCommitReviewsRequest, ListObjectivesRequest, Objective,
+        CommitReview, CommitReviewDecision, CompleteObjectiveRequest, CreateObjectiveRequest,
+        GetObjectiveRequest, ListObjectiveCommitReviewsRequest, ListObjectivesRequest, Objective,
         ObjectiveActionRequest, ReviewObjectiveRequest, RuntimeActions, SetObjectiveLimitsRequest,
         SetObjectiveRuntimeActionsRequest, objectives_client::ObjectivesClient,
     },
@@ -103,6 +103,19 @@ pub enum ObjectiveCommand {
         decision: ReviewDecision,
         #[arg(long, default_value = "")]
         feedback: String,
+        #[arg(long)]
+        operation_id: Option<String>,
+    },
+    /// Complete an open Objective, ongoing or not, with an assessment of its
+    /// outcome and the results that support it. Its open Tasks are cancelled.
+    Complete {
+        objective_id: String,
+        /// File holding the assessment; `-` reads standard input.
+        #[arg(long)]
+        summary_file: String,
+        /// Refuse when the Objective changed since this revision.
+        #[arg(long)]
+        expected_revision: Option<u64>,
         #[arg(long)]
         operation_id: Option<String>,
     },
@@ -304,6 +317,34 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                 .cancel_objective(request(action.into(), &token)?)
                 .await?
         }
+        ObjectiveCommand::Complete {
+            objective_id,
+            summary_file,
+            expected_revision,
+            operation_id: id,
+        } => {
+            let summary = if summary_file == "-" {
+                std::io::read_to_string(std::io::stdin()).context("read the summary from stdin")?
+            } else {
+                std::fs::read_to_string(&summary_file)
+                    .with_context(|| format!("read the summary file {summary_file}"))?
+            };
+            anyhow::ensure!(
+                !summary.trim().is_empty(),
+                "the summary file is empty; write an assessment of the outcome and its results"
+            );
+            client
+                .complete_objective(request(
+                    CompleteObjectiveRequest {
+                        objective_id,
+                        summary: summary.trim().to_owned(),
+                        expected_revision,
+                        operation_id: operation_id(id),
+                    },
+                    &token,
+                )?)
+                .await?
+        }
         ObjectiveCommand::Review {
             objective_id,
             decision,
@@ -387,5 +428,8 @@ pub(crate) fn output(objective: Objective) -> Value {
         "paused_at_ms": objective.paused_at_ms,
         "reported_spend_minor": objective.reported_spend_minor,
         "runtime_actions": objective.runtime_actions.as_ref().map(|scope| scope.actions.as_slice()).unwrap_or_default(),
+        "completion_summary": objective.completion_summary,
+        "cancelled_at_ms": objective.cancelled_at_ms,
+        "cancellation_reason": objective.cancellation_reason,
     })
 }

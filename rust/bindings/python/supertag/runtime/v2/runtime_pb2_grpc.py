@@ -1379,6 +1379,11 @@ class ObjectivesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
                 _registered_method=True)
+        self.CompleteObjective = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/CompleteObjective',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CompleteObjectiveRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
 
 
 class ObjectivesServicer:
@@ -1444,6 +1449,13 @@ class ObjectivesServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CompleteObjective(self, request, context):
+        """An operator completes an Objective with an assessment of its outcome.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ObjectivesServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1495,6 +1507,11 @@ def add_ObjectivesServicer_to_server(servicer, server):
             'ReviewObjective': grpc.unary_unary_rpc_method_handler(
                     servicer.ReviewObjective,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'CompleteObjective': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompleteObjective,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CompleteObjectiveRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
             ),
     }
@@ -1767,6 +1784,33 @@ class Objectives:
             target,
             '/supertag.runtime.v2.Objectives/ReviewObjective',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReviewObjectiveRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CompleteObjective(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/CompleteObjective',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CompleteObjectiveRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
             options,
             channel_credentials,

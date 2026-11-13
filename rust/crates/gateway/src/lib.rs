@@ -562,6 +562,20 @@ impl Objectives for Gateway {
         )
         .await
     }
+
+    async fn complete_objective(
+        &self,
+        request: Request<CompleteObjectiveRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                objectives_client(channel).complete_objective(request).await
+            },
+        )
+        .await
+    }
 }
 
 #[tonic::async_trait]

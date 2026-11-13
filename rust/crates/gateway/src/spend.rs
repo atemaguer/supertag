@@ -31,3 +31,34 @@ impl spend_server::Spend for Gateway {
         .await
     }
 }
+
+impl Gateway {
+    pub fn objective_overview_service(
+        &self,
+    ) -> objective_overviews_server::ObjectiveOverviewsServer<Self> {
+        objective_overviews_server::ObjectiveOverviewsServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+}
+
+#[tonic::async_trait]
+impl objective_overviews_server::ObjectiveOverviews for Gateway {
+    async fn get_objective_overview(
+        &self,
+        request: Request<GetObjectiveOverviewRequest>,
+    ) -> Result<Response<ObjectiveOverview>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                objective_overviews_client::ObjectiveOverviewsClient::new(channel)
+                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                    .get_objective_overview(request)
+                    .await
+            },
+        )
+        .await
+    }
+}

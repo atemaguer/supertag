@@ -8,7 +8,7 @@
 //! Objective turn answers in the home thread.
 use sqlx::{Acquire, Any, Row, Transaction};
 use supertag_protocol::v2::{
-    ObjectiveActionRequest, ObjectiveStatus, ReviewObjectiveRequest, Task, TaskState,
+    ObjectiveActionRequest, ObjectiveStatus, ReplyState, ReviewObjectiveRequest, Task, TaskState,
 };
 use uuid::Uuid;
 
@@ -349,6 +349,68 @@ async fn status_in(
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1, result=$2, allowed_actions='[]', completed_at_ms=$3, cleanup_pending=0, cleanup_observed=1 WHERE task_id=$4")
         .bind(TaskState::Succeeded as i64).bind(answer).bind(now_ms).bind(&task.task_id).execute(&mut **tx).await?;
     task_in(tx, &task.task_id).await
+}
+
+/// Posts a Control Plane report once to an Objective's home thread, keyed by
+/// `key` within the Objective. An Objective without a home thread posts nothing.
+/// A report the home Tag can no longer accept is skipped: the change it
+/// reports has already happened and must not be undone by its notice.
+pub(crate) async fn home_report_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    tag_id: &str,
+    key: &str,
+    text: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let Some(home) = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_surface_objectives WHERE objective_id=$1")
+        .bind(objective_id).fetch_optional(&mut **tx).await? else {
+        return Ok(());
+    };
+    let notice_key = format!("report:{key}");
+    let prior: Option<String> = sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id=$1 AND notice_key=$2",
+    )
+    .bind(objective_id)
+    .bind(&notice_key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if prior.is_some() {
+        return Ok(());
+    }
+    let mut savepoint = tx.begin().await?;
+    let order = next_order(&mut savepoint).await?;
+    let task = match Box::pin(status_in(
+        &mut savepoint,
+        order,
+        tag_id,
+        &format!("Objective {objective_id} report {key}"),
+        text,
+        now_ms,
+    ))
+    .await
+    {
+        Ok(task) => task,
+        Err(
+            StoreError::FailedPrecondition(_)
+            | StoreError::InvalidArgument(_)
+            | StoreError::PermissionDenied
+            | StoreError::NotFound(_),
+        ) => {
+            savepoint.rollback().await?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    sqlx::query("INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id) VALUES ($1,$2,$3)")
+        .bind(objective_id).bind(&notice_key).bind(&task.task_id).execute(&mut *savepoint).await?;
+    sqlx::query("INSERT INTO supertag_v2_replies (reply_id, task_id, account_id, conversation_id, thread_id, text, state, ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
+        .bind(Uuid::new_v4().to_string()).bind(&task.task_id)
+        .bind(home.try_get::<String, _>("account_id")?).bind(home.try_get::<String, _>("conversation_id")?)
+        .bind(home.try_get::<Option<String>, _>("thread_id")?).bind(text)
+        .bind(ReplyState::Pending as i64).bind(order).execute(&mut *savepoint).await?;
+    savepoint.commit().await?;
+    Ok(())
 }
 
 /// Queue the status answer once the thread route of its Task is recorded.

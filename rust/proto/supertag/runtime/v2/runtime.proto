@@ -197,6 +197,8 @@ service Objectives {
   rpc ResumeObjective(ObjectiveActionRequest) returns (Objective);
   rpc CancelObjective(ObjectiveActionRequest) returns (Objective);
   rpc ReviewObjective(ReviewObjectiveRequest) returns (Objective);
+  // An operator completes an Objective with an assessment of its outcome.
+  rpc CompleteObjective(CompleteObjectiveRequest) returns (Objective);
 }
 
 service Inbox {
@@ -1969,6 +1971,11 @@ message Objective {
   optional uint64 reported_spend_minor = 13;
   optional string team_id = 14;
   RuntimeActions runtime_actions = 15;
+  // The owner's or operator's assessment recorded when the Objective was
+  // submitted for review or completed.
+  optional string completion_summary = 3800;
+  optional int64 cancelled_at_ms = 3801;
+  optional string cancellation_reason = 3802;
 }
 
 message Team {
@@ -2124,6 +2131,16 @@ message ReviewObjectiveRequest {
   string operation_id = 2;
   bool approved = 3;
   string feedback = 4;
+}
+
+// Completes an open Objective, including an ongoing one, with a required
+// assessment. Its open Tasks are cancelled.
+message CompleteObjectiveRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  string summary = 3;
+  // When set, the Objective must still be at this revision.
+  optional uint64 expected_revision = 4;
 }
 
 message ReplyDestination {

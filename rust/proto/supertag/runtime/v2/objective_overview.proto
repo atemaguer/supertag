@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// One operator read of an Objective: its record, Team and concurrency limit,
+// budget pool, deadline, what needs a person, every Session of its work, the
+// owner's conversation, recent Team posts, and one page of its Tasks.
+service ObjectiveOverviews {
+  rpc GetObjectiveOverview(GetObjectiveOverviewRequest) returns (ObjectiveOverview);
+}
+
+message GetObjectiveOverviewRequest {
+  string objective_id = 1;
+  // Tasks per page. Zero means 20; larger values are capped at 50.
+  uint32 limit = 2;
+  uint32 offset = 3;
+}
+
+message ObjectiveOverview {
+  Objective objective = 1;
+  int64 as_of_ms = 2;
+  // Absent when the Objective names no Team.
+  ObjectiveOverviewTeam team = 3;
+  ObjectiveBudgetPool pool = 4;
+  // Absent when the Objective has no deadline.
+  ObjectiveDeadlineView deadline = 5;
+  // What an operator can act on, in the order a person should read them.
+  repeated ObjectiveAttention attention = 6;
+  // The owner's own Session first, then each Work Session in the order it started.
+  repeated ObjectiveSessionView sessions = 7;
+  // The owner's Session, oldest first: its latest turns, never one page of them.
+  repeated ObjectiveTurn conversation = 8;
+  // The Team's latest Workstream posts, oldest first.
+  repeated ObjectiveTeamPost posts = 9;
+  // One page of every Task of the Objective, in acceptance order.
+  repeated ObjectiveTurn tasks = 10;
+  uint32 total_tasks = 11;
+  optional uint32 next_offset = 12;
+  // Limit notices the Control Plane recorded for the current limits.
+  repeated ObjectiveLimitNotice notices = 13;
+  uint32 pending_approvals = 14;
+  // Every Session of the Objective; at most 100 are listed.
+  uint32 total_sessions = 15;
+}
+
+message ObjectiveOverviewTeam {
+  string team_id = 1;
+  string name = 2;
+  repeated string member_tag_ids = 3;
+  // Absent when turns are limited only by Worker Host capacity.
+  optional uint32 max_concurrency = 4;
+  // Turns of this Team's Objectives that hold a slot now.
+  uint32 running_turns = 5;
+}
+
+enum ObjectiveBudgetMeasure {
+  OBJECTIVE_BUDGET_MEASURE_UNSPECIFIED = 0;
+  // No monetary limit.
+  OBJECTIVE_BUDGET_MEASURE_UNLIMITED = 1;
+  // A limit without a currency: nothing counts against it.
+  OBJECTIVE_BUDGET_MEASURE_UNMEASURED = 2;
+  // A limit in a currency, counted from provider-reported cost.
+  OBJECTIVE_BUDGET_MEASURE_PROVIDER_REPORTED_COST = 3;
+}
+
+// The Objective's one budget, shared by the owner's turns and every Work
+// Session beneath it.
+message ObjectiveBudgetPool {
+  ObjectiveBudgetMeasure measure = 1;
+  optional string currency = 2;
+  optional uint64 limit_minor = 3;
+  // What the last limit sweep measured; absent before the first sweep.
+  optional uint64 spent_minor = 4;
+  // Limit minus spend, negative after an overrun.
+  optional int64 available_minor = 5;
+  uint64 overrun_minor = 6;
+  bool exhausted = 7;
+  // Attempts whose cost is not known, so the pool cannot count them.
+  uint32 unknown_cost_attempts = 8;
+  uint32 estimated_cost_attempts = 9;
+}
+
+message ObjectiveDeadlineView {
+  int64 at_ms = 1;
+  bool passed = 2;
+  // Running Task Attempts may finish until then.
+  int64 grace_ends_at_ms = 3;
+  // "3h 5m left" or "passed 10m ago".
+  string remaining = 4;
+}
+
+message ObjectiveLimitNotice {
+  string key = 1;
+  string kind = 2;
+  int64 at_ms = 3;
+  string message = 4;
+}
+
+enum ObjectiveAttentionKind {
+  OBJECTIVE_ATTENTION_KIND_UNSPECIFIED = 0;
+  OBJECTIVE_ATTENTION_KIND_QUESTION = 1;
+  OBJECTIVE_ATTENTION_KIND_REVIEW = 2;
+  OBJECTIVE_ATTENTION_KIND_LIMITED = 3;
+  OBJECTIVE_ATTENTION_KIND_PAUSED = 4;
+  OBJECTIVE_ATTENTION_KIND_BLOCKED = 5;
+  OBJECTIVE_ATTENTION_KIND_APPROVALS = 6;
+  OBJECTIVE_ATTENTION_KIND_CANCELLED = 7;
+}
+
+message ObjectiveAttention {
+  ObjectiveAttentionKind kind = 1;
+  string message = 2;
+  // Commands that act on it, each a complete `supertag ...` line.
+  repeated string next_actions = 3;
+  string task_id = 4;
+  string tag_id = 5;
+}
+
+enum ObjectiveSessionStatus {
+  OBJECTIVE_SESSION_STATUS_UNSPECIFIED = 0;
+  // No turn has been accepted yet.
+  OBJECTIVE_SESSION_STATUS_NOT_STARTED = 1;
+  OBJECTIVE_SESSION_STATUS_QUEUED = 2;
+  OBJECTIVE_SESSION_STATUS_RUNNING = 3;
+  // The latest turn finished and waits on a question or an approval.
+  OBJECTIVE_SESSION_STATUS_WAITING = 4;
+  OBJECTIVE_SESSION_STATUS_SUCCEEDED = 5;
+  OBJECTIVE_SESSION_STATUS_FAILED = 6;
+  OBJECTIVE_SESSION_STATUS_CANCELLED = 7;
+  OBJECTIVE_SESSION_STATUS_UNCERTAIN = 8;
+}
+
+message ObjectiveSessionView {
+  string session_id = 1;
+  string tag_id = 2;
+  // The Objective's own conversation.
+  bool owner = 3;
+  string title = 4;
+  string parent_session_id = 5;
+  ObjectiveSessionStatus status = 6;
+  // The question the latest turn waits on.
+  string question = 7;
+  uint32 task_count = 8;
+  string latest_task_id = 9;
+}
+
+message ObjectiveTurn {
+  string task_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  TaskState state = 4;
+  // Why SuperTag queued the turn: "start", "message", "notice", "resume", "idle", or "work".
+  string kind = 5;
+  // Bounded excerpts; the full text is on the Task.
+  string prompt = 6;
+  string result = 7;
+  optional int64 completed_at_ms = 8;
+}
+
+message ObjectiveTeamPost {
+  uint64 sequence = 1;
+  string author_tag_id = 2;
+  repeated string to_tag_ids = 3;
+  string body = 4;
+  int64 created_at_ms = 5;
+}
