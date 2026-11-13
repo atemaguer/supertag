@@ -11,8 +11,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{RegisteredHost, journal::Journal, request, retryable};
 
+/// What one execution lane can do now. A supervised lane reports it to its supervisor, which
+/// reports the Host's aggregate presence under the Host's single registration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum State {
+pub enum State {
     Pending,
     Ready,
     Busy,
@@ -21,6 +23,28 @@ pub(crate) enum State {
 }
 
 impl State {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Ready => "ready",
+            Self::Busy => "busy",
+            Self::Recovery => "recovery",
+            Self::Stopping => "stopping",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Pending,
+            Self::Ready,
+            Self::Busy,
+            Self::Recovery,
+            Self::Stopping,
+        ]
+        .into_iter()
+        .find(|state| state.as_str() == value)
+    }
+
     fn report(
         self,
         sequence: u64,
@@ -49,6 +73,50 @@ impl State {
             workspace_ids: workspaces.to_vec(),
             execution_profile: Some(profile.clone()),
             harnesses: vec![],
+        }
+    }
+}
+
+/// Receives a supervised lane's state changes in place of a direct presence report.
+pub type LaneObserver = Arc<dyn Fn(State) + Send + Sync>;
+
+pub(crate) enum Reporter {
+    Host(Box<Presence>),
+    Lane {
+        observer: LaneObserver,
+        last: std::sync::Mutex<Option<State>>,
+    },
+}
+
+impl Reporter {
+    pub(crate) fn lane(observer: LaneObserver) -> Self {
+        observer(State::Pending);
+        Self::Lane {
+            observer,
+            last: std::sync::Mutex::new(Some(State::Pending)),
+        }
+    }
+
+    pub(crate) fn set(&self, state: State) {
+        match self {
+            Self::Host(presence) => presence.set(state),
+            Self::Lane { observer, last } => {
+                let mut last = last.lock().expect("lane state lock");
+                if *last != Some(state) {
+                    *last = Some(state);
+                    observer(state);
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn stop(self) -> Result<()> {
+        match self {
+            Self::Host(presence) => presence.stop().await,
+            Self::Lane { observer, .. } => {
+                observer(State::Stopping);
+                Ok(())
+            }
         }
     }
 }

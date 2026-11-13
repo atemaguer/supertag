@@ -219,8 +219,8 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> 
         &file,
         &serde_json::json!({"version":1,"services":{
             "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"]},
-            "reader":{"type":"host","adapter":ADAPTER,"restart":"unless-stopped"},
-            "writer":{"type":"host","adapter":ADAPTER}
+            "reader":{"type":"host","adapter":ADAPTER,"restart":"unless-stopped","concurrency":1},
+            "writer":{"type":"host","adapter":ADAPTER,"concurrency":1}
         }}),
     )?;
     let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
@@ -349,8 +349,8 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     yaml(
         &file,
         &serde_json::json!({"services":{
-        "env-host":{"type":"host","control-plane":endpoint,"adapter":ADAPTER,"auth-key":"env"},
-        "file-host":{"type":"host","control-plane":endpoint,"adapter":ADAPTER,"auth-key":"file"}
+        "env-host":{"type":"host","control-plane":endpoint,"adapter":ADAPTER,"auth-key":"env","concurrency":1},
+        "file-host":{"type":"host","control-plane":endpoint,"adapter":ADAPTER,"auth-key":"file","concurrency":1}
     },"secrets":{"env":{"environment":"FIXTURE_JOIN_KEY"},"file":{"file":key_path}}}),
     )?;
     let mut remote = Process::spawn(&state, Some(&file), &[("FIXTURE_JOIN_KEY", &keys[0])])?;
@@ -709,8 +709,8 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         &file,
         &serde_json::json!({"env_file":"services.env","services":{
             "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"]},
-            "codex-host":{"type":"host","harnesses":["codex"]},
-            "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"]}
+            "codex-host":{"type":"host","harnesses":["codex"],"concurrency":1},
+            "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"],"concurrency":1}
         }}),
     )?;
     let path = std::env::var("PATH")?;
@@ -759,11 +759,18 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         expected(&["SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_OPERATOR_TOKEN"])
     );
     // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
+    // Each lane presents its Host credential; the guardian never passes it to a harness.
     let codex = &roles["codex-host"];
-    assert_eq!(names(codex), expected(&["CODEX_API_KEY", "OPENAI_API_KEY"]));
+    assert_eq!(
+        names(codex),
+        expected(&["CODEX_API_KEY", "OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"])
+    );
     assert_eq!(codex["CODEX_API_KEY"], "shell-codex");
     assert_eq!(codex["OPENAI_API_KEY"], "file-openai");
-    assert_eq!(names(&roles["reporter"]), expected(&[]));
+    assert_eq!(
+        names(&roles["reporter"]),
+        expected(&["SUPERTAG_HOST_TOKEN"])
+    );
     for environment in roles.values() {
         assert_eq!(environment["HOME"], home_value);
         assert!(
@@ -861,4 +868,630 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     }
     supervisor.stop().await?;
     Ok(())
+}
+
+/// A Control Plane and Gateway outside the supervisor, so one Host test runs on either database.
+struct Central {
+    services: Vec<Child>,
+    public: String,
+    operator: String,
+    _checkpoints: tempfile::TempDir,
+}
+impl Central {
+    fn start(database: &str) -> Result<Self> {
+        let checkpoints = tempfile::tempdir()?;
+        let gateway_token = Uuid::new_v4().simple().to_string();
+        let operator = Uuid::new_v4().simple().to_string();
+        let listen = |child: &mut Child| -> Result<String> {
+            let mut line = String::new();
+            BufReader::new(child.stdout.take().context("service stdout missing")?)
+                .read_line(&mut line)?;
+            ensure!(!line.trim().is_empty(), "service did not bind");
+            Ok(format!("http://{}", line.trim()))
+        };
+        let mut plane = Command::new(BIN)
+            .args(["control-plane", "--listen", "127.0.0.1:0"])
+            .env_clear()
+            .env("SUPERTAG_DATABASE_URL", database)
+            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let private = listen(&mut plane)?;
+        let mut services = vec![plane];
+        let mut gateway = Command::new(BIN)
+            .args([
+                "gateway",
+                "--control-plane",
+                &private,
+                "--listen",
+                "127.0.0.1:0",
+            ])
+            .arg("--checkpoint-directory")
+            .arg(checkpoints.path().join("checkpoints"))
+            .env_clear()
+            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let public = listen(&mut gateway);
+        services.push(gateway);
+        let mut central = Self {
+            services,
+            public: String::new(),
+            operator,
+            _checkpoints: checkpoints,
+        };
+        central.public = public?;
+        Ok(central)
+    }
+}
+impl Drop for Central {
+    fn drop(&mut self) {
+        for child in &mut self.services {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Runs a contract against a fresh SQLite file or a fresh PostgreSQL database.
+async fn with_database<F, Fut>(postgres: bool, contract: F) -> Result<()>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    use sqlx::{Connection, Executor};
+    if !postgres {
+        let temp = tempfile::tempdir()?;
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            temp.path().join("plane.db").display()
+        );
+        return contract(url).await;
+    }
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .context("PostgreSQL URL file required")?;
+    let admin_url = fs::read_to_string(path)?;
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await?;
+    let name = format!("supertag_lanes_{}", Uuid::new_v4().simple());
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await?;
+    let mut url = url::Url::parse(admin_url.trim())?;
+    url.set_path(&name);
+    let result = contract(url.to_string()).await;
+    let cleanup = admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await;
+    admin.close().await?;
+    cleanup?;
+    result
+}
+
+/// A shared Host with a gated Codex lane group and a gated OpenAI Agents lane group.
+struct SharedHost {
+    _temp: tempfile::TempDir,
+    state: PathBuf,
+    gate: PathBuf,
+    supervisor: Process,
+}
+impl SharedHost {
+    async fn start(central: &Central, concurrency: u32) -> Result<Self> {
+        let temp = tempfile::tempdir()?;
+        let gate = temp.path().join("gate");
+        fs::create_dir_all(gate.join("started"))?;
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin)?;
+        let gate_text = gate.to_str().context("UTF-8 gate")?;
+        // OpenAI Agents runs `python3 -I -m ...`; this stand-in marks its start, waits at the
+        // gate, then becomes the protocol fixture adapter.
+        fs::write(
+            bin.join("python3"),
+            format!(
+                "#!/bin/sh\ntest -z \"${{CODEX_API_KEY:-}}${{ANTHROPIC_API_KEY:-}}${{SUPERTAG_HOST_TOKEN:-}}\" || exit 3\n\
+                 test \"${{OPENAI_API_KEY:-}}\" = fixture-openai || exit 4\n\
+                 echo $$ > \"{gate_text}/started/agents-$$\"\n\
+                 while [ ! -e \"{gate_text}/release\" ]; do sleep 0.05; done\nexec \"{ADAPTER}\"\n"
+            ),
+        )?;
+        // Answer the version probe without starting Python, which is slow on a loaded machine.
+        let server = temp.path().join("gated_codex_app_server.py");
+        fs::write(
+            &server,
+            include_str!("fixtures/gated_codex_app_server.py").replace("@GATE@", gate_text),
+        )?;
+        fs::write(
+            bin.join("codex"),
+            format!(
+                "#!/bin/sh\nif [ \"$*\" = --version ]; then echo codex-cli 0.163.0; exit 0; fi\n\
+                 exec /usr/bin/python3 \"{}\" \"$@\"\n",
+                server.display()
+            ),
+        )?;
+        for name in ["python3", "codex"] {
+            fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o700))?;
+        }
+        // The first launch of a new executable can wait on macOS policy checks. Take that once
+        // here, outside the adapter's bounded version probe.
+        let probe = Command::new(bin.join("codex")).arg("--version").output()?;
+        ensure!(probe.status.success() && probe.stdout.starts_with(b"codex-cli "));
+        let home = temp.path().join("home");
+        fs::create_dir(&home)?;
+        let env_file = temp.path().join("services.env");
+        fs::write(
+            &env_file,
+            "CODEX_API_KEY=fixture-codex\nOPENAI_API_KEY=fixture-openai\nANTHROPIC_API_KEY=fixture-anthropic\n",
+        )?;
+        fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
+        let mut operator = client(&central.public).await?;
+        let key = Uuid::new_v4().to_string();
+        operator
+            .create_auth_key(authenticated_request(
+                CreateAuthKeyRequest {
+                    host_id: "shared".into(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    key_digest: Sha256::digest(key.as_bytes()).to_vec(),
+                    expires_in_ms: 600000,
+                    all_tags: true,
+                    allowed_tag_ids: vec![],
+                },
+                &central.operator,
+                None,
+            )?)
+            .await?;
+        let file = temp.path().join("supertag.yaml");
+        yaml(
+            &file,
+            &serde_json::json!({"env_file":"services.env","services":{"shared":{
+                "type":"host","control-plane":central.public,"auth-key":"join",
+                "harnesses":["codex","openai-agents"],"concurrency":concurrency,
+                "models":{"codex":["fixture-model"],"openai-agents":"fixture-model"}
+            }},"secrets":{"join":{"environment":"FIXTURE_JOIN_KEY"}}}),
+        )?;
+        let state = temp.path().join("state");
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let supervisor = Process::spawn(
+            &state,
+            Some(&file),
+            &[
+                ("PATH", &path),
+                ("HOME", home.to_str().context("UTF-8 home")?),
+                ("FIXTURE_JOIN_KEY", &key),
+            ],
+        )?;
+        assert_eq!(supervisor.ready()?, "ready");
+        Ok(Self {
+            _temp: temp,
+            state,
+            gate,
+            supervisor,
+        })
+    }
+
+    /// Start markers written by harness processes that reached the gate.
+    fn started(&self) -> Result<Vec<(String, i32)>> {
+        let mut started = Vec::new();
+        for entry in fs::read_dir(self.gate.join("started"))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            let (harness, pid) = name.split_once('-').context("start marker")?;
+            started.push((harness.to_owned(), pid.parse()?));
+        }
+        started.sort();
+        Ok(started)
+    }
+
+    async fn wait_started(&self, codex: usize, agents: usize) -> Result<Vec<(String, i32)>> {
+        timeout(WAIT, async {
+            loop {
+                let started = self.started()?;
+                let count = |name| started.iter().filter(|(h, _)| h == name).count();
+                if count("codex") == codex && count("agents") == agents {
+                    break Ok::<_, anyhow::Error>(started);
+                }
+                ensure!(
+                    count("codex") <= codex && count("agents") <= agents,
+                    "more Attempts started than the Host's capacity allows: {started:?}"
+                );
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "gated harnesses did not start: {}",
+                fs::read_to_string(&self.supervisor.log).unwrap_or_default()
+            )
+        })?
+    }
+
+    fn lanes(&self) -> Result<Vec<(i32, String)>> {
+        Ok(children(self.supervisor.child.id())?
+            .into_iter()
+            .filter(|(_, command)| command.contains("/hosts/shared/lanes/"))
+            .collect())
+    }
+}
+
+async fn tag(
+    operator: &mut operator_client::OperatorClient<Channel>,
+    token: &str,
+    id: &str,
+    harness: HarnessKind,
+) -> Result<()> {
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: id.into(),
+                instructions: "Shared Host fixture".into(),
+                allowed_actions: vec!["files:read".into()],
+                harness_kind: harness as i32,
+                ..Default::default()
+            },
+            token,
+            None,
+        )?)
+        .await?;
+    Ok(())
+}
+
+async fn submit(
+    operator: &mut operator_client::OperatorClient<Channel>,
+    token: &str,
+    tag: &str,
+    marker: &str,
+) -> Result<String> {
+    Ok(operator
+        .submit_task(authenticated_request(
+            SubmitTaskRequest {
+                tag_id: tag.into(),
+                session_id: marker.to_lowercase(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: format!("Run {marker}"),
+                ..Default::default()
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task_id)
+}
+
+async fn task(
+    operator: &mut operator_client::OperatorClient<Channel>,
+    token: &str,
+    id: &str,
+) -> Result<Task> {
+    Ok(operator
+        .get_task(authenticated_request(
+            GetTaskRequest { task_id: id.into() },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner())
+}
+
+async fn settled(
+    operator: &mut operator_client::OperatorClient<Channel>,
+    token: &str,
+    id: &str,
+    wanted: TaskState,
+) -> Result<Task> {
+    timeout(WAIT, async {
+        loop {
+            let current = task(operator, token, id).await?;
+            if current.state() == wanted {
+                break Ok::<_, anyhow::Error>(current);
+            }
+            ensure!(
+                !matches!(
+                    current.state(),
+                    TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+                ),
+                "Task {id} settled as {:?}: {:?}",
+                current.state(),
+                current.result
+            );
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .with_context(|| format!("Task {id} did not reach {wanted:?}"))?
+}
+
+async fn host_until(
+    operator: &mut operator_client::OperatorClient<Channel>,
+    token: &str,
+    ready: impl Fn(&WorkerHostStatus) -> bool,
+) -> Result<WorkerHostStatus> {
+    timeout(WAIT, async {
+        loop {
+            let status = host(operator, token, "shared").await?;
+            if ready(&status) {
+                break Ok::<_, anyhow::Error>(status);
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("shared Host did not report the expected presence")?
+}
+
+async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let mut shared = SharedHost::start(&central, 2).await?;
+    // One registration advertises both harnesses, each with its own slots.
+    let ready = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 4
+    })
+    .await?;
+    let generation = ready.generation;
+    assert_eq!(ready.capacity, 4);
+    assert_eq!(ready.harness_kind(), HarnessKind::Unspecified);
+    let advertised = ready
+        .harnesses
+        .iter()
+        .map(|h| (h.harness_kind(), h.capacity, h.available_slots))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        advertised,
+        [
+            (HarnessKind::Codex, 2, 2),
+            (HarnessKind::OpenaiAgents, 2, 2)
+        ]
+    );
+    assert_eq!(
+        ready.harnesses[0]
+            .execution_profile
+            .as_ref()
+            .unwrap()
+            .model_ids,
+        ["fixture-model"]
+    );
+    // Each lane holds only its own harness's provider credentials.
+    let lanes = shared.lanes()?;
+    assert_eq!(lanes.len(), 4);
+    for (pid, command) in &lanes {
+        let environment = process_environment(*pid)?;
+        let mut names = names(&environment);
+        names.retain(|name| !["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"].contains(name));
+        if command.contains("/lanes/codex-") {
+            assert_eq!(
+                names,
+                ["CODEX_API_KEY", "OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"]
+            );
+        } else {
+            assert!(command.contains("/lanes/openai-agents-"), "{command}");
+            assert_eq!(names, ["OPENAI_API_KEY", "SUPERTAG_HOST_TOKEN"]);
+        }
+    }
+
+    tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
+    tag(&mut operator, &token, "agent", HarnessKind::OpenaiAgents).await?;
+    let mut codex = Vec::new();
+    for marker in ["Task-c1", "Task-c2", "Task-c3"] {
+        codex.push(submit(&mut operator, &token, "coder", marker).await?);
+    }
+    let mut agents = Vec::new();
+    for marker in ["Task-a1", "Task-a2"] {
+        agents.push(submit(&mut operator, &token, "agent", marker).await?);
+    }
+    // Two harnesses run at once, and each runs exactly its configured two Attempts.
+    let started = match shared.wait_started(2, 2).await {
+        Ok(started) => started,
+        Err(error) => {
+            let mut states = Vec::new();
+            for id in codex.iter().chain(&agents) {
+                let current = task(&mut operator, &token, id).await?;
+                states.push(format!("{:?} {:?}", current.state(), current.result));
+            }
+            return Err(error.context(format!(
+                "Task states: {states:?}; started: {:?}",
+                shared.started()?
+            )));
+        }
+    };
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(shared.started()?, started, "capacity was exceeded");
+    let mut queued = 0;
+    for id in &codex {
+        if task(&mut operator, &token, id).await?.state() == TaskState::Queued {
+            queued += 1;
+        }
+    }
+    assert_eq!(queued, 1, "the third Codex Task must wait for a free slot");
+    let busy = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Busy && status.active_attempts == 4
+    })
+    .await?;
+    assert_eq!(busy.available_slots, 0);
+
+    // One harness process crashes. Its Attempt fails; the sibling Attempts and lanes continue.
+    let crashed = started
+        .iter()
+        .find(|(harness, _)| harness == "agents")
+        .context("agents start marker")?
+        .1;
+    unsafe {
+        libc::kill(crashed, libc::SIGKILL);
+    }
+    let mut failed = None;
+    timeout(WAIT, async {
+        loop {
+            for id in &agents {
+                if task(&mut operator, &token, id).await?.state() == TaskState::Failed {
+                    failed = Some(id.clone());
+                }
+            }
+            if failed.is_some() {
+                break Ok::<_, anyhow::Error>(());
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .with_context(|| {
+        format!(
+            "crashed Attempt did not fail: {}",
+            fs::read_to_string(&shared.supervisor.log).unwrap_or_default()
+        )
+    })??;
+    let failed = failed.expect("failed Attempt");
+    for id in codex
+        .iter()
+        .take(2)
+        .chain(agents.iter().filter(|id| **id != failed))
+    {
+        let current = task(&mut operator, &token, id).await?;
+        assert!(
+            matches!(current.state(), TaskState::Running | TaskState::Queued),
+            "a sibling Attempt was disturbed: {:?}",
+            current.state()
+        );
+    }
+    assert_eq!(
+        shared
+            .lanes()?
+            .into_iter()
+            .map(|(pid, _)| pid)
+            .collect::<Vec<_>>(),
+        lanes.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(),
+        "a harness crash must not restart any lane"
+    );
+    assert_eq!(
+        host(&mut operator, &token, "shared").await?.generation,
+        generation
+    );
+
+    fs::write(shared.gate.join("release"), "")?;
+    for (id, marker) in codex.iter().zip(["Task-c1", "Task-c2", "Task-c3"]) {
+        let done = settled(&mut operator, &token, id, TaskState::Succeeded).await?;
+        assert_eq!(
+            done.result.as_deref(),
+            Some(format!("codex finished {marker}").as_str())
+        );
+    }
+    for (id, marker) in agents.iter().zip(["Task-a1", "Task-a2"]) {
+        if *id == failed {
+            continue;
+        }
+        let done = settled(&mut operator, &token, id, TaskState::Succeeded).await?;
+        assert!(done.result.unwrap_or_default().contains(marker));
+    }
+    let idle = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 4
+    })
+    .await?;
+    assert_eq!(idle.generation, generation);
+    assert_eq!(shared.lanes()?.len(), 4);
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
+async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let mut shared = SharedHost::start(&central, 1).await?;
+    let ready = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 2
+    })
+    .await?;
+    tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
+    tag(&mut operator, &token, "agent", HarnessKind::OpenaiAgents).await?;
+    let ids = [
+        submit(&mut operator, &token, "coder", "Task-c1").await?,
+        submit(&mut operator, &token, "agent", "Task-a1").await?,
+    ];
+    for id in &ids {
+        settled(&mut operator, &token, id, TaskState::Running).await?;
+    }
+    if let Err(error) = shared.wait_started(1, 1).await {
+        let mut states = Vec::new();
+        for id in &ids {
+            let current = task(&mut operator, &token, id).await?;
+            states.push(format!("{:?} {:?}", current.state(), current.result));
+        }
+        return Err(error.context(format!("Task states: {states:?}")));
+    }
+    let lanes = shared
+        .lanes()?
+        .into_iter()
+        .map(|(pid, _)| pid)
+        .collect::<Vec<_>>();
+    // Another process presents this Host's credential with a different incarnation.
+    let enrollment: Value = serde_json::from_slice(&fs::read(
+        shared.state.join("hosts/shared/enrollment.json"),
+    )?)?;
+    let credential = enrollment["token"].as_str().context("host token")?;
+    let replaced = worker_host_client::WorkerHostClient::connect(central.public.clone())
+        .await?
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: Uuid::new_v4().to_string(),
+            },
+            credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert!(replaced.generation > ready.generation);
+    // Both lanes' Attempts belong to the replaced generation and are fenced together.
+    for id in &ids {
+        let fenced = task(&mut operator, &token, id).await?;
+        assert_eq!(fenced.state(), TaskState::Uncertain);
+    }
+    // The stale registration can no longer report presence or run work: the supervisor stops.
+    let status = timeout(WAIT, async {
+        loop {
+            if let Some(status) = shared.supervisor.child.try_wait()? {
+                break Ok::<_, anyhow::Error>(status);
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .context("supervisor kept a fenced Host running")??;
+    assert!(!status.success());
+    let log = fs::read_to_string(&shared.supervisor.log)?;
+    assert!(
+        log.contains("no longer current") || log.contains("exited unexpectedly"),
+        "{log}"
+    );
+    gone(&lanes).await?;
+    fs::write(shared.gate.join("release"), "")?;
+    for id in &ids {
+        assert_eq!(
+            task(&mut operator, &token, id).await?.state(),
+            TaskState::Uncertain
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_shared_host_runs_two_harnesses_concurrently_within_capacity() -> Result<()> {
+    with_database(false, shared_host_runs_harnesses_concurrently).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_shared_host_runs_two_harnesses_concurrently_within_capacity() -> Result<()> {
+    with_database(true, shared_host_runs_harnesses_concurrently).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_replaced_shared_host_generation_fences_every_lane() -> Result<()> {
+    with_database(false, replaced_shared_host_fences_every_lane).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_replaced_shared_host_generation_fences_every_lane() -> Result<()> {
+    with_database(true, replaced_shared_host_fences_every_lane).await
 }

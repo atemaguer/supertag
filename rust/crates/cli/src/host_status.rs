@@ -80,6 +80,12 @@ fn status_json(host: WorkerHostStatus) -> Value {
         "active_attempts": host.active_attempts,
         "reason": reason,
         "harness_kind": host.harness_kind().as_str_name(),
+        "harnesses": host.harnesses.iter().map(|harness| json!({
+            "harness_kind": harness.harness_kind().as_str_name(),
+            "capacity": harness.capacity,
+            "available_slots": harness.available_slots,
+            "model_ids": harness.execution_profile.as_ref().map(|profile| profile.model_ids.clone()).unwrap_or_default(),
+        })).collect::<Vec<_>>(),
         "workspace_ids": host.workspace_ids,
         "enrolled_at_ms": host.enrolled_at_ms,
         "last_seen_at_ms": host.last_seen_at_ms,

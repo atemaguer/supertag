@@ -15,6 +15,7 @@ use std::{
 };
 
 use crate::local_config::Environment;
+use supertag_worker_host::LaneState;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -545,48 +546,310 @@ fn sqlite_url(database: &Path) -> Result<String> {
     Ok(url)
 }
 
+/// One configured Worker Host: a single enrollment and registration shared by its lanes.
 struct ManagedHost {
     definition: crate::local_config::Host,
     environment: Arc<Environment>,
     endpoint: String,
     directory: PathBuf,
+    lanes: Vec<ManagedLane>,
+    states: Arc<LaneStates>,
+    presence: Option<Presence>,
+    /// The registered incarnation and Host credential every lane presents.
+    authority: Option<(String, String)>,
+}
+
+/// One execution lane: a Worker Host process that runs one Attempt of one harness at a time.
+struct ManagedLane {
+    harness: usize,
+    directory: PathBuf,
     service: Option<Service>,
 }
+
+#[derive(Default)]
+struct LaneStates {
+    states: std::sync::Mutex<Vec<LaneState>>,
+    changed: tokio::sync::Notify,
+}
+
+impl LaneStates {
+    fn set(&self, lane: usize, state: LaneState) {
+        let mut states = self.states.lock().expect("lane states");
+        if states[lane] != state {
+            states[lane] = state;
+            drop(states);
+            self.changed.notify_one();
+        }
+    }
+}
+
+struct Presence {
+    stop: tokio_util::sync::CancellationToken,
+    task: tokio::task::JoinHandle<Result<()>>,
+}
+
 impl ManagedHost {
+    fn new(
+        definition: crate::local_config::Host,
+        environment: Arc<Environment>,
+        endpoint: String,
+        directory: PathBuf,
+    ) -> Self {
+        let mut lanes = Vec::new();
+        for (harness, adapter) in definition.harnesses.iter().enumerate() {
+            for slot in 0..definition.concurrency {
+                lanes.push(ManagedLane {
+                    harness,
+                    directory: directory
+                        .join("lanes")
+                        .join(format!("{}-{slot}", lane_name(adapter.harness_kind()))),
+                    service: None,
+                });
+            }
+        }
+        let states = Arc::new(LaneStates {
+            states: std::sync::Mutex::new(vec![LaneState::Pending; lanes.len()]),
+            changed: tokio::sync::Notify::new(),
+        });
+        Self {
+            definition,
+            environment,
+            endpoint,
+            directory,
+            lanes,
+            states,
+            presence: None,
+            authority: None,
+        }
+    }
+
+    /// Register the Host once, report its aggregate presence, then start every lane.
     async fn start(&mut self, executable: &Path) -> Result<()> {
+        let gateway = crate::network::endpoint(self.endpoint.clone(), false).await?;
+        let shared = supertag_worker_host::SharedHost::register(
+            gateway,
+            &self.directory,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await?
+        .context("Worker Host registration was cancelled")?;
+        let incarnation = shared.incarnation_id().to_owned();
+        let token = shared.token().to_owned();
+        self.authority = Some((incarnation.clone(), token.clone()));
+        let mut slots = Vec::new();
+        for adapter in &self.definition.harnesses {
+            slots.push(supertag_worker_host::HarnessSlots {
+                harness: adapter.harness_kind(),
+                profile: configured_profile(adapter)?,
+                capacity: self.definition.concurrency,
+            });
+        }
+        let workspaces = self
+            .definition
+            .harnesses
+            .first()
+            .and_then(crate::harness::AdapterOptions::workspace_mapping)
+            .filter(|mapping| match &mapping.source {
+                supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
+                supertag_worker_host::WorkspaceSource::Gateway => true,
+            })
+            .map(|mapping| vec![mapping.workspace_id])
+            .unwrap_or_default();
+        let harness_of = self.lanes.iter().map(|lane| lane.harness).collect();
+        self.presence = Some(report_presence(
+            shared,
+            slots,
+            harness_of,
+            workspaces,
+            self.states.clone(),
+        ));
+        for lane in 0..self.lanes.len() {
+            self.start_lane(lane, executable, &incarnation, &token)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn start_lane(
+        &mut self,
+        index: usize,
+        executable: &Path,
+        incarnation: &str,
+        token: &str,
+    ) -> Result<()> {
+        let lane = &mut self.lanes[index];
+        let adapter = &self.definition.harnesses[lane.harness];
         let mut host = command(executable, "worker-host");
         host.args(["--gateway", &self.endpoint, "--state-directory"])
-            .arg(&self.directory)
+            .arg(&lane.directory)
             .arg("--wait-for-recovery")
-            .args(self.definition.adapter.worker_args());
-        if let Some(path) = &self.definition.skills {
+            .args(["--supervised-lane", incarnation])
+            .args(adapter.worker_args());
+        if let Some(path) = &self.definition.skills
+            && loads_skills(adapter.harness_kind())
+        {
             host.arg("--skill-catalog").arg(path);
         }
-        // Only this harness's provider credentials, from the shell or env_file. Service tokens
-        // and other harnesses' credentials never reach the Worker Host or its harness children.
+        // Only this lane's harness credentials, from the shell or env_file. Service tokens and
+        // other harnesses' credentials never reach the lane or its harness children.
         host.envs(
-            self.environment.selected(
-                self.definition
-                    .adapter
-                    .provider_environment()?
-                    .iter()
-                    .copied(),
-            ),
+            self.environment
+                .selected(adapter.provider_environment()?.iter().copied()),
         );
         host.envs(
             HOST_TLS_ENVIRONMENT
                 .into_iter()
                 .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
         );
-        let ready = start_child(
-            &mut self.service,
-            &mut host,
-            &format!("Worker Host {}", self.definition.name),
-        )
-        .await?;
-        ensure!(ready == "ready", "invalid Worker Host readiness signal");
+        // The lane presents the Host credential; the guardian clears it for harness children.
+        host.env("SUPERTAG_HOST_TOKEN", token);
+        let name = format!("Worker Host {} lane {index}", self.definition.name);
+        let mut process = host.spawn().with_context(|| format!("start {name}"))?;
+        let lifeline = process
+            .stdin
+            .take()
+            .context("child lifeline pipe missing")?;
+        let stdout = process
+            .stdout
+            .take()
+            .context("child readiness pipe missing")?;
+        lane.service = Some(Service {
+            process,
+            _lifeline: lifeline,
+        });
+        let states = self.states.clone();
+        states.set(index, LaneState::Pending);
+        let (ready, started) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut ready = Some(ready);
+            let mut lines = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match (&mut lines).take(256).read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                match line.trim() {
+                    "ready" => {
+                        if let Some(ready) = ready.take() {
+                            let _ = ready.send(());
+                        }
+                    }
+                    other => {
+                        if let Some(state) = other.strip_prefix("state ").and_then(LaneState::parse)
+                        {
+                            states.set(index, state);
+                        }
+                    }
+                }
+            }
+            // A stopped lane offers no capacity until its replacement reports.
+            states.set(index, LaneState::Pending);
+        });
+        time::timeout(START_TIMEOUT, started)
+            .await
+            .with_context(|| format!("{name} did not become ready"))?
+            .with_context(|| format!("{name} did not report readiness"))?;
         Ok(())
     }
+
+    async fn restart_lane(&mut self, index: usize, executable: &Path) -> Result<()> {
+        let (incarnation, token) = self
+            .authority
+            .clone()
+            .context("Worker Host was not registered")?;
+        self.start_lane(index, executable, &incarnation, &token)
+            .await
+    }
+}
+
+fn lane_name(kind: supertag_protocol::v2::HarnessKind) -> String {
+    match kind {
+        supertag_protocol::v2::HarnessKind::Unspecified => "adapter".into(),
+        kind => kind
+            .as_str_name()
+            .trim_start_matches("HARNESS_KIND_")
+            .to_ascii_lowercase()
+            .replace('_', "-"),
+    }
+}
+
+fn loads_skills(kind: supertag_protocol::v2::HarnessKind) -> bool {
+    use supertag_protocol::v2::HarnessKind;
+    !matches!(
+        kind,
+        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor
+    )
+}
+
+/// The profile a configured lane claims with. Configured Hosts select no MCP catalog, shared
+/// execution, remote Workspace provider, or Volume mounts, so this matches the lane's own.
+fn configured_profile(
+    adapter: &crate::harness::AdapterOptions,
+) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
+    let mut profile = adapter.execution_profile()?;
+    profile.task_artifact_inputs = adapter.workspace_mapping().is_some()
+        && supertag_protocol::task_artifact_inputs::supports_harness(adapter.harness_kind());
+    Ok(profile)
+}
+
+/// Report the Host's presence whenever a lane changes state, and at least every five seconds.
+/// A replaced or revoked registration ends the task with an error.
+fn report_presence(
+    mut shared: supertag_worker_host::SharedHost,
+    slots: Vec<supertag_worker_host::HarnessSlots>,
+    harness_of: Vec<usize>,
+    workspaces: Vec<String>,
+    states: Arc<LaneStates>,
+) -> Presence {
+    let stop = tokio_util::sync::CancellationToken::new();
+    let cancelled = stop.clone();
+    let task = tokio::spawn(async move {
+        let mut ticker = time::interval(Duration::from_secs(5));
+        ticker.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        loop {
+            let stopping = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => true,
+                _ = states.changed.notified() => false,
+                _ = ticker.tick() => false,
+            };
+            let lanes = {
+                let current = states.states.lock().expect("lane states");
+                harness_of
+                    .iter()
+                    .zip(current.iter())
+                    .map(|(harness, state)| {
+                        (
+                            *harness,
+                            if stopping {
+                                LaneState::Stopping
+                            } else {
+                                *state
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let reported = shared.report(&slots, &lanes, &workspaces).await;
+            if stopping {
+                // Best effort: an unreported stop expires with the presence lease.
+                return Ok(());
+            }
+            match reported {
+                Ok(_) => {}
+                Err(error) if supertag_worker_host::presence_retryable(&error) => {}
+                Err(error) => {
+                    return Err(anyhow::anyhow!(
+                        "Worker Host registration generation {} is no longer current: {}",
+                        shared.generation(),
+                        error.message()
+                    ));
+                }
+            }
+        }
+    });
+    Presence { stop, task }
 }
 
 /// Supervise explicitly configured services. Each named Host owns one credential and journal.
@@ -627,7 +890,7 @@ pub async fn configured(
                     config
                         .hosts
                         .iter()
-                        .any(|h| h.adapter.uses_gateway_workspace())
+                        .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
                         .then_some(&*environment),
                     false,
                 )
@@ -674,13 +937,12 @@ pub async fn configured(
             )
             .await?;
             let index = hosts.len();
-            hosts.push(ManagedHost {
+            hosts.push(ManagedHost::new(
                 definition,
-                environment: environment.clone(),
-                endpoint: target,
-                directory: host_directory,
-                service: None,
-            });
+                environment.clone(),
+                target,
+                host_directory,
+            ));
             hosts[index].start(&executable).await?;
         }
         if let Some(endpoint) = endpoint {
@@ -705,13 +967,15 @@ pub async fn configured(
     let mut failures = Vec::new();
     let mut stops = tokio::task::JoinSet::new();
     for host in &mut hosts {
-        if let Some(mut service) = host.service.take() {
-            let name = host.definition.name.clone();
-            stops.spawn(async move {
-                stop_child(&mut service.process)
-                    .await
-                    .with_context(|| format!("stop Worker Host {name}"))
-            });
+        for (index, lane) in host.lanes.iter_mut().enumerate() {
+            if let Some(mut service) = lane.service.take() {
+                let name = host.definition.name.clone();
+                stops.spawn(async move {
+                    stop_child(&mut service.process)
+                        .await
+                        .with_context(|| format!("stop Worker Host {name} lane {index}"))
+                });
+            }
         }
     }
     while let Some(stopped) = stops.join_next().await {
@@ -720,6 +984,13 @@ pub async fn configured(
             .and_then(|r| r)
         {
             failures.push(format!("{error:#}"));
+        }
+    }
+    // Lanes are stopped; report each Host as stopping under its own registration.
+    for host in &mut hosts {
+        if let Some(presence) = host.presence.take() {
+            presence.stop.cancel();
+            let _ = presence.task.await;
         }
     }
     if let Err(error) = base.stop().await {
@@ -820,21 +1091,38 @@ async fn wait_configured(
             }
         }
         for host in hosts.iter_mut() {
-            if let Some(status) = host
-                .service
-                .as_mut()
-                .expect("started Host")
-                .process
-                .try_wait()?
+            if let Some(presence) = &mut host.presence
+                && presence.task.is_finished()
             {
+                let outcome = (&mut presence.task).await;
+                host.presence.take();
+                let error = match outcome {
+                    Ok(Err(error)) => error,
+                    Ok(Ok(())) => anyhow::anyhow!("presence reporting stopped"),
+                    Err(error) => anyhow::anyhow!("presence reporting failed: {error}"),
+                };
+                bail!("Worker Host {}: {error:#}", host.definition.name);
+            }
+            for index in 0..host.lanes.len() {
+                let Some(status) = host.lanes[index]
+                    .service
+                    .as_mut()
+                    .expect("started lane")
+                    .process
+                    .try_wait()?
+                else {
+                    continue;
+                };
+                // A lane runs one Attempt. Its exit leaves sibling lanes, their Attempts, and
+                // the Host's shared generation in place.
                 ensure!(
                     host.definition.restart == crate::local_config::Restart::UnlessStopped,
-                    "Worker Host {} exited unexpectedly with {status}",
+                    "Worker Host {} lane {index} exited unexpectedly with {status}",
                     host.definition.name
                 );
-                host.service.take();
+                host.lanes[index].service.take();
                 time::sleep(Duration::from_secs(1)).await;
-                host.start(executable).await?;
+                host.restart_lane(index, executable).await?;
             }
         }
         time::sleep(Duration::from_millis(100)).await;
