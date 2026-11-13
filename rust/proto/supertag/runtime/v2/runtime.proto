@@ -18,6 +18,7 @@ service Operator {
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
   rpc SubmitTask(SubmitTaskRequest) returns (Task);
   rpc GetTask(GetTaskRequest) returns (Task);
+  rpc GetSessionDelivery(GetSessionDeliveryRequest) returns (SessionDelivery);
   rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
@@ -1524,6 +1525,20 @@ message SettleMcpEffectResponse {}
 
 message GetTaskRequest {
   string task_id = 1;
+}
+
+// Names one Session: by its ID, and by its Tag when more than one Tag has a Session with that ID.
+message GetSessionDeliveryRequest {
+  string session_id = 1;
+  string tag_id = 2;
+}
+
+// The Session's latest accepted Workspace delivery and the Task that delivered it.
+message SessionDelivery {
+  string task_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  WorkspaceDeliveryReference delivery = 4;
 }
 
 message ListEventsRequest {

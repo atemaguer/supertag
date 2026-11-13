@@ -72,7 +72,7 @@ enum Service {
         #[serde(default)]
         models: BTreeMap<String, Models>,
         #[serde(default)]
-        workspaces: BTreeMap<String, PathBuf>,
+        workspaces: BTreeMap<String, WorkspaceMapping>,
         #[serde(default)]
         skills: Option<PathBuf>,
         #[serde(default, rename = "allow-unsandboxed-commands")]
@@ -90,6 +90,34 @@ enum Service {
 enum ProvisionEntry {
     File(PathBuf),
     Inline(serde_json::Value),
+}
+/// A Workspace's local repository: a path, or a path and how deliveries reach it.
+#[derive(Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+enum WorkspaceMapping {
+    Path(PathBuf),
+    Detailed {
+        path: PathBuf,
+        #[serde(default)]
+        delivery: Delivery,
+    },
+}
+/// `branch` imports each delivered Task into the repository as its Session branch; `patch`
+/// leaves the repository alone, and the patch and bundle stay downloadable.
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Delivery {
+    #[default]
+    Branch,
+    Patch,
+}
+impl WorkspaceMapping {
+    fn parts(&self) -> (&Path, Delivery) {
+        match self {
+            Self::Path(path) => (path, Delivery::Branch),
+            Self::Detailed { path, delivery } => (path, *delivery),
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -145,6 +173,10 @@ pub struct Host {
     pub concurrency: u32,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
+    /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
+    /// Only a Host of this file's own Control Plane has them; the supervisor imports with the
+    /// local operator credential.
+    pub session_branches: crate::delivery_branches::Repositories,
 }
 /// The largest per-harness concurrency a Worker Host may declare.
 const MAX_CONCURRENCY: u32 = 16;
@@ -430,13 +462,19 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             "each native Worker Host currently supports one Workspace mapping"
         );
         let mut mapping = Vec::new();
-        for (id, path) in &workspaces {
+        let mut session_branches = BTreeMap::new();
+        for (id, workspace) in &workspaces {
             identifier(id)?;
+            let (path, delivery) = workspace.parts();
+            let path = resolve_path(base, path)?;
+            if delivery == Delivery::Branch && remote.is_none() {
+                session_branches.insert(id.clone(), path.clone());
+            }
             mapping.extend([
                 OsString::from("--workspace-id"),
                 id.into(),
                 "--workspace-source".into(),
-                resolve_path(base, path)?.into_os_string(),
+                path.into_os_string(),
             ]);
         }
         let mut selections = Vec::new();
@@ -509,6 +547,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             concurrency,
             skills,
             restart,
+            session_branches,
         });
     }
     ensure!(
@@ -950,6 +989,56 @@ secrets:
         let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
         assert_eq!(default.concurrency, 1);
         assert_eq!(default.harnesses.len(), 1);
+    }
+    #[test]
+    fn mapped_workspaces_deliver_session_branches_unless_patch_or_remote() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
+  branch: {type: host, adapter: ./adapter, workspaces: {app: ./app}}
+  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch}}}
+  patch: {type: host, adapter: ./adapter, workspaces: {docs: {path: ./docs, delivery: patch}}}
+  remote: {type: host, control-plane: "https://plane.example", adapter: ./adapter, workspaces: {api: ./api}}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let branches = |name: &str| {
+            c.hosts
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .session_branches
+                .clone()
+        };
+        assert_eq!(
+            branches("branch"),
+            [("app".to_owned(), PathBuf::from("/trusted/./app"))].into()
+        );
+        assert_eq!(
+            branches("explicit"),
+            [("web".to_owned(), PathBuf::from("/trusted/./web"))].into()
+        );
+        // The repository is still the host's source; only the import is off.
+        assert!(branches("patch").is_empty());
+        let patch = c.hosts.iter().find(|h| h.name == "patch").unwrap();
+        assert!(
+            patch.harnesses[0]
+                .worker_args()
+                .iter()
+                .any(|v| v == "/trusted/./docs")
+        );
+        // Another Control Plane's host: this file has no operator credential for it.
+        assert!(branches("remote").is_empty());
+        let valid = br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, delivery: patch}}}}"#;
+        assert!(parse(valid, Path::new("/trusted"), |_| None).is_ok());
+        for invalid in [
+            &br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, delivery: pull-request}}}}"#[..],
+            br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, typo: 1}}}}"#,
+        ] {
+            assert!(parse(invalid, Path::new("/trusted"), |_| None).is_err());
+        }
     }
     #[test]
     fn env_file_interpolates_services_and_backs_environment_secrets() {

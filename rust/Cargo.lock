@@ -2669,6 +2669,7 @@ dependencies = [
  "supertag-protocol",
  "supertag-shared-execution",
  "supertag-worker-host",
+ "supertag-workspaces",
  "tempfile",
  "tokio",
  "tokio-stream",

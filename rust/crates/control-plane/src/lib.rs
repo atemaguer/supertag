@@ -285,6 +285,18 @@ impl operator_server::Operator for ControlPlane {
         Ok(Response::new(self.store.get_task(&task_id).await?))
     }
 
+    async fn get_session_delivery(
+        &self,
+        request: Request<GetSessionDeliveryRequest>,
+    ) -> Result<Response<SessionDelivery>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .get_session_delivery(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn list_native_usage(
         &self,
         request: Request<ListNativeUsageRequest>,

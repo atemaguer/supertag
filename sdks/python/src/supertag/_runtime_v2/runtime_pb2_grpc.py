@@ -82,6 +82,11 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.GetSessionDelivery = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/GetSessionDelivery',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetSessionDeliveryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SessionDelivery.FromString,
+                _registered_method=True)
         self.ListNativeUsage = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/ListNativeUsage',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageRequest.SerializeToString,
@@ -188,6 +193,12 @@ class OperatorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSessionDelivery(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListNativeUsage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -289,6 +300,11 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.GetTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'GetSessionDelivery': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSessionDelivery,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetSessionDeliveryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SessionDelivery.SerializeToString,
             ),
             'ListNativeUsage': grpc.unary_unary_rpc_method_handler(
                     servicer.ListNativeUsage,
@@ -581,6 +597,33 @@ class Operator:
             '/supertag.runtime.v2.Operator/GetTask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSessionDelivery(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/GetSessionDelivery',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetSessionDeliveryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SessionDelivery.FromString,
             options,
             channel_credentials,
             insecure,

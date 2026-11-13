@@ -8,6 +8,7 @@ pub mod devcontainer;
 mod git;
 pub mod packages;
 mod paths;
+pub mod session_branch;
 pub mod source;
 mod transfer;
 pub use transfer::{
