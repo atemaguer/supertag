@@ -512,9 +512,7 @@ fn remove_tree_at(parent: &File, name: &str, depth: usize) -> Result<()> {
     directory.set_permissions(fs::Permissions::from_mode(0o700))?;
     for child in directory_names(&directory, MAX_ENTRIES + 1)? {
         match stat_at(&directory, &child)? {
-            Some(mode) if mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32 => {
-                remove_tree_at(&directory, &child, depth + 1)?
-            }
+            Some(mode) if is_directory(mode) => remove_tree_at(&directory, &child, depth + 1)?,
             Some(_) => unlink_at(&directory, &child, 0)?,
             None => {}
         }
@@ -592,6 +590,12 @@ fn create_at(parent: &File, name: &str) -> Result<File> {
 }
 
 /// The entry's mode without following a final link, or `None` if absent.
+// `S_IFMT` and `S_IFDIR` are `u16` on macOS and `u32` on Linux.
+#[allow(clippy::unnecessary_cast)]
+fn is_directory(mode: u32) -> bool {
+    mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32
+}
+
 fn stat_at(parent: &File, name: &str) -> Result<Option<u32>> {
     let name = c_name(name)?;
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
