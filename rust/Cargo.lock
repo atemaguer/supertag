@@ -2852,6 +2852,8 @@ dependencies = [
  "libc",
  "prost",
  "reqwest",
+ "ring",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",

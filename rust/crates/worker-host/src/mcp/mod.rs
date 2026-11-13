@@ -1,3 +1,4 @@
+mod auth;
 mod catalog;
 mod http;
 mod oauth;
@@ -531,7 +532,15 @@ pub(super) mod test_http {
     ) -> (SocketAddr, JoinHandle<Vec<Request>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move {
+        (address, serve_on(listener, responses))
+    }
+
+    /// Answers one connection per response, in order, on `listener`.
+    pub(crate) fn serve_on(
+        listener: TcpListener,
+        responses: Vec<(u16, &'static str, String)>,
+    ) -> JoinHandle<Vec<Request>> {
+        tokio::spawn(async move {
             let mut requests = Vec::new();
             for (status, content_type, body) in responses {
                 let (stream, _) = listener.accept().await.unwrap();
@@ -571,7 +580,6 @@ pub(super) mod test_http {
                     .unwrap();
             }
             requests
-        });
-        (address, task)
+        })
     }
 }

@@ -364,7 +364,7 @@ pub fn safe_endpoint(value: &str) -> bool {
     })
 }
 
-fn same_origin(left: &str, right: &str) -> bool {
+pub(super) fn same_origin(left: &str, right: &str) -> bool {
     match (Url::parse(left), Url::parse(right)) {
         (Ok(left), Ok(right)) => left.origin() == right.origin(),
         _ => false,
@@ -382,7 +382,7 @@ pub fn token_client() -> Result<Client> {
 
 /// Sends one token request without following redirects: it carries a refresh token, code, or
 /// client secret, and a redirect would resend it elsewhere.
-async fn token_request(
+pub(super) async fn token_request(
     client: &Client,
     server: &str,
     what: &str,
@@ -404,7 +404,7 @@ async fn token_request(
     Ok(response)
 }
 
-async fn token_response(
+pub(super) async fn token_response(
     server: &str,
     what: &str,
     response: reqwest::Response,
@@ -430,7 +430,7 @@ async fn token_response(
     }
 }
 
-fn access_token(server: &str, body: &Map<String, Value>) -> Result<String> {
+pub(super) fn access_token(server: &str, body: &Map<String, Value>) -> Result<String> {
     let token = body
         .get("access_token")
         .and_then(Value::as_str)
@@ -448,14 +448,14 @@ fn access_token(server: &str, body: &Map<String, Value>) -> Result<String> {
 }
 
 /// Token values become an HTTP header, so they must be visible ASCII.
-fn valid_token(token: &str) -> bool {
+pub(super) fn valid_token(token: &str) -> bool {
     !token.is_empty() && token.len() <= 8192 && token.bytes().all(|byte| (33..=126).contains(&byte))
 }
 
 /// The OAuth endpoints an MCP server's authorization server publishes.
 struct Metadata {
     token_endpoint: String,
-    authorization_endpoint: String,
+    authorization_endpoint: Option<String>,
     registration_endpoint: Option<String>,
     scopes: Vec<String>,
 }
@@ -546,11 +546,7 @@ async fn discover(client: &Client, server: &str, url: &str) -> Result<Metadata> 
         same_origin(&token_endpoint, url),
         "MCP server {server}: its OAuth metadata names a token endpoint on another origin than the server, which SuperTag does not trust with a refresh token"
     );
-    let authorization_endpoint = endpoint("authorization_endpoint").ok_or_else(|| {
-        anyhow::anyhow!(
-            "MCP server {server}: its authorization server publishes no authorization endpoint"
-        )
-    })?;
+    let authorization_endpoint = endpoint("authorization_endpoint");
     let scopes = resource
         .as_ref()
         .and_then(|resource| resource.get("scopes_supported"))
@@ -575,6 +571,15 @@ async fn discover(client: &Client, server: &str, url: &str) -> Result<Metadata> 
         registration_endpoint: endpoint("registration_endpoint"),
         scopes,
     })
+}
+
+/// The token endpoint the MCP server's metadata names, pinned to the server's own origin.
+pub(super) async fn discover_token_endpoint(
+    client: &Client,
+    server: &str,
+    url: &str,
+) -> Result<String> {
+    Ok(discover(client, server, url).await?.token_endpoint)
 }
 
 async fn register(
@@ -626,6 +631,11 @@ pub struct LoginOptions<'a> {
 pub async fn run_login(server: &str, url: &str, options: LoginOptions<'_>) -> Result<McpLogin> {
     let client = token_client()?;
     let metadata = discover(&client, server, url).await?;
+    let authorization_endpoint = metadata.authorization_endpoint.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "MCP server {server}: its authorization server publishes no authorization endpoint"
+        )
+    })?;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let redirect_uri = format!(
         "http://127.0.0.1:{}{CALLBACK_PATH}",
@@ -647,7 +657,7 @@ pub async fn run_login(server: &str, url: &str, options: LoginOptions<'_>) -> Re
     let verifier = random();
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let state = random();
-    let mut authorize = Url::parse(&metadata.authorization_endpoint)?;
+    let mut authorize = Url::parse(authorization_endpoint)?;
     {
         let mut query = authorize.query_pairs_mut();
         query
