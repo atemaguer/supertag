@@ -387,6 +387,68 @@ REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
 
+class ProvisionTagsRequest(_message.Message):
+    __slots__ = ("tags",)
+    TAGS_FIELD_NUMBER: _ClassVar[int]
+    tags: _containers.RepeatedCompositeFieldContainer[ProvisionTag]
+    def __init__(self, tags: _Optional[_Iterable[_Union[ProvisionTag, _Mapping]]] = ...) -> None: ...
+
+class ProvisionTag(_message.Message):
+    __slots__ = ("tag", "role_ids", "mailbox_senders")
+    TAG_FIELD_NUMBER: _ClassVar[int]
+    ROLE_IDS_FIELD_NUMBER: _ClassVar[int]
+    MAILBOX_SENDERS_FIELD_NUMBER: _ClassVar[int]
+    tag: PutTagRequest
+    role_ids: _containers.RepeatedScalarFieldContainer[str]
+    mailbox_senders: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tag: _Optional[_Union[PutTagRequest, _Mapping]] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ProvisionTagsResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ReconcileTagRelationshipsRequest(_message.Message):
+    __slots__ = ("tag_id", "manager", "role_ids", "mailbox_senders", "force_conflicts", "preview")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    MANAGER_FIELD_NUMBER: _ClassVar[int]
+    ROLE_IDS_FIELD_NUMBER: _ClassVar[int]
+    MAILBOX_SENDERS_FIELD_NUMBER: _ClassVar[int]
+    FORCE_CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    manager: str
+    role_ids: _containers.RepeatedScalarFieldContainer[str]
+    mailbox_senders: _containers.RepeatedScalarFieldContainer[str]
+    force_conflicts: bool
+    preview: bool
+    def __init__(self, tag_id: _Optional[str] = ..., manager: _Optional[str] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ..., force_conflicts: _Optional[bool] = ..., preview: _Optional[bool] = ...) -> None: ...
+
+class ManifestRelationshipChange(_message.Message):
+    __slots__ = ("path", "present", "ownership_only")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    PRESENT_FIELD_NUMBER: _ClassVar[int]
+    OWNERSHIP_ONLY_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    present: bool
+    ownership_only: bool
+    def __init__(self, path: _Optional[str] = ..., present: _Optional[bool] = ..., ownership_only: _Optional[bool] = ...) -> None: ...
+
+class ReconcileTagRelationshipsResponse(_message.Message):
+    __slots__ = ("changes", "conflicts")
+    CHANGES_FIELD_NUMBER: _ClassVar[int]
+    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    changes: _containers.RepeatedCompositeFieldContainer[ManifestRelationshipChange]
+    conflicts: _containers.RepeatedCompositeFieldContainer[ManifestRelationshipConflict]
+    def __init__(self, changes: _Optional[_Iterable[_Union[ManifestRelationshipChange, _Mapping]]] = ..., conflicts: _Optional[_Iterable[_Union[ManifestRelationshipConflict, _Mapping]]] = ...) -> None: ...
+
+class ManifestRelationshipConflict(_message.Message):
+    __slots__ = ("path", "manager")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    MANAGER_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    manager: str
+    def __init__(self, path: _Optional[str] = ..., manager: _Optional[str] = ...) -> None: ...
+
 class WatchRequest(_message.Message):
     __slots__ = ("resume_token", "kinds")
     RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]

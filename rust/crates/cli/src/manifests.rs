@@ -11,6 +11,7 @@ use clap::Args;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use supertag_protocol::v2::*;
+use tonic::transport::Channel;
 
 use crate::{
     Connection,
@@ -267,17 +268,23 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
     })
 }
 
-fn read_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
-    use std::os::unix::fs::OpenOptionsExt;
+fn read_file(path: &Path, limit: usize, provision: bool) -> Result<Vec<u8>> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
     let file = fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NONBLOCK)
+        .custom_flags(libc::O_NONBLOCK | if provision { libc::O_NOFOLLOW } else { 0 })
         .open(path)?;
-    ensure!(
-        file.metadata()?.is_file(),
-        "manifest input must be a regular file"
-    );
+    let metadata = file.metadata()?;
+    ensure!(metadata.is_file(), "manifest input must be a regular file");
+    if provision {
+        // SAFETY: geteuid takes no arguments and has no memory preconditions.
+        let owner = unsafe { libc::geteuid() };
+        ensure!(
+            metadata.uid() == owner && metadata.mode() & 0o022 == 0,
+            "provision file must be owned by the current user and writable only by its owner"
+        );
+    }
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     Ok(bytes)
@@ -314,8 +321,9 @@ fn files(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
-fn read(path: &Path, remaining: usize) -> Result<Vec<u8>> {
+fn read(path: &Path, remaining: usize, provision: bool) -> Result<Vec<u8>> {
     let bytes = if path == Path::new("-") {
+        ensure!(!provision, "provision cannot read from stdin");
         let mut bytes = Vec::new();
         io::stdin()
             .lock()
@@ -323,7 +331,7 @@ fn read(path: &Path, remaining: usize) -> Result<Vec<u8>> {
             .read_to_end(&mut bytes)?;
         bytes
     } else {
-        read_file(path, remaining)?
+        read_file(path, remaining, provision)?
     };
     ensure!(
         bytes.len() <= remaining,
@@ -332,7 +340,12 @@ fn read(path: &Path, remaining: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn load(paths: Vec<PathBuf>) -> Result<Vec<Manifest>> {
+pub(crate) enum ProvisionSource {
+    File(PathBuf),
+    Inline(Value),
+}
+
+fn load(sources: Vec<ProvisionSource>, provision: bool) -> Result<Vec<Manifest>> {
     let mut manifests = Vec::new();
     let mut seen = BTreeSet::new();
     let mut remaining = MAX_INPUT_BYTES;
@@ -344,8 +357,36 @@ fn load(paths: Vec<PathBuf>) -> Result<Vec<Manifest>> {
             max_total_scalar_bytes: MAX_INPUT_BYTES,
         },
     };
-    for path in files(paths)? {
-        let bytes = read(&path, remaining).with_context(|| format!("read {}", path.display()))?;
+    ensure!(sources.len() <= MAX_MANIFESTS, "too many manifest inputs");
+    let mut add = |value, source: String| -> Result<()> {
+        let item = manifest(value, &source).with_context(|| source)?;
+        ensure!(
+            seen.insert((item.kind, item.name.clone())),
+            "duplicate {:?}/{} in {}",
+            item.kind,
+            item.name,
+            item.source
+        );
+        manifests.push(item);
+        ensure!(manifests.len() <= MAX_MANIFESTS, "too many manifests");
+        Ok(())
+    };
+    for (index, source) in sources.into_iter().enumerate() {
+        let path = match source {
+            ProvisionSource::File(path) => path,
+            ProvisionSource::Inline(value) => {
+                let len = serde_json::to_vec(&value)?.len();
+                ensure!(
+                    len <= remaining,
+                    "manifest input exceeds the total size limit"
+                );
+                remaining -= len;
+                add(value, format!("provision entry {}", index + 1))?;
+                continue;
+            }
+        };
+        let bytes = read(&path, remaining, provision)
+            .with_context(|| format!("read {}", path.display()))?;
         remaining -= bytes.len();
         let documents: Vec<Value> =
             serde_saphyr::from_bytes_multiple_with_options(&bytes, options.clone())
@@ -356,22 +397,15 @@ fn load(paths: Vec<PathBuf>) -> Result<Vec<Manifest>> {
                 value => vec![value],
             };
             for (entry, value) in values.into_iter().enumerate() {
-                let source = format!(
-                    "{} document {} entry {}",
-                    path.display(),
-                    index + 1,
-                    entry + 1
-                );
-                let item = manifest(value, &source).with_context(|| source)?;
-                ensure!(
-                    seen.insert((item.kind, item.name.clone())),
-                    "duplicate {:?}/{} in {}",
-                    item.kind,
-                    item.name,
-                    item.source
-                );
-                manifests.push(item);
-                ensure!(manifests.len() <= MAX_MANIFESTS, "too many manifests");
+                add(
+                    value,
+                    format!(
+                        "{} document {} entry {}",
+                        path.display(),
+                        index + 1,
+                        entry + 1
+                    ),
+                )?;
             }
         }
     }
@@ -382,14 +416,36 @@ fn load(paths: Vec<PathBuf>) -> Result<Vec<Manifest>> {
     Ok(manifests)
 }
 
+pub(crate) async fn provision(
+    channel: Channel,
+    token: &str,
+    sources: Vec<ProvisionSource>,
+) -> Result<()> {
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let manifests = load(sources, true)?;
+    let mut catalog = plan::Catalog::new(channel, token, "provision", false, true)?;
+    let changes = catalog.plan(manifests).await?;
+    for change in changes {
+        catalog.apply(change, false).await?;
+    }
+    Ok(())
+}
+
 pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
-    let manifests = load(args.files)?;
+    let sources = files(args.files)?
+        .into_iter()
+        .map(ProvisionSource::File)
+        .collect();
+    let manifests = load(sources, false)?;
     let (channel, token) = crate::connect_operator(args.connection).await?;
     let mut catalog = plan::Catalog::new(
         channel,
         &token,
         args.manager.as_deref().unwrap_or_default(),
         args.force_conflicts,
+        false,
     )?;
     let changes = catalog.plan(manifests).await?;
     if changes.is_empty() {
@@ -397,7 +453,7 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
     }
     for change in changes {
         if apply {
-            catalog.apply(change).await?;
+            catalog.apply(change, true).await?;
         } else {
             println!("{}", change.preview());
         }

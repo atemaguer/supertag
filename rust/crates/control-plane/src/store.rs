@@ -326,6 +326,16 @@ impl Store {
     }
 
     pub async fn put_tag_spec(&self, input: PutTagRequest) -> Result<Tag> {
+        let (mut tx, _) = self.write().await?;
+        let tag = Self::put_tag_in(&mut tx, input).await?;
+        tx.commit().await?;
+        Ok(tag)
+    }
+
+    pub(crate) async fn put_tag_in(
+        transaction: &mut Transaction<'_, Any>,
+        input: PutTagRequest,
+    ) -> Result<Tag> {
         let PutTagRequest {
             tag_id,
             instructions,
@@ -374,20 +384,19 @@ impl Store {
         let actions = serde_json::to_string(&allowed_actions)?;
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
         let stored_rules = stored_approval_rules(&approval_rules)?;
-        let (mut transaction, _) = self.write().await?;
         if let Some(expected) = expected_revision {
             let revision: Option<i64> =
                 sqlx::query_scalar("SELECT revision FROM supertag_v2_tags WHERE tag_id=$1")
                     .bind(tag_id)
-                    .fetch_optional(&mut *transaction)
+                    .fetch_optional(&mut **transaction)
                     .await?;
             if revision.unwrap_or(0) as u64 != expected {
                 return Err(StoreError::Conflict("Tag revision changed".into()));
             }
         }
-        crate::github_workspaces::validate_tag_in(&mut transaction, workspace.as_ref()).await?;
+        crate::github_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
         let display_name =
-            crate::tags::active_name_in(&mut transaction, tag_id, display_name.as_deref()).await?;
+            crate::tags::active_name_in(transaction, tag_id, display_name.as_deref()).await?;
         let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
@@ -396,8 +405,7 @@ impl Store {
             .bind(stored_rules)
             .bind(execution.as_ref().map(Message::encode_to_vec))
             .bind(&display_name)
-            .fetch_one(&mut *transaction).await?;
-        transaction.commit().await?;
+            .fetch_one(&mut **transaction).await?;
         Ok(Tag {
             tag_id: tag_id.into(),
             instructions: instructions.into(),

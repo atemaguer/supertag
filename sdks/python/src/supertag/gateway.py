@@ -98,6 +98,7 @@ class _Services:
         self.mailbox = runtime_pb2_grpc.MailboxStub(channel)
         self.live_inputs = runtime_pb2_grpc.LiveInputsStub(channel)
         self.policy = policy_pb2_grpc.PolicyCatalogStub(channel)
+        self.manifest_relationships = runtime_pb2_grpc.ManifestRelationshipsStub(channel)
         self.surfaces = policy_pb2_grpc.SurfacePolicyCatalogStub(channel)
         self.github_workspaces = github_workspaces_pb2_grpc.GithubWorkspacesStub(channel)
         self.github_publications = github_publications_pb2_grpc.GithubPublicationsStub(channel)

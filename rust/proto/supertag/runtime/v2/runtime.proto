@@ -46,7 +46,22 @@ service OperatorEvents {
 // Applies owned Tag relationships under one serialized Control Plane write.
 service ManifestRelationships {
   rpc ReconcileTag(ReconcileTagRelationshipsRequest) returns (ReconcileTagRelationshipsResponse);
+  rpc ProvisionTags(ProvisionTagsRequest) returns (ProvisionTagsResponse);
 }
+
+// Creates the declared Tags and their policy relationships atomically. A Tag
+// that already exists is left as-is.
+message ProvisionTagsRequest {
+  repeated ProvisionTag tags = 1;
+}
+
+message ProvisionTag {
+  PutTagRequest tag = 1;
+  repeated string role_ids = 2;
+  repeated string mailbox_senders = 3;
+}
+
+message ProvisionTagsResponse {}
 
 message ReconcileTagRelationshipsRequest {
   string tag_id = 1;

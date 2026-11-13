@@ -1157,6 +1157,124 @@ class OperatorEvents:
             _registered_method=True)
 
 
+class ManifestRelationshipsStub:
+    """Applies owned Tag relationships under one serialized Control Plane write.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ReconcileTag = channel.unary_unary(
+                '/supertag.runtime.v2.ManifestRelationships/ReconcileTag',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsResponse.FromString,
+                _registered_method=True)
+        self.ProvisionTags = channel.unary_unary(
+                '/supertag.runtime.v2.ManifestRelationships/ProvisionTags',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.FromString,
+                _registered_method=True)
+
+
+class ManifestRelationshipsServicer:
+    """Applies owned Tag relationships under one serialized Control Plane write.
+    """
+
+    def ReconcileTag(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ProvisionTags(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ManifestRelationshipsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ReconcileTag': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReconcileTag,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsResponse.SerializeToString,
+            ),
+            'ProvisionTags': grpc.unary_unary_rpc_method_handler(
+                    servicer.ProvisionTags,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.ManifestRelationships', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.ManifestRelationships', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ManifestRelationships:
+    """Applies owned Tag relationships under one serialized Control Plane write.
+    """
+
+    @staticmethod
+    def ReconcileTag(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ManifestRelationships/ReconcileTag',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileTagRelationshipsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ProvisionTags(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ManifestRelationships/ProvisionTags',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class ObjectivesStub:
     """Missing associated documentation comment in .proto file."""
 

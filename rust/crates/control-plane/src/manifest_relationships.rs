@@ -182,6 +182,22 @@ impl Store {
         input: &ReconcileTagRelationshipsRequest,
     ) -> Result<ReconcileTagRelationshipsResponse> {
         operator(principal)?;
+        let mut tx = if input.preview {
+            self.pool.begin().await?
+        } else {
+            self.write().await?.0
+        };
+        let response = self.reconcile_in(&mut tx, principal, input).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    async fn reconcile_in(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        principal: &str,
+        input: &ReconcileTagRelationshipsRequest,
+    ) -> Result<ReconcileTagRelationshipsResponse> {
         let owner = manager(&input.manager)?;
         name("Tag ID", &input.tag_id)?;
         if input.role_ids.len() + input.mailbox_senders.len() > MAX_RELATIONSHIPS {
@@ -200,12 +216,7 @@ impl Store {
                 desired.insert((kind, related.clone()));
             }
         }
-        let mut tx = if input.preview {
-            self.pool.begin().await?
-        } else {
-            self.write().await?.0
-        };
-        tags::require_active(&mut tx, &input.tag_id).await?;
+        tags::require_active(tx, &input.tag_id).await?;
         // A preview may name relationships created earlier in the same manifest.
         // The committing call always validates the final, authoritative identities.
         if !input.preview {
@@ -216,7 +227,7 @@ impl Store {
                             "SELECT status FROM supertag_v2_roles WHERE role_id=$1",
                         )
                         .bind(related)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await?;
                         if status != Some(RoleStatus::Active as i64) {
                             return Err(StoreError::FailedPrecondition(
@@ -224,7 +235,7 @@ impl Store {
                             ));
                         }
                     }
-                    Kind::Mailbox => tags::require_active(&mut tx, related).await?,
+                    Kind::Mailbox => tags::require_active(tx, related).await?,
                 }
             }
         }
@@ -233,7 +244,7 @@ impl Store {
             "SELECT kind,related_id,manager,observed_version FROM supertag_v2_manifest_relationships WHERE tag_id=$1 ORDER BY kind,related_id",
         )
         .bind(&input.tag_id)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
         let mut stored = BTreeMap::new();
         for row in owned {
@@ -269,7 +280,7 @@ impl Store {
         let mut effects = Vec::new();
         for key in keys {
             let (kind, related) = &key;
-            let before = current(&mut tx, &input.tag_id, *kind, related).await?;
+            let before = current(tx, &input.tag_id, *kind, related).await?;
             let entry = stored.get(&key);
             let same_version = entry.is_some_and(|entry| entry.observed_version == before.version);
             let previous_owner = entry
@@ -311,31 +322,62 @@ impl Store {
             let now = self.execution_now_ms();
             for ((kind, related), present, ownership_only) in effects {
                 if !ownership_only {
-                    apply(
-                        &mut tx,
-                        principal,
-                        &input.tag_id,
-                        kind,
-                        &related,
-                        present,
-                        now,
-                    )
-                    .await?;
+                    apply(tx, principal, &input.tag_id, kind, &related, present, now).await?;
                 }
                 if present {
-                    let after = current(&mut tx, &input.tag_id, kind, &related).await?;
+                    let after = current(tx, &input.tag_id, kind, &related).await?;
                     sqlx::query("INSERT INTO supertag_v2_manifest_relationships (tag_id,kind,related_id,manager,observed_version) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(tag_id,kind,related_id) DO UPDATE SET manager=excluded.manager,observed_version=excluded.observed_version")
                         .bind(&input.tag_id).bind(kind.field()).bind(related).bind(owner).bind(after.version)
-                        .execute(&mut *tx).await?;
+                        .execute(&mut **tx).await?;
                 } else {
                     sqlx::query("DELETE FROM supertag_v2_manifest_relationships WHERE tag_id=$1 AND kind=$2 AND related_id=$3 AND manager=$4")
                         .bind(&input.tag_id).bind(kind.field()).bind(related).bind(owner)
-                        .execute(&mut *tx).await?;
+                        .execute(&mut **tx).await?;
                 }
             }
         }
-        tx.commit().await?;
         Ok(ReconcileTagRelationshipsResponse { changes, conflicts })
+    }
+    async fn provision_tags(&self, principal: &str, input: ProvisionTagsRequest) -> Result<()> {
+        operator(principal)?;
+        if input.tags.len() > MAX_RELATIONSHIPS {
+            return Err(invalid("too many provisioned Tags"));
+        }
+        let (mut tx, _) = self.write().await?;
+        let mut seen = BTreeSet::new();
+        let mut created = Vec::new();
+        for entry in input.tags {
+            let mut tag = entry
+                .tag
+                .ok_or_else(|| invalid("missing provisioned Tag"))?;
+            name("Tag ID", &tag.tag_id)?;
+            if !seen.insert(tag.tag_id.clone()) {
+                return Err(invalid("duplicate provisioned Tag"));
+            }
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT revision FROM supertag_v2_tags WHERE tag_id=$1")
+                    .bind(&tag.tag_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if exists.is_some() {
+                continue;
+            }
+            tag.expected_revision = Some(0);
+            let tag = Self::put_tag_in(&mut tx, tag).await?;
+            created.push(ReconcileTagRelationshipsRequest {
+                tag_id: tag.tag_id,
+                manager: "provision".into(),
+                role_ids: entry.role_ids,
+                mailbox_senders: entry.mailbox_senders,
+                ..Default::default()
+            });
+        }
+        for relationships in created {
+            self.reconcile_in(&mut tx, principal, &relationships)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }
 
@@ -361,5 +403,15 @@ impl manifest_relationships_server::ManifestRelationships for ControlPlane {
                 .reconcile_tag_relationships(&principal, request.get_ref())
                 .await?,
         ))
+    }
+    async fn provision_tags(
+        &self,
+        request: Request<ProvisionTagsRequest>,
+    ) -> std::result::Result<Response<ProvisionTagsResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        self.store
+            .provision_tags(&principal, request.into_inner())
+            .await?;
+        Ok(Response::new(ProvisionTagsResponse {}))
     }
 }

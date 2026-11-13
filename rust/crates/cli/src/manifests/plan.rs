@@ -28,6 +28,7 @@ pub(super) struct Catalog<'a> {
     relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
     manager: &'a str,
     force_conflicts: bool,
+    create_only: bool,
 }
 
 enum Write {
@@ -38,6 +39,8 @@ enum Write {
     Permission(PutPermissionSetRequest),
     Role(PutRoleRequest),
     Tag(PutTagRequest),
+    ProvisionTag(ProvisionTag),
+    ProvisionTags(ProvisionTagsRequest),
     Team(CreateTeamRequest),
     UpdateTeam(UpdateTeamRequest),
     Location(PutSurfaceLocationRequest),
@@ -117,6 +120,7 @@ impl<'a> Catalog<'a> {
         token: &'a str,
         manager: &'a str,
         force_conflicts: bool,
+        create_only: bool,
     ) -> Result<Self> {
         macro_rules! client {
             ($module:ident, $client:ident) => {
@@ -147,6 +151,7 @@ impl<'a> Catalog<'a> {
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
             manager,
             force_conflicts,
+            create_only,
         })
     }
 
@@ -175,6 +180,34 @@ impl<'a> Catalog<'a> {
                     write,
                     details: vec![],
                 });
+            }
+        }
+        if self.create_only {
+            let mut tags = Vec::new();
+            changes.retain_mut(|change| {
+                if let Write::ProvisionTag(tag) = &mut change.write {
+                    tags.push(std::mem::take(tag));
+                    return false;
+                }
+                true
+            });
+            if !tags.is_empty() {
+                let insert_at = changes.iter().position(|change| {
+                    matches!(
+                        change.write,
+                        Write::Team(_) | Write::Location(_) | Write::Objective(_)
+                    )
+                });
+                let index = insert_at.unwrap_or(changes.len());
+                changes.insert(
+                    index,
+                    Change {
+                        label: "provisioned Tags".into(),
+                        action: "create",
+                        write: Write::ProvisionTags(ProvisionTagsRequest { tags }),
+                        details: vec![],
+                    },
+                );
             }
         }
         // Assignments affect the policy frozen on an Objective's first Task.
@@ -216,6 +249,12 @@ impl<'a> Catalog<'a> {
                     token,
                 )?))
                 .await?;
+                if self.create_only
+                    && let Some(prior) = prior
+                {
+                    declarations.accounts.insert(name.into(), prior);
+                    return Ok(None);
+                }
                 let revision = prior.as_ref().map(|prior| prior.revision);
                 ensure!(
                     prior
@@ -245,6 +284,9 @@ impl<'a> Catalog<'a> {
                     token,
                 )?))
                 .await?;
+                if self.create_only && prior.is_some() {
+                    return Ok(None);
+                }
                 prior
                     .as_ref()
                     .is_none_or(|value| value.source != source)
@@ -261,6 +303,19 @@ impl<'a> Catalog<'a> {
                     })
             }
             Resource::Workspace(mut value) => {
+                let prior = lookup(self.workspaces.get(request(
+                    GetGithubWorkspaceRequest {
+                        workspace_id: name.into(),
+                    },
+                    token,
+                )?))
+                .await?;
+                if self.create_only && prior.is_some() {
+                    declarations
+                        .ids
+                        .insert((Kind::Workspace, name.into()), name.into());
+                    return Ok(None);
+                }
                 validate_manifest_workspace(&mut value)?;
                 let account = self
                     .account(
@@ -280,13 +335,6 @@ impl<'a> Catalog<'a> {
                         ),
                     "Workspace source requires an enabled GitHub Surface Account"
                 );
-                let prior = lookup(self.workspaces.get(request(
-                    GetGithubWorkspaceRequest {
-                        workspace_id: name.into(),
-                    },
-                    token,
-                )?))
-                .await?;
                 let revision = prior.as_ref().map(|value| value.revision);
                 value.revision = revision.unwrap_or_default();
                 declarations
@@ -306,6 +354,14 @@ impl<'a> Catalog<'a> {
             Resource::ContextSet(mut value) => {
                 let prior =
                     lookup(self.policy.get_context_set(request(reference(), token)?)).await?;
+                if self.create_only
+                    && let Some(prior) = prior
+                {
+                    declarations
+                        .ids
+                        .insert((Kind::ContextSet, name.into()), prior.set_id);
+                    return Ok(None);
+                }
                 normalize_manifest_context(&mut value, prior.as_ref())?;
                 let revision = prior.as_ref().map(|value| value.revision);
                 preserve_identity(
@@ -335,6 +391,14 @@ impl<'a> Catalog<'a> {
             Resource::PermissionSet(mut value) => {
                 let prior =
                     lookup(self.policy.get_permission_set(request(reference(), token)?)).await?;
+                if self.create_only
+                    && let Some(prior) = prior
+                {
+                    declarations
+                        .ids
+                        .insert((Kind::PermissionSet, name.into()), prior.set_id);
+                    return Ok(None);
+                }
                 normalize_manifest_permission(&mut value, prior.as_ref())?;
                 let revision = prior.as_ref().map(|value| value.revision);
                 preserve_identity(
@@ -367,6 +431,12 @@ impl<'a> Catalog<'a> {
             }
             Resource::Role(mut value) => {
                 let prior = lookup(self.policy.get_role(request(reference(), token)?)).await?;
+                if self.create_only
+                    && let Some(prior) = prior
+                {
+                    declarations.roles.insert(name.into(), prior);
+                    return Ok(None);
+                }
                 normalize_manifest_role(&mut value, prior.as_ref())?;
                 self.resolve_sets(
                     declarations,
@@ -397,6 +467,16 @@ impl<'a> Catalog<'a> {
             Resource::Tag(spec) => return self.plan_tag(spec, name, declarations, followups).await,
             Resource::Team(spec) => return self.plan_team(spec, name, declarations).await,
             Resource::SurfaceLocation(mut value) => {
+                let prior = lookup(self.surfaces.get_surface_location(request(
+                    GetSurfaceLocationRequest {
+                        location_id: name.into(),
+                    },
+                    token,
+                )?))
+                .await?;
+                if self.create_only && prior.is_some() {
+                    return Ok(None);
+                }
                 let account = self.account(declarations, &value.account_id).await?;
                 validate_manifest_location(&value, &account)?;
                 ensure!(
@@ -414,13 +494,6 @@ impl<'a> Catalog<'a> {
                 .await?;
                 self.resolve_sets(declarations, Kind::ContextSet, &mut value.context_set_ids)
                     .await?;
-                let prior = lookup(self.surfaces.get_surface_location(request(
-                    GetSurfaceLocationRequest {
-                        location_id: name.into(),
-                    },
-                    token,
-                )?))
-                .await?;
                 ensure!(
                     prior
                         .as_ref()
@@ -535,6 +608,9 @@ impl<'a> Catalog<'a> {
         followups: &mut Vec<Change>,
     ) -> Result<Option<(bool, Write)>> {
         let prior = self.tag(name).await?;
+        if self.create_only && prior.is_some() {
+            return Ok(None);
+        }
         ensure!(
             prior
                 .as_ref()
@@ -646,6 +722,16 @@ impl<'a> Catalog<'a> {
             force_conflicts: self.force_conflicts,
             preview: true,
         };
+        if self.create_only {
+            return Ok(Some((
+                false,
+                Write::ProvisionTag(ProvisionTag {
+                    tag: Some(value),
+                    role_ids: reconciliation.role_ids,
+                    mailbox_senders: reconciliation.mailbox_senders,
+                }),
+            )));
+        }
         let details =
             if prior.is_some() {
                 let response = self
@@ -718,6 +804,17 @@ impl<'a> Catalog<'a> {
                 .get_team(request(GetTeamRequest { team: name.into() }, self.token)?),
         )
         .await?;
+        if self.create_only
+            && let Some(prior) = prior
+        {
+            declarations
+                .ids
+                .insert((Kind::Team, name.into()), prior.team_id.clone());
+            declarations
+                .ids
+                .insert((Kind::Team, prior.name), prior.team_id);
+            return Ok(None);
+        }
         ensure!(
             prior.as_ref().is_none_or(|prior| prior.team_id == name),
             "Team name belongs to a different ID"
@@ -811,6 +908,16 @@ impl<'a> Catalog<'a> {
         name: &str,
         declarations: &Declarations,
     ) -> Result<Option<(bool, Write)>> {
+        let prior = lookup(self.objectives.get_objective(request(
+            GetObjectiveRequest {
+                objective_id: name.into(),
+            },
+            self.token,
+        )?))
+        .await?;
+        if self.create_only && prior.is_some() {
+            return Ok(None);
+        }
         self.require_tag(declarations, &spec.owner_tag_id).await?;
         ensure!(
             spec.deadline.is_none() || spec.deadline_ms.is_none(),
@@ -857,13 +964,6 @@ impl<'a> Catalog<'a> {
             runtime_actions: actions,
         };
         validate_manifest_objective(&value)?;
-        let prior = lookup(self.objectives.get_objective(request(
-            GetObjectiveRequest {
-                objective_id: name.into(),
-            },
-            self.token,
-        )?))
-        .await?;
         if let Some(prior) = prior {
             ensure!(
                 prior.owner_tag_id == value.owner_tag_id
@@ -908,7 +1008,7 @@ impl<'a> Catalog<'a> {
         Ok(Some((false, Write::Objective(value))))
     }
 
-    pub(super) async fn apply(&mut self, change: Change) -> Result<()> {
+    pub(super) async fn apply(&mut self, change: Change, report: bool) -> Result<()> {
         let token = self.token;
         let result = match change.write {
             Write::Account(input) => self
@@ -935,6 +1035,12 @@ impl<'a> Catalog<'a> {
             Write::Role(input) => self
                 .policy
                 .put_role(request(input, token)?)
+                .await
+                .map(|_| ()),
+            Write::ProvisionTag(_) => unreachable!("provisioned Tags are grouped in the plan"),
+            Write::ProvisionTags(input) => self
+                .relationships
+                .provision_tags(request(input, token)?)
                 .await
                 .map(|_| ()),
             Write::Tag(input) => self
@@ -974,7 +1080,9 @@ impl<'a> Catalog<'a> {
                 .map(|_| ()),
         };
         result.with_context(|| format!("apply {}", change.label))?;
-        println!("configured {}", change.label);
+        if report {
+            println!("configured {}", change.label);
+        }
         Ok(())
     }
 }

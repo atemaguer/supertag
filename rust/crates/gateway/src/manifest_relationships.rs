@@ -29,4 +29,21 @@ impl manifest_relationships_server::ManifestRelationships for Gateway {
         )
         .await
     }
+    async fn provision_tags(
+        &self,
+        request: Request<ProvisionTagsRequest>,
+    ) -> Result<Response<ProvisionTagsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                manifest_relationships_client::ManifestRelationshipsClient::new(channel)
+                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                    .provision_tags(request)
+                    .await
+            },
+        )
+        .await
+    }
 }

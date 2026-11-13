@@ -27,6 +27,8 @@ const (
 	ConversationsName = "supertag.runtime.v2.Conversations"
 	// OperatorEventsName is the fully-qualified name of the OperatorEvents service.
 	OperatorEventsName = "supertag.runtime.v2.OperatorEvents"
+	// ManifestRelationshipsName is the fully-qualified name of the ManifestRelationships service.
+	ManifestRelationshipsName = "supertag.runtime.v2.ManifestRelationships"
 	// ObjectivesName is the fully-qualified name of the Objectives service.
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// InboxName is the fully-qualified name of the Inbox service.
@@ -144,6 +146,12 @@ const (
 	ConversationsListMessageEventsProcedure = "/supertag.runtime.v2.Conversations/ListMessageEvents"
 	// OperatorEventsWatchProcedure is the fully-qualified name of the OperatorEvents's Watch RPC.
 	OperatorEventsWatchProcedure = "/supertag.runtime.v2.OperatorEvents/Watch"
+	// ManifestRelationshipsReconcileTagProcedure is the fully-qualified name of the
+	// ManifestRelationships's ReconcileTag RPC.
+	ManifestRelationshipsReconcileTagProcedure = "/supertag.runtime.v2.ManifestRelationships/ReconcileTag"
+	// ManifestRelationshipsProvisionTagsProcedure is the fully-qualified name of the
+	// ManifestRelationships's ProvisionTags RPC.
+	ManifestRelationshipsProvisionTagsProcedure = "/supertag.runtime.v2.ManifestRelationships/ProvisionTags"
 	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
 	// CreateObjective RPC.
 	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
@@ -1175,6 +1183,104 @@ type UnimplementedOperatorEventsHandler struct{}
 
 func (UnimplementedOperatorEventsHandler) Watch(context.Context, *connect.Request[runtimev2.WatchRequest], *connect.ServerStream[runtimev2.WatchEvent]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.OperatorEvents.Watch is not implemented"))
+}
+
+// ManifestRelationshipsClient is a client for the supertag.runtime.v2.ManifestRelationships
+// service.
+type ManifestRelationshipsClient interface {
+	ReconcileTag(context.Context, *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error)
+	ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error)
+}
+
+// NewManifestRelationshipsClient constructs a client for the
+// supertag.runtime.v2.ManifestRelationships service. By default, it uses the Connect protocol with
+// the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To use
+// the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewManifestRelationshipsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ManifestRelationshipsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	manifestRelationshipsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("ManifestRelationships").Methods()
+	return &manifestRelationshipsClient{
+		reconcileTag: connect.NewClient[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse](
+			httpClient,
+			baseURL+ManifestRelationshipsReconcileTagProcedure,
+			connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileTag")),
+			connect.WithClientOptions(opts...),
+		),
+		provisionTags: connect.NewClient[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse](
+			httpClient,
+			baseURL+ManifestRelationshipsProvisionTagsProcedure,
+			connect.WithSchema(manifestRelationshipsMethods.ByName("ProvisionTags")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// manifestRelationshipsClient implements ManifestRelationshipsClient.
+type manifestRelationshipsClient struct {
+	reconcileTag  *connect.Client[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse]
+	provisionTags *connect.Client[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse]
+}
+
+// ReconcileTag calls supertag.runtime.v2.ManifestRelationships.ReconcileTag.
+func (c *manifestRelationshipsClient) ReconcileTag(ctx context.Context, req *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error) {
+	return c.reconcileTag.CallUnary(ctx, req)
+}
+
+// ProvisionTags calls supertag.runtime.v2.ManifestRelationships.ProvisionTags.
+func (c *manifestRelationshipsClient) ProvisionTags(ctx context.Context, req *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error) {
+	return c.provisionTags.CallUnary(ctx, req)
+}
+
+// ManifestRelationshipsHandler is an implementation of the
+// supertag.runtime.v2.ManifestRelationships service.
+type ManifestRelationshipsHandler interface {
+	ReconcileTag(context.Context, *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error)
+	ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error)
+}
+
+// NewManifestRelationshipsHandler builds an HTTP handler from the service implementation. It
+// returns the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewManifestRelationshipsHandler(svc ManifestRelationshipsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	manifestRelationshipsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("ManifestRelationships").Methods()
+	manifestRelationshipsReconcileTagHandler := connect.NewUnaryHandler(
+		ManifestRelationshipsReconcileTagProcedure,
+		svc.ReconcileTag,
+		connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileTag")),
+		connect.WithHandlerOptions(opts...),
+	)
+	manifestRelationshipsProvisionTagsHandler := connect.NewUnaryHandler(
+		ManifestRelationshipsProvisionTagsProcedure,
+		svc.ProvisionTags,
+		connect.WithSchema(manifestRelationshipsMethods.ByName("ProvisionTags")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.ManifestRelationships/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case ManifestRelationshipsReconcileTagProcedure:
+			manifestRelationshipsReconcileTagHandler.ServeHTTP(w, r)
+		case ManifestRelationshipsProvisionTagsProcedure:
+			manifestRelationshipsProvisionTagsHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedManifestRelationshipsHandler returns CodeUnimplemented from all methods.
+type UnimplementedManifestRelationshipsHandler struct{}
+
+func (UnimplementedManifestRelationshipsHandler) ReconcileTag(context.Context, *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ReconcileTag is not implemented"))
+}
+
+func (UnimplementedManifestRelationshipsHandler) ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ProvisionTags is not implemented"))
 }
 
 // ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
