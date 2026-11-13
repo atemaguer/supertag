@@ -765,23 +765,27 @@ async fn sync_directory(directory: &Path) -> Result<(), Status> {
 }
 
 async fn open_blob(path: &Path) -> Result<tokio::fs::File, Status> {
+    open_optional_blob(path)
+        .await?
+        .ok_or_else(|| Status::data_loss("stored blob is missing"))
+}
+
+async fn open_optional_blob(path: &Path) -> Result<Option<tokio::fs::File>, Status> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
-        let file = OpenOptions::new()
+        let file = match OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
-            .map_err(|error| {
-                if error.kind() == ErrorKind::NotFound {
-                    Status::data_loss("stored blob is missing")
-                } else {
-                    storage_error(error)
-                }
-            })?;
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(storage_error(error)),
+        };
         if !file.metadata().map_err(storage_error)?.is_file() {
             return Err(Status::data_loss("blob storage entry is not a file"));
         }
-        Ok(tokio::fs::File::from_std(file))
+        Ok(Some(tokio::fs::File::from_std(file)))
     })
     .await
     .map_err(|_| Status::internal("blob file open failed"))?

@@ -494,6 +494,30 @@ class ListArtifactVolumeCopiesResponse(_message.Message):
     next_before_order: int
     def __init__(self, copies: _Optional[_Iterable[_Union[ArtifactVolumeCopy, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
 
+class LocateArtifactVolumeCopiesRequest(_message.Message):
+    __slots__ = ("operator", "attempt", "volume_ids")
+    OPERATOR_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_IDS_FIELD_NUMBER: _ClassVar[int]
+    operator: DownloadArtifactFileRequest
+    attempt: GetAcquiredArtifactFileRequest
+    volume_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operator: _Optional[_Union[DownloadArtifactFileRequest, _Mapping]] = ..., attempt: _Optional[_Union[GetAcquiredArtifactFileRequest, _Mapping]] = ..., volume_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ArtifactVolumeLocation(_message.Message):
+    __slots__ = ("volume", "storage_key")
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
+    STORAGE_KEY_FIELD_NUMBER: _ClassVar[int]
+    volume: ArtifactVolume
+    storage_key: str
+    def __init__(self, volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., storage_key: _Optional[str] = ...) -> None: ...
+
+class LocateArtifactVolumeCopiesResponse(_message.Message):
+    __slots__ = ("locations",)
+    LOCATIONS_FIELD_NUMBER: _ClassVar[int]
+    locations: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeLocation]
+    def __init__(self, locations: _Optional[_Iterable[_Union[ArtifactVolumeLocation, _Mapping]]] = ...) -> None: ...
+
 class ArtifactPublication(_message.Message):
     __slots__ = ("publication_id", "source_objective_id", "producer", "artifact_id", "files", "audience_objective_ids", "source_owner_tag_id", "assessment", "approved_by", "approved_at_ms", "supersedes_publication_id", "status", "revision", "withdrawn_by", "withdrawn_at_ms")
     PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]

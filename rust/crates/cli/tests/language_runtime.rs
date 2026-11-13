@@ -218,6 +218,10 @@ struct LanguageServices {
 
 impl LanguageServices {
     async fn start(directory: &Path) -> Result<Self> {
+        Self::start_with_volume(directory, None).await
+    }
+
+    async fn start_with_volume(directory: &Path, volume: Option<&Path>) -> Result<Self> {
         let gateway_token = Uuid::new_v4().to_string();
         let operator_token = Uuid::new_v4().to_string();
         let host_token = Uuid::new_v4().to_string();
@@ -239,6 +243,11 @@ impl LanguageServices {
             .arg(directory.join("blobs"))
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+        if let Some(volume) = volume {
+            gateway
+                .arg("--artifact-volume")
+                .arg(format!("inputs={}", volume.display()));
+        }
         let (gateway, public) = service(gateway).await?;
         Ok(Self {
             control,

@@ -53,7 +53,16 @@ pub enum CaptureCommand {
 }
 
 pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
+    let (channel, token) = if matches!(command, CaptureCommand::Download { .. }) {
+        let (uri, token) = crate::operator_target(connection)?;
+        let channel = crate::network::endpoint_with_timeout(uri, false, Duration::from_secs(65))
+            .await?
+            .connect()
+            .await?;
+        (channel, token)
+    } else {
+        connect_operator(connection).await?
+    };
     let mut catalog = ArtifactCatalogClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);

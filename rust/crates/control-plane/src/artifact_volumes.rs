@@ -60,6 +60,111 @@ async fn record(
     sqlx::query("INSERT INTO supertag_v2_artifact_volume_operations (principal,operation_id,request_digest,response) VALUES ($1,$2,$3,$4)").bind(principal).bind(operation).bind(digest).bind(response.encode_to_vec()).execute(&mut **tx).await?;
     Ok(())
 }
+/// Version 48 receipts store the file path inside the immutable protobuf.
+pub(crate) async fn backfill_file_paths(tx: &mut Transaction<'_, Any>) -> Result<()> {
+    let mut after = 0i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT copy_id, payload, created_order FROM supertag_v2_artifact_volume_copies
+             WHERE created_order>$1 ORDER BY created_order LIMIT 32",
+        )
+        .bind(after)
+        .fetch_all(&mut **tx)
+        .await?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+        for row in rows {
+            let copy: ArtifactVolumeCopy = decode(&row.try_get::<Vec<u8>, _>("payload")?)?;
+            let file = copy
+                .file
+                .ok_or_else(|| invalid("stored Volume copy has no file"))?;
+            validate_artifact_path(&file.path).map_err(|error| invalid(error.message()))?;
+            sqlx::query(
+                "UPDATE supertag_v2_artifact_volume_copies SET file_path=$1 WHERE copy_id=$2",
+            )
+            .bind(file.path)
+            .bind(row.try_get::<String, _>("copy_id")?)
+            .execute(&mut **tx)
+            .await?;
+            after = row.try_get("created_order")?;
+        }
+    }
+}
+
+pub(crate) async fn locations_in(
+    tx: &mut Transaction<'_, Any>,
+    artifact: &CapturedArtifact,
+    file: ArtifactFile,
+    ids: &[String],
+) -> Result<LocateArtifactVolumeCopiesResponse> {
+    if ids.len() > 32 || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(invalid(
+            "Volume lookup requires at most 32 ordered unique IDs",
+        ));
+    }
+    let summary = artifact.summary.as_ref().ok_or_else(missing)?;
+    let producer = summary.producer.as_ref().ok_or_else(missing)?;
+    let blob = file.blob.as_ref().ok_or_else(missing)?;
+    let storage_key = format!("attempts/{}/sha256/{}", producer.attempt_id, blob.sha256);
+    let mut locations = Vec::with_capacity(ids.len());
+    for id in ids {
+        name("Volume ID", id)?;
+        // The partial index skips reservations and reaches just this file's
+        // oldest verified copy for each candidate Volume.
+        let row = sqlx::query(
+            "SELECT c.payload, v.volume_id, v.source, v.revision
+             FROM supertag_v2_artifact_volume_copies c
+             JOIN supertag_v2_artifact_volumes v ON v.volume_id=c.volume_id
+             WHERE c.artifact_id=$1 AND c.file_path=$2 AND c.volume_id=$3
+               AND c.state=2 AND v.deleted=0
+             ORDER BY c.created_order LIMIT 1",
+        )
+        .bind(&summary.artifact_id)
+        .bind(&file.path)
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let Some(row) = row else { continue };
+        let copy: ArtifactVolumeCopy = decode(&row.try_get::<Vec<u8>, _>("payload")?)?;
+        let active = volume(&row)?;
+        if copy.artifact_id != summary.artifact_id
+            || copy.state() != ArtifactVolumeCopyState::Verified
+            || copy.verified_at_ms.is_none()
+            || copy.volume.as_ref() != Some(&active)
+            || copy.file.as_ref() != Some(&file)
+            || copy.storage_key != storage_key
+        {
+            continue;
+        }
+        locations.push(ArtifactVolumeLocation {
+            volume: Some(active),
+            storage_key: storage_key.clone(),
+        });
+    }
+    Ok(LocateArtifactVolumeCopiesResponse { locations })
+}
+
+pub(crate) async fn operator_locations(
+    store: &Store,
+    principal: &str,
+    request: &DownloadArtifactFileRequest,
+    ids: &[String],
+) -> Result<LocateArtifactVolumeCopiesResponse> {
+    operator(principal)?;
+    name("artifact ID", &request.artifact_id)?;
+    validate_artifact_path(&request.path).map_err(|error| invalid(error.message()))?;
+    let mut tx = store.pool.begin().await?;
+    let capture = access(&mut tx, principal, &request.artifact_id).await?;
+    let file = capture
+        .files
+        .iter()
+        .find(|file| file.path == request.path)
+        .cloned()
+        .ok_or_else(missing)?;
+    locations_in(&mut tx, &capture, file, ids).await
+}
+
 async fn unused(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_artifact_volume_copies WHERE volume_id=$1",
@@ -282,7 +387,7 @@ impl Store {
                 "artifact Volume copy receipt exceeds the transport limit",
             ));
         }
-        sqlx::query("INSERT INTO supertag_v2_artifact_volume_copies (copy_id,principal,operation_id,volume_id,artifact_id,request_digest,state,payload,created_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)").bind(&result.copy_id).bind(principal).bind(&input.operation_id).bind(&input.volume_id).bind(&input.artifact_id).bind(digest).bind(result.state as i64).bind(result.encode_to_vec()).bind(order).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_artifact_volume_copies (copy_id,principal,operation_id,volume_id,artifact_id,request_digest,state,payload,created_order,file_path) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)").bind(&result.copy_id).bind(principal).bind(&input.operation_id).bind(&input.volume_id).bind(&input.artifact_id).bind(digest).bind(result.state as i64).bind(result.encode_to_vec()).bind(order).bind(&input.path).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(result)
     }

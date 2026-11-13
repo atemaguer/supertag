@@ -23,7 +23,13 @@ async fn interrupt_input_receipt(
         services.operator_token.clone(),
         "operator:local".into(),
     )?;
-    let transfers = GatewayTransfers::new(gateway.clone(), Some(root.join("blobs")))?;
+    let transfers = GatewayTransfers::new(gateway.clone(), Some(root.join("blobs")))?
+        .with_artifact_volumes(
+            supertag_gateway::transfers::volumes::ArtifactVolumeMappings::new(vec![(
+                "inputs".into(),
+                root.join("volume"),
+            )])?,
+        )?;
     let response = Arc::new(tokio::sync::Notify::new());
     let gate = {
         let response = response.clone();
@@ -108,7 +114,10 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch() -> 
     )?;
     let native = claude_fixture(root.path())?;
     let claude = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
-    let services = LanguageServices::start(root.path()).await?;
+    let volume = root.path().canonicalize()?.join("volume");
+    std::fs::create_dir(&volume)?;
+    std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
+    let services = LanguageServices::start_with_volume(root.path(), Some(&volume)).await?;
     // A fixture Task creates and submits a file through the real declared-output lifecycle.
     services
         .operator(&[
@@ -211,6 +220,35 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch() -> 
     );
     assert_eq!(services.operator(&args).await?, queued);
 
+    services
+        .operator(&[
+            "volume",
+            "put",
+            "inputs",
+            "--source",
+            &format!("file://{}", volume.display()),
+            "--operation-id",
+            "register-inputs-volume",
+        ])
+        .await?;
+    let copy = services
+        .operator(&[
+            "volume",
+            "copy",
+            "inputs",
+            artifact_id,
+            "--path",
+            "evidence.txt",
+            "--expected-revision",
+            "1",
+            "--operation-id",
+            "copy-input-evidence",
+        ])
+        .await?;
+    let digest = copy["file"]["blob"]["sha256"]
+        .as_str()
+        .context("verified Volume copy digest")?;
+    std::fs::remove_file(root.path().join("blobs").join(digest))?;
     // The accepted Objective Session's harness remains pinned. Verify delivery from
     // Claude's actual manager with the input path supplied before native launch.
     let attempt = interrupt_input_receipt(&services, root.path(), worker).await?;
@@ -222,5 +260,6 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch() -> 
     assert_eq!(result["result"], "verified supplied Task artifact input");
     assert_eq!(result["workspace_delivery"]["changed_files"], 0);
     assert!(!source.join("inputs").exists());
+    assert!(!root.path().join("blobs").join(digest).exists());
     services.stop().await
 }

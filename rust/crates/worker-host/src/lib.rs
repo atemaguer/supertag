@@ -287,7 +287,11 @@ pub async fn run(
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
-            options.gateway.clone().connect_lazy(),
+            options
+                .gateway
+                .clone()
+                .timeout(Duration::from_secs(65))
+                .connect_lazy(),
             headers.clone(),
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)

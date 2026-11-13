@@ -199,6 +199,11 @@ class ArtifactDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.FromString,
                 _registered_method=True)
+        self.LocateVolumeCopies = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactDirectory/LocateVolumeCopies',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.FromString,
+                _registered_method=True)
 
 
 class ArtifactDirectoryServicer:
@@ -260,6 +265,12 @@ class ArtifactDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def LocateVolumeCopies(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ArtifactDirectoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -307,6 +318,11 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
                     servicer.GetAcquiredFile,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.SerializeToString,
+            ),
+            'LocateVolumeCopies': grpc.unary_unary_rpc_method_handler(
+                    servicer.LocateVolumeCopies,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -554,6 +570,33 @@ class ArtifactDirectory:
             '/supertag.runtime.v2.ArtifactDirectory/GetAcquiredFile',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def LocateVolumeCopies(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactDirectory/LocateVolumeCopies',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.FromString,
             options,
             channel_credentials,
             insecure,

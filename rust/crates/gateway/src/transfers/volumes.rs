@@ -3,7 +3,7 @@ use super::*;
 use std::{
     collections::BTreeMap,
     ffi::CString,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     os::fd::{AsRawFd, FromRawFd},
 };
 use supertag_protocol::{artifacts::MAX_ARTIFACT_FILE_BYTES, volumes::file_volume_path};
@@ -90,6 +90,17 @@ impl ArtifactVolumeMappings {
         );
         self.objects = objects;
         Ok(self)
+    }
+
+    pub(super) fn candidate_ids(&self) -> Vec<String> {
+        let mut ids: Vec<_> = self
+            .files
+            .keys()
+            .chain(self.objects.keys())
+            .cloned()
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     fn resolve(&self, volume: &ArtifactVolume) -> Result<Storage, Status> {
@@ -190,7 +201,7 @@ fn verify_bytes(bytes: &[u8], blob: &BlobReference) -> Result<()> {
     );
     Ok(())
 }
-fn verify_at(parent: &File, blob: &BlobReference) -> Result<Vec<u8>> {
+fn verify_at(parent: &File, blob: &BlobReference, mut output: impl Write) -> Result<()> {
     let name = CString::new(blob.sha256.clone())?;
     let fd = unsafe {
         libc::openat(
@@ -212,11 +223,26 @@ fn verify_at(parent: &File, blob: &BlobReference) -> Result<Vec<u8>> {
             && before.len() == blob.byte_length,
         "artifact Volume object is not an owned regular file"
     );
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take(blob.byte_length + 1)
-        .read_to_end(&mut bytes)?;
-    verify_bytes(&bytes, blob)?;
+    let mut bytes = vec![0; CHECKPOINT_CHUNK_BYTES];
+    let mut digest = Sha256::new();
+    let mut length = 0u64;
+    loop {
+        let size = file.read(&mut bytes)?;
+        if size == 0 {
+            break;
+        }
+        length += size as u64;
+        ensure!(
+            length <= blob.byte_length,
+            "artifact Volume object exceeds its receipt"
+        );
+        digest.update(&bytes[..size]);
+        output.write_all(&bytes[..size])?;
+    }
+    ensure!(
+        length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
+        "artifact Volume bytes differ from the immutable receipt"
+    );
     let after = file.metadata()?;
     ensure!(
         before.len() == after.len()
@@ -229,7 +255,7 @@ fn verify_at(parent: &File, blob: &BlobReference) -> Result<Vec<u8>> {
     );
     file.sync_all()?;
     parent.sync_all()?;
-    Ok(bytes)
+    Ok(())
 }
 
 struct Staged {
@@ -259,7 +285,7 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
         )
     };
     if exists == 0 {
-        verify_at(&destination, blob)?;
+        verify_at(&destination, blob, std::io::sink())?;
     } else {
         if std::io::Error::last_os_error().kind() != ErrorKind::NotFound {
             return Err(std::io::Error::last_os_error().into());
@@ -321,11 +347,60 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
     // Reopen from the registered root, not only the descriptor used for staging.
     current(&mapping)?;
     let reopened = parent(&mapping, &copy.storage_key, blob, false)?;
-    verify_at(&reopened, blob)?;
+    verify_at(&reopened, blob, std::io::sink())?;
     current(&mapping)?;
     Ok(())
 }
+impl Storage {
+    async fn read(
+        self,
+        scratch: &Path,
+        key: &str,
+        blob: &BlobReference,
+    ) -> Result<tokio::fs::File, Status> {
+        match self {
+            Self::File(mapping) => {
+                let scratch = scratch.to_owned();
+                let key = key.to_owned();
+                let blob = blob.clone();
+                tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                    current(&mapping)?;
+                    let directory = parent(&mapping, &key, &blob, false)?;
+                    let mut snapshot = tempfile::tempfile_in(scratch)?;
+                    verify_at(&directory, &blob, &mut snapshot)?;
+                    current(&mapping)?;
+                    snapshot.rewind()?;
+                    Ok(tokio::fs::File::from_std(snapshot))
+                })
+                .await
+                .map_err(|_| Status::internal("artifact Volume reader failed"))?
+                .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))
+            }
+            Self::S3(mapping) => mapping
+                .read(scratch, key, blob)
+                .await
+                .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))?
+                .ok_or_else(|| Status::data_loss("verified artifact Volume copy is missing")),
+        }
+    }
+}
+
 impl GatewayTransfers {
+    pub(super) async fn read_volume_location(
+        &self,
+        location: &ArtifactVolumeLocation,
+        blob: &BlobReference,
+    ) -> Result<tokio::fs::File, Status> {
+        let volume = location
+            .volume
+            .as_ref()
+            .ok_or_else(|| Status::data_loss("copy has no Volume"))?;
+        self.volumes
+            .resolve(volume)?
+            .read(self.directory()?, &location.storage_key, blob)
+            .await
+    }
+
     pub fn with_artifact_volumes(mut self, mappings: ArtifactVolumeMappings) -> Result<Self> {
         if !mappings.files.is_empty() || !mappings.objects.is_empty() {
             let directory = self.directory()?.canonicalize()?;
@@ -386,82 +461,36 @@ impl artifact_volumes_server::ArtifactVolumes for GatewayTransfers {
             })
             .ok_or_else(|| Status::data_loss("copy has invalid bytes"))?;
         let permit = self.acquire()?;
-        let key = copy.storage_key.clone();
-        let mapping = match mapping {
-            Storage::File(mapping) => mapping,
-            Storage::S3(mapping) => {
-                let reader = mapping
-                    .read(self.directory()?, &key, &blob)
-                    .await
-                    .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))?
-                    .ok_or_else(|| Status::data_loss("verified artifact Volume copy is missing"))?;
-                let mut recheck = Request::new(input);
-                *recheck.metadata_mut() = metadata;
-                let gateway = self.clone();
-                let authorize = move || {
-                    let mut request = Request::new(recheck.get_ref().clone());
-                    *request.metadata_mut() = recheck.metadata().clone();
-                    let gateway = gateway.clone();
-                    let copy = copy.clone();
-                    async move {
-                        if gateway.get_copy(request).await?.into_inner() != copy {
-                            return Err(Status::data_loss("artifact Volume receipt changed"));
-                        }
-                        Ok(())
-                    }
-                };
-                authorize().await?;
-                return Ok(Response::new(download_stream(
-                    reader,
-                    permit,
-                    blob,
-                    ArtifactDownload {
-                        part: Some(artifact_download::Part::File(file)),
-                    },
-                    |chunk| ArtifactDownload {
-                        part: Some(artifact_download::Part::Chunk(chunk)),
-                    },
-                    authorize,
-                    Duration::from_secs(60),
-                )));
+        let reader = mapping
+            .read(self.directory()?, &copy.storage_key, &blob)
+            .await?;
+        let gateway = self.clone();
+        let authorize = move || {
+            let mut request = Request::new(input.clone());
+            *request.metadata_mut() = metadata.clone();
+            let gateway = gateway.clone();
+            let copy = copy.clone();
+            async move {
+                if gateway.get_copy(request).await?.into_inner() != copy {
+                    return Err(Status::data_loss("artifact Volume receipt changed"));
+                }
+                Ok(())
             }
         };
-        let (bytes, permit) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            current(&mapping)?;
-            let directory = parent(&mapping, &key, &blob, false)?;
-            let bytes = verify_at(&directory, &blob)?;
-            current(&mapping)?;
-            Ok((bytes, permit))
-        })
-        .await
-        .map_err(|_| Status::internal("artifact Volume reader failed"))?
-        .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))?;
-        let mut recheck = Request::new(input);
-        *recheck.metadata_mut() = metadata;
-        if self.get_copy(recheck).await?.into_inner() != copy {
-            return Err(Status::data_loss("artifact Volume receipt changed"));
-        }
-        let (send, receive) = mpsc::channel(2);
-        tokio::spawn(async move {
-            let _permit = permit;
-            let _ = timeout(Duration::from_secs(60), async move {
-                send.send(Ok(ArtifactDownload {
-                    part: Some(artifact_download::Part::File(file)),
-                }))
-                .await
-                .map_err(|_| ())?;
-                for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
-                    send.send(Ok(ArtifactDownload {
-                        part: Some(artifact_download::Part::Chunk(chunk.to_vec())),
-                    }))
-                    .await
-                    .map_err(|_| ())?;
-                }
-                Ok::<(), ()>(())
-            })
-            .await;
-        });
-        Ok(Response::new(ReceiverStream::new(receive)))
+        authorize().await?;
+        Ok(Response::new(download_stream(
+            reader,
+            permit,
+            blob,
+            ArtifactDownload {
+                part: Some(artifact_download::Part::File(file)),
+            },
+            |chunk| ArtifactDownload {
+                part: Some(artifact_download::Part::Chunk(chunk)),
+            },
+            authorize,
+            Duration::from_secs(60),
+        )))
     }
     async fn copy(
         &self,

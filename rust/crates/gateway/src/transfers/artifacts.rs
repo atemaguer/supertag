@@ -4,6 +4,10 @@ use supertag_protocol::artifacts::{
 };
 
 const ARTIFACT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
+const VOLUME_SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+const VOLUME_READ_TIMEOUT: Duration = Duration::from_secs(12);
+
+use locate_artifact_volume_copies_request::Target;
 
 impl GatewayTransfers {
     pub fn attempt_artifacts_service(
@@ -28,6 +32,86 @@ impl GatewayTransfers {
             })
             .await?
             .into_inner())
+    }
+
+    async fn operator_file(
+        &self,
+        metadata: tonic::metadata::MetadataMap,
+        input: &DownloadArtifactFileRequest,
+    ) -> Result<ArtifactFile, Status> {
+        let mut lookup = Request::new(GetCapturedArtifactRequest {
+            artifact_id: input.artifact_id.clone(),
+        });
+        *lookup.metadata_mut() = metadata;
+        let capture = artifact_catalog_server::ArtifactCatalog::get(self, lookup)
+            .await?
+            .into_inner();
+        capture
+            .files
+            .into_iter()
+            .find(|file| file.path == input.path)
+            .ok_or_else(|| Status::not_found("artifact file was not found"))
+    }
+
+    async fn locate_volume_copies(
+        &self,
+        metadata: tonic::metadata::MetadataMap,
+        target: Target,
+        ids: &[String],
+    ) -> Result<LocateArtifactVolumeCopiesResponse, Status> {
+        let attempt = matches!(target, Target::Attempt(_));
+        let mut request = Request::new(LocateArtifactVolumeCopiesRequest {
+            target: Some(target),
+            volume_ids: ids.to_vec(),
+        });
+        *request.metadata_mut() = metadata;
+        let call = |channel, request| async move {
+            artifact_client(channel).locate_volume_copies(request).await
+        };
+        let response = if attempt {
+            self.gateway.forward_host(request, true, call).await?
+        } else {
+            self.gateway
+                .forward(request, &self.gateway.credentials.operator, call)
+                .await?
+        };
+        Ok(response.into_inner())
+    }
+
+    async fn open_artifact(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        target: Target,
+        blob: &BlobReference,
+    ) -> Result<tokio::fs::File, Status> {
+        if let Some(file) = open_optional_blob(&self.directory()?.join(&blob.sha256)).await? {
+            return Ok(file);
+        }
+        let ids = self.volumes.candidate_ids();
+        let search = async {
+            for batch in ids.chunks(32) {
+                let found = self
+                    .locate_volume_copies(metadata.clone(), target.clone(), batch)
+                    .await?;
+                for location in found.locations {
+                    if let Ok(Ok(file)) = timeout(
+                        VOLUME_READ_TIMEOUT,
+                        self.read_volume_location(&location, blob),
+                    )
+                    .await
+                    {
+                        return Ok(Some(file));
+                    }
+                }
+            }
+            Ok::<_, Status>(None)
+        };
+        match timeout(VOLUME_SEARCH_TIMEOUT, search).await {
+            Ok(result) => result?.ok_or_else(|| Status::data_loss(
+                "artifact bytes are absent from Gateway storage and no usable verified Volume copy was found",
+            )),
+            Err(_) => Err(Status::deadline_exceeded("artifact Volume lookup timed out")),
+        }
     }
 
     pub fn artifact_catalog_service(&self) -> artifact_catalog_server::ArtifactCatalogServer<Self> {
@@ -205,9 +289,26 @@ impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
             })
             .ok_or_else(|| Status::data_loss("artifact selection has an invalid blob reference"))?;
         let permit = self.acquire()?;
-        let file = open_blob(&self.directory()?.join(&blob.sha256)).await?;
+        let file = self
+            .open_artifact(&metadata, Target::Attempt(input.clone()), &blob)
+            .await?;
         let expected = entry.clone();
         let transfer = self.clone();
+        let authorize = move || {
+            let transfer = transfer.clone();
+            let metadata = metadata.clone();
+            let input = input.clone();
+            let expected = expected.clone();
+            async move {
+                if transfer.acquired_file(metadata, input).await? != expected {
+                    return Err(Status::data_loss(
+                        "artifact selection changed during transfer",
+                    ));
+                }
+                Ok(())
+            }
+        };
+        authorize().await?;
         Ok(Response::new(download_stream(
             file,
             permit,
@@ -218,20 +319,7 @@ impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
             |data| ArtifactDownload {
                 part: Some(artifact_download::Part::Chunk(data)),
             },
-            move || {
-                let transfer = transfer.clone();
-                let metadata = metadata.clone();
-                let input = input.clone();
-                let expected = expected.clone();
-                async move {
-                    if transfer.acquired_file(metadata, input).await? != expected {
-                        return Err(Status::data_loss(
-                            "artifact selection changed during transfer",
-                        ));
-                    }
-                    Ok(())
-                }
-            },
+            authorize,
             ARTIFACT_TRANSFER_TIMEOUT,
         )))
     }
@@ -255,18 +343,7 @@ impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
     ) -> Result<Response<Self::DownloadFileStream>, Status> {
         let (metadata, _, input) = request.into_parts();
         validate_artifact_path(&input.path)?;
-        let mut lookup = Request::new(GetCapturedArtifactRequest {
-            artifact_id: input.artifact_id,
-        });
-        *lookup.metadata_mut() = metadata;
-        let capture = artifact_catalog_server::ArtifactCatalog::get(self, lookup)
-            .await?
-            .into_inner();
-        let entry = capture
-            .files
-            .into_iter()
-            .find(|file| file.path == input.path)
-            .ok_or_else(|| Status::not_found("artifact file was not found"))?;
+        let entry = self.operator_file(metadata.clone(), &input).await?;
         let blob = entry
             .blob
             .clone()
@@ -276,19 +353,37 @@ impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
             })
             .ok_or_else(|| Status::data_loss("artifact file has an invalid blob reference"))?;
         let permit = self.acquire()?;
-        let file = open_blob(&self.directory()?.join(&blob.sha256)).await?;
-        let header = ArtifactDownload {
-            part: Some(artifact_download::Part::File(entry)),
+        let file = self
+            .open_artifact(&metadata, Target::Operator(input.clone()), &blob)
+            .await?;
+        let transfer = self.clone();
+        let expected = entry.clone();
+        let authorize = move || {
+            let transfer = transfer.clone();
+            let metadata = metadata.clone();
+            let input = input.clone();
+            let expected = expected.clone();
+            async move {
+                if transfer.operator_file(metadata, &input).await? != expected {
+                    return Err(Status::data_loss(
+                        "artifact selection changed during transfer",
+                    ));
+                }
+                Ok(())
+            }
         };
+        authorize().await?;
         Ok(Response::new(download_stream(
             file,
             permit,
             blob,
-            header,
+            ArtifactDownload {
+                part: Some(artifact_download::Part::File(entry)),
+            },
             |data| ArtifactDownload {
                 part: Some(artifact_download::Part::Chunk(data)),
             },
-            || async { Ok(()) },
+            authorize,
             ARTIFACT_TRANSFER_TIMEOUT,
         )))
     }

@@ -494,6 +494,39 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         ))
     }
 
+    async fn locate_volume_copies(
+        &self,
+        request: Request<LocateArtifactVolumeCopiesRequest>,
+    ) -> std::result::Result<Response<LocateArtifactVolumeCopiesResponse>, Status> {
+        let input = request.get_ref();
+        use locate_artifact_volume_copies_request::Target;
+        let result = match input.target.as_ref() {
+            Some(Target::Operator(file)) => {
+                let principal = self.principal(&request, "operator:")?;
+                crate::artifact_volumes::operator_locations(
+                    &self.store,
+                    &principal,
+                    file,
+                    &input.volume_ids,
+                )
+                .await?
+            }
+            Some(Target::Attempt(file)) => {
+                let host = self.host_authority(&request)?;
+                let mut tx = self.store.pool.begin().await.map_err(StoreError::from)?;
+                let (capture, file) = self.store.acquired_source_in(&mut tx, &host, file).await?;
+                crate::artifact_volumes::locations_in(&mut tx, &capture, file, &input.volume_ids)
+                    .await?
+            }
+            None => {
+                return Err(Status::invalid_argument(
+                    "artifact download authority is required",
+                ));
+            }
+        };
+        Ok(Response::new(result))
+    }
+
     async fn reserve_capture(
         &self,
         request: Request<CommitArtifactCaptureRequest>,

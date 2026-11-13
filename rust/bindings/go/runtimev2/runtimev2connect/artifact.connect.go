@@ -76,6 +76,9 @@ const (
 	// ArtifactDirectoryGetAcquiredFileProcedure is the fully-qualified name of the ArtifactDirectory's
 	// GetAcquiredFile RPC.
 	ArtifactDirectoryGetAcquiredFileProcedure = "/supertag.runtime.v2.ArtifactDirectory/GetAcquiredFile"
+	// ArtifactDirectoryLocateVolumeCopiesProcedure is the fully-qualified name of the
+	// ArtifactDirectory's LocateVolumeCopies RPC.
+	ArtifactDirectoryLocateVolumeCopiesProcedure = "/supertag.runtime.v2.ArtifactDirectory/LocateVolumeCopies"
 	// AttemptArtifactsFindProcedure is the fully-qualified name of the AttemptArtifacts's Find RPC.
 	AttemptArtifactsFindProcedure = "/supertag.runtime.v2.AttemptArtifacts/Find"
 	// AttemptArtifactsInspectProcedure is the fully-qualified name of the AttemptArtifacts's Inspect
@@ -285,6 +288,7 @@ type ArtifactDirectoryClient interface {
 	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
 	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
 	GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error)
+	LocateVolumeCopies(context.Context, *connect.Request[runtimev2.LocateArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.LocateArtifactVolumeCopiesResponse], error)
 }
 
 // NewArtifactDirectoryClient constructs a client for the supertag.runtime.v2.ArtifactDirectory
@@ -352,20 +356,27 @@ func NewArtifactDirectoryClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(artifactDirectoryMethods.ByName("GetAcquiredFile")),
 			connect.WithClientOptions(opts...),
 		),
+		locateVolumeCopies: connect.NewClient[runtimev2.LocateArtifactVolumeCopiesRequest, runtimev2.LocateArtifactVolumeCopiesResponse](
+			httpClient,
+			baseURL+ArtifactDirectoryLocateVolumeCopiesProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("LocateVolumeCopies")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // artifactDirectoryClient implements ArtifactDirectoryClient.
 type artifactDirectoryClient struct {
-	reserveCapture  *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
-	commitCapture   *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
-	get             *connect.Client[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact]
-	list            *connect.Client[runtimev2.ListCapturedArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
-	findForAttempt  *connect.Client[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
-	getForAttempt   *connect.Client[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact]
-	acquire         *connect.Client[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition]
-	settle          *connect.Client[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition]
-	getAcquiredFile *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactFile]
+	reserveCapture     *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
+	commitCapture      *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
+	get                *connect.Client[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact]
+	list               *connect.Client[runtimev2.ListCapturedArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	findForAttempt     *connect.Client[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	getForAttempt      *connect.Client[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact]
+	acquire            *connect.Client[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition]
+	settle             *connect.Client[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition]
+	getAcquiredFile    *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactFile]
+	locateVolumeCopies *connect.Client[runtimev2.LocateArtifactVolumeCopiesRequest, runtimev2.LocateArtifactVolumeCopiesResponse]
 }
 
 // ReserveCapture calls supertag.runtime.v2.ArtifactDirectory.ReserveCapture.
@@ -413,6 +424,11 @@ func (c *artifactDirectoryClient) GetAcquiredFile(ctx context.Context, req *conn
 	return c.getAcquiredFile.CallUnary(ctx, req)
 }
 
+// LocateVolumeCopies calls supertag.runtime.v2.ArtifactDirectory.LocateVolumeCopies.
+func (c *artifactDirectoryClient) LocateVolumeCopies(ctx context.Context, req *connect.Request[runtimev2.LocateArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.LocateArtifactVolumeCopiesResponse], error) {
+	return c.locateVolumeCopies.CallUnary(ctx, req)
+}
+
 // ArtifactDirectoryHandler is an implementation of the supertag.runtime.v2.ArtifactDirectory
 // service.
 type ArtifactDirectoryHandler interface {
@@ -425,6 +441,7 @@ type ArtifactDirectoryHandler interface {
 	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
 	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
 	GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error)
+	LocateVolumeCopies(context.Context, *connect.Request[runtimev2.LocateArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.LocateArtifactVolumeCopiesResponse], error)
 }
 
 // NewArtifactDirectoryHandler builds an HTTP handler from the service implementation. It returns
@@ -488,6 +505,12 @@ func NewArtifactDirectoryHandler(svc ArtifactDirectoryHandler, opts ...connect.H
 		connect.WithSchema(artifactDirectoryMethods.ByName("GetAcquiredFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	artifactDirectoryLocateVolumeCopiesHandler := connect.NewUnaryHandler(
+		ArtifactDirectoryLocateVolumeCopiesProcedure,
+		svc.LocateVolumeCopies,
+		connect.WithSchema(artifactDirectoryMethods.ByName("LocateVolumeCopies")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.ArtifactDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ArtifactDirectoryReserveCaptureProcedure:
@@ -508,6 +531,8 @@ func NewArtifactDirectoryHandler(svc ArtifactDirectoryHandler, opts ...connect.H
 			artifactDirectorySettleHandler.ServeHTTP(w, r)
 		case ArtifactDirectoryGetAcquiredFileProcedure:
 			artifactDirectoryGetAcquiredFileHandler.ServeHTTP(w, r)
+		case ArtifactDirectoryLocateVolumeCopiesProcedure:
+			artifactDirectoryLocateVolumeCopiesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -551,6 +576,10 @@ func (UnimplementedArtifactDirectoryHandler) Settle(context.Context, *connect.Re
 
 func (UnimplementedArtifactDirectoryHandler) GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile is not implemented"))
+}
+
+func (UnimplementedArtifactDirectoryHandler) LocateVolumeCopies(context.Context, *connect.Request[runtimev2.LocateArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.LocateArtifactVolumeCopiesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.LocateVolumeCopies is not implemented"))
 }
 
 // AttemptArtifactsClient is a client for the supertag.runtime.v2.AttemptArtifacts service.

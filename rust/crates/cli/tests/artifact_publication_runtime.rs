@@ -2,7 +2,9 @@
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
+use std::{
+    net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
+};
 use supertag_protocol::{HOST_GENERATION_HEADER, authenticated_request, v2::*};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -82,7 +84,10 @@ fn plane(credentials: &Credentials, root: &Path, listen: &str) -> Command {
 }
 fn gateway(credentials: &Credentials, root: &Path, private: &str) -> Command {
     let mut c = credentials.command(&["gateway", "--control-plane", private]);
-    c.arg("--checkpoint-directory").arg(root.join("cas"));
+    c.arg("--checkpoint-directory")
+        .arg(root.join("cas"))
+        .arg("--artifact-volume")
+        .arg(format!("published={}", root.join("volume").display()));
     c
 }
 fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
@@ -94,6 +99,9 @@ fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Comman
 async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
+    let volume = root.join("volume");
+    std::fs::create_dir(&volume)?;
+    std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
     let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
@@ -324,8 +332,36 @@ async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
         admitted["input_artifacts"][0]["publication"]["consumption_id"],
         "consent"
     );
+    json(credentials.command(&[
+        "volume",
+        "--gateway",
+        &public,
+        "put",
+        "published",
+        "--source",
+        &format!("file://{}", volume.display()),
+        "--operation-id",
+        "register-volume",
+    ]))
+    .await?;
+    json(credentials.command(&[
+        "volume",
+        "--gateway",
+        &public,
+        "copy",
+        "published",
+        &artifact_id,
+        "--path",
+        "report.txt",
+        "--expected-revision",
+        "1",
+        "--operation-id",
+        "copy-volume",
+    ]))
+    .await?;
     stop(&mut ingress).await?;
     stop(&mut control).await?;
+    std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
     let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
     let replay = json(publication(
@@ -382,22 +418,28 @@ async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
     ))
     .await?;
     let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
+    let operation = supertag_protocol::task_artifact_inputs::operation_id(&artifact_id);
     let acquired = acquisitions
         .acquire(credentials.host(
             AcquireArtifactRequest {
                 attempt: Some(live.clone()),
-                operation_id: "read".into(),
+                operation_id: operation.clone(),
                 artifact_id: artifact_id.clone(),
                 paths: vec!["report.txt".into()],
-                delivery: ArtifactDelivery::Read as i32,
-                destination: None,
+                delivery: ArtifactDelivery::Materialize as i32,
+                destination: Some(
+                    supertag_protocol::artifacts::materialized_artifact_directory(
+                        &live.attempt_id,
+                        &operation,
+                    ),
+                ),
             },
             registered.generation,
         ))
         .await?
         .into_inner();
     let download = GetAcquiredArtifactFileRequest {
-        attempt: Some(live),
+        attempt: Some(live.clone()),
         acquisition_id: acquired.acquisition_id,
         path: "report.txt".into(),
     };
@@ -413,6 +455,19 @@ async fn cross_objective_publication_is_explicit_and_durable() -> Result<()> {
         }
     }
     assert_eq!(received, bytes);
+    let delivered = acquisitions
+        .settle(credentials.host(
+            SettleArtifactAcquisitionRequest {
+                attempt: Some(live),
+                acquisition_id: download.acquisition_id.clone(),
+                state: ArtifactAcquisitionState::Delivered.into(),
+            },
+            registered.generation,
+        ))
+        .await?
+        .into_inner();
+    assert_eq!(delivered.state(), ArtifactAcquisitionState::Delivered);
+    assert!(!root.join("cas").join(&blob.sha256).exists());
     let withdrawn = json(publication(
         &credentials,
         &public,

@@ -22,6 +22,7 @@ service ArtifactDirectory {
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
   rpc GetAcquiredFile(GetAcquiredArtifactFileRequest) returns (ArtifactFile);
+  rpc LocateVolumeCopies(LocateArtifactVolumeCopiesRequest) returns (LocateArtifactVolumeCopiesResponse);
 }
 
 // Gateway facade. Identity and generation come from the authenticated Worker Host.
@@ -313,6 +314,22 @@ message CommitArtifactVolumeCopyRequest { string copy_id = 1; BlobReference veri
 message GetArtifactVolumeCopyRequest { string copy_id = 1; }
 message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
 message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
+
+// Private Gateway lookup. The target carries the original download authority.
+message LocateArtifactVolumeCopiesRequest {
+  oneof target {
+    DownloadArtifactFileRequest operator = 1;
+    GetAcquiredArtifactFileRequest attempt = 2;
+  }
+  repeated string volume_ids = 3;
+}
+message ArtifactVolumeLocation {
+  ArtifactVolume volume = 1;
+  string storage_key = 2;
+}
+message LocateArtifactVolumeCopiesResponse {
+  repeated ArtifactVolumeLocation locations = 1;
+}
 
 // Operator approvals expose only selected immutable entries to named Objectives.
 service ArtifactPublications {

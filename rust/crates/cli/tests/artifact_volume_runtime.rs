@@ -222,6 +222,150 @@ async fn capture(
     Ok((artifact.summary.unwrap().artifact_id, bytes, blob))
 }
 
+fn capture_download(
+    credentials: &Credentials,
+    public: &str,
+    artifact: &str,
+    output: &Path,
+) -> Command {
+    let mut command = credentials.command(&["artifact", "--gateway", public]);
+    command
+        .args(["download", artifact, "--path", "report.txt", "--output"])
+        .arg(output);
+    command
+}
+
+async fn read_dynamic(
+    credentials: &Credentials,
+    public: &str,
+    artifact_id: &str,
+    expected: &[u8],
+) -> Result<()> {
+    let channel = Channel::from_shared(public.to_owned())?.connect().await?;
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let task = operator
+        .submit_task(authenticated_request(
+            SubmitTaskRequest {
+                tag_id: "writer".into(),
+                session_id: "source".into(),
+                operation_id: "consumer".into(),
+                prompt: "Read the captured file".into(),
+                ..Default::default()
+            },
+            &credentials.operator,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    let generation = host
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "volume-fixture".into(),
+            },
+            &credentials.host,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .generation;
+    let assignment = host
+        .claim_task(credentials.host(
+            ClaimTaskRequest {
+                operation_id: "consume".into(),
+                ..Default::default()
+            },
+            generation,
+        ))
+        .await?
+        .into_inner()
+        .assignment
+        .context("no consumer assignment")?;
+    assert_eq!(assignment.task.as_ref().unwrap().task_id, task.task_id);
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id.clone(),
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    host.start_task(credentials.host(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        generation,
+    ))
+    .await?;
+    let mut artifacts = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
+    let acquired = artifacts
+        .acquire(credentials.host(
+            AcquireArtifactRequest {
+                attempt: Some(attempt.clone()),
+                operation_id: "read".into(),
+                artifact_id: artifact_id.into(),
+                paths: vec!["report.txt".into()],
+                delivery: ArtifactDelivery::Read.into(),
+                destination: None,
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    let input = GetAcquiredArtifactFileRequest {
+        attempt: Some(attempt.clone()),
+        acquisition_id: acquired.acquisition_id,
+        path: "report.txt".into(),
+    };
+    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
+    let mut forbidden = input.clone();
+    forbidden.path = "wrong.txt".into();
+    assert_eq!(
+        transfers
+            .download_acquired_file(credentials.host(forbidden, generation))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound,
+    );
+    assert_eq!(
+        transfers
+            .download_acquired_file(credentials.host(input.clone(), generation + 1))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::PermissionDenied,
+    );
+    let mut stream = transfers
+        .download_acquired_file(credentials.host(input, generation))
+        .await?
+        .into_inner();
+    assert_eq!(
+        stream.message().await?.unwrap().part,
+        Some(artifact_download::Part::File(acquired.files[0].clone()))
+    );
+    let mut actual = Vec::new();
+    while let Some(message) = stream.message().await? {
+        let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
+            anyhow::bail!("expected artifact bytes");
+        };
+        actual.extend_from_slice(&chunk);
+    }
+    assert_eq!(actual, expected);
+    host.finish_task(credentials.host(
+        FinishTaskRequest {
+            task_id: attempt.task_id,
+            attempt_id: attempt.attempt_id,
+            lease_token: attempt.lease_token,
+            succeeded: true,
+            result: "Read exact bytes".into(),
+            ..Default::default()
+        },
+        generation,
+    ))
+    .await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes() -> Result<()> {
     let temporary = tempfile::tempdir()?;
@@ -324,6 +468,17 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     .await?;
     assert_eq!(downloaded["sha256"], blob.sha256);
     assert_eq!(std::fs::read(&download)?, bytes);
+    let from_capture = root.join("capture.txt");
+    json(capture_download(
+        &credentials,
+        &new_public,
+        &artifact_id,
+        &from_capture,
+    ))
+    .await?;
+    assert_eq!(std::fs::read(&from_capture)?, bytes);
+    read_dynamic(&credentials, &new_public, &artifact_id, &bytes).await?;
+    assert!(!root.join("cas").join(&blob.sha256).exists());
     std::fs::write(&destination, b"divergent destination")?;
     let corrupted = volume(&credentials, &new_public, &copy_args)
         .output()

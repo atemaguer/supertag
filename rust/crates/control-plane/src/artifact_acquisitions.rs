@@ -361,18 +361,31 @@ impl Store {
         host: &HostAuthority,
         input: &GetAcquiredArtifactFileRequest,
     ) -> Result<ArtifactFile> {
-        let identity = attempt(input.attempt.as_ref())?;
         let mut tx = self.pool.begin().await?;
-        let owned = owner_in(&mut tx, host, identity).await?;
+        Ok(self.acquired_source_in(&mut tx, host, input).await?.1)
+    }
+
+    pub(crate) async fn acquired_source_in(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        host: &HostAuthority,
+        input: &GetAcquiredArtifactFileRequest,
+    ) -> Result<(CapturedArtifact, ArtifactFile)> {
+        let identity = attempt(input.attempt.as_ref())?;
+        let owned = owner_in(tx, host, identity).await?;
         crate::artifact_captures::running(&owned, self.execution_now_ms())?;
         let row=sqlx::query("SELECT payload FROM supertag_v2_artifact_acquisitions WHERE acquisition_id=$1 AND attempt_id=$2 AND task_id=$3 AND state<>$4")
-            .bind(&input.acquisition_id).bind(&identity.attempt_id).bind(&identity.task_id).bind(ArtifactAcquisitionState::Failed as i64).fetch_optional(&mut *tx).await?.ok_or_else(missing)?;
+            .bind(&input.acquisition_id).bind(&identity.attempt_id).bind(&identity.task_id).bind(ArtifactAcquisitionState::Failed as i64).fetch_optional(&mut **tx).await?.ok_or_else(missing)?;
         let acquisition = receipt(&row)?;
-        visible_in(&mut tx, &identity.task_id, &acquisition.artifact_id).await?;
-        acquisition
+        let capture = visible_in(tx, &identity.task_id, &acquisition.artifact_id).await?;
+        let file = acquisition
             .files
             .into_iter()
             .find(|file| file.path == input.path)
-            .ok_or_else(missing)
+            .ok_or_else(missing)?;
+        if !capture.files.contains(&file) {
+            return Err(missing());
+        }
+        Ok((capture, file))
     }
 }

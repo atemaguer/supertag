@@ -1,9 +1,38 @@
 mod support;
 use sqlx::{Connection, Executor};
-use supertag_control_plane::{Store, StoreError};
-use supertag_protocol::v2::*;
+use supertag_control_plane::{ControlPlane, Store, StoreError};
+use supertag_protocol::{
+    authenticated_request,
+    v2::{artifact_directory_server::ArtifactDirectory, *},
+};
 use uuid::Uuid;
 const OP: &str = "operator:volume-owner";
+async fn locations(
+    plane: &ControlPlane,
+    principal: &str,
+    artifact_id: &str,
+    path: &str,
+) -> Result<Vec<ArtifactVolumeLocation>, tonic::Status> {
+    let request = LocateArtifactVolumeCopiesRequest {
+        target: Some(locate_artifact_volume_copies_request::Target::Operator(
+            DownloadArtifactFileRequest {
+                artifact_id: artifact_id.into(),
+                path: path.into(),
+            },
+        )),
+        volume_ids: vec!["durable".into(), "object".into()],
+    };
+    Ok(plane
+        .locate_volume_copies(authenticated_request(
+            request,
+            "private-key",
+            Some(principal),
+        )?)
+        .await?
+        .into_inner()
+        .locations)
+}
+
 async fn exercise(url: &str) {
     // Start from the actual populated schema 47, then let Store apply only 48.
     sqlx::any::install_default_drivers();
@@ -196,6 +225,33 @@ async fn exercise(url: &str) {
     let reserved = a.unwrap();
     assert_eq!(reserved, b.unwrap());
     assert_eq!(reserved.state(), ArtifactVolumeCopyState::Reserved);
+    let plane = ControlPlane::open(url, "private-key".into()).await.unwrap();
+    assert!(
+        locations(&plane, OP, &copy.artifact_id, "report.txt")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        locations(&plane, "operator:other", &copy.artifact_id, "report.txt")
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        locations(
+            &plane,
+            "host:volume-writer",
+            &copy.artifact_id,
+            "report.txt"
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        tonic::Code::PermissionDenied
+    );
+    drop(plane);
     let changed_selection = CopyArtifactToVolumeRequest {
         path: "other.txt".into(),
         ..copy.clone()
@@ -317,8 +373,44 @@ async fn exercise(url: &str) {
             .copies
             .is_empty()
     );
-    drop(store);
+    // Recreate the exact pre-0052 layout with a real old verified and reserved receipt.
+    store.close().await;
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    sqlx::raw_sql(
+        "DROP INDEX supertag_v2_artifact_verified_file_locations;
+         ALTER TABLE supertag_v2_artifact_volume_copies DROP COLUMN file_path;
+         UPDATE supertag_v2_schema SET version=51;",
+    )
+    .execute(&mut connection)
+    .await
+    .unwrap();
+    connection.close().await.unwrap();
     let store = Store::open(url).await.unwrap();
+    let plane = ControlPlane::open(url, "private-key".into()).await.unwrap();
+    assert_eq!(
+        locations(&plane, OP, &copy.artifact_id, "report.txt")
+            .await
+            .unwrap(),
+        vec![ArtifactVolumeLocation {
+            volume: verified.volume.clone(),
+            storage_key: verified.storage_key.clone()
+        }],
+    );
+    assert_eq!(
+        locations(&plane, OP, &copy.artifact_id, "wrong.txt")
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        locations(&plane, "operator:other", &copy.artifact_id, "report.txt")
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    drop(plane);
     assert_eq!(
         store.reserve_artifact_volume_copy(OP, &copy).await.unwrap(),
         verified

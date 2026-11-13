@@ -151,6 +151,8 @@ fn mapped_gateway(
     )?;
     let mut command = gateway(credentials, root, private, false);
     command
+        .arg("--artifact-volume")
+        .arg(format!("aaa-file={}", root.join("volume").display()))
         .arg("--artifact-s3-volumes")
         .arg(config)
         .env("VOLUME_TEST_ACCESS_KEY_ID", KEY)
@@ -195,6 +197,9 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<
 
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
+    let volume_path = root.join("volume");
+    std::fs::create_dir(&volume_path)?;
+    std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
     let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
     let (mut ingress, public) = service(mapped_gateway(
@@ -279,6 +284,49 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<
         );
     }
 
+    json(volume(
+        &credentials,
+        &public,
+        &[
+            "put",
+            "aaa-file",
+            "--source",
+            &format!("file://{}", volume_path.display()),
+            "--operation-id",
+            "register-file",
+        ],
+    ))
+    .await?;
+    let file_copy = json(volume(
+        &credentials,
+        &public,
+        &[
+            "copy",
+            "aaa-file",
+            &artifact_id,
+            "--path",
+            "report.txt",
+            "--expected-revision",
+            "1",
+            "--operation-id",
+            "copy-file",
+        ],
+    ))
+    .await?;
+    let file_path = volume_path.join(file_copy["storage_key"].as_str().unwrap());
+    let output = root.join("downloaded.txt");
+    json(capture_download(
+        &credentials,
+        &public,
+        &artifact_id,
+        &output,
+    ))
+    .await?;
+    assert_eq!(std::fs::read(&output)?, bytes);
+    std::fs::remove_file(&output)?;
+    assert_eq!(object_state.lock().unwrap().reads, 4);
+    // A bad first candidate cannot shadow the independently verified later copy.
+    std::fs::write(&file_path, &divergence)?;
     stop(&mut ingress).await?;
     stop(&mut control).await?;
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
@@ -296,14 +344,31 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback() -> Result<
         receipt
     );
     let copy_id = receipt["copy_id"].as_str().unwrap();
-    let output = root.join("downloaded.txt");
     let download = ["download", copy_id, "--output", output.to_str().unwrap()];
     let downloaded = json(volume(&credentials, &public, &download)).await?;
     assert_eq!(downloaded["sha256"], blob.sha256);
     assert_eq!(std::fs::read(&output)?, bytes);
     std::fs::remove_file(&output)?;
 
+    json(capture_download(
+        &credentials,
+        &public,
+        &artifact_id,
+        &output,
+    ))
+    .await?;
+    assert_eq!(std::fs::read(&output)?, bytes);
+    std::fs::remove_file(&output)?;
+    read_dynamic(&credentials, &public, &artifact_id, &bytes).await?;
+    assert!(!root.join("cas").join(&blob.sha256).exists());
+    assert_eq!(std::fs::read(&file_path)?, divergence);
+
     object_state.lock().unwrap().bytes = Some(vec![b'x'; bytes.len()]);
+    refused(
+        capture_download(&credentials, &public, &artifact_id, &output),
+        "no usable verified Volume copy",
+    )
+    .await?;
     refused(volume(&credentials, &public, &download), "verified").await?;
     assert!(!output.exists());
     refused(volume(&credentials, &public, &copy_args), "verified").await?;

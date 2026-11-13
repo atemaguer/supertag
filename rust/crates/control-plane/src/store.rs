@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 51;
+        const SCHEMA_VERSION: i64 = 52;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -173,6 +173,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0049_task_artifact_inputs.sql"),
                 include_str!("../migrations/sqlite/0050_artifact_publications.sql"),
                 include_str!("../migrations/sqlite/0051_artifact_context.sql"),
+                include_str!("../migrations/sqlite/0052_artifact_volume_fallback.sql"),
             ]
         } else {
             [
@@ -227,12 +228,19 @@ impl Store {
                 include_str!("../migrations/postgresql/0049_task_artifact_inputs.sql"),
                 include_str!("../migrations/postgresql/0050_artifact_publications.sql"),
                 include_str!("../migrations/postgresql/0051_artifact_context.sql"),
+                include_str!("../migrations/postgresql/0052_artifact_volume_fallback.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
             let mut transaction = pool.begin().await?;
             for migration in &migrations[version as usize..] {
                 sqlx::raw_sql(migration).execute(&mut *transaction).await?;
+            }
+            if version < 52 {
+                Box::pin(crate::artifact_volumes::backfill_file_paths(
+                    &mut transaction,
+                ))
+                .await?;
             }
             if version < 16 {
                 sqlx::query("UPDATE supertag_v2_watch_state SET feed_id=$1 WHERE singleton=1")
