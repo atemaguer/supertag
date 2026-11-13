@@ -2011,3 +2011,264 @@ async fn sqlite_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
 async fn postgres_services_refuse_calls_that_skipped_negotiation() -> Result<()> {
     with_postgres("protocol_fence", exercise_protocol_fence).await
 }
+
+// ---------------------------------------------------------------------------
+// TLS through an idle-closing TCP proxy
+
+/// A TCP relay like an operator's proxy: it closes a link that carried no bytes
+/// in either direction for `idle`, and a partition severs every link and
+/// refuses new ones until restored.
+struct IdleProxy {
+    address: SocketAddr,
+    partitioned: Arc<AtomicBool>,
+    refused: Arc<AtomicU64>,
+    links: Arc<Mutex<Vec<AbortHandle>>>,
+    task: JoinHandle<()>,
+}
+
+impl IdleProxy {
+    async fn start(target: SocketAddr, idle: Duration) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let partitioned = Arc::new(AtomicBool::new(false));
+        let refused = Arc::new(AtomicU64::new(0));
+        let links: Arc<Mutex<Vec<AbortHandle>>> = Arc::default();
+        let (state, refusals, open) = (partitioned.clone(), refused.clone(), links.clone());
+        let task = tokio::spawn(async move {
+            while let Ok((downstream, _)) = listener.accept().await {
+                let mut open = open.lock().unwrap();
+                if state.load(Ordering::SeqCst) {
+                    refusals.fetch_add(1, Ordering::SeqCst);
+                    continue;
+                }
+                let link = tokio::spawn(async move {
+                    if let Ok(upstream) = TcpStream::connect(target).await {
+                        relay_until_idle(downstream, upstream, idle).await;
+                    }
+                });
+                open.retain(|link| !link.is_finished());
+                open.push(link.abort_handle());
+            }
+        });
+        Ok(Self {
+            address,
+            partitioned,
+            refused,
+            links,
+            task,
+        })
+    }
+
+    fn partition(&self) {
+        let mut links = self.links.lock().unwrap();
+        self.partitioned.store(true, Ordering::SeqCst);
+        for link in links.drain(..) {
+            link.abort();
+        }
+    }
+
+    fn restore(&self) {
+        let _links = self.links.lock().unwrap();
+        self.partitioned.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Drop for IdleProxy {
+    fn drop(&mut self) {
+        self.partition();
+        self.task.abort();
+    }
+}
+
+/// Copies bytes both ways until either side closes or the link is idle.
+async fn relay_until_idle(downstream: TcpStream, upstream: TcpStream, idle: Duration) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (mut down_read, mut down_write) = downstream.into_split();
+    let (mut up_read, mut up_write) = upstream.into_split();
+    let (mut from_client, mut from_server) = (vec![0; 16 * 1024], vec![0; 16 * 1024]);
+    loop {
+        tokio::select! {
+            read = down_read.read(&mut from_client) => match read {
+                Ok(0) | Err(_) => return,
+                Ok(count) => if up_write.write_all(&from_client[..count]).await.is_err() {
+                    return;
+                },
+            },
+            read = up_read.read(&mut from_server) => match read {
+                Ok(0) | Err(_) => return,
+                Ok(count) => if down_write.write_all(&from_server[..count]).await.is_err() {
+                    return;
+                },
+            },
+            () = sleep(idle) => return,
+        }
+    }
+}
+
+/// Ports `tests/worklet-grpc-proxy-operational.test.ts`: a Worker Host reaches a
+/// TLS Gateway through a TCP proxy that closes links idle for 400 ms. The host
+/// stays ready through idle time, reconnects after a partition severs every
+/// link, and then runs a Task exactly once.
+async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let pki = Pki::authority(root, "supertag-proxy-ca").await?;
+    let gateway_leaf = pki.leaf("gateway").await?;
+    let host_leaf = pki.leaf("worker-host").await?;
+    let operator_leaf = pki.leaf("operator").await?;
+
+    let mut command = binary(&["control-plane"]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Service::spawn(command, root, "proxy-control-plane")?;
+    let private = format!("http://{}", control_plane.address().await?);
+    let mut command = binary(&["gateway", "--control-plane", &private]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    server_tls(&mut command, &gateway_leaf, &pki.ca());
+    let mut gateway = Service::spawn(command, root, "proxy-gateway")?;
+    let gateway_address = gateway.address().await?;
+    let public = format!("https://{gateway_address}");
+    let proxy = IdleProxy::start(gateway_address, Duration::from_millis(400)).await?;
+    let proxied = format!("https://{}", proxy.address);
+
+    let operator = |args: &[&str]| {
+        let mut command = binary(args);
+        command
+            .args(["--gateway", &public])
+            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+        client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
+        command
+    };
+    run_json(operator(&[
+        "put-tag",
+        "proxied",
+        "--instructions",
+        "Answer through the proxy",
+    ]))
+    .await?;
+    let issued = run_json(operator(&[
+        "create-auth-key",
+        "proxy-host",
+        "--tag",
+        "proxied",
+    ]))
+    .await?;
+    let key = root.join("proxy-host.key");
+    std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
+    let state = root.join("proxy-host");
+    let mut enroll = binary(&["enroll-host", "proxy-host", "--gateway", &proxied]);
+    enroll
+        .arg("--state-directory")
+        .arg(&state)
+        .arg("--auth-key")
+        .arg(format!("file:{}", key.display()));
+    client_tls(&mut enroll, &pki.ca(), Some(&host_leaf));
+    assert_eq!(run_json(enroll).await?["host_id"], "proxy-host");
+
+    let (adapter, launches) = recording_adapter(root, "proxy-host")?;
+    let mut command = binary(&["worker-host", "--gateway", &proxied]);
+    command
+        .arg("--state-directory")
+        .arg(&state)
+        .arg("--adapter")
+        .arg(&adapter);
+    client_tls(&mut command, &pki.ca(), Some(&host_leaf));
+    let mut host = Service::spawn(command, root, "proxy-worker-host")?;
+
+    // Idle time. The host's claim connection carries traffic often enough to stay
+    // open; its other Gateway channels sit idle, and when the proxy closes them
+    // they reconnect on their next call. Neither stops the host.
+    let host_ready = || {
+        let mut command = binary(&["host", "--gateway", &public, "get", "proxy-host"]);
+        command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+        client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
+        run_json(command)
+    };
+    let deadline = Instant::now() + STARTUP;
+    while !host_ready()
+        .await
+        .is_ok_and(|host| host["phase"] == "ready")
+    {
+        ensure!(
+            Instant::now() < deadline,
+            "Worker Host never connected through the proxy: {}",
+            host.logs()
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+    sleep(Duration::from_millis(1500)).await;
+    ensure!(
+        host.running()?,
+        "Worker Host stopped while idle: {}",
+        host.logs()
+    );
+    ensure!(
+        host_ready().await?["phase"] == "ready",
+        "Worker Host lost readiness while idle behind the proxy"
+    );
+
+    // A partition severs the link; the host reconnects once it heals.
+    proxy.partition();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while proxy.refused.load(Ordering::SeqCst) == 0 {
+        ensure!(
+            Instant::now() < deadline,
+            "Worker Host never tried to reconnect"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    proxy.restore();
+
+    let submitted = run_json(operator(&[
+        "submit",
+        "--tag",
+        "proxied",
+        "--session",
+        "proxy",
+        "Verify proxy recovery",
+    ]))
+    .await?;
+    let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let task = loop {
+        let task = run_json(operator(&["get-task", &task_id])).await?;
+        if matches!(
+            task["state"].as_str(),
+            Some("TASK_STATE_SUCCEEDED" | "TASK_STATE_FAILED" | "TASK_STATE_CANCELLED")
+        ) {
+            break task;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "Task never finished: {task}\n{}",
+            host.logs()
+        );
+        sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    assert_eq!(
+        task["result"],
+        "Answer through the proxy: Verify proxy recovery []"
+    );
+    let launched = std::fs::read_to_string(&launches)?.lines().count();
+    assert_eq!(launched, 1, "the adapter ran {launched} times");
+    ensure!(host.running()? && gateway.running()? && control_plane.running()?);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_tls_worker_host_traverses_an_idle_closing_proxy() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_tls_proxy_traversal(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_tls_worker_host_traverses_an_idle_closing_proxy() -> Result<()> {
+    with_postgres("proxy_traversal", exercise_tls_proxy_traversal).await
+}
