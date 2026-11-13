@@ -18,6 +18,7 @@ mod microsoft_teams;
 mod readiness;
 #[path = "slack_threads.rs"]
 mod slack_threads;
+mod sqlite_files;
 pub(crate) use authority::lease_is_live;
 pub use hosts::HostAuthority;
 pub(crate) use readiness::status_in as host_status_in;
@@ -81,6 +82,9 @@ impl Store {
             sqlite || url.starts_with("postgres:") || url.starts_with("postgresql:"),
             "expected a SQLite or PostgreSQL database URL"
         );
+        if sqlite {
+            sqlite_files::make_private(url)?;
+        }
         let options = AnyConnectOptions::from_str(url)?;
         let pool = AnyPoolOptions::new()
             .max_connections(if sqlite { 1 } else { 8 })

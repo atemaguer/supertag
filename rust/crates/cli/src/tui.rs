@@ -25,9 +25,7 @@ fn default_connection() -> Result<Connection> {
             state_directory: None,
         });
     }
-    let state_directory = std::env::var_os("SUPERTAG_STATE_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".supertag")));
+    let state_directory = crate::local_config::state_directory(None).ok();
     Ok(Connection {
         gateway: None,
         state_directory,

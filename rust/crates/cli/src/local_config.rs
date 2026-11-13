@@ -156,11 +156,33 @@ struct AdapterArguments {
     adapter: AdapterOptions,
 }
 
+/// The local state directory: `--state-directory`, else `SUPERTAG_STATE_DIR`, else
+/// `~/.supertag`. A relative directory is resolved from the directory `supertag` runs in, so the
+/// services it starts use the same files.
 pub fn state_directory(explicit: Option<PathBuf>) -> Result<PathBuf> {
-    explicit
-        .or_else(|| std::env::var_os("SUPERTAG_STATE_DIR").map(PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".supertag")))
-        .context("provide --state-directory or set HOME")
+    resolve_state_directory(
+        explicit,
+        std::env::var_os("SUPERTAG_STATE_DIR").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+        &std::env::current_dir().context("read the current directory")?,
+    )
+}
+
+fn resolve_state_directory(
+    explicit: Option<PathBuf>,
+    configured: Option<PathBuf>,
+    home: Option<PathBuf>,
+    invocation: &Path,
+) -> Result<PathBuf> {
+    let directory = explicit
+        .or(configured)
+        .filter(|path| !path.as_os_str().is_empty())
+        .or_else(|| {
+            home.filter(|home| !home.as_os_str().is_empty())
+                .map(|home| home.join(".supertag"))
+        })
+        .context("provide --state-directory or set HOME")?;
+    Ok(invocation.join(directory))
 }
 pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
     let explicit = file.is_some();
@@ -859,6 +881,42 @@ impl Secret {
 mod tests {
     use super::*;
     use std::fs;
+
+    // packages/store/paths.test.ts
+    #[test]
+    fn state_lives_under_home_or_a_configured_directory_from_the_invocation_directory() {
+        let invocation = Path::new("/srv/supertag");
+        let home = || Some(PathBuf::from("/tmp/supertag-home"));
+        assert_eq!(
+            resolve_state_directory(None, None, home(), invocation).unwrap(),
+            Path::new("/tmp/supertag-home/.supertag")
+        );
+        assert_eq!(
+            resolve_state_directory(None, Some("state".into()), home(), invocation).unwrap(),
+            Path::new("/srv/supertag/state")
+        );
+        assert_eq!(
+            resolve_state_directory(None, Some("".into()), home(), invocation).unwrap(),
+            Path::new("/tmp/supertag-home/.supertag")
+        );
+        assert_eq!(
+            resolve_state_directory(
+                Some("explicit".into()),
+                Some("/var/lib/supertag".into()),
+                home(),
+                invocation
+            )
+            .unwrap(),
+            Path::new("/srv/supertag/explicit")
+        );
+        assert_eq!(
+            resolve_state_directory(None, Some("/var/lib/supertag".into()), None, invocation)
+                .unwrap(),
+            Path::new("/var/lib/supertag")
+        );
+        assert!(resolve_state_directory(None, None, None, invocation).is_err());
+    }
+
     #[test]
     fn local_and_remote_named_services_preserve_selection() {
         let c=parse(br#"version: 1
