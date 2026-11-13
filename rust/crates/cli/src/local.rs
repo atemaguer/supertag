@@ -274,6 +274,8 @@ struct Children {
     database: Option<PostgresDatabase>,
     /// What every service gets from [`PROXY_ENVIRONMENT`].
     proxy: Vec<(String, OsString)>,
+    /// The Control Plane's `--audit-log`.
+    audit_log: Option<String>,
 }
 
 /// A PostgreSQL database for the local Control Plane, and the password it connects with.
@@ -334,6 +336,7 @@ impl Children {
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
             database: None,
             proxy: proxy_environment(&Environment::default()),
+            audit_log: None,
         })
     }
 
@@ -395,6 +398,9 @@ impl Children {
                     plane.env(name, value);
                 }
             }
+        }
+        if let Some(audit_log) = &self.audit_log {
+            plane.arg("--audit-log").arg(audit_log);
         }
         let address = start_child(
             &mut self.control_plane,
@@ -1573,6 +1579,7 @@ pub async fn configured(
             base.notify = plane.notify.resolve(&environment);
             base.database = postgres_database(plane.database.as_ref(), &environment)?;
             base.proxy = proxy_environment(&environment);
+            base.audit_log.clone_from(&plane.audit_log);
             let endpoint = base
                 .start_base(
                     &executable,

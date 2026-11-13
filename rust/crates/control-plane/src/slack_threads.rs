@@ -140,8 +140,10 @@ impl Store {
             crate::surface_objectives::Handled::Work(task) => (task, false),
             crate::surface_objectives::Handled::Status(task) => (Some(task), true),
         };
+        let audit_call = crate::surface_objectives::audit_call_id(account, &input.event_id);
         let Some(task) = task else {
             tx.commit().await?;
+            self.emit_audit_call(&audit_call).await;
             return Ok(AcceptSlackEventResponse { task: None });
         };
         crate::reply_progress::acknowledge_in(
@@ -201,6 +203,7 @@ impl Store {
         }
         supertag_protocol::crash_point("control-plane.slack-admission", "before-commit");
         tx.commit().await?;
+        self.emit_audit_call(&audit_call).await;
         Ok(AcceptSlackEventResponse { task: Some(task) })
     }
 }

@@ -303,6 +303,7 @@ impl Store {
         if key == token {
             return Err(invalid("Auth Key and enrolled credential must be distinct"));
         }
+        let operation = fingerprint(&(role.as_str(), &input.name, &input.operation_id))?;
         let fingerprint = fingerprint(&(role.as_str(), &input.name, &input.operation_id, &token))?;
         let (mut transaction, _) = self.write().await?;
         let Some(row) = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE key_digest=$1")
@@ -325,14 +326,16 @@ impl Store {
                 role.plural()
             )));
         }
-        let prior: Option<String> = sqlx::query_scalar("SELECT enrollment_digest FROM supertag_v2_auth_key_joins WHERE key_digest=$1 AND role=$2 AND name=$3")
-            .bind(&key).bind(role.as_str()).bind(&input.name)
+        // A join is found again by its operation, since a reusable key's host join may have
+        // enrolled a suffixed name; a join recorded before operations were kept, by its name.
+        let prior: Option<(String, String)> = sqlx::query_as("SELECT name, enrollment_digest FROM supertag_v2_auth_key_joins WHERE key_digest=$1 AND role=$2 AND (operation_digest=$3 OR (operation_digest IS NULL AND name=$4))")
+            .bind(&key).bind(role.as_str()).bind(&operation).bind(&input.name)
             .fetch_optional(&mut *transaction).await?;
-        if let Some(prior) = prior {
+        if let Some((enrolled, prior)) = prior {
             if prior != fingerprint {
                 return Err(StoreError::PermissionDenied);
             }
-            let enrollment = enrollment_in(&mut transaction, role, &input.name)
+            let enrollment = enrollment_in(&mut transaction, role, &enrolled)
                 .await?
                 .ok_or(StoreError::PermissionDenied)?;
             transaction.rollback().await?;
@@ -359,24 +362,32 @@ impl Store {
             }
         }
         // Names are never reused within a role, and a host name is also never a Worker Host
-        // that exists without an enrollment.
-        let taken = enrollment_in(&mut transaction, role, &input.name)
-            .await?
-            .is_some()
-            || (role == Role::Host
-                && super::hosts::host_exists_in(&mut transaction, &input.name).await?);
-        if taken {
-            return Err(StoreError::Conflict(format!(
-                "the {} name is not available",
-                role.as_str()
-            )));
+        // that exists without an enrollment. A reusable key's host join that asks for a taken
+        // name enrolls the first free NAME-2, NAME-3, ... instead, as TypeScript does.
+        let mut enrolled = input.name.clone();
+        let mut suffix = 1;
+        while name_taken_in(&mut transaction, role, &enrolled).await? {
+            suffix += 1;
+            if !(reusable && role == Role::Host) || suffix > MAX_NAME_SUFFIX {
+                return Err(StoreError::Conflict(format!(
+                    "the {} name is not available",
+                    role.as_str()
+                )));
+            }
+            enrolled = format!("{}-{suffix}", input.name);
+            if enrollee_name(&enrolled).is_err() {
+                return Err(StoreError::Conflict(format!(
+                    "the {} name is not available",
+                    role.as_str()
+                )));
+            }
         }
         credential_unused_in(&mut transaction, &token).await?;
         let key_label: String = row.try_get("name")?;
         insert_enrollment_in(
             &mut transaction,
             role,
-            &input.name,
+            &enrolled,
             &token,
             Some(&key_label),
             if role == Role::Client { &tags } else { &[] },
@@ -387,7 +398,7 @@ impl Store {
         if role == Role::Host {
             super::hosts::insert_host_in(
                 &mut transaction,
-                &input.name,
+                &enrolled,
                 all_tags,
                 &tags,
                 row.try_get::<i64, _>("ephemeral")? == 1,
@@ -396,15 +407,15 @@ impl Store {
             )
             .await?;
         }
-        sqlx::query("INSERT INTO supertag_v2_auth_key_joins (key_digest,role,name,enrollment_digest,enrolled_at_ms) VALUES ($1,$2,$3,$4,$5)")
-            .bind(&key).bind(role.as_str()).bind(&input.name).bind(&fingerprint).bind(now)
+        sqlx::query("INSERT INTO supertag_v2_auth_key_joins (key_digest,role,name,enrollment_digest,enrolled_at_ms,operation_digest) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(&key).bind(role.as_str()).bind(&enrolled).bind(&fingerprint).bind(now).bind(&operation)
             .execute(&mut *transaction).await?;
         sqlx::query("UPDATE supertag_v2_auth_keys SET consumed_at_ms=COALESCE(consumed_at_ms,$1) WHERE key_digest=$2")
             .bind(now)
             .bind(&key)
             .execute(&mut *transaction)
             .await?;
-        let enrollment = enrollment_in(&mut transaction, role, &input.name)
+        let enrollment = enrollment_in(&mut transaction, role, &enrolled)
             .await?
             .ok_or(StoreError::PermissionDenied)?;
         transaction.commit().await?;
@@ -832,6 +843,20 @@ fn auth_key_name(value: &str) -> Result<()> {
 /// or client name.
 /// The name of the host and Gateway the Control Plane seeds from its configuration.
 const BOOTSTRAP_NAME: &str = "local";
+
+/// Most suffixes a reusable host join tries before it reports the name unavailable.
+const MAX_NAME_SUFFIX: u32 = 1000;
+
+/// Whether `name` is enrolled in `role` or, for hosts, is a Worker Host that exists without an
+/// enrollment.
+async fn name_taken_in(
+    transaction: &mut Transaction<'_, Any>,
+    role: Role,
+    name: &str,
+) -> Result<bool> {
+    Ok(enrollment_in(transaction, role, name).await?.is_some()
+        || (role == Role::Host && super::hosts::host_exists_in(transaction, name).await?))
+}
 
 pub(crate) fn enrollee_name(id: &str) -> Result<()> {
     if id.is_empty()

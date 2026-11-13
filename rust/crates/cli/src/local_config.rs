@@ -66,6 +66,9 @@ enum Service {
         /// A PostgreSQL database for the Control Plane instead of the state directory's SQLite file.
         #[serde(default)]
         database: Option<DatabaseSection>,
+        /// Service logging; only `audit` is configurable.
+        #[serde(default)]
+        logging: Option<Logging>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -95,6 +98,14 @@ enum Service {
         #[serde(default, rename = "attempt-timeout-seconds")]
         attempt_timeout_seconds: Option<u64>,
     },
+}
+/// `logging.audit`: where audit entries also go, besides the database, as in TypeScript's
+/// supertag.yaml: `stderr` or a JSON-lines file.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Logging {
+    #[serde(default)]
+    audit: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -199,6 +210,8 @@ pub struct Plane {
     pub listen: SocketAddr,
     pub provision: Vec<crate::manifests::ProvisionSource>,
     pub notify: Notifications,
+    /// The Control Plane's `--audit-log`: `stderr` or an absolute file path.
+    pub audit_log: Option<String>,
     pub database: Option<Database>,
 }
 /// The control-plane service's `database`: a PostgreSQL URL without a password, and the
@@ -435,6 +448,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             provision,
             notify,
             database,
+            logging,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -537,8 +551,23 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                     Some(Database { url, password })
                 }
             };
+            let audit_log = logging
+                .as_ref()
+                .and_then(|logging| logging.audit.as_ref())
+                .map(|value| {
+                    anyhow::Ok(if value == "stderr" {
+                        value.clone()
+                    } else {
+                        resolve_path(base, Path::new(value))?
+                            .to_str()
+                            .context("logging.audit path must be UTF-8")?
+                            .to_owned()
+                    })
+                })
+                .transpose()?;
             plane = Some(Plane {
                 listen,
+                audit_log,
                 provision: sources,
                 notify: Notifications {
                     destinations,
@@ -1249,6 +1278,32 @@ secrets:
         .unwrap();
         assert!(c.plane.is_none());
         assert!(c.hosts[0].key.is_some());
+    }
+    #[test]
+    fn audit_log_is_stderr_or_a_path_resolved_from_the_file() {
+        let audit_log = |value: &str| {
+            parse(
+                format!(
+                    "services:\n  control-plane: {{type: control-plane, logging: {{audit: {value}}}}}\n"
+                )
+                .as_bytes(),
+                Path::new("/trusted"),
+                |_| None,
+            )
+            .unwrap()
+            .plane
+            .unwrap()
+            .audit_log
+        };
+        assert_eq!(audit_log("stderr").as_deref(), Some("stderr"));
+        assert_eq!(
+            audit_log("logs/audit.jsonl").as_deref(),
+            Some("/trusted/logs/audit.jsonl")
+        );
+        assert_eq!(
+            audit_log("/var/log/audit.jsonl").as_deref(),
+            Some("/var/log/audit.jsonl")
+        );
     }
     #[test]
     fn one_host_serves_several_harnesses_with_per_harness_settings() {

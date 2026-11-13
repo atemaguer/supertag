@@ -60,7 +60,8 @@ pub enum AuthKeyCommand {
         /// The role every enrollee takes. It never changes.
         #[arg(long, value_enum)]
         role: KeyRole,
-        /// Enroll any number of principals instead of one.
+        /// Enroll any number of principals instead of one. A host name already taken enrolls as
+        /// NAME-2, NAME-3, and so on.
         #[arg(long)]
         reusable: bool,
         /// Host keys only: remove hosts that join with this key once they go offline.

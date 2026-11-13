@@ -369,6 +369,10 @@ enum Command {
         /// `SUPERTAG_GITHUB_*` variables. Requires the transfer directory.
         #[arg(long, requires = "transfer_directory")]
         github_workspace_directory: Option<PathBuf>,
+        /// Also write each committed audit entry as one JSON line to `stderr` or to this absolute
+        /// file path, created owner-only. The database keeps every entry either way.
+        #[arg(long, value_name = "stderr|PATH")]
+        audit_log: Option<String>,
     },
     /// Run a Gateway: collaboration surface webhooks and connections, reply delivery, and
     /// operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke,
@@ -559,9 +563,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         command: auth_keys::AuthKeyCommand,
     },
     /// Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one
-    /// secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an
-    /// operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as
-    /// client:NAME and saves only the resulting credential.
+    /// secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a
+    /// masked prompt in a terminal: an operator token is checked and saved; a client Auth Key
+    /// (stak_...) enrolls this device as client:NAME and saves only the resulting credential.
     Connect {
         /// The Control Plane origin, such as https://supertag.example.com, or its wss:// tunnel URL.
         url: String,
@@ -988,6 +992,7 @@ async fn run(command: Command) -> Result<()> {
             artifact_volumes,
             artifact_s3_volumes,
             github_workspace_directory,
+            audit_log,
         } => {
             control_plane(
                 listen,
@@ -997,6 +1002,7 @@ async fn run(command: Command) -> Result<()> {
                     artifact_volumes,
                     artifact_s3_volumes,
                     github_workspace: github_workspace_directory,
+                    audit_log,
                 },
             )
             .await?
@@ -1362,6 +1368,8 @@ struct ControlPlaneOptions {
     artifact_volumes: Vec<String>,
     artifact_s3_volumes: Option<PathBuf>,
     github_workspace: Option<PathBuf>,
+    /// `--audit-log`: also write each committed audit entry to `stderr` or this file.
+    audit_log: Option<String>,
 }
 
 /// Runs the Control Plane: the state owner and its controllers, and in front of them the public
@@ -1378,12 +1386,15 @@ async fn control_plane(
     let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_principal =
         std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
-    let plane = ControlPlane::open(
+    let mut plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
         service_token.clone(),
         operator_principal.clone(),
     )
     .await?;
+    if let Some(audit_log) = &options.audit_log {
+        plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(audit_log)?);
+    }
     // The deployment's default thread for Objective notices (TypeScript parity).
     plane
         .set_default_notification_task(
@@ -2514,13 +2525,7 @@ async fn connect_control_plane(
 ) -> Result<()> {
     saved.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
         Ok(token) => token,
-        Err(_) => {
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .context("read the operator token or Auth Key from standard input")?;
-            line
-        }
+        Err(_) => read_operator_token()?,
     }
     .trim()
     .to_owned();
@@ -2585,6 +2590,25 @@ async fn connect_control_plane(
         "connected_as": caller.principal,
     }))?;
     Ok(())
+}
+
+/// Reads the operator token from standard input: a masked prompt in a terminal, as TypeScript's
+/// `connect control-plane` did, and otherwise one line.
+fn read_operator_token() -> Result<String> {
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    // Echo is off before the prompt appears, so nothing typed after it is shown.
+    let echo = terminal.then(surface_setup::hide_input).flatten();
+    if terminal {
+        crate::terminal::write_stderr("Operator token or Auth Key: ");
+    }
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if let Some(saved) = echo {
+        surface_setup::restore_input(saved);
+        errln!("");
+    }
+    read.context("read the operator token or Auth Key from standard input")?;
+    Ok(line)
 }
 
 fn required_env(name: &str) -> Result<String> {

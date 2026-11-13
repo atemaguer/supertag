@@ -54,7 +54,23 @@ impl enrollments_server::Enrollments for ControlPlane {
             .ok_or_else(|| Status::permission_denied("invalid Auth Key"))?;
         // Every refusal of a key or a replay is the same, so it reveals nothing about the key.
         match self.store.enroll(&digest, request.get_ref()).await {
-            Ok(enrollment) => Ok(Response::new(enrollment)),
+            Ok(enrollment) => {
+                let requested = request.get_ref();
+                let suffixed = enrollment.name != requested.name;
+                let target = crate::audit::enrollment_kind(requested.role)
+                    .map(|kind| format!("{kind}/{}", enrollment.name));
+                let mut response = Response::new(enrollment);
+                // A reusable key's suffixed join is recorded under the name it enrolled.
+                if let Some(target) = target.filter(|_| suffixed) {
+                    response
+                        .extensions_mut()
+                        .insert(AuditChanges(vec![AuditChange {
+                            action: "enrollment.join".into(),
+                            target,
+                        }]));
+                }
+                Ok(response)
+            }
             Err(crate::StoreError::PermissionDenied) => Err(Status::permission_denied(
                 "the Auth Key does not admit this enrollment",
             )),

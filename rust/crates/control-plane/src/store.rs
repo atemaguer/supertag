@@ -87,11 +87,13 @@ pub struct Store {
     ephemeral_watch_since: Arc<std::sync::OnceLock<i64>>,
     /// Keeps a second process off a SQLite database while this Store lives.
     _process_lock: Option<Arc<std::fs::File>>,
+    /// Where committed audit entries are also written, besides the database.
+    pub(crate) audit_sink: Option<Arc<crate::AuditSink>>,
 }
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 75;
+        const SCHEMA_VERSION: i64 = 76;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -253,6 +255,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0073_objective_notice_homes.sql"),
                 include_str!("../migrations/sqlite/0074_manifest_ownership.sql"),
                 include_str!("../migrations/sqlite/0075_workspace_mount_writes.sql"),
+                include_str!("../migrations/sqlite/0076_auth_key_join_operations.sql"),
             ]
         } else {
             [
@@ -333,6 +336,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0073_objective_notice_homes.sql"),
                 include_str!("../migrations/postgresql/0074_manifest_ownership.sql"),
                 include_str!("../migrations/postgresql/0075_workspace_mount_writes.sql"),
+                include_str!("../migrations/postgresql/0076_auth_key_join_operations.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -365,6 +369,7 @@ impl Store {
             execution_clock: None,
             ephemeral_watch_since: Arc::default(),
             _process_lock: process_lock,
+            audit_sink: None,
         })
     }
 

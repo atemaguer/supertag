@@ -66,6 +66,7 @@ impl Services {
             supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             Uuid::new_v4().to_string(),
             crash,
+            None,
         )
         .await
     }
@@ -75,8 +76,12 @@ impl Services {
         gateway_token: String,
         operator_token: String,
         crash: Option<(&str, &Path)>,
+        audit_log: Option<&Path>,
     ) -> Result<Self> {
         let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
+        if let Some(path) = audit_log {
+            control.arg("--audit-log").arg(path);
+        }
         control
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
@@ -152,6 +157,99 @@ database_tests! {
     worker_host_joins_are_recorded_under_their_auth_key;
     #[tokio::test]
     connect_saves_a_proven_token_for_later_commands;
+    #[tokio::test]
+    audit_log_receives_each_committed_entry_as_a_json_line;
+}
+
+/// `--audit-log PATH` appends every committed entry, failed calls included, to an owner-only
+/// JSON-lines file in the order they are recorded, with no secret, as TypeScript's file sink did.
+async fn audit_log_receives_each_committed_entry_as_a_json_line(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let log = directory.path().join("audit.jsonl");
+    let services = Services::start_with(
+        &database,
+        supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+        Uuid::new_v4().to_string(),
+        None,
+        Some(&log),
+    )
+    .await?;
+    services
+        .json(&["tag", "put", "reviewer", "--instructions", "Review"])
+        .await?;
+    let issued = services
+        .json(&[
+            "auth-key",
+            "create",
+            "fleet",
+            "--role",
+            "host",
+            "--reusable",
+            "--tag",
+            "reviewer",
+        ])
+        .await?;
+    let secret = issued["auth_key"].as_str().context("auth_key")?.to_owned();
+    let refused = timeout(
+        WAIT,
+        services
+            .operator(&[
+                "auth-key",
+                "create",
+                "fleet",
+                "--role",
+                "host",
+                "--reusable",
+                "--tag",
+                "reviewer",
+            ])
+            .output(),
+    )
+    .await??;
+    ensure!(
+        !refused.status.success(),
+        "a reused Auth Key name was accepted"
+    );
+    let recorded = services.audit().await?;
+    ensure!(recorded.len() == 3, "{recorded:?}");
+    let text = std::fs::read_to_string(&log)?;
+    ensure!(!text.contains(&secret), "the audit log holds the Auth Key");
+    let lines = text
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let logged = lines
+        .iter()
+        .map(|line| {
+            assert_eq!(line["type"], "supertag.audit");
+            assert!(line["id"].as_str().is_some_and(|id| !id.is_empty()));
+            assert!(line["at"].as_str().is_some_and(|at| at.ends_with('Z')));
+            assert!(line["method"].as_str().is_some_and(|m| m.starts_with('/')));
+            ["actor", "action", "target", "outcome", "code"]
+                .map(|field| line[field].as_str().unwrap_or_default().to_owned())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(logged, recorded);
+    assert_eq!(logged[2][3], "failed");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&log)?.permissions().mode() & 0o777, 0o600);
+    services.stop().await?;
+
+    // A relative path is refused before the service starts.
+    let refused = timeout(
+        WAIT,
+        binary(&["control-plane", "--audit-log", "audit.jsonl"])
+            .env("SUPERTAG_DATABASE_URL", &database)
+            .output(),
+    )
+    .await??;
+    ensure!(!refused.status.success());
+    ensure!(
+        String::from_utf8_lossy(&refused.stderr).contains("absolute file path"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    Ok(())
 }
 
 /// The Control Plane dies after committing an audited change and before answering. The change
@@ -195,7 +293,8 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
     );
     let (gateway_token, operator_token) = services.stop().await?;
 
-    let services = Services::start_with(&database, gateway_token, operator_token, None).await?;
+    let services =
+        Services::start_with(&database, gateway_token, operator_token, None, None).await?;
     let mut connection = database::connect(&database).await?;
     let accepted: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks WHERE tag_id='reviewer'")
@@ -259,7 +358,7 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
                 role: PrincipalRole::Host.into(),
                 name: host.into(),
                 operation_id: operation.into(),
-                token_digest: Sha256::digest(format!("credential for {host}")).to_vec(),
+                token_digest: Sha256::digest(format!("credential for {host} {operation}")).to_vec(),
             },
             key,
             None,
@@ -286,6 +385,30 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     // A one-time key admits one enrollee; another may not use it.
     let refused = join(auth_key, "other-host", "other").await?.unwrap_err();
     assert_eq!(refused.code(), Code::PermissionDenied);
+    // A reusable key that asks for a taken name enrolls NAME-2, and the entry names that host.
+    let fleet = services
+        .json(&[
+            "auth-key",
+            "create",
+            "fleet-key",
+            "--role",
+            "host",
+            "--reusable",
+            "--tag",
+            "reviewer",
+        ])
+        .await?;
+    let fleet_key = fleet["auth_key"].as_str().context("auth_key")?;
+    let suffixed = join(fleet_key, "review-host", "fleet-join")
+        .await??
+        .into_inner();
+    assert_eq!(suffixed.name, "review-host-2");
+    assert_eq!(suffixed.principal, "host:review-host-2");
+    // A retried join returns the suffixed host, and its entry names that host too.
+    let retried = join(fleet_key, "review-host", "fleet-join")
+        .await??
+        .into_inner();
+    assert_eq!(retried.name, "review-host-2");
 
     let actor = format!("auth-key:{key_name}");
     let joins = services
@@ -294,7 +417,19 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .into_iter()
         .filter(|entry| entry[1] == "enrollment.join")
         .collect::<Vec<_>>();
-    assert_eq!(joins.len(), 3, "{joins:?}");
+    assert_eq!(joins.len(), 5, "{joins:?}");
+    for joined in &joins[3..] {
+        assert_eq!(
+            *joined,
+            entry(
+                "auth-key:fleet-key",
+                "enrollment.join",
+                "WorkerHost/review-host-2",
+                "succeeded",
+                "OK"
+            )
+        );
+    }
     assert_eq!(
         joins[0],
         entry(
@@ -433,6 +568,52 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["control_planes"].as_array().map(Vec::len), Some(1));
 
+    // In a terminal the token is read from a masked prompt: the terminal never shows it.
+    let (terminal, input) = pseudo_terminal()?;
+    let mut prompted = binary(&["connect", &services.public, "--name", "typed"]);
+    prompted
+        .env("HOME", home.path())
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = prompted.spawn()?;
+    let mut stderr = child.stderr.take().context("stderr")?;
+    let mut prompt = Vec::new();
+    timeout(WAIT, async {
+        use tokio::io::AsyncReadExt;
+        while !String::from_utf8_lossy(&prompt).contains("Operator token or Auth Key: ") {
+            let mut byte = [0; 1];
+            ensure!(stderr.read(&mut byte).await? == 1, "no prompt");
+            prompt.push(byte[0]);
+        }
+        anyhow::Ok(())
+    })
+    .await??;
+    // The prompt turns echo off before reading, so typing after it shows nothing.
+    let mut writer = std::fs::File::from(terminal.try_clone()?);
+    std::io::Write::write_all(&mut writer, format!("{token}\n").as_bytes())?;
+    let status = timeout(WAIT, child.wait()).await??;
+    ensure!(status.success(), "the prompted connect failed");
+    let mut shown = Vec::new();
+    let mut reader = std::fs::File::from(terminal);
+    // SAFETY: sets O_NONBLOCK on a descriptor this test owns.
+    unsafe {
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&reader);
+        libc::fcntl(
+            fd,
+            libc::F_SETFL,
+            libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK,
+        );
+    }
+    let _ = std::io::Read::read_to_end(&mut reader, &mut shown);
+    ensure!(
+        !String::from_utf8_lossy(&shown).contains(&token),
+        "the terminal echoed the token"
+    );
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["control_planes"][1]["name"], "typed");
+    assert_eq!(profiles["control_planes"][1]["token"], token.as_str());
+
     // A client Auth Key joins this device as client:NAME; only the enrolled credential is saved,
     // and the device reaches only the Tags its key allows.
     for tag in ["allowed", "hidden"] {
@@ -534,4 +715,29 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     );
     services.stop().await?;
     Ok(())
+}
+
+/// A pseudo-terminal: the controlling side the test types into, and the terminal a child reads.
+fn pseudo_terminal() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
+    use std::os::fd::FromRawFd;
+    let (mut controller, mut terminal) = (0, 0);
+    // SAFETY: openpty writes two new descriptors that this function then owns.
+    let opened = unsafe {
+        libc::openpty(
+            &mut controller,
+            &mut terminal,
+            std::ptr::null_mut(),
+            // Mutable on macOS and const on Linux; a null mutable pointer suits both.
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    ensure!(opened == 0, "openpty failed");
+    // SAFETY: both descriptors were just opened and are owned by nothing else.
+    Ok(unsafe {
+        (
+            std::os::fd::OwnedFd::from_raw_fd(controller),
+            std::os::fd::OwnedFd::from_raw_fd(terminal),
+        )
+    })
 }

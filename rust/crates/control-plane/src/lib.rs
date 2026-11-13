@@ -7,6 +7,7 @@ mod artifact_direct;
 mod artifact_publications;
 mod artifact_volumes;
 mod audit;
+mod audit_sink;
 mod budget_pool;
 mod changed_paths;
 mod checkpoints;
@@ -51,6 +52,7 @@ mod workspace_mounts;
 mod workspaces;
 
 pub use audit::{AuditChange, AuditChanges, AuditLayer, AuditService};
+pub use audit_sink::AuditSink;
 pub use github_workspaces::validate_manifest_workspace;
 pub use objectives::validate_manifest_objective;
 pub use operator_access::{AuditRecord, OPERATOR_TOKEN_LIFETIME_MS, OperatorAuthentication};
@@ -101,6 +103,12 @@ impl ControlPlane {
             internal_token: Arc::new(internal_token),
             admin_operator: Arc::new(admin_operator),
         })
+    }
+
+    /// Also writes every committed audit entry to `sink`.
+    pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
+        self.store = self.store.with_audit_sink(sink);
+        self
     }
 
     /// Records the deployment's default thread for Objective notices, or clears it.

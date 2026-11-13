@@ -74,6 +74,10 @@ struct State {
     token: String,
     /// The credential revision the Control Plane holds for `token`; set once enrolled.
     revision: Option<u64>,
+    /// The name the Control Plane enrolled when a reusable Auth Key found `name` taken and
+    /// suffixed it, as `NAME-2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enrolled_name: Option<String>,
     /// A replacement credential recorded before the Control Plane was asked to install it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rotation: Option<PendingRotation>,
@@ -106,6 +110,7 @@ pub async fn enroll(
             operation_id: Uuid::new_v4().to_string(),
             token: new_secret(CREDENTIAL_SECRET_PREFIX),
             revision: None,
+            enrolled_name: None,
             rotation: None,
         },
     };
@@ -115,10 +120,11 @@ pub async fn enroll(
         role.noun()
     );
     if let Some(revision) = state.revision {
+        let enrolled = state.enrolled().to_owned();
         return Ok(Enrollment {
             role: role.proto().into(),
-            principal: format!("{}:{name}", role.prefix()),
-            name,
+            principal: format!("{}:{enrolled}", role.prefix()),
+            name: enrolled,
             credential_revision: revision,
             ..Default::default()
         });
@@ -152,15 +158,36 @@ pub async fn enroll(
         .await?
         .into_inner();
     ensure!(
-        enrollment.name == state.name
+        suffixed_or_same(&enrollment.name, &state.name)
             && enrollment.role == role.proto() as i32
             && enrollment.revoked_at_ms.is_none()
             && enrollment.credential_revision > 0,
         "invalid enrollment receipt"
     );
+    if enrollment.name != state.name {
+        state.enrolled_name = Some(enrollment.name.clone());
+    }
     state.revision = Some(enrollment.credential_revision);
     save(&journal, &state)?;
     Ok(enrollment)
+}
+
+impl State {
+    /// The name this state directory is enrolled as.
+    fn enrolled(&self) -> &str {
+        self.enrolled_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// Whether `enrolled` is `requested` or `requested-N` with N of 2 or more.
+fn suffixed_or_same(enrolled: &str, requested: &str) -> bool {
+    enrolled == requested
+        || enrolled
+            .strip_prefix(requested)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|number| {
+                !number.starts_with('0') && number.parse::<u32>().is_ok_and(|number| number >= 2)
+            })
 }
 
 /// This directory's enrolled name and credential.
@@ -193,7 +220,7 @@ fn stored_credential(
         "complete the pending {} enrollment",
         role.noun()
     );
-    Ok((state.name, state.token))
+    Ok((state.enrolled().to_owned(), state.token))
 }
 
 /// The Control Plane URL this directory enrolled with.
@@ -321,4 +348,26 @@ fn save(journal: &Journal, state: &State) -> Result<()> {
     journal.write(&journal.directory().join("enrollment.json"), |file| {
         Ok(serde_json::to_writer(file, state)?)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::suffixed_or_same;
+
+    #[test]
+    fn accepts_only_the_requested_id_or_its_numbered_suffix() {
+        for enrolled in ["runner", "runner-2", "runner-10"] {
+            assert!(suffixed_or_same(enrolled, "runner"), "{enrolled}");
+        }
+        for enrolled in [
+            "runner-1",
+            "runner-02",
+            "runner-x",
+            "runner2",
+            "other",
+            "runner-2-2",
+        ] {
+            assert!(!suffixed_or_same(enrolled, "runner"), "{enrolled}");
+        }
+    }
 }

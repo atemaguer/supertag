@@ -52,7 +52,7 @@ Commands:
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
   client                Revoke client devices and rotate their credentials
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
-  connect               Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+  connect               Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -1911,6 +1911,9 @@ Options:
       --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
           Private scratch for GitHub source bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Requires the transfer directory
 
+      --audit-log <stderr|PATH>
+          Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -2368,7 +2371,7 @@ Options:
           - client:  Clients (a device running the CLI, terminal UI, or desktop app), with `supertag connect`
 
       --reusable
-          Enroll any number of principals instead of one
+          Enroll any number of principals instead of one. A host name already taken enrolls as NAME-2, NAME-3, and so on
 
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
@@ -2414,7 +2417,7 @@ Options:
 ## `supertag connect`
 
 ```text
-Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
+Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 

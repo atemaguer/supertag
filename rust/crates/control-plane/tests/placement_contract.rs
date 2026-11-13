@@ -262,16 +262,6 @@ async fn placement_contract(url: &str) {
             .await,
         Err(StoreError::PermissionDenied)
     ));
-    // A host ID enrolled with another key stays taken.
-    assert!(matches!(
-        store
-            .enroll(
-                &plain_key,
-                &host_join("gpu-host", "join-again", &digest("token:other"))
-            )
-            .await,
-        Err(StoreError::Conflict(_))
-    ));
     // An unbound host's labels never count.
     let unbound_key = key(&store, "elsewhere", &["elsewhere"], &["gpu", "tpu"], false).await;
     let unbound = join(&store, &unbound_key, "unbound-tpu").await;
@@ -446,6 +436,8 @@ async fn ephemeral_contract(url: &str) {
     let queued = store.get_task(&task).await.unwrap();
     assert_eq!(queued.state, TaskState::Queued as i32);
     assert!(queued.attempt_id.is_none());
+    // The removal is not written into the Task's events, which are the Tag's reply text.
+    assert!(store.list_events(&task, 0, 0).await.unwrap().is_empty());
     let listed = store
         .list_hosts(&ListHostsRequest::default())
         .await
@@ -483,6 +475,106 @@ async fn ephemeral_contract(url: &str) {
         Some(task.as_str())
     );
     store.close().await;
+}
+
+/// A removed ephemeral host's cancelled Attempt finishes its cleanup without running again, and
+/// nothing is written into the Task's reply text (TypeScript's typed `task.worker-host-removed`
+/// event has no Rust counterpart; see the capability ledger).
+async fn removed_host_cancelled_attempt_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+    let ci = key(&store, "ci", &["builder"], &[], true).await;
+    let worker = join(&store, &ci, "worker").await;
+    report(&store, &worker, 1, &[]).await;
+    let task = submit(&store, "builder", "build").await;
+    assert_eq!(start_running(&store, &worker, "worker-1").await, task);
+    store.cancel_task(&task).await.unwrap();
+    clock.store(NOW + 30_000, Ordering::SeqCst);
+    assert_eq!(store.sweep_ephemeral_hosts().await.unwrap(), ["worker"]);
+    assert_eq!(
+        store.get_task(&task).await.unwrap().state,
+        TaskState::Cancelled as i32
+    );
+    assert!(store.list_events(&task, 0, 0).await.unwrap().is_empty());
+}
+
+/// A reusable Auth Key's host join that asks for a taken name enrolls the first free `NAME-N`, as
+/// tests/auth-key-runtime.test.ts "lets reusable keys join hosts under NAME-2"; a lost response
+/// replays the same host, and the same operation with another credential is refused. A one-time
+/// key's join never takes a suffix.
+async fn host_id_suffix_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+    let fleet = key(&store, "fleet", &["builder"], &[], false).await;
+    let enroll = |key: &[u8], host: &str, operation: &str, token: &str| {
+        let request = host_join(host, operation, &digest(token));
+        let store = store.clone();
+        let key = key.to_vec();
+        async move { store.enroll(&key, &request).await }
+    };
+    assert_eq!(
+        enroll(&fleet, "runner", "one", "t1").await.unwrap().name,
+        "runner"
+    );
+    let suffixed = enroll(&fleet, "runner", "two", "t2").await.unwrap();
+    assert_eq!(suffixed.name, "runner-2");
+    assert_eq!(suffixed.principal, "host:runner-2");
+    assert_eq!(
+        enroll(&fleet, "runner", "two", "t2").await.unwrap().name,
+        "runner-2"
+    );
+    assert!(matches!(
+        enroll(&fleet, "runner", "two", "stolen").await,
+        Err(StoreError::PermissionDenied)
+    ));
+    // A name a one-time key enrolled is skipped too.
+    let once = create("once", false, 0);
+    store.create_auth_key(OPERATOR, &once).await.unwrap();
+    assert_eq!(
+        enroll(&once.key_digest, "runner-3", "once", "t3")
+            .await
+            .unwrap()
+            .name,
+        "runner-3"
+    );
+    assert_eq!(
+        enroll(&fleet, "runner", "three", "t4").await.unwrap().name,
+        "runner-4"
+    );
+    // A one-time key's join of a taken name is refused, never suffixed.
+    let twice = create("twice", false, 0);
+    store.create_auth_key(OPERATOR, &twice).await.unwrap();
+    assert!(matches!(
+        enroll(&twice.key_digest, "runner", "twice", "t5").await,
+        Err(StoreError::Conflict(_))
+    ));
+    // A suffix that would make the name too long is not tried.
+    let long = "h".repeat(250);
+    assert_eq!(
+        enroll(&fleet, &long, "long", "t6").await.unwrap().name,
+        long
+    );
+    assert!(matches!(
+        enroll(&fleet, &long, "long-again", "t7").await,
+        Err(StoreError::Conflict(_))
+    ));
+    let listed = store
+        .list_hosts(&ListHostsRequest::default())
+        .await
+        .unwrap();
+    let mut ids = listed
+        .hosts
+        .iter()
+        .map(|host| host.host_id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [long.as_str(), "runner", "runner-2", "runner-3", "runner-4"]
+    );
 }
 
 /// Time the Control Plane is down never counts as a host being offline.
@@ -582,19 +674,22 @@ async fn auth_key_lifecycle_contract(url: &str) {
         Err(StoreError::PermissionDenied)
     ));
 
-    // A one-time key enrolls whatever name its enrollee chooses, but a taken name stays taken.
+    // A one-time key enrolls whatever name its enrollee chooses, and that name stays taken: a
+    // reusable key's host join that asks for it enrolls NAME-2 instead.
     let reserved = create("reserved", false, 0);
     store.create_auth_key(OPERATOR, &reserved).await.unwrap();
     join(&store, &reserved.key_digest, "reserved-host").await;
-    assert!(matches!(
+    assert_eq!(
         store
             .enroll(
                 &pool.key_digest,
                 &host_join("reserved-host", "steal", &digest("token:steal")),
             )
-            .await,
-        Err(StoreError::Conflict(_))
-    ));
+            .await
+            .unwrap()
+            .name,
+        "reserved-host-2"
+    );
 
     // Revocation blocks new joins and replays; joined hosts stay enrolled.
     join(&store, &pool.key_digest, "first").await;
@@ -940,6 +1035,18 @@ async fn sqlite_ephemeral_host_contract() {
 }
 
 #[tokio::test]
+async fn sqlite_removed_host_cancelled_attempt_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    removed_host_cancelled_attempt_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
+async fn sqlite_host_id_suffix_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    host_id_suffix_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
 async fn sqlite_ephemeral_restart_contract() {
     let directory = tempfile::tempdir().unwrap();
     ephemeral_restart_contract(&sqlite_url(&directory)).await;
@@ -1025,4 +1132,16 @@ async fn postgres_restarted_host_labels_contract() {
 async fn postgres_auth_key_names_and_host_credentials_contract() {
     on_postgres(|url| async move { auth_key_names_and_host_credentials_contract(&url).await })
         .await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_host_id_suffix_contract() {
+    on_postgres(|url| async move { host_id_suffix_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_removed_host_cancelled_attempt_contract() {
+    on_postgres(|url| async move { removed_host_cancelled_attempt_contract(&url).await }).await;
 }

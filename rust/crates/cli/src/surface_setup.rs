@@ -644,7 +644,7 @@ impl Prompter {
     }
 }
 
-fn hide_input() -> Option<libc::termios> {
+pub(crate) fn hide_input() -> Option<libc::termios> {
     // SAFETY: tcgetattr and tcsetattr only read and write the termios value for fd 0.
     unsafe {
         let mut saved = std::mem::zeroed::<libc::termios>();
@@ -657,7 +657,7 @@ fn hide_input() -> Option<libc::termios> {
     }
 }
 
-fn restore_input(saved: libc::termios) {
+pub(crate) fn restore_input(saved: libc::termios) {
     // SAFETY: restores the attributes read by hide_input.
     unsafe {
         libc::tcsetattr(0, libc::TCSANOW, &saved);
