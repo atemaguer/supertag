@@ -33,6 +33,7 @@ supertag-codex-adapter.workspace = true
 supertag-gateway.workspace = true
 supertag-protocol.workspace = true
 supertag-worker-host.workspace = true
+supertag-workspaces.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
@@ -81,6 +82,11 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "github_runtime"
 path = "tests/github_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "session_branch_runtime"
+path = "tests/session_branch_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]

@@ -733,6 +733,20 @@ impl Operator for Gateway {
         .await
     }
 
+    async fn get_session_delivery(
+        &self,
+        request: Request<GetSessionDeliveryRequest>,
+    ) -> Result<Response<SessionDelivery>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                operator_client(channel).get_session_delivery(request).await
+            },
+        )
+        .await
+    }
+
     async fn list_native_usage(
         &self,
         request: Request<ListNativeUsageRequest>,

@@ -2186,6 +2186,26 @@ class GetTaskRequest(_message.Message):
     task_id: str
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
+class GetSessionDeliveryRequest(_message.Message):
+    __slots__ = ("session_id", "tag_id")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    tag_id: str
+    def __init__(self, session_id: _Optional[str] = ..., tag_id: _Optional[str] = ...) -> None: ...
+
+class SessionDelivery(_message.Message):
+    __slots__ = ("task_id", "tag_id", "session_id", "delivery")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    tag_id: str
+    session_id: str
+    delivery: WorkspaceDeliveryReference
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
+
 class ListEventsRequest(_message.Message):
     __slots__ = ("task_id", "after_sequence", "limit")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]

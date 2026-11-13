@@ -37,3 +37,4 @@ supertag-control-plane = { path = "crates/control-plane" }
 supertag-codex-adapter = { path = "crates/codex-adapter" }
 supertag-gateway = { path = "crates/gateway" }
 supertag-worker-host = { path = "crates/worker-host" }
+supertag-workspaces = { path = "crates/workspaces" }

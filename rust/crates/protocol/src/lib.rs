@@ -170,6 +170,19 @@ pub fn valid_workspace_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+/// The one branch a Tag's Session delivers to: `supertag/session/<id>`, where `<id>` is the
+/// SHA-256 of the Tag and Session IDs. A pull request and a local import use the same name, and
+/// two Sessions, even of different Tags with the same Session ID, never share it.
+pub fn session_branch(tag_id: &str, session_id: &str) -> String {
+    use sha2::Digest as _;
+    format!(
+        "supertag/session/{:x}",
+        sha2::Sha256::digest(
+            serde_json::to_vec(&(tag_id, session_id)).expect("string pairs serialize")
+        )
+    )
+}
+
 pub fn valid_git_commit(value: &str) -> bool {
     (value.len() == 40 || value.len() == 64)
         && value

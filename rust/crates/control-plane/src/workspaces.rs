@@ -130,6 +130,47 @@ impl Store {
         Ok(reference.clone())
     }
 
+    /// The latest accepted delivery of the one Session the principal may read with this ID,
+    /// optionally of one Tag. Two such Sessions are ambiguous and require the Tag.
+    pub async fn get_session_delivery(
+        &self,
+        principal: &str,
+        input: &GetSessionDeliveryRequest,
+    ) -> Result<SessionDelivery> {
+        name("Session ID", &input.session_id)?;
+        if !input.tag_id.is_empty() {
+            name("Tag ID", &input.tag_id)?;
+        }
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query("SELECT h.tag_id,d.task_id,d.reference FROM supertag_v2_workspace_heads h JOIN supertag_v2_workspace_deliveries d ON d.attempt_id=h.attempt_id WHERE h.session_id=$1 AND ($2='' OR h.tag_id=$2) AND d.committed_at_ms IS NOT NULL ORDER BY h.tag_id")
+            .bind(&input.session_id)
+            .bind(&input.tag_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut found = Vec::new();
+        for row in rows {
+            let task_id: String = row.try_get("task_id")?;
+            if crate::conversations::task_access_in(&mut tx, principal, &task_id).await? {
+                found.push(SessionDelivery {
+                    task_id,
+                    tag_id: row.try_get("tag_id")?,
+                    session_id: input.session_id.clone(),
+                    delivery: Some(decode_delivery(row.try_get("reference")?)?),
+                });
+            }
+        }
+        tx.commit().await?;
+        match found.len() {
+            0 => Err(StoreError::NotFound(
+                "Session has no delivered Workspace commits".into(),
+            )),
+            1 => Ok(found.remove(0)),
+            _ => Err(invalid(
+                "more than one Tag has a Session with this ID; name the Tag",
+            )),
+        }
+    }
+
     pub async fn get_workspace_artifact(
         &self,
         input: &GetWorkspaceArtifactRequest,

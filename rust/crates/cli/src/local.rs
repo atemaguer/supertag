@@ -125,6 +125,23 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         } => result.map(Some),
         _ = &mut shutdown => Ok(None),
     };
+    // A Workspace mapped from flags delivers to its repository as Session branches.
+    let importer = match (&start, options.adapter.workspace_mapping()) {
+        (
+            Ok(Some(endpoint)),
+            Some(supertag_worker_host::WorkspaceMapping {
+                workspace_id,
+                source: supertag_worker_host::WorkspaceSource::Local(path),
+            }),
+        ) => Some(tokio::spawn(crate::delivery_branches::follow(
+            endpoint.clone(),
+            credentials.operator.clone(),
+            directory.clone(),
+            [(workspace_id, path)].into(),
+            supervisor_log,
+        ))),
+        _ => None,
+    };
     let result = match start {
         Ok(Some(endpoint)) => match announce(&directory, &endpoint).and_then(|()| {
             let mut services = children.base_status(&endpoint);
@@ -155,6 +172,9 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         Ok(None) => Ok(()),
         Err(error) => Err(error),
     };
+    if let Some(importer) = importer {
+        importer.abort();
+    }
     let removed = remove_endpoint(&directory).and(lifecycle::forget(&directory));
     let stopped = children.stop().await;
     drop(lock);
@@ -164,6 +184,14 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         }
         (result, cleanup) => result.and(cleanup),
     }
+}
+
+/// One timestamped line in the supervisor's own log, which is its standard error.
+fn supervisor_log(line: &str) {
+    eprintln!(
+        "{} {line}",
+        lifecycle::timestamp(std::time::SystemTime::now())
+    );
 }
 
 /// Read the endpoint and operator credential for a local CLI invocation.
@@ -1159,6 +1187,12 @@ pub async fn configured(
     let instance = config.name.clone();
     let mut announced: Option<String> = None;
     let mut hosts = Vec::new();
+    let mut importer = None;
+    let session_branches: crate::delivery_branches::Repositories = config
+        .hosts
+        .iter()
+        .flat_map(|host| host.session_branches.clone())
+        .collect();
     tokio::pin!(shutdown);
     let startup = async {
         let credentials = config
@@ -1237,6 +1271,15 @@ pub async fn configured(
         }
         if let (Some(endpoint), Some(credentials)) = (&endpoint, &credentials) {
             undrain(&directory, endpoint, &credentials.operator).await?;
+            if !session_branches.is_empty() {
+                importer = Some(tokio::spawn(crate::delivery_branches::follow(
+                    endpoint.clone(),
+                    credentials.operator.clone(),
+                    directory.clone(),
+                    session_branches,
+                    supervisor_log,
+                )));
+            }
         }
         if let Some(endpoint) = &endpoint {
             announce(&directory, endpoint)?;
@@ -1291,6 +1334,9 @@ pub async fn configured(
         Ok(false) => Ok(()),
         Err(error) => Err(error),
     };
+    if let Some(importer) = importer.take() {
+        importer.abort();
+    }
     let mut failures = Vec::new();
     let mut stops = tokio::task::JoinSet::new();
     for host in &mut hosts {

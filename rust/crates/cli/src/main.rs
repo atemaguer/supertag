@@ -1,5 +1,6 @@
 mod artifact_publications;
 mod artifacts;
+mod delivery_branches;
 mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
@@ -639,6 +640,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         kind: artifacts::ArtifactKind,
         #[arg(long)]
         output: PathBuf,
+    },
+    /// Import a Task's or Session's delivered commits as its Session branch in a repository.
+    Fetch {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: delivery_branches::FetchArgs,
     },
     /// Read a page of recorded Task events.
     TaskEvents {
@@ -1504,6 +1512,7 @@ async fn run(command: Command) -> Result<()> {
         } => {
             artifacts::download(connection, task_id, kind, &output).await?;
         }
+        Command::Fetch { connection, args } => delivery_branches::fetch(connection, args).await?,
         Command::ArtifactPublication {
             connection,
             command,

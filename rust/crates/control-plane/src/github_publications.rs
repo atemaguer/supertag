@@ -143,10 +143,7 @@ pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Res
         prior.reason = "a newer verified commit superseded this undispatched publication".into();
         save(tx, &prior).await?;
     }
-    let branch = format!(
-        "supertag/session/{:x}",
-        Sha256::digest(serde_json::to_vec(&(&task.tag_id, &task.session_id))?)
-    );
+    let branch = supertag_protocol::session_branch(&task.tag_id, &task.session_id);
     let title = task
         .prompt
         .lines()

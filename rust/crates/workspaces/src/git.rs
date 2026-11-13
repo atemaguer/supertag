@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{GitOutputFiles, check_cancelled, paths};
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(15);
 
 const MAX_OUTPUT: usize = 268_435_456;
@@ -888,8 +888,8 @@ fn reject_object_links(directory: &Path) -> Result<()> {
 }
 
 #[derive(Debug)]
-struct GitExit {
-    code: Option<i32>,
+pub(crate) struct GitExit {
+    pub(crate) code: Option<i32>,
     stderr: String,
 }
 impl std::fmt::Display for GitExit {
@@ -913,7 +913,7 @@ async fn limited(mut reader: impl AsyncRead + Unpin, maximum: usize) -> Result<V
     Ok(bytes)
 }
 
-async fn run(
+pub(crate) async fn run(
     mut command: Command,
     input: &[u8],
     cancel: &CancellationToken,
