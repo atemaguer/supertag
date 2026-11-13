@@ -66,16 +66,33 @@ pub(crate) struct PendingWorkspace {
 
 pub(crate) struct Workspaces {
     directory: PathBuf,
-    mapping: Option<WorkspaceMapping>,
+    mappings: Vec<WorkspaceMapping>,
 }
 
+/// A Worker Host advertises at most this many Workspaces, as the Control Plane accepts.
+const MAX_WORKSPACE_MAPPINGS: usize = 128;
+
 impl Workspaces {
-    pub fn new(directory: &Path, mapping: Option<WorkspaceMapping>) -> Result<Self> {
-        let mapping = mapping
+    /// Several IDs may map the same source: each (ID, base commit) pair gets its own private
+    /// state directory, and no checkout ever writes a branch or ref into the source repository,
+    /// so aliases cannot collide.
+    pub fn new(directory: &Path, mappings: Vec<WorkspaceMapping>) -> Result<Self> {
+        ensure!(
+            mappings.len() <= MAX_WORKSPACE_MAPPINGS,
+            "a Worker Host maps at most {MAX_WORKSPACE_MAPPINGS} Workspaces"
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        let mappings = mappings
+            .into_iter()
             .map(|mut mapping| -> Result<_> {
                 ensure!(
                     valid_workspace_id(&mapping.workspace_id),
                     "invalid hosted workspace identity"
+                );
+                ensure!(
+                    seen.insert(mapping.workspace_id.clone()),
+                    "Workspace {} is mapped more than once",
+                    mapping.workspace_id
                 );
                 // An unavailable source cannot be advertised for new work, but
                 // must not prevent recovery cleanup from recorded private state.
@@ -86,15 +103,21 @@ impl Workspaces {
                 }
                 Ok(mapping)
             })
-            .transpose()?;
+            .collect::<Result<_>>()?;
         Ok(Self {
             directory: directory.join("workspaces"),
-            mapping,
+            mappings,
         })
     }
 
+    fn mapping(&self, workspace_id: &str) -> Option<&WorkspaceMapping> {
+        self.mappings
+            .iter()
+            .find(|mapping| mapping.workspace_id == workspace_id)
+    }
+
     pub fn ids(&self) -> Vec<String> {
-        self.mapping
+        self.mappings
             .iter()
             .filter(|mapping| match &mapping.source {
                 WorkspaceSource::Local(source) => source.is_dir(),
@@ -105,7 +128,7 @@ impl Workspaces {
     }
 
     pub fn gateway_ids(&self) -> Vec<String> {
-        self.mapping
+        self.mappings
             .iter()
             .filter(|mapping| matches!(mapping.source, WorkspaceSource::Gateway))
             .map(|mapping| mapping.workspace_id.clone())
@@ -114,9 +137,7 @@ impl Workspaces {
 
     fn open(&self, workspace_id: &str, base_commit: &str) -> Result<Workspace> {
         let mapping = self
-            .mapping
-            .as_ref()
-            .filter(|mapping| mapping.workspace_id == workspace_id)
+            .mapping(workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;
         let identity = format!(
             "{:x}",
@@ -155,9 +176,7 @@ impl Workspaces {
             return Ok(None);
         };
         let mapping = self
-            .mapping
-            .as_ref()
-            .filter(|mapping| mapping.workspace_id == spec.workspace_id)
+            .mapping(&spec.workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;
         match (&mapping.source, &spec.github_source) {
             (WorkspaceSource::Gateway, Some(expected)) => {
@@ -279,10 +298,7 @@ impl Workspaces {
         authority: (&Transfers, &Attempt, &str),
         cancel: &CancellationToken,
     ) -> Option<String> {
-        let mapping = self
-            .mapping
-            .as_ref()
-            .filter(|mapping| mapping.workspace_id == workspace.workspace_id)?;
+        let mapping = self.mapping(&workspace.workspace_id)?;
         match &mapping.source {
             WorkspaceSource::Local(source) => supertag_workspaces::advertised_output_remote(
                 source,
@@ -656,7 +672,7 @@ mod tests {
             workspace_id: "project".into(),
             source: WorkspaceSource::Local(source.clone()),
         };
-        let workspaces = Workspaces::new(&state, Some(mapping.clone()))?;
+        let workspaces = Workspaces::new(&state, vec![mapping.clone()])?;
         assert_eq!(workspaces.ids(), ["project"]);
         assert!(workspaces.open("other", &base_commit).is_err());
         let private = workspaces.open("project", &base_commit)?;
@@ -697,7 +713,7 @@ mod tests {
         drop(journal);
         drop(workspaces);
         let journal = Journal::open(&state)?;
-        let workspaces = Workspaces::new(&state, Some(mapping))?;
+        let workspaces = Workspaces::new(&state, vec![mapping])?;
         let Some(Entry::Finalizing {
             attempt,
             result,
@@ -788,7 +804,7 @@ mod tests {
             attempt,
             prepared: Some(prepared.clone()),
         })?;
-        let recovered = Workspaces::new(&state, None)?;
+        let recovered = Workspaces::new(&state, vec![])?;
         recovered.discard(&prepared)?;
         // Simulate a crash after deletion but before clearing the Terminal record.
         drop(journal);

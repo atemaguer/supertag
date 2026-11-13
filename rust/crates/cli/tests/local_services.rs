@@ -333,6 +333,7 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
+                    name: name.into(),
                     host_id: name.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
@@ -1044,6 +1045,7 @@ impl SharedHost {
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
+                    name: "shared".into(),
                     host_id: "shared".into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),

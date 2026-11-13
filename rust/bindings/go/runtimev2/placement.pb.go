@@ -23,7 +23,7 @@ const (
 
 type RevokeAuthKeyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	KeyId         string                 `protobuf:"bytes,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -58,11 +58,275 @@ func (*RevokeAuthKeyRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *RevokeAuthKeyRequest) GetKeyId() string {
+func (x *RevokeAuthKeyRequest) GetName() string {
 	if x != nil {
-		return x.KeyId
+		return x.Name
 	}
 	return ""
+}
+
+type GetAuthKeyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAuthKeyRequest) Reset() {
+	*x = GetAuthKeyRequest{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAuthKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuthKeyRequest) ProtoMessage() {}
+
+func (x *GetAuthKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuthKeyRequest.ProtoReflect.Descriptor instead.
+func (*GetAuthKeyRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetAuthKeyRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type ListAuthKeysRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// At most this many keys; 0 means 100. At most 500.
+	Limit uint32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	// The name of the last key on the previous page.
+	Cursor        string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAuthKeysRequest) Reset() {
+	*x = ListAuthKeysRequest{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAuthKeysRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAuthKeysRequest) ProtoMessage() {}
+
+func (x *ListAuthKeysRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAuthKeysRequest.ProtoReflect.Descriptor instead.
+func (*ListAuthKeysRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ListAuthKeysRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListAuthKeysRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListAuthKeysResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuthKeys      []*AuthKey             `protobuf:"bytes,1,rep,name=auth_keys,json=authKeys,proto3" json:"auth_keys,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAuthKeysResponse) Reset() {
+	*x = ListAuthKeysResponse{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAuthKeysResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAuthKeysResponse) ProtoMessage() {}
+
+func (x *ListAuthKeysResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAuthKeysResponse.ProtoReflect.Descriptor instead.
+func (*ListAuthKeysResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListAuthKeysResponse) GetAuthKeys() []*AuthKey {
+	if x != nil {
+		return x.AuthKeys
+	}
+	return nil
+}
+
+func (x *ListAuthKeysResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type RotateHostCredentialRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	HostId string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	// The host's current credential_revision. A repeat of a rotation that already
+	// applied, with the same digest, returns the same result.
+	ExpectedCredentialRevision uint64 `protobuf:"varint,2,opt,name=expected_credential_revision,json=expectedCredentialRevision,proto3" json:"expected_credential_revision,omitempty"`
+	TokenDigest                []byte `protobuf:"bytes,3,opt,name=token_digest,json=tokenDigest,proto3" json:"token_digest,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *RotateHostCredentialRequest) Reset() {
+	*x = RotateHostCredentialRequest{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RotateHostCredentialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RotateHostCredentialRequest) ProtoMessage() {}
+
+func (x *RotateHostCredentialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RotateHostCredentialRequest.ProtoReflect.Descriptor instead.
+func (*RotateHostCredentialRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RotateHostCredentialRequest) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+func (x *RotateHostCredentialRequest) GetExpectedCredentialRevision() uint64 {
+	if x != nil {
+		return x.ExpectedCredentialRevision
+	}
+	return 0
+}
+
+func (x *RotateHostCredentialRequest) GetTokenDigest() []byte {
+	if x != nil {
+		return x.TokenDigest
+	}
+	return nil
+}
+
+type HostCredentialRotation struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	HostId             string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	CredentialRevision uint64                 `protobuf:"varint,2,opt,name=credential_revision,json=credentialRevision,proto3" json:"credential_revision,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HostCredentialRotation) Reset() {
+	*x = HostCredentialRotation{}
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCredentialRotation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCredentialRotation) ProtoMessage() {}
+
+func (x *HostCredentialRotation) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCredentialRotation.ProtoReflect.Descriptor instead.
+func (*HostCredentialRotation) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HostCredentialRotation) GetHostId() string {
+	if x != nil {
+		return x.HostId
+	}
+	return ""
+}
+
+func (x *HostCredentialRotation) GetCredentialRevision() uint64 {
+	if x != nil {
+		return x.CredentialRevision
+	}
+	return 0
 }
 
 type SetTagRunsOnRequest struct {
@@ -75,7 +339,7 @@ type SetTagRunsOnRequest struct {
 
 func (x *SetTagRunsOnRequest) Reset() {
 	*x = SetTagRunsOnRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -87,7 +351,7 @@ func (x *SetTagRunsOnRequest) String() string {
 func (*SetTagRunsOnRequest) ProtoMessage() {}
 
 func (x *SetTagRunsOnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -100,7 +364,7 @@ func (x *SetTagRunsOnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetTagRunsOnRequest.ProtoReflect.Descriptor instead.
 func (*SetTagRunsOnRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{1}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SetTagRunsOnRequest) GetTagId() string {
@@ -126,7 +390,7 @@ type DiagnoseTaskPlacementRequest struct {
 
 func (x *DiagnoseTaskPlacementRequest) Reset() {
 	*x = DiagnoseTaskPlacementRequest{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -138,7 +402,7 @@ func (x *DiagnoseTaskPlacementRequest) String() string {
 func (*DiagnoseTaskPlacementRequest) ProtoMessage() {}
 
 func (x *DiagnoseTaskPlacementRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -151,7 +415,7 @@ func (x *DiagnoseTaskPlacementRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiagnoseTaskPlacementRequest.ProtoReflect.Descriptor instead.
 func (*DiagnoseTaskPlacementRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{2}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DiagnoseTaskPlacementRequest) GetTaskId() string {
@@ -176,7 +440,7 @@ type HostPlacement struct {
 
 func (x *HostPlacement) Reset() {
 	*x = HostPlacement{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +452,7 @@ func (x *HostPlacement) String() string {
 func (*HostPlacement) ProtoMessage() {}
 
 func (x *HostPlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +465,7 @@ func (x *HostPlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostPlacement.ProtoReflect.Descriptor instead.
 func (*HostPlacement) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HostPlacement) GetHostId() string {
@@ -262,7 +526,7 @@ type TaskPlacementDiagnosis struct {
 
 func (x *TaskPlacementDiagnosis) Reset() {
 	*x = TaskPlacementDiagnosis{}
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -274,7 +538,7 @@ func (x *TaskPlacementDiagnosis) String() string {
 func (*TaskPlacementDiagnosis) ProtoMessage() {}
 
 func (x *TaskPlacementDiagnosis) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_placement_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,7 +551,7 @@ func (x *TaskPlacementDiagnosis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPlacementDiagnosis.ProtoReflect.Descriptor instead.
 func (*TaskPlacementDiagnosis) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_placement_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TaskPlacementDiagnosis) GetTaskId() string {
@@ -350,9 +614,25 @@ var File_supertag_runtime_v2_placement_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_placement_proto_rawDesc = "" +
 	"\n" +
-	"#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"-\n" +
-	"\x14RevokeAuthKeyRequest\x12\x15\n" +
-	"\x06key_id\x18\x01 \x01(\tR\x05keyId\"E\n" +
+	"#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"*\n" +
+	"\x14RevokeAuthKeyRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"'\n" +
+	"\x11GetAuthKeyRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"C\n" +
+	"\x13ListAuthKeysRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"r\n" +
+	"\x14ListAuthKeysResponse\x129\n" +
+	"\tauth_keys\x18\x01 \x03(\v2\x1c.supertag.runtime.v2.AuthKeyR\bauthKeys\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\x9b\x01\n" +
+	"\x1bRotateHostCredentialRequest\x12\x17\n" +
+	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12@\n" +
+	"\x1cexpected_credential_revision\x18\x02 \x01(\x04R\x1aexpectedCredentialRevision\x12!\n" +
+	"\ftoken_digest\x18\x03 \x01(\fR\vtokenDigest\"b\n" +
+	"\x16HostCredentialRotation\x12\x17\n" +
+	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12/\n" +
+	"\x13credential_revision\x18\x02 \x01(\x04R\x12credentialRevision\"E\n" +
 	"\x13SetTagRunsOnRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\x17\n" +
 	"\aruns_on\x18\x02 \x03(\tR\x06runsOn\"7\n" +
@@ -375,9 +655,14 @@ const file_supertag_runtime_v2_placement_proto_rawDesc = "" +
 	"\x05hosts\x18\b \x03(\v2\".supertag.runtime.v2.HostPlacementR\x05hosts2\xcf\x01\n" +
 	"\tPlacement\x12R\n" +
 	"\fSetTagRunsOn\x12(.supertag.runtime.v2.SetTagRunsOnRequest\x1a\x18.supertag.runtime.v2.Tag\x12n\n" +
-	"\fDiagnoseTask\x121.supertag.runtime.v2.DiagnoseTaskPlacementRequest\x1a+.supertag.runtime.v2.TaskPlacementDiagnosis2d\n" +
+	"\fDiagnoseTask\x121.supertag.runtime.v2.DiagnoseTaskPlacementRequest\x1a+.supertag.runtime.v2.TaskPlacementDiagnosis2\x9d\x02\n" +
 	"\bAuthKeys\x12X\n" +
-	"\rRevokeAuthKey\x12).supertag.runtime.v2.RevokeAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKeyb\x06proto3"
+	"\rRevokeAuthKey\x12).supertag.runtime.v2.RevokeAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey\x12c\n" +
+	"\fListAuthKeys\x12(.supertag.runtime.v2.ListAuthKeysRequest\x1a).supertag.runtime.v2.ListAuthKeysResponse\x12R\n" +
+	"\n" +
+	"GetAuthKey\x12&.supertag.runtime.v2.GetAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey2\x88\x01\n" +
+	"\x0fHostCredentials\x12u\n" +
+	"\x14RotateHostCredential\x120.supertag.runtime.v2.RotateHostCredentialRequest\x1a+.supertag.runtime.v2.HostCredentialRotationb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_placement_proto_rawDescOnce sync.Once
@@ -391,33 +676,45 @@ func file_supertag_runtime_v2_placement_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_placement_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_placement_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_supertag_runtime_v2_placement_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_supertag_runtime_v2_placement_proto_goTypes = []any{
 	(*RevokeAuthKeyRequest)(nil),         // 0: supertag.runtime.v2.RevokeAuthKeyRequest
-	(*SetTagRunsOnRequest)(nil),          // 1: supertag.runtime.v2.SetTagRunsOnRequest
-	(*DiagnoseTaskPlacementRequest)(nil), // 2: supertag.runtime.v2.DiagnoseTaskPlacementRequest
-	(*HostPlacement)(nil),                // 3: supertag.runtime.v2.HostPlacement
-	(*TaskPlacementDiagnosis)(nil),       // 4: supertag.runtime.v2.TaskPlacementDiagnosis
-	(HostPhase)(0),                       // 5: supertag.runtime.v2.HostPhase
-	(TaskState)(0),                       // 6: supertag.runtime.v2.TaskState
-	(*Tag)(nil),                          // 7: supertag.runtime.v2.Tag
-	(*AuthKey)(nil),                      // 8: supertag.runtime.v2.AuthKey
+	(*GetAuthKeyRequest)(nil),            // 1: supertag.runtime.v2.GetAuthKeyRequest
+	(*ListAuthKeysRequest)(nil),          // 2: supertag.runtime.v2.ListAuthKeysRequest
+	(*ListAuthKeysResponse)(nil),         // 3: supertag.runtime.v2.ListAuthKeysResponse
+	(*RotateHostCredentialRequest)(nil),  // 4: supertag.runtime.v2.RotateHostCredentialRequest
+	(*HostCredentialRotation)(nil),       // 5: supertag.runtime.v2.HostCredentialRotation
+	(*SetTagRunsOnRequest)(nil),          // 6: supertag.runtime.v2.SetTagRunsOnRequest
+	(*DiagnoseTaskPlacementRequest)(nil), // 7: supertag.runtime.v2.DiagnoseTaskPlacementRequest
+	(*HostPlacement)(nil),                // 8: supertag.runtime.v2.HostPlacement
+	(*TaskPlacementDiagnosis)(nil),       // 9: supertag.runtime.v2.TaskPlacementDiagnosis
+	(*AuthKey)(nil),                      // 10: supertag.runtime.v2.AuthKey
+	(HostPhase)(0),                       // 11: supertag.runtime.v2.HostPhase
+	(TaskState)(0),                       // 12: supertag.runtime.v2.TaskState
+	(*Tag)(nil),                          // 13: supertag.runtime.v2.Tag
 }
 var file_supertag_runtime_v2_placement_proto_depIdxs = []int32{
-	5, // 0: supertag.runtime.v2.HostPlacement.phase:type_name -> supertag.runtime.v2.HostPhase
-	6, // 1: supertag.runtime.v2.TaskPlacementDiagnosis.state:type_name -> supertag.runtime.v2.TaskState
-	3, // 2: supertag.runtime.v2.TaskPlacementDiagnosis.hosts:type_name -> supertag.runtime.v2.HostPlacement
-	1, // 3: supertag.runtime.v2.Placement.SetTagRunsOn:input_type -> supertag.runtime.v2.SetTagRunsOnRequest
-	2, // 4: supertag.runtime.v2.Placement.DiagnoseTask:input_type -> supertag.runtime.v2.DiagnoseTaskPlacementRequest
-	0, // 5: supertag.runtime.v2.AuthKeys.RevokeAuthKey:input_type -> supertag.runtime.v2.RevokeAuthKeyRequest
-	7, // 6: supertag.runtime.v2.Placement.SetTagRunsOn:output_type -> supertag.runtime.v2.Tag
-	4, // 7: supertag.runtime.v2.Placement.DiagnoseTask:output_type -> supertag.runtime.v2.TaskPlacementDiagnosis
-	8, // 8: supertag.runtime.v2.AuthKeys.RevokeAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	10, // 0: supertag.runtime.v2.ListAuthKeysResponse.auth_keys:type_name -> supertag.runtime.v2.AuthKey
+	11, // 1: supertag.runtime.v2.HostPlacement.phase:type_name -> supertag.runtime.v2.HostPhase
+	12, // 2: supertag.runtime.v2.TaskPlacementDiagnosis.state:type_name -> supertag.runtime.v2.TaskState
+	8,  // 3: supertag.runtime.v2.TaskPlacementDiagnosis.hosts:type_name -> supertag.runtime.v2.HostPlacement
+	6,  // 4: supertag.runtime.v2.Placement.SetTagRunsOn:input_type -> supertag.runtime.v2.SetTagRunsOnRequest
+	7,  // 5: supertag.runtime.v2.Placement.DiagnoseTask:input_type -> supertag.runtime.v2.DiagnoseTaskPlacementRequest
+	0,  // 6: supertag.runtime.v2.AuthKeys.RevokeAuthKey:input_type -> supertag.runtime.v2.RevokeAuthKeyRequest
+	2,  // 7: supertag.runtime.v2.AuthKeys.ListAuthKeys:input_type -> supertag.runtime.v2.ListAuthKeysRequest
+	1,  // 8: supertag.runtime.v2.AuthKeys.GetAuthKey:input_type -> supertag.runtime.v2.GetAuthKeyRequest
+	4,  // 9: supertag.runtime.v2.HostCredentials.RotateHostCredential:input_type -> supertag.runtime.v2.RotateHostCredentialRequest
+	13, // 10: supertag.runtime.v2.Placement.SetTagRunsOn:output_type -> supertag.runtime.v2.Tag
+	9,  // 11: supertag.runtime.v2.Placement.DiagnoseTask:output_type -> supertag.runtime.v2.TaskPlacementDiagnosis
+	10, // 12: supertag.runtime.v2.AuthKeys.RevokeAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	3,  // 13: supertag.runtime.v2.AuthKeys.ListAuthKeys:output_type -> supertag.runtime.v2.ListAuthKeysResponse
+	10, // 14: supertag.runtime.v2.AuthKeys.GetAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	5,  // 15: supertag.runtime.v2.HostCredentials.RotateHostCredential:output_type -> supertag.runtime.v2.HostCredentialRotation
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_placement_proto_init() }
@@ -432,9 +729,9 @@ func file_supertag_runtime_v2_placement_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_placement_proto_rawDesc), len(file_supertag_runtime_v2_placement_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   10,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   3,
 		},
 		GoTypes:           file_supertag_runtime_v2_placement_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_placement_proto_depIdxs,

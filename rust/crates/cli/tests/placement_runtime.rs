@@ -149,6 +149,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let issued = json(op(
         &[
             "create-auth-key",
+            "infra-pool",
             "--reusable",
             "--tag",
             "trainer",
@@ -164,7 +165,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(issued["reusable"], true);
     assert_eq!(issued["labels"], json!(["team:infra"]));
     let key = issued["auth_key"].as_str().context("missing Auth Key")?;
-    let key_id = issued["key_id"].as_str().context("missing Auth Key ID")?;
+    assert_eq!(issued["name"], "infra-pool");
+    assert_eq!(issued["phase"], "active");
     // Without --expires-in-seconds a reusable key lives 90 days, never longer.
     let lifetime = issued["expires_at_ms"].as_i64().context("missing expiry")?
         - std::time::SystemTime::now()
@@ -174,6 +176,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let too_long = output(op(
         &[
             "create-auth-key",
+            "too-long",
             "--reusable",
             "--all-tags",
             "--expires-in-seconds",
@@ -265,8 +268,13 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     );
 
     // Revoking the key stops new joins; hosts that joined keep working.
-    let revoked = json(op(&["revoke-auth-key", key_id], &[])).await?;
+    let revoked = json(op(&["revoke-auth-key", "infra-pool"], &[])).await?;
     assert_eq!(revoked["revoked"], true);
+    assert_eq!(revoked["phase"], "revoked");
+    assert_eq!(
+        json(op(&["get-auth-key", "infra-pool"], &[])).await?,
+        revoked
+    );
     let refused = output(enroll(
         &public,
         &directory.join("late-host"),
@@ -299,7 +307,13 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     // An ephemeral key marks the hosts that join with it.
     let ephemeral = json(op(
-        &["create-auth-key", "--reusable", "--ephemeral", "--all-tags"],
+        &[
+            "create-auth-key",
+            "labelled-runners",
+            "--reusable",
+            "--ephemeral",
+            "--all-tags",
+        ],
         &[],
     ))
     .await?;
@@ -347,7 +361,13 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
     let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
     json(op(&["put-tag", "builder", "--instructions", "Build"], &[])).await?;
     let issued = json(op(
-        &["create-auth-key", "--reusable", "--ephemeral", "--all-tags"],
+        &[
+            "create-auth-key",
+            "ephemeral-runners",
+            "--reusable",
+            "--ephemeral",
+            "--all-tags",
+        ],
         &[],
     ))
     .await?;

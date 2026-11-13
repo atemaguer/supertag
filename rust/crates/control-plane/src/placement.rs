@@ -348,7 +348,46 @@ impl auth_keys_server::AuthKeys for ControlPlane {
         let principal = self.principal(&request, "operator:")?;
         Ok(Response::new(
             self.store
-                .revoke_auth_key(&principal, &request.get_ref().key_id)
+                .revoke_auth_key(&principal, &request.get_ref().name)
+                .await?,
+        ))
+    }
+
+    async fn list_auth_keys(
+        &self,
+        request: Request<ListAuthKeysRequest>,
+    ) -> std::result::Result<Response<ListAuthKeysResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .list_auth_keys(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn get_auth_key(
+        &self,
+        request: Request<GetAuthKeyRequest>,
+    ) -> std::result::Result<Response<AuthKey>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .get_auth_key(&principal, &request.get_ref().name)
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl host_credentials_server::HostCredentials for ControlPlane {
+    async fn rotate_host_credential(
+        &self,
+        request: Request<RotateHostCredentialRequest>,
+    ) -> std::result::Result<Response<HostCredentialRotation>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .rotate_host_credential(&principal, request.get_ref())
                 .await?,
         ))
     }

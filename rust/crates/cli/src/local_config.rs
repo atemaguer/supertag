@@ -480,8 +480,8 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             "each harness may be listed once per named host"
         );
         ensure!(
-            workspaces.len() <= 1,
-            "each native Worker Host currently supports one Workspace mapping"
+            workspaces.len() <= 128,
+            "a named Worker Host maps at most 128 Workspaces"
         );
         let mut mapping = Vec::new();
         let mut session_branches = BTreeMap::new();
@@ -1036,7 +1036,7 @@ secrets:
         assert_eq!(profiles[1].model_ids, ["cursor-model"]);
         assert!(profiles[2].model_ids.is_empty());
         assert!(!profiles[0].allow_unsandboxed_commands && profiles[1].allow_unsandboxed_commands);
-        // Every harness shares the Host's one Workspace mapping.
+        // Every harness shares the Host's Workspace mappings.
         assert!(
             shared
                 .harnesses
@@ -1098,6 +1098,60 @@ secrets:
             assert!(parse(invalid, Path::new("/trusted"), |_| None).is_err());
         }
     }
+    #[test]
+    fn one_host_maps_several_workspaces_each_with_its_own_source() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
+  shared:
+    type: host
+    harnesses: [codex, claude-code]
+    workspaces: {docs: ./docs, app: ./app, alias: ./app}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        for adapter in &c.hosts[0].harnesses {
+            let mappings = adapter.workspace_mappings().unwrap();
+            let pairs: Vec<_> = mappings
+                .iter()
+                .map(|mapping| match &mapping.source {
+                    supertag_worker_host::WorkspaceSource::Local(path) => {
+                        (mapping.workspace_id.as_str(), path.to_str().unwrap())
+                    }
+                    supertag_worker_host::WorkspaceSource::Gateway => unreachable!(),
+                })
+                .collect();
+            assert_eq!(
+                pairs,
+                [
+                    ("alias", "/trusted/./app"),
+                    ("app", "/trusted/./app"),
+                    ("docs", "/trusted/./docs")
+                ]
+            );
+            // Each lane receives every mapping, each ID followed by its source.
+            let args = adapter.worker_args();
+            let ids: Vec<_> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, arg)| *arg == "--workspace-id")
+                .map(|(index, _)| (&args[index + 1], &args[index + 2], &args[index + 3]))
+                .collect();
+            assert_eq!(ids.len(), 3);
+            assert!(ids.iter().all(|(_, flag, _)| *flag == "--workspace-source"));
+        }
+        let workspaces = (0..129)
+            .map(|index| format!("w{index}: ./w{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let many = format!(
+            "services:\n  control-plane: {{type: control-plane}}\n  big: {{type: host, harnesses: [codex], workspaces: {{{workspaces}}}}}\n"
+        );
+        assert!(parse(many.as_bytes(), Path::new("/trusted"), |_| None).is_err());
+    }
+
     #[test]
     fn env_file_interpolates_services_and_backs_environment_secrets() {
         use std::os::unix::fs::PermissionsExt;

@@ -125,21 +125,29 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         } => result.map(Some),
         _ = &mut shutdown => Ok(None),
     };
-    // A Workspace mapped from flags delivers to its repository as Session branches.
-    let importer = match (&start, options.adapter.workspace_mapping()) {
-        (
-            Ok(Some(endpoint)),
-            Some(supertag_worker_host::WorkspaceMapping {
-                workspace_id,
-                source: supertag_worker_host::WorkspaceSource::Local(path),
-            }),
-        ) => Some(tokio::spawn(crate::delivery_branches::follow(
-            endpoint.clone(),
-            credentials.operator.clone(),
-            directory.clone(),
-            [(workspace_id, path)].into(),
-            supervisor_log,
-        ))),
+    // Workspaces mapped from flags deliver to their repositories as Session branches.
+    let repositories: crate::delivery_branches::Repositories = options
+        .adapter
+        .workspace_mappings()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|mapping| match mapping.source {
+            supertag_worker_host::WorkspaceSource::Local(path) => {
+                Some((mapping.workspace_id, path))
+            }
+            supertag_worker_host::WorkspaceSource::Gateway => None,
+        })
+        .collect();
+    let importer = match &start {
+        Ok(Some(endpoint)) if !repositories.is_empty() => {
+            Some(tokio::spawn(crate::delivery_branches::follow(
+                endpoint.clone(),
+                credentials.operator.clone(),
+                directory.clone(),
+                repositories,
+                supervisor_log,
+            )))
+        }
         _ => None,
     };
     let result = match start {
@@ -912,17 +920,18 @@ impl ManagedHost {
                 capacity: self.definition.concurrency,
             });
         }
-        let workspaces = self
-            .definition
-            .harnesses
-            .first()
-            .and_then(crate::harness::AdapterOptions::workspace_mapping)
-            .filter(|mapping| match &mapping.source {
-                supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
-                supertag_worker_host::WorkspaceSource::Gateway => true,
-            })
-            .map(|mapping| vec![mapping.workspace_id])
-            .unwrap_or_default();
+        let workspaces = match self.definition.harnesses.first() {
+            Some(adapter) => adapter
+                .workspace_mappings()?
+                .into_iter()
+                .filter(|mapping| match &mapping.source {
+                    supertag_worker_host::WorkspaceSource::Local(path) => path.is_dir(),
+                    supertag_worker_host::WorkspaceSource::Gateway => true,
+                })
+                .map(|mapping| mapping.workspace_id)
+                .collect(),
+            None => vec![],
+        };
         let harness_of = self.lanes.iter().map(|lane| lane.harness).collect();
         self.presence = Some(report_presence(
             shared,
@@ -1091,7 +1100,7 @@ fn configured_profile(
     adapter: &crate::harness::AdapterOptions,
 ) -> Result<supertag_protocol::v2::HarnessExecutionProfile> {
     let mut profile = adapter.execution_profile()?;
-    profile.task_artifact_inputs = adapter.workspace_mapping().is_some()
+    profile.task_artifact_inputs = !adapter.workspace_mappings()?.is_empty()
         && supertag_protocol::task_artifact_inputs::supports_harness(adapter.harness_kind());
     Ok(profile)
 }
@@ -1426,6 +1435,7 @@ async fn enroll_configured(
         OperatorClient::new(crate::network::operator_channel(&gateway).await?)
             .create_auth_key(crate::request(
                 CreateAuthKeyRequest {
+                    name: join_key_name(&definition.name),
                     host_id: definition.name.clone(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
@@ -1447,6 +1457,21 @@ async fn enroll_configured(
     };
     supertag_worker_host::enroll(gateway, state, definition.name.clone(), Some(&key)).await?;
     Ok(())
+}
+/// A fresh name for the one-time key that joins a configured host, since names are never reused.
+fn join_key_name(host: &str) -> String {
+    let mut name: String = host
+        .chars()
+        .map(|c| match c.to_ascii_lowercase() {
+            c @ ('a'..='z' | '0'..='9' | '-' | '_') => c,
+            _ => '-',
+        })
+        .take(40)
+        .collect();
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        name.insert(0, 'h');
+    }
+    format!("{name}-join-{}", &Uuid::new_v4().simple().to_string()[..12])
 }
 async fn wait_configured(
     base: &mut Children,

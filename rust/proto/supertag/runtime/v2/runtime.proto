@@ -716,6 +716,8 @@ message WorkerHostStatus {
   // Set when an offline ephemeral host was removed.
   optional int64 removed_at_ms = 1403;
   repeated HostHarnessCapacity harnesses = 1500;
+  // Increases with every credential rotation, from 1.
+  uint64 credential_revision = 3300;
 }
 
 message ListHostsRequest {
@@ -1135,6 +1137,9 @@ message CreateAuthKeyRequest {
   bool ephemeral = 1401;
   // Labels granted to every host that joins with the key.
   repeated string labels = 1402;
+  // The operator's name for the key: 1 to 63 lowercase letters, digits,
+  // hyphens or underscores, starting with a letter or digit. Never reused.
+  string name = 3300;
 }
 
 message AuthKey {
@@ -1145,10 +1150,13 @@ message AuthKey {
   bool reusable = 1400;
   bool ephemeral = 1401;
   repeated string labels = 1402;
-  // Public name of the key, for revocation. It does not authorize anything.
-  string key_id = 1403;
+  reserved 1403;
   // A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
   bool revoked = 1404;
+  string name = 3300;
+  int64 created_at_ms = 3301;
+  // A one-time key enrolled its host, or a reusable key enrolled at least one.
+  bool used = 3302;
 }
 
 message RevokeHostRequest {

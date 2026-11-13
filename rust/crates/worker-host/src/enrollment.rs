@@ -26,6 +26,17 @@ struct Enrollment {
     operation_id: String,
     token: String,
     receipt: Option<Receipt>,
+    /// A replacement credential recorded before the Control Plane was asked to install it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotation: Option<PendingRotation>,
+}
+
+/// A Worker Host credential rotation that this state directory has not yet finished.
+#[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
+pub struct PendingRotation {
+    pub host_id: String,
+    pub token: String,
+    pub expected_revision: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -48,6 +59,7 @@ pub async fn enroll(
             operation_id: Uuid::new_v4().to_string(),
             token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
             receipt: None,
+            rotation: None,
         },
     };
     ensure!(
@@ -110,6 +122,61 @@ pub(crate) fn host_token(journal: &Journal, gateway: &Endpoint) -> Result<String
         "complete the pending Worker Host enrollment"
     );
     Ok(state.token)
+}
+
+/// Records a replacement credential for this enrolled host before the Control Plane installs it.
+/// A rotation this directory already started is returned unchanged, so a retry after a lost
+/// response sends the same digest and revision. Fails while a Worker Host runs from the directory.
+pub fn begin_credential_rotation(
+    directory: &Path,
+    host_id: &str,
+    current_revision: u64,
+) -> Result<PendingRotation> {
+    let journal = Journal::open(directory)?;
+    let mut state = read(&journal)?.context("this state directory has no enrolled Worker Host")?;
+    ensure!(
+        state.host_id == host_id && state.receipt.is_some(),
+        "this state directory holds another Worker Host's enrollment"
+    );
+    if let Some(pending) = &state.rotation {
+        return Ok(pending.clone());
+    }
+    ensure!(
+        current_revision > 0,
+        "invalid Worker Host credential revision"
+    );
+    let pending = PendingRotation {
+        host_id: host_id.to_owned(),
+        token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+        expected_revision: current_revision,
+    };
+    state.rotation = Some(pending.clone());
+    save(&journal, &state)?;
+    Ok(pending)
+}
+
+/// Makes the installed replacement this host's credential.
+pub fn finish_credential_rotation(directory: &Path, pending: &PendingRotation) -> Result<()> {
+    let journal = Journal::open(directory)?;
+    let mut state = read(&journal)?.context("this state directory has no enrolled Worker Host")?;
+    ensure!(
+        state.rotation.as_ref() == Some(pending),
+        "this state directory recorded a different credential rotation"
+    );
+    state.token.clone_from(&pending.token);
+    state.rotation = None;
+    save(&journal, &state)
+}
+
+/// Forgets a replacement the Control Plane refused, so the next rotation starts afresh.
+pub fn abandon_credential_rotation(directory: &Path, pending: &PendingRotation) -> Result<()> {
+    let journal = Journal::open(directory)?;
+    let mut state = read(&journal)?.context("this state directory has no enrolled Worker Host")?;
+    if state.rotation.as_ref() == Some(pending) {
+        state.rotation = None;
+        save(&journal, &state)?;
+    }
+    Ok(())
 }
 
 fn read(journal: &Journal) -> Result<Option<Enrollment>> {

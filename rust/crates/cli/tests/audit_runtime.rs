@@ -6,6 +6,8 @@ mod prerequisites;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
+#[path = "support/protocol.rs"]
+mod protocol;
 
 use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
 
@@ -211,7 +213,7 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
 }
 
 /// A join with a key the Control Plane does not know is not recorded, nor is a join refused before
-/// its key is looked up; a join with a known key is recorded under `auth-key:KEY_ID`, whether it
+/// its key is looked up; a join with a known key is recorded under `auth-key:NAME`, whether it
 /// succeeds or is refused.
 async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
@@ -219,11 +221,18 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .json(&["put-tag", "reviewer", "--instructions", "Review the change"])
         .await?;
     let issued = services
-        .json(&["create-auth-key", "review-host", "--tag", "reviewer"])
+        .json(&[
+            "create-auth-key",
+            "review-key",
+            "--host",
+            "review-host",
+            "--tag",
+            "reviewer",
+        ])
         .await?;
     let auth_key = issued["auth_key"].as_str().context("auth_key")?;
-    let key_id = issued["key_id"].as_str().context("key_id")?;
-    let mut enrollment = HostEnrollmentClient::connect(services.public.clone()).await?;
+    let key_name = issued["name"].as_str().context("name")?;
+    let mut enrollment = HostEnrollmentClient::new(protocol::dial(services.public.clone()).await?);
     let mut join = async |key: &str, host: &str, operation: &str| {
         let mut request = authenticated_request(
             EnrollHostRequest {
@@ -255,7 +264,7 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     let refused = join(auth_key, "other-host", "other").await?.unwrap_err();
     assert_ne!(refused.code(), Code::Ok);
 
-    let actor = format!("auth-key:{key_id}");
+    let actor = format!("auth-key:{key_name}");
     let joins = services
         .audit()
         .await?

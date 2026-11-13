@@ -1,7 +1,8 @@
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
-    AuthKey, CreateAuthKeyRequest, EnrollHostRequest, HostRecord, TaskState,
+    AuthKey, CreateAuthKeyRequest, EnrollHostRequest, HostCredentialRotation, HostRecord,
+    ListAuthKeysRequest, ListAuthKeysResponse, RotateHostCredentialRequest, TaskState,
 };
 
 use super::{Result, Store, StoreError, invalid, name};
@@ -59,6 +60,7 @@ impl Store {
                 .strip_prefix("operator:")
                 .ok_or(StoreError::PermissionDenied)?,
         )?;
+        auth_key_name(&input.name)?;
         if input.reusable {
             if !input.host_id.is_empty() {
                 return Err(invalid(
@@ -98,7 +100,7 @@ impl Store {
         let scope = serde_json::to_string(&tags)?;
         let fingerprint = fingerprint(&(
             (&input.host_id, &key, expires_in_ms, &tags, input.all_tags),
-            (input.reusable, input.ephemeral, &labels),
+            (input.reusable, input.ephemeral, &labels, &input.name),
         ))?;
         let (mut transaction, _) = self.write().await?;
         let prior = sqlx::query(
@@ -117,6 +119,16 @@ impl Store {
             transaction.rollback().await?;
             return auth_key_row(&prior);
         }
+        let named: Option<String> =
+            sqlx::query_scalar("SELECT name FROM supertag_v2_auth_keys WHERE name=$1")
+                .bind(&input.name)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        if named.is_some() {
+            return Err(StoreError::Conflict(
+                "Auth Key names are never reused; choose another name".into(),
+            ));
+        }
         if !input.reusable && host_in(&mut transaction, &input.host_id).await?.is_some() {
             return Err(StoreError::Conflict(
                 "Worker Host ID is already enrolled".into(),
@@ -133,15 +145,15 @@ impl Store {
         for tag in &tags {
             crate::tags::require_active(&mut transaction, tag).await?;
         }
-        let expires_at_ms = self
-            .execution_now_ms()
+        let now = self.execution_now_ms();
+        let expires_at_ms = now
             .checked_add(expires_in_ms)
             .ok_or_else(|| invalid("Auth Key expiry is out of range"))?;
-        let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,host_id,allowed_tag_ids,all_tags,expires_at_ms,reusable,ephemeral,labels,key_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING")
+        let inserted = sqlx::query("INSERT INTO supertag_v2_auth_keys (key_digest,operator_principal,operation_id,request_digest,host_id,allowed_tag_ids,all_tags,expires_at_ms,reusable,ephemeral,labels,name,created_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING")
             .bind(&key).bind(principal).bind(&input.operation_id).bind(fingerprint).bind(&input.host_id)
             .bind(scope).bind(i64::from(input.all_tags)).bind(expires_at_ms)
             .bind(i64::from(input.reusable)).bind(i64::from(input.ephemeral)).bind(serde_json::to_string(&labels)?)
-            .bind(&key[..KEY_ID_LEN])
+            .bind(&input.name).bind(now)
             .execute(&mut *transaction).await?;
         if inserted.rows_affected() != 1 {
             return Err(StoreError::Conflict(
@@ -158,35 +170,146 @@ impl Store {
 
     /// Blocks new joins with the key, including replays of earlier joins.
     /// Hosts that already joined keep their enrollment. Idempotent.
-    pub async fn revoke_auth_key(&self, principal: &str, key_id: &str) -> Result<AuthKey> {
-        name(
-            "operator identity",
-            principal
-                .strip_prefix("operator:")
-                .ok_or(StoreError::PermissionDenied)?,
-        )?;
-        if key_id.len() != KEY_ID_LEN
-            || !key_id
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(invalid(
-                "Auth Key ID is 16 lowercase hexadecimal characters",
-            ));
-        }
+    pub async fn revoke_auth_key(&self, principal: &str, key_name: &str) -> Result<AuthKey> {
+        operator(principal)?;
+        auth_key_name(key_name)?;
         let (mut transaction, _) = self.write().await?;
-        sqlx::query("UPDATE supertag_v2_auth_keys SET revoked_at_ms=$1 WHERE key_id=$2 AND revoked_at_ms IS NULL")
+        sqlx::query("UPDATE supertag_v2_auth_keys SET revoked_at_ms=$1 WHERE name=$2 AND revoked_at_ms IS NULL")
             .bind(self.execution_now_ms())
-            .bind(key_id)
+            .bind(key_name)
             .execute(&mut *transaction)
             .await?;
-        let row = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE key_id=$1")
-            .bind(key_id)
+        let row = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE name=$1")
+            .bind(key_name)
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or_else(|| StoreError::NotFound("Auth Key was not found".into()))?;
         transaction.commit().await?;
         auth_key_row(&row)
+    }
+
+    /// One Auth Key, without its secret.
+    pub async fn get_auth_key(&self, principal: &str, key_name: &str) -> Result<AuthKey> {
+        operator(principal)?;
+        auth_key_name(key_name)?;
+        let row = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE name=$1")
+            .bind(key_name)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Auth Key was not found".into()))?;
+        auth_key_row(&row)
+    }
+
+    /// Every Auth Key, revoked, expired and used ones included: the earliest created
+    /// first, then by name, as packages/store/src/auth-key-store.ts lists them.
+    pub async fn list_auth_keys(
+        &self,
+        principal: &str,
+        input: &ListAuthKeysRequest,
+    ) -> Result<ListAuthKeysResponse> {
+        operator(principal)?;
+        if input.limit > 500 {
+            return Err(invalid("Auth Key page limit must be at most 500"));
+        }
+        let limit = if input.limit == 0 { 100 } else { input.limit } as usize;
+        let mut transaction = self.pool.begin().await?;
+        let (after_ms, after_name) = if input.cursor.is_empty() {
+            (i64::MIN, String::new())
+        } else {
+            auth_key_name(&input.cursor)?;
+            let created: i64 =
+                sqlx::query_scalar("SELECT created_at_ms FROM supertag_v2_auth_keys WHERE name=$1")
+                    .bind(&input.cursor)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+                    .ok_or_else(|| invalid("unknown Auth Key cursor"))?;
+            (created, input.cursor.clone())
+        };
+        let mut rows = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE created_at_ms>$1 OR (created_at_ms=$1 AND name>$2) ORDER BY created_at_ms, name LIMIT $3")
+            .bind(after_ms)
+            .bind(&after_name)
+            .bind((limit + 1) as i64)
+            .fetch_all(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        let next_cursor = if rows.len() > limit {
+            rows.truncate(limit);
+            rows.last()
+                .map(|row| row.try_get::<String, _>("name"))
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        Ok(ListAuthKeysResponse {
+            auth_keys: rows.iter().map(auth_key_row).collect::<Result<_>>()?,
+            next_cursor,
+        })
+    }
+
+    /// Replaces an enrolled Worker Host's credential digest. The previous credential stops
+    /// authenticating at once, as RotateWorkerHostCredential does in
+    /// packages/store/src/worker-host-store.ts. A repeat with the digest the rotation
+    /// installed returns the same result, so a lost response can be retried.
+    pub async fn rotate_host_credential(
+        &self,
+        principal: &str,
+        input: &RotateHostCredentialRequest,
+    ) -> Result<HostCredentialRotation> {
+        operator(principal)?;
+        host_id(&input.host_id)?;
+        let expected = i64::try_from(input.expected_credential_revision)
+            .ok()
+            .filter(|revision| *revision > 0)
+            .ok_or_else(|| invalid("expected credential revision must be at least 1"))?;
+        let token = credential_digest(&input.token_digest)?;
+        let (mut transaction, _) = self.write().await?;
+        let row = host_in(&mut transaction, &input.host_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Worker Host was not found".into()))?;
+        if row.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some() {
+            return Err(StoreError::FailedPrecondition(
+                "Worker Host is revoked; enroll the machine under a new ID".into(),
+            ));
+        }
+        let revision: i64 = row.try_get("credential_revision")?;
+        if row.try_get::<String, _>("token_digest")? == token
+            && Some(revision) == expected.checked_add(1)
+        {
+            transaction.rollback().await?;
+            return Ok(HostCredentialRotation {
+                host_id: input.host_id.clone(),
+                credential_revision: revision as u64,
+            });
+        }
+        if revision != expected {
+            return Err(StoreError::FailedPrecondition(
+                "Worker Host credential revision changed; read the host and retry".into(),
+            ));
+        }
+        // A credential set when the Control Plane starts is replaced by changing that setting.
+        let joined: Option<String> = sqlx::query_scalar("SELECT host_id FROM supertag_v2_auth_keys WHERE host_id=$1 AND consumed_at_ms IS NOT NULL UNION SELECT host_id FROM supertag_v2_auth_key_enrollments WHERE host_id=$1")
+            .bind(&input.host_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+        if joined.is_none() {
+            return Err(StoreError::FailedPrecondition(
+                "this Worker Host's credential comes from the Control Plane's startup configuration".into(),
+            ));
+        }
+        credential_unused_in(&mut transaction, &token).await?;
+        sqlx::query("UPDATE supertag_v2_hosts SET token_digest=$1,credential_revision=$2 WHERE host_id=$3 AND credential_revision=$4")
+            .bind(&token)
+            .bind(revision + 1)
+            .bind(&input.host_id)
+            .bind(revision)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(HostCredentialRotation {
+            host_id: input.host_id.clone(),
+            credential_revision: (revision + 1) as u64,
+        })
     }
 
     pub async fn enroll_host(
@@ -198,13 +321,13 @@ impl Store {
         // refuses an unknown Auth Key before anything else: a join with a key the Control Plane
         // does not know names no one to record, whatever else is wrong with it.
         let key = credential_digest(key_digest)?;
-        let key_id: String =
-            sqlx::query_scalar("SELECT key_id FROM supertag_v2_auth_keys WHERE key_digest=$1")
+        let key_name: String =
+            sqlx::query_scalar("SELECT name FROM supertag_v2_auth_keys WHERE key_digest=$1")
                 .bind(&key)
                 .fetch_optional(&self.pool)
                 .await?
                 .ok_or(StoreError::PermissionDenied)?;
-        let actor = format!("auth-key:{key_id}");
+        let actor = format!("auth-key:{key_name}");
         crate::audit::note_actor(&actor);
         host_id(&input.host_id)?;
         name("operation ID", &input.operation_id)?;
@@ -482,9 +605,6 @@ async fn host_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Opt
     )
 }
 
-/// Length of the public Auth Key ID: the start of the key's hex digest.
-const KEY_ID_LEN: usize = 16;
-
 fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
     Ok(AuthKey {
         host_id: row.try_get("host_id")?,
@@ -494,8 +614,10 @@ fn auth_key_row(row: &AnyRow) -> Result<AuthKey> {
         reusable: row.try_get::<i64, _>("reusable")? == 1,
         ephemeral: row.try_get::<i64, _>("ephemeral")? == 1,
         labels: serde_json::from_str(&row.try_get::<String, _>("labels")?)?,
-        key_id: row.try_get("key_id")?,
         revoked: row.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some(),
+        name: row.try_get("name")?,
+        created_at_ms: row.try_get("created_at_ms")?,
+        used: row.try_get::<Option<i64>, _>("consumed_at_ms")?.is_some(),
     })
 }
 
@@ -585,6 +707,45 @@ fn next_generation(generation: i64) -> Result<i64> {
     generation
         .checked_add(1)
         .ok_or_else(|| StoreError::FailedPrecondition("Worker Host generation is exhausted".into()))
+}
+
+/// A rotated Worker Host credential is no other host's credential and no Auth Key.
+async fn credential_unused_in(transaction: &mut Transaction<'_, Any>, token: &str) -> Result<()> {
+    let used: Option<String> = sqlx::query_scalar("SELECT key_digest FROM supertag_v2_auth_keys WHERE key_digest=$1 UNION SELECT token_digest FROM supertag_v2_hosts WHERE token_digest=$1")
+        .bind(token)
+        .fetch_optional(&mut **transaction)
+        .await?;
+    if used.is_some() {
+        return Err(StoreError::Conflict("credential is already in use".into()));
+    }
+    Ok(())
+}
+
+fn operator(principal: &str) -> Result<()> {
+    name(
+        "operator identity",
+        principal
+            .strip_prefix("operator:")
+            .ok_or(StoreError::PermissionDenied)?,
+    )
+}
+
+/// 1 to 63 lowercase letters, digits, hyphens or underscores, starting with a letter or
+/// digit, as packages/core/src/auth-key.ts names Auth Keys.
+fn auth_key_name(value: &str) -> Result<()> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 63
+        || !bytes[0].is_ascii_lowercase() && !bytes[0].is_ascii_digit()
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(byte))
+    {
+        return Err(invalid(
+            "Auth Key name must be 1-63 lowercase letters, digits, hyphens or underscores, starting with a letter or digit",
+        ));
+    }
+    Ok(())
 }
 
 fn host_id(id: &str) -> Result<()> {

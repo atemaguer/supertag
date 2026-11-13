@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AuthKeySchema, HostPhase, TagSchema, TaskState } from "./runtime_pb.js";
+import type { AuthKey, AuthKeySchema, HostPhase, TagSchema, TaskState } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,16 +12,16 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/placement.proto.
  */
 export const file_supertag_runtime_v2_placement: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiImChRSZXZva2VBdXRoS2V5UmVxdWVzdBIOCgZrZXlfaWQYASABKAkiNgoTU2V0VGFnUnVuc09uUmVxdWVzdBIOCgZ0YWdfaWQYASABKAkSDwoHcnVuc19vbhgCIAMoCSIvChxEaWFnbm9zZVRhc2tQbGFjZW1lbnRSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiiQEKDUhvc3RQbGFjZW1lbnQSDwoHaG9zdF9pZBgBIAEoCRItCgVwaGFzZRgCIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuSG9zdFBoYXNlEg4KBmxhYmVscxgDIAMoCRIWCg5taXNzaW5nX2xhYmVscxgEIAMoCRIQCghlbGlnaWJsZRgFIAEoCCLyAQoWVGFza1BsYWNlbWVudERpYWdub3NpcxIPCgd0YXNrX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRItCgVzdGF0ZRgDIAEoDjIeLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1N0YXRlEhcKD3JlcXVpcmVkX2xhYmVscxgEIAMoCRIWCg5taXNzaW5nX2xhYmVscxgFIAMoCRITCgtyZXF1aXJlbWVudBgGIAEoCRIPCgdzdW1tYXJ5GAcgASgJEjEKBWhvc3RzGAggAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5Ib3N0UGxhY2VtZW50Ms8BCglQbGFjZW1lbnQSUgoMU2V0VGFnUnVuc09uEiguc3VwZXJ0YWcucnVudGltZS52Mi5TZXRUYWdSdW5zT25SZXF1ZXN0Ghguc3VwZXJ0YWcucnVudGltZS52Mi5UYWcSbgoMRGlhZ25vc2VUYXNrEjEuc3VwZXJ0YWcucnVudGltZS52Mi5EaWFnbm9zZVRhc2tQbGFjZW1lbnRSZXF1ZXN0Gisuc3VwZXJ0YWcucnVudGltZS52Mi5UYXNrUGxhY2VtZW50RGlhZ25vc2lzMmQKCEF1dGhLZXlzElgKDVJldm9rZUF1dGhLZXkSKS5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZUF1dGhLZXlSZXF1ZXN0Ghwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5YgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3BsYWNlbWVudC5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiIkChRSZXZva2VBdXRoS2V5UmVxdWVzdBIMCgRuYW1lGAEgASgJIiEKEUdldEF1dGhLZXlSZXF1ZXN0EgwKBG5hbWUYASABKAkiNAoTTGlzdEF1dGhLZXlzUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkiXAoUTGlzdEF1dGhLZXlzUmVzcG9uc2USLwoJYXV0aF9rZXlzGAEgAygLMhwuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoS2V5EhMKC25leHRfY3Vyc29yGAIgASgJImoKG1JvdGF0ZUhvc3RDcmVkZW50aWFsUmVxdWVzdBIPCgdob3N0X2lkGAEgASgJEiQKHGV4cGVjdGVkX2NyZWRlbnRpYWxfcmV2aXNpb24YAiABKAQSFAoMdG9rZW5fZGlnZXN0GAMgASgMIkYKFkhvc3RDcmVkZW50aWFsUm90YXRpb24SDwoHaG9zdF9pZBgBIAEoCRIbChNjcmVkZW50aWFsX3JldmlzaW9uGAIgASgEIjYKE1NldFRhZ1J1bnNPblJlcXVlc3QSDgoGdGFnX2lkGAEgASgJEg8KB3J1bnNfb24YAiADKAkiLwocRGlhZ25vc2VUYXNrUGxhY2VtZW50UmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIokBCg1Ib3N0UGxhY2VtZW50Eg8KB2hvc3RfaWQYASABKAkSLQoFcGhhc2UYAiABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RQaGFzZRIOCgZsYWJlbHMYAyADKAkSFgoObWlzc2luZ19sYWJlbHMYBCADKAkSEAoIZWxpZ2libGUYBSABKAgi8gEKFlRhc2tQbGFjZW1lbnREaWFnbm9zaXMSDwoHdGFza19pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSLQoFc3RhdGUYAyABKA4yHi5zdXBlcnRhZy5ydW50aW1lLnYyLlRhc2tTdGF0ZRIXCg9yZXF1aXJlZF9sYWJlbHMYBCADKAkSFgoObWlzc2luZ19sYWJlbHMYBSADKAkSEwoLcmVxdWlyZW1lbnQYBiABKAkSDwoHc3VtbWFyeRgHIAEoCRIxCgVob3N0cxgIIAMoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuSG9zdFBsYWNlbWVudDLPAQoJUGxhY2VtZW50ElIKDFNldFRhZ1J1bnNPbhIoLnN1cGVydGFnLnJ1bnRpbWUudjIuU2V0VGFnUnVuc09uUmVxdWVzdBoYLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFnEm4KDERpYWdub3NlVGFzaxIxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGlhZ25vc2VUYXNrUGxhY2VtZW50UmVxdWVzdBorLnN1cGVydGFnLnJ1bnRpbWUudjIuVGFza1BsYWNlbWVudERpYWdub3NpczKdAgoIQXV0aEtleXMSWAoNUmV2b2tlQXV0aEtleRIpLnN1cGVydGFnLnJ1bnRpbWUudjIuUmV2b2tlQXV0aEtleVJlcXVlc3QaHC5zdXBlcnRhZy5ydW50aW1lLnYyLkF1dGhLZXkSYwoMTGlzdEF1dGhLZXlzEiguc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXV0aEtleXNSZXF1ZXN0Gikuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXV0aEtleXNSZXNwb25zZRJSCgpHZXRBdXRoS2V5EiYuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRBdXRoS2V5UmVxdWVzdBocLnN1cGVydGFnLnJ1bnRpbWUudjIuQXV0aEtleTKIAQoPSG9zdENyZWRlbnRpYWxzEnUKFFJvdGF0ZUhvc3RDcmVkZW50aWFsEjAuc3VwZXJ0YWcucnVudGltZS52Mi5Sb3RhdGVIb3N0Q3JlZGVudGlhbFJlcXVlc3QaKy5zdXBlcnRhZy5ydW50aW1lLnYyLkhvc3RDcmVkZW50aWFsUm90YXRpb25iBnByb3RvMw", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.RevokeAuthKeyRequest
  */
 export type RevokeAuthKeyRequest = Message<"supertag.runtime.v2.RevokeAuthKeyRequest"> & {
   /**
-   * @generated from field: string key_id = 1;
+   * @generated from field: string name = 1;
    */
-  keyId: string;
+  name: string;
 };
 
 /**
@@ -30,6 +30,123 @@ export type RevokeAuthKeyRequest = Message<"supertag.runtime.v2.RevokeAuthKeyReq
  */
 export const RevokeAuthKeyRequestSchema: GenMessage<RevokeAuthKeyRequest> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_placement, 0);
+
+/**
+ * @generated from message supertag.runtime.v2.GetAuthKeyRequest
+ */
+export type GetAuthKeyRequest = Message<"supertag.runtime.v2.GetAuthKeyRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetAuthKeyRequest.
+ * Use `create(GetAuthKeyRequestSchema)` to create a new message.
+ */
+export const GetAuthKeyRequestSchema: GenMessage<GetAuthKeyRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 1);
+
+/**
+ * @generated from message supertag.runtime.v2.ListAuthKeysRequest
+ */
+export type ListAuthKeysRequest = Message<"supertag.runtime.v2.ListAuthKeysRequest"> & {
+  /**
+   * At most this many keys; 0 means 100. At most 500.
+   *
+   * @generated from field: uint32 limit = 1;
+   */
+  limit: number;
+
+  /**
+   * The name of the last key on the previous page.
+   *
+   * @generated from field: string cursor = 2;
+   */
+  cursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListAuthKeysRequest.
+ * Use `create(ListAuthKeysRequestSchema)` to create a new message.
+ */
+export const ListAuthKeysRequestSchema: GenMessage<ListAuthKeysRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 2);
+
+/**
+ * @generated from message supertag.runtime.v2.ListAuthKeysResponse
+ */
+export type ListAuthKeysResponse = Message<"supertag.runtime.v2.ListAuthKeysResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.AuthKey auth_keys = 1;
+   */
+  authKeys: AuthKey[];
+
+  /**
+   * @generated from field: string next_cursor = 2;
+   */
+  nextCursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListAuthKeysResponse.
+ * Use `create(ListAuthKeysResponseSchema)` to create a new message.
+ */
+export const ListAuthKeysResponseSchema: GenMessage<ListAuthKeysResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 3);
+
+/**
+ * @generated from message supertag.runtime.v2.RotateHostCredentialRequest
+ */
+export type RotateHostCredentialRequest = Message<"supertag.runtime.v2.RotateHostCredentialRequest"> & {
+  /**
+   * @generated from field: string host_id = 1;
+   */
+  hostId: string;
+
+  /**
+   * The host's current credential_revision. A repeat of a rotation that already
+   * applied, with the same digest, returns the same result.
+   *
+   * @generated from field: uint64 expected_credential_revision = 2;
+   */
+  expectedCredentialRevision: bigint;
+
+  /**
+   * @generated from field: bytes token_digest = 3;
+   */
+  tokenDigest: Uint8Array;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.RotateHostCredentialRequest.
+ * Use `create(RotateHostCredentialRequestSchema)` to create a new message.
+ */
+export const RotateHostCredentialRequestSchema: GenMessage<RotateHostCredentialRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 4);
+
+/**
+ * @generated from message supertag.runtime.v2.HostCredentialRotation
+ */
+export type HostCredentialRotation = Message<"supertag.runtime.v2.HostCredentialRotation"> & {
+  /**
+   * @generated from field: string host_id = 1;
+   */
+  hostId: string;
+
+  /**
+   * @generated from field: uint64 credential_revision = 2;
+   */
+  credentialRevision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HostCredentialRotation.
+ * Use `create(HostCredentialRotationSchema)` to create a new message.
+ */
+export const HostCredentialRotationSchema: GenMessage<HostCredentialRotation> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_placement, 5);
 
 /**
  * @generated from message supertag.runtime.v2.SetTagRunsOnRequest
@@ -51,7 +168,7 @@ export type SetTagRunsOnRequest = Message<"supertag.runtime.v2.SetTagRunsOnReque
  * Use `create(SetTagRunsOnRequestSchema)` to create a new message.
  */
 export const SetTagRunsOnRequestSchema: GenMessage<SetTagRunsOnRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 1);
+  messageDesc(file_supertag_runtime_v2_placement, 6);
 
 /**
  * @generated from message supertag.runtime.v2.DiagnoseTaskPlacementRequest
@@ -68,7 +185,7 @@ export type DiagnoseTaskPlacementRequest = Message<"supertag.runtime.v2.Diagnose
  * Use `create(DiagnoseTaskPlacementRequestSchema)` to create a new message.
  */
 export const DiagnoseTaskPlacementRequestSchema: GenMessage<DiagnoseTaskPlacementRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 2);
+  messageDesc(file_supertag_runtime_v2_placement, 7);
 
 /**
  * @generated from message supertag.runtime.v2.HostPlacement
@@ -109,7 +226,7 @@ export type HostPlacement = Message<"supertag.runtime.v2.HostPlacement"> & {
  * Use `create(HostPlacementSchema)` to create a new message.
  */
 export const HostPlacementSchema: GenMessage<HostPlacement> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 3);
+  messageDesc(file_supertag_runtime_v2_placement, 8);
 
 /**
  * @generated from message supertag.runtime.v2.TaskPlacementDiagnosis
@@ -173,7 +290,7 @@ export type TaskPlacementDiagnosis = Message<"supertag.runtime.v2.TaskPlacementD
  * Use `create(TaskPlacementDiagnosisSchema)` to create a new message.
  */
 export const TaskPlacementDiagnosisSchema: GenMessage<TaskPlacementDiagnosis> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_placement, 4);
+  messageDesc(file_supertag_runtime_v2_placement, 9);
 
 /**
  * Worker Host placement. Labels narrow the hosts bound to a Tag; they never
@@ -206,8 +323,9 @@ export const Placement: GenService<{
   serviceDesc(file_supertag_runtime_v2_placement, 0);
 
 /**
- * Auth Key lifecycle beyond creation. Revocation blocks new joins, including
- * replays of earlier joins; hosts that already joined keep their enrollment.
+ * Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+ * name is never reused. Revocation blocks new joins, including replays of
+ * earlier joins; hosts that already joined keep their enrollment.
  *
  * @generated from service supertag.runtime.v2.AuthKeys
  */
@@ -220,5 +338,44 @@ export const AuthKeys: GenService<{
     input: typeof RevokeAuthKeyRequestSchema;
     output: typeof AuthKeySchema;
   },
+  /**
+   * Revoked, expired and used keys included, the earliest created first, then by name.
+   *
+   * @generated from rpc supertag.runtime.v2.AuthKeys.ListAuthKeys
+   */
+  listAuthKeys: {
+    methodKind: "unary";
+    input: typeof ListAuthKeysRequestSchema;
+    output: typeof ListAuthKeysResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.AuthKeys.GetAuthKey
+   */
+  getAuthKey: {
+    methodKind: "unary";
+    input: typeof GetAuthKeyRequestSchema;
+    output: typeof AuthKeySchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_placement, 1);
+
+/**
+ * An enrolled Worker Host's own credential. Only its SHA-256 digest is stored;
+ * the caller generates the secret, so the Control Plane never receives it.
+ *
+ * @generated from service supertag.runtime.v2.HostCredentials
+ */
+export const HostCredentials: GenService<{
+  /**
+   * Replaces the host's credential. The previous credential stops working at
+   * once. A revoked host must be enrolled under a new ID instead.
+   *
+   * @generated from rpc supertag.runtime.v2.HostCredentials.RotateHostCredential
+   */
+  rotateHostCredential: {
+    methodKind: "unary";
+    input: typeof RotateHostCredentialRequestSchema;
+    output: typeof HostCredentialRotationSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_placement, 2);

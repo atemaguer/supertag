@@ -91,6 +91,11 @@ path = "tests/placement_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "host_workspaces_runtime"
+path = "tests/host_workspaces_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "slack_threads"
 path = "tests/slack_threads.rs"
 required-features = ["test-fixtures"]

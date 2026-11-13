@@ -128,14 +128,17 @@ pub struct ArtifactSourceConfig {
 }
 
 impl ArtifactSourceConfig {
-    pub(crate) async fn bind(self, state: &Path, workspace: Option<&Path>) -> Result<BoundSource> {
+    pub(crate) async fn bind(self, state: &Path, workspaces: &[&Path]) -> Result<BoundSource> {
         ensure!(
             self.listen.ip().is_loopback() || self.tls.is_some(),
             "remote artifact listener requires TLS"
         );
         let directory = self.directory.clone();
         let state = state.canonicalize()?;
-        let workspace = workspace.map(Path::canonicalize).transpose()?;
+        let workspaces = workspaces
+            .iter()
+            .map(|path| path.canonicalize())
+            .collect::<std::io::Result<Vec<_>>>()?;
         let storage = tokio::task::spawn_blocking(move || {
             ensure!(
                 directory.is_absolute(),
@@ -146,9 +149,9 @@ impl ArtifactSourceConfig {
             ensure!(
                 !state.starts_with(&root)
                     && !root.starts_with(&state)
-                    && workspace
-                        .as_ref()
-                        .is_none_or(|path| !root.starts_with(path) && !path.starts_with(&root)),
+                    && workspaces
+                        .iter()
+                        .all(|path| !root.starts_with(path) && !path.starts_with(&root)),
                 "artifact source directory overlaps Worker Host state or the source Workspace"
             );
             SourceStorage::open(&root)

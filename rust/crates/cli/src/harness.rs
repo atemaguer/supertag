@@ -97,13 +97,15 @@ pub struct AdapterOptions {
     /// Existing directory for read-only Tasks. Otherwise each Task gets its own directory.
     #[arg(long, requires = "harness", conflicts_with = "workspace_id")]
     codex_workspace: Option<PathBuf>,
-    /// Repository identity that this host can prepare for accepted Tasks.
+    /// Repository identity that this host can prepare for accepted Tasks. Repeat it, each
+    /// followed by its --workspace-source, to map several Workspaces.
     #[arg(long, requires = "workspace_source_kind")]
-    workspace_id: Option<String>,
-    /// Trusted local Git source; Tasks run in separate pinned checkouts.
+    workspace_id: Vec<String>,
+    /// Trusted local Git source for the preceding --workspace-id; Tasks run in separate
+    /// pinned checkouts. Several Workspace IDs may name the same source.
     #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
-    workspace_source: Option<PathBuf>,
-    /// Retrieve this Workspace's accepted GitHub source from the Gateway.
+    workspace_source: Vec<PathBuf>,
+    /// Retrieve each Workspace's accepted GitHub source from the Gateway.
     #[arg(
         long,
         requires = "workspace_id",
@@ -125,23 +127,38 @@ impl AdapterOptions {
         self.workspace_from_gateway
     }
 
-    pub fn workspace_mapping(&self) -> Option<WorkspaceMapping> {
+    /// The host's Workspace mappings, each `--workspace-id` paired with the
+    /// `--workspace-source` in the same position, or every ID served from the Gateway.
+    pub fn workspace_mappings(&self) -> Result<Vec<WorkspaceMapping>> {
         if self.workspace_from_gateway {
-            return self
-                .workspace_id
-                .as_ref()
-                .map(|workspace_id| WorkspaceMapping {
-                    workspace_id: workspace_id.clone(),
-                    source: WorkspaceSource::Gateway,
-                });
+            ensure!(
+                self.workspace_source.is_empty(),
+                "Gateway Workspaces take no --workspace-source"
+            );
+        } else {
+            ensure!(
+                self.workspace_source.len() == self.workspace_id.len(),
+                "give each --workspace-id its own --workspace-source"
+            );
         }
+        let mut seen = std::collections::BTreeSet::new();
         self.workspace_id
-            .as_ref()
-            .zip(self.workspace_source.as_ref())
-            .map(|(workspace_id, source)| WorkspaceMapping {
-                workspace_id: workspace_id.clone(),
-                source: WorkspaceSource::Local(source.clone()),
+            .iter()
+            .enumerate()
+            .map(|(index, workspace_id)| {
+                ensure!(
+                    seen.insert(workspace_id),
+                    "Workspace {workspace_id} is mapped more than once"
+                );
+                Ok(WorkspaceMapping {
+                    workspace_id: workspace_id.clone(),
+                    source: match self.workspace_source.get(index) {
+                        Some(source) => WorkspaceSource::Local(source.clone()),
+                        None => WorkspaceSource::Gateway,
+                    },
+                })
             })
+            .collect()
     }
 
     pub fn harness_kind(&self) -> HarnessKind {
@@ -298,18 +315,17 @@ impl AdapterOptions {
     }
 
     fn mapping_args(&self, args: &mut Vec<OsString>) {
-        if let Some(mapping) = self.workspace_mapping() {
-            args.extend([
-                OsString::from("--workspace-id"),
-                mapping.workspace_id.into(),
-            ]);
-            match mapping.source {
-                WorkspaceSource::Local(source) => args.extend([
+        for (index, workspace_id) in self.workspace_id.iter().enumerate() {
+            args.extend([OsString::from("--workspace-id"), workspace_id.into()]);
+            if let Some(source) = self.workspace_source.get(index) {
+                args.extend([
                     OsString::from("--workspace-source"),
-                    source.into_os_string(),
-                ]),
-                WorkspaceSource::Gateway => args.push(OsString::from("--workspace-from-gateway")),
+                    source.as_os_str().to_owned(),
+                ]);
             }
+        }
+        if self.workspace_from_gateway {
+            args.push(OsString::from("--workspace-from-gateway"));
         }
     }
 

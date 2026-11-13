@@ -500,6 +500,7 @@ async fn start_host(
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     operator
         .create_auth_key(tokens.request(CreateAuthKeyRequest {
+            name: id.clone(),
             host_id: id.clone(),
             operation_id: Uuid::new_v4().to_string(),
             key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
@@ -1794,7 +1795,14 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     ))
     .await?;
     let issued = run_json(operator(
-        &["create-auth-key", "tls-host", "--tag", "secure"],
+        &[
+            "create-auth-key",
+            "tls",
+            "--host",
+            "tls-host",
+            "--tag",
+            "secure",
+        ],
         Some(&operator_leaf),
     ))
     .await?;
@@ -2339,6 +2347,8 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     .await?;
     let issued = run_json(operator(&[
         "create-auth-key",
+        "proxy-host",
+        "--host",
         "proxy-host",
         "--tag",
         "proxied",

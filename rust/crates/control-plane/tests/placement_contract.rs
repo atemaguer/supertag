@@ -45,6 +45,7 @@ async fn key(
         .create_auth_key(
             OPERATOR,
             &CreateAuthKeyRequest {
+                name: name.into(),
                 operation_id: format!("issue-{name}"),
                 key_digest: secret.clone(),
                 expires_in_ms: 3_600_000,
@@ -192,6 +193,7 @@ async fn placement_contract(url: &str) {
                 .create_auth_key(
                     OPERATOR,
                     &CreateAuthKeyRequest {
+                        name: format!("bad-{}", host_id.len()),
                         host_id: host_id.into(),
                         operation_id: format!("bad-{host_id}"),
                         key_digest: digest(&format!("bad-{host_id}")),
@@ -528,6 +530,7 @@ fn create(
     expires_in_ms: u64,
 ) -> CreateAuthKeyRequest {
     CreateAuthKeyRequest {
+        name: operation.into(),
         host_id: host_id.into(),
         operation_id: operation.into(),
         key_digest: digest(&format!("key:{operation}")),
@@ -558,7 +561,8 @@ async fn auth_key_lifecycle_contract(url: &str) {
     let pool = create("pool", "", true, 0);
     let issued = store.create_auth_key(OPERATOR, &pool).await.unwrap();
     assert_eq!(issued.expires_at_ms, NOW + NINETY_DAYS as i64);
-    assert_eq!(issued.key_id.len(), 16);
+    assert_eq!(issued.name, "pool");
+    assert_eq!(issued.created_at_ms, NOW);
     assert!(!issued.revoked);
     assert_eq!(
         store
@@ -608,29 +612,23 @@ async fn auth_key_lifecycle_contract(url: &str) {
     // Revocation blocks new joins and replays; joined hosts stay enrolled.
     join(&store, &pool.key_digest, "first").await;
     assert!(matches!(
-        store.revoke_auth_key("host:first", &issued.key_id).await,
+        store.revoke_auth_key("host:first", &issued.name).await,
         Err(StoreError::PermissionDenied)
     ));
-    for key_id in ["", "XYZ", "0123456789ABCDEF", "0123456789abcdef0"] {
+    for name in ["", "Pool", "-pool", "pool.key", &"a".repeat(64)] {
         assert!(matches!(
-            store.revoke_auth_key(OPERATOR, key_id).await,
+            store.revoke_auth_key(OPERATOR, name).await,
             Err(StoreError::InvalidArgument(_))
         ));
     }
     assert!(matches!(
-        store.revoke_auth_key(OPERATOR, "0000000000000000").await,
+        store.revoke_auth_key(OPERATOR, "missing").await,
         Err(StoreError::NotFound(_))
     ));
-    let revoked = store
-        .revoke_auth_key(OPERATOR, &issued.key_id)
-        .await
-        .unwrap();
+    let revoked = store.revoke_auth_key(OPERATOR, &issued.name).await.unwrap();
     assert!(revoked.revoked && revoked.reusable);
     assert_eq!(
-        store
-            .revoke_auth_key(OPERATOR, &issued.key_id)
-            .await
-            .unwrap(),
+        store.revoke_auth_key(OPERATOR, &issued.name).await.unwrap(),
         revoked
     );
     assert_eq!(
@@ -661,6 +659,260 @@ async fn auth_key_lifecycle_contract(url: &str) {
         "first"
     );
     store.close().await;
+}
+
+/// Operator-chosen Auth Key names, as tests/auth-key-store.test.ts and tests/auth-key-cli.test.ts
+/// name them, and Worker Host credential rotation, as packages/store/worker-host.test.ts rotates.
+async fn auth_key_names_and_host_credentials_contract(url: &str) {
+    const HOUR: i64 = 3_600_000;
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+
+    // Names are validated, and never reused: not after revocation, expiry or use.
+    let mut invalid = create("invalid", "", true, 0);
+    for name in ["", "CI", "_ci", "ci key", "ci.key", &"c".repeat(64)] {
+        invalid.name = name.into();
+        assert!(matches!(
+            store.create_auth_key(OPERATOR, &invalid).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    let mut longest = create("longest", "", true, 0);
+    longest.name = format!("9{}", "_".repeat(62));
+    store.create_auth_key(OPERATOR, &longest).await.unwrap();
+    let laptop = create("laptop", "laptop-host", false, 0);
+    let issued = store.create_auth_key(OPERATOR, &laptop).await.unwrap();
+    assert_eq!(
+        (issued.name.as_str(), issued.used, issued.revoked),
+        ("laptop", false, false)
+    );
+    let mut reused = create("laptop-again", "", true, 0);
+    reused.name = "laptop".into();
+    assert!(matches!(
+        store.create_auth_key(OPERATOR, &reused).await,
+        Err(StoreError::Conflict(_))
+    ));
+    // The same operation with a different name is a different request.
+    let mut renamed = laptop.clone();
+    renamed.name = "renamed".into();
+    assert!(matches!(
+        store.create_auth_key(OPERATOR, &renamed).await,
+        Err(StoreError::Conflict(_))
+    ));
+    clock.store(NOW + 1, Ordering::SeqCst);
+    store
+        .create_auth_key(OPERATOR, &create("ci", "", true, 0))
+        .await
+        .unwrap();
+    clock.store(NOW + 2, Ordering::SeqCst);
+    store
+        .create_auth_key(OPERATOR, &create("brief", "brief-host", false, 1))
+        .await
+        .unwrap();
+
+    // A one-time key's use is visible; the host keeps its credential.
+    join(&store, &laptop.key_digest, "laptop-host").await;
+    assert!(store.get_auth_key(OPERATOR, "laptop").await.unwrap().used);
+    assert!(matches!(
+        store.get_auth_key("host:laptop-host", "laptop").await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert!(matches!(
+        store.get_auth_key(OPERATOR, "missing").await,
+        Err(StoreError::NotFound(_))
+    ));
+    store.revoke_auth_key(OPERATOR, "ci").await.unwrap();
+    clock.store(NOW + HOUR, Ordering::SeqCst);
+    let mut again = create("ci-again", "", true, 0);
+    again.name = "ci".into();
+    assert!(matches!(
+        store.create_auth_key(OPERATOR, &again).await,
+        Err(StoreError::Conflict(_))
+    ));
+
+    // Earliest created first, then by name; revoked, expired and used keys included.
+    let names = |page: &ListAuthKeysResponse| {
+        page.auth_keys
+            .iter()
+            .map(|key| key.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let all = store
+        .list_auth_keys(OPERATOR, &ListAuthKeysRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(names(&all), [&longest.name, "laptop", "ci", "brief"]);
+    assert!(all.next_cursor.is_empty());
+    assert!(all.auth_keys[2].revoked);
+    let first = store
+        .list_auth_keys(
+            OPERATOR,
+            &ListAuthKeysRequest {
+                limit: 2,
+                cursor: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.next_cursor, "laptop");
+    let second = store
+        .list_auth_keys(
+            OPERATOR,
+            &ListAuthKeysRequest {
+                limit: 2,
+                cursor: first.next_cursor,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(names(&second), ["ci", "brief"]);
+    assert!(second.next_cursor.is_empty());
+    for request in [
+        ListAuthKeysRequest {
+            limit: 501,
+            cursor: String::new(),
+        },
+        ListAuthKeysRequest {
+            limit: 1,
+            cursor: "missing".into(),
+        },
+    ] {
+        assert!(matches!(
+            store.list_auth_keys(OPERATOR, &request).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+
+    // Rotation replaces the credential at once and advances the revision from 1.
+    assert_eq!(
+        store
+            .get_host("laptop-host")
+            .await
+            .unwrap()
+            .credential_revision,
+        1
+    );
+    let rotate = |revision: u64, secret: &str| RotateHostCredentialRequest {
+        host_id: "laptop-host".into(),
+        expected_credential_revision: revision,
+        token_digest: digest(secret),
+    };
+    assert!(matches!(
+        store
+            .rotate_host_credential("host:laptop-host", &rotate(1, "token:rotated"))
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    assert!(matches!(
+        store
+            .rotate_host_credential(OPERATOR, &rotate(0, "token:rotated"))
+            .await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        store
+            .rotate_host_credential(OPERATOR, &rotate(2, "token:rotated"))
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    // Neither another host's credential nor an Auth Key becomes this host's credential.
+    join(&store, &store_key(&store, "spare").await, "spare-host").await;
+    for secret in ["token:spare-host", "key:laptop"] {
+        assert!(matches!(
+            store
+                .rotate_host_credential(OPERATOR, &rotate(1, secret))
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+    }
+    let rotated = store
+        .rotate_host_credential(OPERATOR, &rotate(1, "token:rotated"))
+        .await
+        .unwrap();
+    assert_eq!(rotated.credential_revision, 2);
+    // A repeat of the applied rotation answers the same; a stale one is refused.
+    assert_eq!(
+        store
+            .rotate_host_credential(OPERATOR, &rotate(1, "token:rotated"))
+            .await
+            .unwrap(),
+        rotated
+    );
+    assert!(matches!(
+        store
+            .rotate_host_credential(OPERATOR, &rotate(1, "token:other"))
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    assert!(matches!(
+        store.authenticate_host(&digest("token:laptop-host")).await,
+        Err(StoreError::PermissionDenied)
+    ));
+    let record = store
+        .authenticate_host(&digest("token:rotated"))
+        .await
+        .unwrap();
+    // The registration and its running work are unchanged until the host restarts.
+    assert_eq!(
+        (record.host_id.as_str(), record.generation),
+        ("laptop-host", 1)
+    );
+    assert_eq!(
+        store
+            .get_host("laptop-host")
+            .await
+            .unwrap()
+            .credential_revision,
+        2
+    );
+
+    // A host whose credential comes from Control Plane startup is changed there instead.
+    store
+        .seed_host("local", &digest("token:local"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .rotate_host_credential(
+                OPERATOR,
+                &RotateHostCredentialRequest {
+                    host_id: "local".into(),
+                    expected_credential_revision: 1,
+                    token_digest: digest("token:local-rotated"),
+                },
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    assert!(matches!(
+        store
+            .rotate_host_credential(
+                OPERATOR,
+                &RotateHostCredentialRequest {
+                    host_id: "missing".into(),
+                    expected_credential_revision: 1,
+                    token_digest: digest("token:missing"),
+                },
+            )
+            .await,
+        Err(StoreError::NotFound(_))
+    ));
+    // A revoked host is enrolled under a new ID instead.
+    store.revoke_host("laptop-host").await.unwrap();
+    assert!(matches!(
+        store
+            .rotate_host_credential(OPERATOR, &rotate(2, "token:after-revoke"))
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    store.close().await;
+}
+
+async fn store_key(store: &Store, name: &str) -> Vec<u8> {
+    let request = create(name, "", true, 0);
+    store.create_auth_key(OPERATOR, &request).await.unwrap();
+    request.key_digest
 }
 
 /// A restarted host claims with the labels it reports in its new generation.
@@ -718,6 +970,12 @@ async fn sqlite_ephemeral_restart_contract() {
 async fn sqlite_auth_key_lifecycle_contract() {
     let directory = tempfile::tempdir().unwrap();
     auth_key_lifecycle_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
+async fn sqlite_auth_key_names_and_host_credentials_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    auth_key_names_and_host_credentials_contract(&sqlite_url(&directory)).await;
 }
 
 #[tokio::test]
@@ -781,4 +1039,11 @@ async fn postgres_auth_key_lifecycle_contract() {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_restarted_host_labels_contract() {
     on_postgres(|url| async move { restarted_host_labels_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_auth_key_names_and_host_credentials_contract() {
+    on_postgres(|url| async move { auth_key_names_and_host_credentials_contract(&url).await })
+        .await;
 }

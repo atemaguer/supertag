@@ -427,12 +427,18 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long)]
         wait_for_recovery: bool,
     },
-    /// Create a scoped Auth Key: one-time for a named Worker Host, or reusable.
+    /// Create a named, scoped Auth Key: one-time for a named Worker Host, or reusable.
     CreateAuthKey {
         #[command(flatten)]
         connection: Connection,
-        /// Worker Host ID for a one-time key. Omit with --reusable.
-        #[arg(required_unless_present = "reusable", conflicts_with = "reusable")]
+        /// The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused.
+        name: String,
+        /// Worker Host ID a one-time key enrolls. Omit with --reusable.
+        #[arg(
+            long = "host",
+            required_unless_present = "reusable",
+            conflicts_with = "reusable"
+        )]
         host_id: Option<String>,
         /// Enroll any number of Worker Hosts, each choosing its own ID.
         #[arg(long)]
@@ -474,12 +480,45 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long, requires = "client_cert_file")]
         client_key_file: Option<PathBuf>,
     },
+    /// List Auth Keys, revoked, expired and used ones included, without their secrets.
+    ListAuthKeys {
+        #[command(flatten)]
+        connection: Connection,
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        /// The next_cursor of the previous page.
+        #[arg(long, default_value = "")]
+        cursor: String,
+    },
+    /// Show one Auth Key without its secret.
+    GetAuthKey {
+        #[command(flatten)]
+        connection: Connection,
+        name: String,
+    },
     /// Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled.
     RevokeAuthKey {
         #[command(flatten)]
         connection: Connection,
-        /// The key_id that create-auth-key printed.
-        key_id: String,
+        name: String,
+    },
+    /// Replace an enrolled Worker Host's credential. The previous one stops working at once.
+    RotateHostCredential {
+        #[command(flatten)]
+        connection: Connection,
+        host_id: String,
+        /// Write the new credential to this new owner-only file, for a host that reads
+        /// SUPERTAG_HOST_TOKEN from its own secret manager.
+        #[arg(
+            long,
+            required_unless_present = "host_state_directory",
+            conflicts_with = "host_state_directory"
+        )]
+        out: Option<PathBuf>,
+        /// Install the new credential in the state directory of this machine's stopped,
+        /// enrolled Worker Host. It uses the credential when it next starts.
+        #[arg(long)]
+        host_state_directory: Option<PathBuf>,
     },
     /// Enroll this installation with a one-time Auth Key.
     EnrollHost {
@@ -1060,7 +1099,7 @@ async fn run(command: Command) -> Result<()> {
             );
             let provider_model = adapter.provider_model();
             let mut execution_profile = adapter.execution_profile()?;
-            let workspace = adapter.workspace_mapping();
+            let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
             let remote_provider = if let Some(executable) = e2b_workspace_provider {
                 Some(ProviderConfig {
@@ -1102,7 +1141,7 @@ async fn run(command: Command) -> Result<()> {
             if remote_provider.is_some() {
                 ensure!(
                     harness == HarnessKind::Cursor
-                        && workspace.is_some()
+                        && !workspaces.is_empty()
                         && !execution_profile.allow_unsandboxed_commands,
                     "remote Workspace placement requires Cursor and a named Workspace without unsandboxed commands"
                 );
@@ -1142,7 +1181,7 @@ async fn run(command: Command) -> Result<()> {
             } else {
                 None
             };
-            execution_profile.task_artifact_inputs = workspace.is_some()
+            execution_profile.task_artifact_inputs = !workspaces.is_empty()
                 && shared_execution.is_none()
                 && supertag_protocol::task_artifact_inputs::supports_harness(harness);
             let artifact_source = match artifact_transfer_listen.zip(artifact_source_directory) {
@@ -1206,7 +1245,7 @@ async fn run(command: Command) -> Result<()> {
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,
-                workspace,
+                workspaces,
                 remote_provider,
                 shared_execution,
                 context_catalog: supertag_worker_host::context::ContextCatalog::load(
@@ -1238,6 +1277,7 @@ async fn run(command: Command) -> Result<()> {
         }
         Command::CreateAuthKey {
             connection,
+            name,
             host_id,
             reusable,
             ephemeral,
@@ -1251,6 +1291,7 @@ async fn run(command: Command) -> Result<()> {
             let key = operator
                 .create_auth_key(request(
                     CreateAuthKeyRequest {
+                        name,
                         host_id: host_id.unwrap_or_default(),
                         reusable,
                         ephemeral,
@@ -1269,20 +1310,9 @@ async fn run(command: Command) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            println!(
-                "{}",
-                json!({
-                    "auth_key": secret,
-                    "key_id": key.key_id,
-                    "host_id": key.host_id,
-                    "expires_at_ms": key.expires_at_ms,
-                    "allowed_tag_ids": key.allowed_tag_ids,
-                    "all_tags": key.all_tags,
-                    "reusable": key.reusable,
-                    "ephemeral": key.ephemeral,
-                    "labels": key.labels,
-                })
-            );
+            let mut view = placement::auth_key_view(&key);
+            view["auth_key"] = secret.into();
+            println!("{view}");
         }
         Command::ConnectGateway {
             url,
@@ -1305,8 +1335,25 @@ async fn run(command: Command) -> Result<()> {
             )
             .await?;
         }
-        Command::RevokeAuthKey { connection, key_id } => {
-            placement::revoke_auth_key(connection, key_id).await?;
+        Command::ListAuthKeys {
+            connection,
+            limit,
+            cursor,
+        } => placement::list_auth_keys(connection, limit, cursor).await?,
+        Command::GetAuthKey { connection, name } => {
+            placement::get_auth_key(connection, name).await?;
+        }
+        Command::RevokeAuthKey { connection, name } => {
+            placement::revoke_auth_key(connection, name).await?;
+        }
+        Command::RotateHostCredential {
+            connection,
+            host_id,
+            out,
+            host_state_directory,
+        } => {
+            placement::rotate_host_credential(connection, host_id, out, host_state_directory)
+                .await?;
         }
         Command::EnrollHost {
             gateway,
@@ -1838,6 +1885,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(supertag_protocol::v2::workspace_volumes_server::WorkspaceVolumesServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::placement_server::PlacementServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::auth_keys_server::AuthKeysServer::new(plane.clone()))
+        .add_service(supertag_protocol::v2::host_credentials_server::HostCredentialsServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::attempt_workspace_mounts_server::AttemptWorkspaceMountsServer::new(plane.clone()))
         .add_service(
             ArtifactDirectoryServer::new(plane.clone())
@@ -2092,6 +2140,7 @@ async fn gateway(
         .add_service(gateway.workspace_volumes_service())
         .add_service(gateway.placement_service())
         .add_service(gateway.auth_keys_service())
+        .add_service(gateway.host_credentials_service())
         .add_service(gateway.attempt_workspace_mounts_service())
         .add_service(transfers.attempt_artifacts_service())
         .add_service(transfers.artifact_transfer_service())
@@ -2695,10 +2744,7 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
             client_key: gateway.client_key_file.clone(),
         }),
     };
-    let channel = target
-        .endpoint(Duration::from_secs(15))
-        .await?
-        .connect()
+    let channel = network::operator_channel(&target.endpoint(Duration::from_secs(15)).await?)
         .await
         .with_context(|| format!("could not reach the Gateway at {}", gateway.url))?;
     OperatorClient::new(channel)

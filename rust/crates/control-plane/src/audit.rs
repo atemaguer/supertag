@@ -14,7 +14,7 @@
 //! failure while settling is reported on standard error and never fails the call.
 //!
 //! Callers other than operators are recorded too: a Worker Host joining with an Auth Key as
-//! `auth-key:KEY_ID`, and a person directing an Objective from a surface thread as
+//! `auth-key:NAME`, and a person directing an Objective from a surface thread as
 //! `<provider>:<user ID>`.
 
 use std::{
@@ -128,8 +128,20 @@ fn rule(path: &str) -> Option<Rule> {
         ),
         ("Operator", "CreateAuthKey") => rule!(
             "auth-key.create",
-            "WorkerHost",
+            "AuthKey",
             CreateAuthKeyRequest,
+            |value| named("AuthKey", &value.name)
+        ),
+        ("AuthKeys", "RevokeAuthKey") => rule!(
+            "auth-key.revoke",
+            "AuthKey",
+            RevokeAuthKeyRequest,
+            |value| named("AuthKey", &value.name)
+        ),
+        ("HostCredentials", "RotateHostCredential") => rule!(
+            "worker-host.credential.rotate",
+            "WorkerHost",
+            RotateHostCredentialRequest,
             |value| named("WorkerHost", &value.host_id)
         ),
         ("HostDirectory", "Enroll") => Rule {

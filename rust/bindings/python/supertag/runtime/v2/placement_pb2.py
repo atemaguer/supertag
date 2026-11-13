@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from supertag.runtime.v2 import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"&\n\x14RevokeAuthKeyRequest\x12\x0e\n\x06key_id\x18\x01 \x01(\t\"6\n\x13SetTagRunsOnRequest\x12\x0e\n\x06tag_id\x18\x01 \x01(\t\x12\x0f\n\x07runs_on\x18\x02 \x03(\t\"/\n\x1c\x44iagnoseTaskPlacementRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\"\x89\x01\n\rHostPlacement\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12-\n\x05phase\x18\x02 \x01(\x0e\x32\x1e.supertag.runtime.v2.HostPhase\x12\x0e\n\x06labels\x18\x03 \x03(\t\x12\x16\n\x0emissing_labels\x18\x04 \x03(\t\x12\x10\n\x08\x65ligible\x18\x05 \x01(\x08\"\xf2\x01\n\x16TaskPlacementDiagnosis\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12-\n\x05state\x18\x03 \x01(\x0e\x32\x1e.supertag.runtime.v2.TaskState\x12\x17\n\x0frequired_labels\x18\x04 \x03(\t\x12\x16\n\x0emissing_labels\x18\x05 \x03(\t\x12\x13\n\x0brequirement\x18\x06 \x01(\t\x12\x0f\n\x07summary\x18\x07 \x01(\t\x12\x31\n\x05hosts\x18\x08 \x03(\x0b\x32\".supertag.runtime.v2.HostPlacement2\xcf\x01\n\tPlacement\x12R\n\x0cSetTagRunsOn\x12(.supertag.runtime.v2.SetTagRunsOnRequest\x1a\x18.supertag.runtime.v2.Tag\x12n\n\x0c\x44iagnoseTask\x12\x31.supertag.runtime.v2.DiagnoseTaskPlacementRequest\x1a+.supertag.runtime.v2.TaskPlacementDiagnosis2d\n\x08\x41uthKeys\x12X\n\rRevokeAuthKey\x12).supertag.runtime.v2.RevokeAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKeyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#supertag/runtime/v2/placement.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"$\n\x14RevokeAuthKeyRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"!\n\x11GetAuthKeyRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"4\n\x13ListAuthKeysRequest\x12\r\n\x05limit\x18\x01 \x01(\r\x12\x0e\n\x06\x63ursor\x18\x02 \x01(\t\"\\\n\x14ListAuthKeysResponse\x12/\n\tauth_keys\x18\x01 \x03(\x0b\x32\x1c.supertag.runtime.v2.AuthKey\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t\"j\n\x1bRotateHostCredentialRequest\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12$\n\x1c\x65xpected_credential_revision\x18\x02 \x01(\x04\x12\x14\n\x0ctoken_digest\x18\x03 \x01(\x0c\"F\n\x16HostCredentialRotation\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12\x1b\n\x13\x63redential_revision\x18\x02 \x01(\x04\"6\n\x13SetTagRunsOnRequest\x12\x0e\n\x06tag_id\x18\x01 \x01(\t\x12\x0f\n\x07runs_on\x18\x02 \x03(\t\"/\n\x1c\x44iagnoseTaskPlacementRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\"\x89\x01\n\rHostPlacement\x12\x0f\n\x07host_id\x18\x01 \x01(\t\x12-\n\x05phase\x18\x02 \x01(\x0e\x32\x1e.supertag.runtime.v2.HostPhase\x12\x0e\n\x06labels\x18\x03 \x03(\t\x12\x16\n\x0emissing_labels\x18\x04 \x03(\t\x12\x10\n\x08\x65ligible\x18\x05 \x01(\x08\"\xf2\x01\n\x16TaskPlacementDiagnosis\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12-\n\x05state\x18\x03 \x01(\x0e\x32\x1e.supertag.runtime.v2.TaskState\x12\x17\n\x0frequired_labels\x18\x04 \x03(\t\x12\x16\n\x0emissing_labels\x18\x05 \x03(\t\x12\x13\n\x0brequirement\x18\x06 \x01(\t\x12\x0f\n\x07summary\x18\x07 \x01(\t\x12\x31\n\x05hosts\x18\x08 \x03(\x0b\x32\".supertag.runtime.v2.HostPlacement2\xcf\x01\n\tPlacement\x12R\n\x0cSetTagRunsOn\x12(.supertag.runtime.v2.SetTagRunsOnRequest\x1a\x18.supertag.runtime.v2.Tag\x12n\n\x0c\x44iagnoseTask\x12\x31.supertag.runtime.v2.DiagnoseTaskPlacementRequest\x1a+.supertag.runtime.v2.TaskPlacementDiagnosis2\x9d\x02\n\x08\x41uthKeys\x12X\n\rRevokeAuthKey\x12).supertag.runtime.v2.RevokeAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey\x12\x63\n\x0cListAuthKeys\x12(.supertag.runtime.v2.ListAuthKeysRequest\x1a).supertag.runtime.v2.ListAuthKeysResponse\x12R\n\nGetAuthKey\x12&.supertag.runtime.v2.GetAuthKeyRequest\x1a\x1c.supertag.runtime.v2.AuthKey2\x88\x01\n\x0fHostCredentials\x12u\n\x14RotateHostCredential\x12\x30.supertag.runtime.v2.RotateHostCredentialRequest\x1a+.supertag.runtime.v2.HostCredentialRotationb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,17 +33,29 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag.runtime.v2.placeme
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_REVOKEAUTHKEYREQUEST']._serialized_start=95
-  _globals['_REVOKEAUTHKEYREQUEST']._serialized_end=133
-  _globals['_SETTAGRUNSONREQUEST']._serialized_start=135
-  _globals['_SETTAGRUNSONREQUEST']._serialized_end=189
-  _globals['_DIAGNOSETASKPLACEMENTREQUEST']._serialized_start=191
-  _globals['_DIAGNOSETASKPLACEMENTREQUEST']._serialized_end=238
-  _globals['_HOSTPLACEMENT']._serialized_start=241
-  _globals['_HOSTPLACEMENT']._serialized_end=378
-  _globals['_TASKPLACEMENTDIAGNOSIS']._serialized_start=381
-  _globals['_TASKPLACEMENTDIAGNOSIS']._serialized_end=623
-  _globals['_PLACEMENT']._serialized_start=626
-  _globals['_PLACEMENT']._serialized_end=833
-  _globals['_AUTHKEYS']._serialized_start=835
-  _globals['_AUTHKEYS']._serialized_end=935
+  _globals['_REVOKEAUTHKEYREQUEST']._serialized_end=131
+  _globals['_GETAUTHKEYREQUEST']._serialized_start=133
+  _globals['_GETAUTHKEYREQUEST']._serialized_end=166
+  _globals['_LISTAUTHKEYSREQUEST']._serialized_start=168
+  _globals['_LISTAUTHKEYSREQUEST']._serialized_end=220
+  _globals['_LISTAUTHKEYSRESPONSE']._serialized_start=222
+  _globals['_LISTAUTHKEYSRESPONSE']._serialized_end=314
+  _globals['_ROTATEHOSTCREDENTIALREQUEST']._serialized_start=316
+  _globals['_ROTATEHOSTCREDENTIALREQUEST']._serialized_end=422
+  _globals['_HOSTCREDENTIALROTATION']._serialized_start=424
+  _globals['_HOSTCREDENTIALROTATION']._serialized_end=494
+  _globals['_SETTAGRUNSONREQUEST']._serialized_start=496
+  _globals['_SETTAGRUNSONREQUEST']._serialized_end=550
+  _globals['_DIAGNOSETASKPLACEMENTREQUEST']._serialized_start=552
+  _globals['_DIAGNOSETASKPLACEMENTREQUEST']._serialized_end=599
+  _globals['_HOSTPLACEMENT']._serialized_start=602
+  _globals['_HOSTPLACEMENT']._serialized_end=739
+  _globals['_TASKPLACEMENTDIAGNOSIS']._serialized_start=742
+  _globals['_TASKPLACEMENTDIAGNOSIS']._serialized_end=984
+  _globals['_PLACEMENT']._serialized_start=987
+  _globals['_PLACEMENT']._serialized_end=1194
+  _globals['_AUTHKEYS']._serialized_start=1197
+  _globals['_AUTHKEYS']._serialized_end=1482
+  _globals['_HOSTCREDENTIALS']._serialized_start=1485
+  _globals['_HOSTCREDENTIALS']._serialized_end=1621
 # @@protoc_insertion_point(module_scope)

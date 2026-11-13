@@ -6,6 +6,8 @@ mod prerequisites;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
+#[path = "support/protocol.rs"]
+mod protocol;
 
 use std::{net::SocketAddr, process::Stdio, time::Duration};
 
@@ -108,7 +110,7 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     for tag in ["reviewer", "writer"] {
         output(operator(&["put-tag", tag, "--instructions", "Echo"])).await?;
     }
-    let mut client = OperatorClient::connect(public.clone()).await?;
+    let mut client = OperatorClient::new(protocol::dial(public.clone()).await?);
     let mut submitted = vec![];
     for index in 0..TASKS {
         let task = client
