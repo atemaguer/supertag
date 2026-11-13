@@ -1,5 +1,7 @@
 # Connector contract
 
+<!-- supertag-cli: native -->
+
 A **Connector** links one collaboration surface account to SuperTag. It turns surface events into
 [Tasks](glossary.md#task) and delivers each Task's reply back to the surface. The built-in
 connectors for Slack, GitHub, Linear, Lark, and Microsoft Teams run inside a

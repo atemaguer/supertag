@@ -75,7 +75,8 @@ async function until<T>(read: () => Promise<T>, accept: (value: T) => boolean, l
 }
 
 /** The bootstrap Gateway and Worker Host present enrolled `stcr_` credentials. */
-const enrolled = () => `stcr_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
+const enrolled = () =>
+  `stcr_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
 
 const credentials = {
   gateway: enrolled(),

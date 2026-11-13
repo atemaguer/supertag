@@ -1,5 +1,7 @@
 # SuperTag Control Plane
 
+<!-- supertag-cli: native -->
+
 The Control Plane is one of SuperTag's two top-level runtime components. It maintains the durable
 state of an AI [organization](glossary.md#autonomous-organization) and decides what work the
 organization accepts and where that work runs. [Worker Hosts](glossary.md#worker-host) form the
