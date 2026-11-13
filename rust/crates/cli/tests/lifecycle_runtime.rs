@@ -577,7 +577,10 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
 
     // A harness on PATH, but no terminal and no --yes.
     let codex = machine.bin.join("codex");
-    fs::write(&codex, "#!/bin/sh\nexit 0\n")?;
+    fs::write(
+        &codex,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo codex-cli 0.163.0; fi\nexit 0\n",
+    )?;
     fs::set_permissions(&codex, fs::Permissions::from_mode(0o755))?;
     let output = init(&[])?;
     assert!(String::from_utf8_lossy(&output.stderr).contains("needs a terminal"));
@@ -605,6 +608,27 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     ])?;
     assert!(!machine.state.exists());
 
+    // Codex has no credential the Worker Host could use: nothing is written, and the steps say
+    // how to sign in.
+    let output = init(&["--yes"])?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("No selected harness could complete the sign-in check"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("codex -c 'cli_auth_credentials_store=\"file\"' login"),
+        "{stderr}"
+    );
+    assert!(!machine.state.join("supertag.yaml").exists());
+    // A file-backed Codex login is checked without a model turn.
+    fs::create_dir_all(machine.home.join(".codex"))?;
+    fs::write(
+        machine.home.join(".codex/auth.json"),
+        r#"{"tokens":{"refresh_token":"refresh"}}"#,
+    )?;
+
     let output = init(&["--yes"])?;
     ensure!(
         output.status.success(),
@@ -622,6 +646,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         stdout.contains("Tag lead runs codex on this machine, in Workspace my-project"),
         "{stdout}"
     );
+    assert!(stdout.contains("  codex: signed in"), "{stdout}");
     let file = machine.state.join("supertag.yaml");
     assert_eq!(fs::metadata(&file)?.permissions().mode() & 0o777, 0o600);
     let services = machine.ok(&["config", "--services"])?;

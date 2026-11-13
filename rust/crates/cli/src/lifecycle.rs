@@ -454,7 +454,7 @@ fn unit_definition(
         })
         .collect::<Result<Vec<_>>>()?;
     let mut environment = vec![(MODE_VARIABLE.to_owned(), "service".to_owned())];
-    for name in ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR"] {
+    for name in local_config::UNIT_VARIABLES {
         if let Ok(value) = std::env::var(name) {
             environment.push((name.into(), value));
         }

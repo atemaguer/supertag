@@ -589,6 +589,28 @@ fn capture_log(process: &mut tokio::process::Child, logs: &Logs, service: &str) 
     Ok(())
 }
 
+/// Append one timestamped line to a service's log, and with `echo` also to this terminal.
+fn note_line(logs: &Logs, service: &str, line: &str) -> Result<()> {
+    let path = lifecycle::log_path(&logs.state, service);
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    let line = line.replace('\n', " ");
+    writeln!(
+        file,
+        "{} {line}",
+        lifecycle::timestamp(std::time::SystemTime::now())
+    )?;
+    if logs.echo {
+        let _ = writeln!(io::stderr().lock(), "{service} | {line}");
+    }
+    Ok(())
+}
+
 /// Copy a child's stderr into its log, one ISO 8601 timestamp per line, and with `echo` also to
 /// this terminal prefixed by the service name.
 async fn copy_log(
@@ -1334,12 +1356,27 @@ pub async fn configured(
         } else {
             None
         };
-        for definition in config.hosts {
+        // Before any host registers or takes work: a Codex CLI that cannot run Tasks, or a
+        // configured model its provider does not offer, stops startup here. Every host's checks
+        // run together, so they fit within `up`'s readiness wait however many hosts there are.
+        let checks = futures_util::future::join_all(config.hosts.iter().map(async |definition| {
+            let host = crate::harness_checks::host_harnesses(definition)?;
+            crate::harness_checks::check_host(&host, &environment).await
+        }))
+        .await;
+        let mut host_notes: Vec<Vec<String>> = Vec::new();
+        for checked in checks {
+            host_notes.push(checked?);
+        }
+        for (definition, notes) in config.hosts.into_iter().zip(host_notes) {
             let target = definition
                 .gateway
                 .clone()
                 .or_else(|| endpoint.clone())
                 .context("host Gateway is unavailable")?;
+            for note in notes {
+                note_line(&logs, &definition.name, &note)?;
+            }
             let host_directory = directory.join("hosts").join(&definition.name);
             enroll_configured(
                 &definition,

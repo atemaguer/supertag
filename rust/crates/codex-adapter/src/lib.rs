@@ -44,6 +44,9 @@ pub struct CodexOptions {
     pub environment: BTreeMap<OsString, OsString>,
 }
 
+/// The oldest Codex CLI whose app server this adapter speaks.
+pub const MINIMUM_CODEX_VERSION: &str = "0.163.0";
+
 /// Bounds one native app-server exchange and local process steps.
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds one call to the supervising Worker Host. The host repeats an
@@ -504,9 +507,13 @@ async fn verify_version(
             .ok()
             .filter(|parts| parts.len() == 3)
             .context("unsupported Codex version format")?;
+        let minimum = MINIMUM_CODEX_VERSION
+            .split('.')
+            .map(str::parse::<u64>)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         ensure!(
-            parts.as_slice() >= [0, 163, 0].as_slice(),
-            "Codex CLI 0.163.0 or later is required"
+            parts >= minimum,
+            "Codex CLI {MINIMUM_CODEX_VERSION} or later is required"
         );
         Ok::<_, anyhow::Error>(())
     })
