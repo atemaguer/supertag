@@ -603,13 +603,13 @@ async fn supervise(
         )
         .await;
     }
-    let survivors = signal_group(group, libc::SIGKILL)?;
+    let survivors = signal_group(group, libc::SIGKILL).await?;
     time::timeout(Duration::from_secs(2), async {
         if child.try_wait()?.is_none() {
             child.kill().await?;
         }
         child.wait().await?;
-        while signal_group(group, 0)? {
+        while signal_group(group, 0).await? {
             time::sleep(Duration::from_millis(10)).await;
         }
         Ok::<_, anyhow::Error>(())
@@ -735,17 +735,29 @@ fn renewal_time(valid_until: Instant) -> Instant {
     now + (valid_until.saturating_duration_since(now) / 3).min(Duration::from_secs(5))
 }
 
-fn signal_group(group: u32, signal: i32) -> Result<bool> {
+async fn signal_group(group: u32, signal: i32) -> Result<bool> {
     let group = i32::try_from(group).context("adapter process group is out of range")?;
     ensure!(group > 0, "invalid adapter process group");
-    // The child was launched as leader of a dedicated Unix process group.
-    let result = unsafe { libc::kill(-group, signal) };
-    if result == 0 {
-        return Ok(true);
+    // Darwin answers EPERM instead of ESRCH while a group holds only zombies that their
+    // reaper has not collected yet, as when a harness process was killed with its guardian.
+    let mut zombie_retries = if cfg!(target_os = "macos") { 100 } else { 0 };
+    loop {
+        // The child was launched as leader of a dedicated Unix process group.
+        let result = unsafe { libc::kill(-group, signal) };
+        if result == 0 {
+            return Ok(true);
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => return Ok(false),
+            Some(libc::EPERM) if zombie_retries > 0 => {
+                zombie_retries -= 1;
+                time::sleep(Duration::from_millis(10)).await;
+            }
+            _ => {
+                return Err(error)
+                    .with_context(|| format!("signal {signal} to adapter process group {group}"));
+            }
+        }
     }
-    let error = io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(false);
-    }
-    Err(error).with_context(|| format!("signal {signal} to adapter process group {group}"))
 }
