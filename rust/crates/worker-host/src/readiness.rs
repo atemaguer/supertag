@@ -61,8 +61,11 @@ pub(crate) struct Presence {
     token: String,
     harness: i32,
     workspaces: Vec<String>,
-    profile: HarnessExecutionProfile,
+    profile: Profile,
 }
+
+/// The execution profile to report now; MCP login states change while the host runs.
+pub(crate) type Profile = Arc<dyn Fn() -> HarnessExecutionProfile + Send + Sync>;
 
 impl Presence {
     pub(crate) fn start(
@@ -71,7 +74,7 @@ impl Presence {
         token: String,
         harness: i32,
         workspaces: Vec<String>,
-        profile: HarnessExecutionProfile,
+        profile: Profile,
         shutdown: CancellationToken,
     ) -> Self {
         let cancel = shutdown.child_token();
@@ -106,7 +109,7 @@ impl Presence {
                         return Err(error);
                     }
                 };
-                let report = state.report(sequence, harness, &workspaces, &profile);
+                let report = state.report(sequence, harness, &workspaces, &profile());
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
@@ -145,7 +148,7 @@ impl Presence {
             self.journal.next_report_sequence()?,
             self.harness,
             &self.workspaces,
-            &self.profile,
+            &(self.profile)(),
         );
         // Best effort: on a partition the last observation naturally expires. Never
         // prevent journal cleanup or treat a presence reply as execution authority.

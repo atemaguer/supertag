@@ -396,6 +396,13 @@ impl Store {
             }
             items.extend(pending.into_iter().take(SCAN));
         }
+        if wants(&cursor, InboxItemKind::McpLogin) {
+            let (logins, more) = mcp_logins_in(&mut tx, &cursor).await?;
+            if more {
+                truncated.push(InboxItemKind::McpLogin as i32);
+            }
+            items.extend(logins);
+        }
         items.sort_by(|a, b| (a.actionable_since_ms, &a.key).cmp(&(b.actionable_since_ms, &b.key)));
         items.retain(|item| {
             (item.actionable_since_ms, item.key.as_str()) > (cursor.at, cursor.key.as_str())
@@ -425,6 +432,118 @@ impl Store {
             truncated_kinds: truncated,
         })
     }
+}
+
+/// Queued Objective Tasks that wait for an OAuth MCP server whose login lapsed: no live
+/// Worker Host that may run the Task provides the server, and one of them reports its login
+/// lapsed. The item stays until a host provides the server again.
+async fn mcp_logins_in(
+    tx: &mut Transaction<'_, Any>,
+    cursor: &Cursor,
+) -> Result<(Vec<InboxItem>, bool)> {
+    struct Host {
+        id: String,
+        all_tags: bool,
+        workspaces: Vec<String>,
+        provided: Vec<String>,
+        lapsed: Vec<String>,
+    }
+    let mut hosts = Vec::new();
+    for row in sqlx::query("SELECT r.host_id,r.workspace_ids,r.execution_profile,h.all_tags FROM supertag_v2_host_readiness r JOIN supertag_v2_hosts h ON h.host_id=r.host_id AND h.generation=r.generation WHERE h.revoked_at_ms IS NULL AND r.presence_expires_at_ms>$1")
+        .bind(cursor.as_of_ms).fetch_all(&mut **tx).await?
+    {
+        let profile = crate::store::read_host_profile(row.try_get("execution_profile")?)?
+            .unwrap_or_default();
+        hosts.push(Host {
+            id: row.try_get("host_id")?,
+            all_tags: row.try_get::<i64, _>("all_tags")? != 0,
+            workspaces: serde_json::from_str(&row.try_get::<String, _>("workspace_ids")?)?,
+            provided: profile.mcp_servers.into_iter().map(|server| server.name).collect(),
+            lapsed: profile.mcp_login_servers,
+        });
+    }
+    if !hosts.iter().any(|host| !host.lapsed.is_empty()) {
+        return Ok((Vec::new(), false));
+    }
+    let bindings: Vec<(String, String)> =
+        sqlx::query_as("SELECT host_id,tag_id FROM supertag_v2_host_tags")
+            .fetch_all(&mut **tx)
+            .await?;
+    let lapses: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT host_id,server,observed_at_ms FROM supertag_v2_mcp_login_lapses WHERE observed_at_ms<=$1",
+    )
+    .bind(cursor.as_of_ms)
+    .fetch_all(&mut **tx)
+    .await?;
+    let rows = sqlx::query("SELECT t.*,o.objective_id AS inbox_objective_id FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE t.state=$1 AND o.status NOT IN ($2,$3) AND ($4='' OR o.objective_id=$4) ORDER BY t.accepted_order LIMIT $5")
+        .bind(TaskState::Queued as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64)
+        .fetch_all(&mut **tx).await?;
+    let mut items = Vec::new();
+    for row in rows.iter().take(SCAN) {
+        let task = crate::store::task_row(row)?;
+        let eligible: Vec<&Host> = hosts
+            .iter()
+            .filter(|host| {
+                (host.all_tags
+                    || bindings
+                        .iter()
+                        .any(|(id, tag)| id == &host.id && tag == &task.tag_id))
+                    && task
+                        .workspace
+                        .as_ref()
+                        .is_none_or(|spec| host.workspaces.contains(&spec.workspace_id))
+            })
+            .collect();
+        let workspace = supertag_protocol::mcp::workspace_servers(&task);
+        let servers: std::collections::BTreeSet<&str> = supertag_protocol::mcp::grants(&task)
+            .filter_map(|(_, grant)| supertag_protocol::mcp::parse_action(&grant.action))
+            .map(|(server, _)| server)
+            .filter(|server| !workspace.contains(server))
+            .collect();
+        for server in servers {
+            if eligible
+                .iter()
+                .any(|host| host.provided.iter().any(|name| name == server))
+            {
+                continue;
+            }
+            let Some(since) = lapses
+                .iter()
+                .filter(|(host, name, _)| {
+                    name == server
+                        && eligible
+                            .iter()
+                            .any(|eligible| &eligible.id == host && eligible.lapsed.iter().any(|lapsed| lapsed == server))
+                })
+                .map(|(_, _, at)| *at)
+                .min()
+            else {
+                continue;
+            };
+            let key = format!("mcp_login:{}:{server}", task.task_id);
+            items.push(InboxItem {
+                key: key.clone(),
+                occurrence: format!("{key}:{since}"),
+                kind: InboxItemKind::McpLogin as i32,
+                objective_id: row.try_get("inbox_objective_id")?,
+                task_id: task.task_id.clone(),
+                attempt_id: None,
+                operator_eligible: true,
+                actionable_since_ms: since,
+                reason: format!(
+                    "The Task needs MCP server {server}, whose login lapsed on its Worker Host. Run {} on that host; the Task waits until then.",
+                    mcp_login_command(server)
+                ),
+                question: None,
+                approval: None,
+            });
+        }
+    }
+    Ok((items, rows.len() > SCAN))
+}
+
+fn mcp_login_command(server: &str) -> String {
+    format!("supertag mcp login {server}")
 }
 
 async fn question_objective_in(

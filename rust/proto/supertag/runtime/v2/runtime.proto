@@ -212,6 +212,8 @@ enum InboxItemKind {
   INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 3;
   INBOX_ITEM_KIND_TASK_ATTENTION = 4;
   INBOX_ITEM_KIND_APPROVAL = 5;
+  // A queued Task needs an OAuth MCP server whose login lapsed on every Worker Host serving it.
+  INBOX_ITEM_KIND_MCP_LOGIN = 1800;
 }
 
 message ListInboxItemsRequest {
@@ -1372,6 +1374,9 @@ message HarnessExecutionProfile {
   bool declared_task_outputs = 7;
   bool task_artifact_inputs = 8;
   repeated WorkspaceMountCapability workspace_mounts = 9;
+  // OAuth MCP servers whose login lapsed on this host. They are advertised here instead of in
+  // `mcp_servers`, so Tasks that need them wait for `supertag mcp login NAME`.
+  repeated string mcp_login_servers = 1800;
 }
 
 enum SharedExecutionTool {
@@ -1413,7 +1418,23 @@ message AttemptExecutionSelection {
 service AttemptMcpEffects {
   rpc Reserve(ReserveMcpEffectRequest) returns (ReserveMcpEffectResponse);
   rpc Settle(SettleMcpEffectRequest) returns (SettleMcpEffectResponse);
+  // Records the Workspace MCP servers an Attempt resolved, before any of them starts. The first
+  // recorded digest of a Task binds every later Attempt of that Task.
+  rpc RecordWorkspaceMcp(RecordWorkspaceMcpRequest) returns (RecordWorkspaceMcpResponse);
 }
+
+// The selected `.mcp.json` entries of a Task's Workspace as one Attempt resolved them.
+message WorkspaceMcpRecord {
+  // `sha256:` and the hex digest of the selected entries as declared, with no value resolved.
+  string digest = 1;
+  // One capability per selected server; its provider binding pins the resolved launch.
+  repeated McpServerCapability servers = 2;
+}
+message RecordWorkspaceMcpRequest {
+  InspectAttemptRequest attempt = 1;
+  WorkspaceMcpRecord record = 2;
+}
+message RecordWorkspaceMcpResponse {}
 
 message ReserveMcpEffectRequest {
   InspectAttemptRequest attempt = 1;
@@ -1720,6 +1741,9 @@ message WorkspaceSpec {
   // Set by admission from the catalog, never accepted from PutTag input.
   GithubWorkspace github_source = 3;
   repeated WorkspaceCopyMount mounts = 4;
+  // Servers the Workspace's `.mcp.json` declares that its Tasks may use. Each Attempt reads them
+  // from a Worker-owned snapshot of `base_commit`, never from the Task worktree.
+  repeated string mcp_servers = 1800;
 }
 
 message WorkspaceCopyMount {

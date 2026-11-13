@@ -430,6 +430,9 @@ const (
 	// AttemptMcpEffectsSettleProcedure is the fully-qualified name of the AttemptMcpEffects's Settle
 	// RPC.
 	AttemptMcpEffectsSettleProcedure = "/supertag.runtime.v2.AttemptMcpEffects/Settle"
+	// AttemptMcpEffectsRecordWorkspaceMcpProcedure is the fully-qualified name of the
+	// AttemptMcpEffects's RecordWorkspaceMcp RPC.
+	AttemptMcpEffectsRecordWorkspaceMcpProcedure = "/supertag.runtime.v2.AttemptMcpEffects/RecordWorkspaceMcp"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -5115,6 +5118,9 @@ func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Req
 type AttemptMcpEffectsClient interface {
 	Reserve(context.Context, *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error)
 	Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error)
+	// Records the Workspace MCP servers an Attempt resolved, before any of them starts. The first
+	// recorded digest of a Task binds every later Attempt of that Task.
+	RecordWorkspaceMcp(context.Context, *connect.Request[runtimev2.RecordWorkspaceMcpRequest]) (*connect.Response[runtimev2.RecordWorkspaceMcpResponse], error)
 }
 
 // NewAttemptMcpEffectsClient constructs a client for the supertag.runtime.v2.AttemptMcpEffects
@@ -5140,13 +5146,20 @@ func NewAttemptMcpEffectsClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(attemptMcpEffectsMethods.ByName("Settle")),
 			connect.WithClientOptions(opts...),
 		),
+		recordWorkspaceMcp: connect.NewClient[runtimev2.RecordWorkspaceMcpRequest, runtimev2.RecordWorkspaceMcpResponse](
+			httpClient,
+			baseURL+AttemptMcpEffectsRecordWorkspaceMcpProcedure,
+			connect.WithSchema(attemptMcpEffectsMethods.ByName("RecordWorkspaceMcp")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptMcpEffectsClient implements AttemptMcpEffectsClient.
 type attemptMcpEffectsClient struct {
-	reserve *connect.Client[runtimev2.ReserveMcpEffectRequest, runtimev2.ReserveMcpEffectResponse]
-	settle  *connect.Client[runtimev2.SettleMcpEffectRequest, runtimev2.SettleMcpEffectResponse]
+	reserve            *connect.Client[runtimev2.ReserveMcpEffectRequest, runtimev2.ReserveMcpEffectResponse]
+	settle             *connect.Client[runtimev2.SettleMcpEffectRequest, runtimev2.SettleMcpEffectResponse]
+	recordWorkspaceMcp *connect.Client[runtimev2.RecordWorkspaceMcpRequest, runtimev2.RecordWorkspaceMcpResponse]
 }
 
 // Reserve calls supertag.runtime.v2.AttemptMcpEffects.Reserve.
@@ -5159,11 +5172,19 @@ func (c *attemptMcpEffectsClient) Settle(ctx context.Context, req *connect.Reque
 	return c.settle.CallUnary(ctx, req)
 }
 
+// RecordWorkspaceMcp calls supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp.
+func (c *attemptMcpEffectsClient) RecordWorkspaceMcp(ctx context.Context, req *connect.Request[runtimev2.RecordWorkspaceMcpRequest]) (*connect.Response[runtimev2.RecordWorkspaceMcpResponse], error) {
+	return c.recordWorkspaceMcp.CallUnary(ctx, req)
+}
+
 // AttemptMcpEffectsHandler is an implementation of the supertag.runtime.v2.AttemptMcpEffects
 // service.
 type AttemptMcpEffectsHandler interface {
 	Reserve(context.Context, *connect.Request[runtimev2.ReserveMcpEffectRequest]) (*connect.Response[runtimev2.ReserveMcpEffectResponse], error)
 	Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error)
+	// Records the Workspace MCP servers an Attempt resolved, before any of them starts. The first
+	// recorded digest of a Task binds every later Attempt of that Task.
+	RecordWorkspaceMcp(context.Context, *connect.Request[runtimev2.RecordWorkspaceMcpRequest]) (*connect.Response[runtimev2.RecordWorkspaceMcpResponse], error)
 }
 
 // NewAttemptMcpEffectsHandler builds an HTTP handler from the service implementation. It returns
@@ -5185,12 +5206,20 @@ func NewAttemptMcpEffectsHandler(svc AttemptMcpEffectsHandler, opts ...connect.H
 		connect.WithSchema(attemptMcpEffectsMethods.ByName("Settle")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptMcpEffectsRecordWorkspaceMcpHandler := connect.NewUnaryHandler(
+		AttemptMcpEffectsRecordWorkspaceMcpProcedure,
+		svc.RecordWorkspaceMcp,
+		connect.WithSchema(attemptMcpEffectsMethods.ByName("RecordWorkspaceMcp")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptMcpEffects/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptMcpEffectsReserveProcedure:
 			attemptMcpEffectsReserveHandler.ServeHTTP(w, r)
 		case AttemptMcpEffectsSettleProcedure:
 			attemptMcpEffectsSettleHandler.ServeHTTP(w, r)
+		case AttemptMcpEffectsRecordWorkspaceMcpProcedure:
+			attemptMcpEffectsRecordWorkspaceMcpHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -5206,4 +5235,8 @@ func (UnimplementedAttemptMcpEffectsHandler) Reserve(context.Context, *connect.R
 
 func (UnimplementedAttemptMcpEffectsHandler) Settle(context.Context, *connect.Request[runtimev2.SettleMcpEffectRequest]) (*connect.Response[runtimev2.SettleMcpEffectResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMcpEffects.Settle is not implemented"))
+}
+
+func (UnimplementedAttemptMcpEffectsHandler) RecordWorkspaceMcp(context.Context, *connect.Request[runtimev2.RecordWorkspaceMcpRequest]) (*connect.Response[runtimev2.RecordWorkspaceMcpResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp is not implemented"))
 }

@@ -59,11 +59,13 @@ impl Store {
         workspaces.sort_unstable();
         workspaces.dedup();
         let workspaces = serde_json::to_string(&workspaces)?;
-        let execution_profile = input
+        let normalized_profile = input
             .execution_profile
             .as_ref()
             .map(|profile| execution::normalize_profile(Some(profile)))
-            .transpose()?
+            .transpose()?;
+        let execution_profile = normalized_profile
+            .as_ref()
             .map(|profile| profile.encode_to_vec());
         let observed = (
             input.capacity,
@@ -113,6 +115,31 @@ impl Store {
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
             .bind(execution_profile)
             .execute(&mut *transaction).await?;
+        // When each lapsed login was first reported, so the Inbox item keeps its place.
+        let lapsed = normalized_profile
+            .as_ref()
+            .map(|profile| profile.mcp_login_servers.clone())
+            .unwrap_or_default();
+        let recorded: Vec<String> =
+            sqlx::query_scalar("SELECT server FROM supertag_v2_mcp_login_lapses WHERE host_id=$1")
+                .bind(host.id())
+                .fetch_all(&mut *transaction)
+                .await?;
+        for server in recorded.iter().filter(|server| !lapsed.contains(server)) {
+            sqlx::query("DELETE FROM supertag_v2_mcp_login_lapses WHERE host_id=$1 AND server=$2")
+                .bind(host.id())
+                .bind(server)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        for server in lapsed.iter().filter(|server| !recorded.contains(server)) {
+            sqlx::query("INSERT INTO supertag_v2_mcp_login_lapses(host_id,server,observed_at_ms) VALUES($1,$2,$3)")
+                .bind(host.id())
+                .bind(server)
+                .bind(now)
+                .execute(&mut *transaction)
+                .await?;
+        }
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;
         Ok(view)

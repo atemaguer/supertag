@@ -188,6 +188,7 @@ impl AdapterOptions {
             }
         }
         Ok(supertag_protocol::v2::HarnessExecutionProfile {
+            mcp_login_servers: vec![],
             model_ids,
             default_model,
             allow_unsandboxed_commands: self.allow_unsandboxed_commands,

@@ -2,6 +2,7 @@ mod catalog;
 mod http;
 mod oauth;
 mod stdio;
+mod workspace;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -21,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 pub use catalog::{McpCatalog, McpCatalogEntry};
+pub(crate) use workspace::{WorkspaceMcp, host_variable as workspace_mcp_variable};
 pub use oauth::{
     LoginOptions as McpLoginOptions, McpLogin, McpLoginState, McpLoginStore, login_command,
     run_login as run_mcp_login,
@@ -144,8 +146,11 @@ pub(crate) struct AdmittedCall {
 }
 
 impl AttemptMcp {
+    /// Opens each granted server: a Workspace server from `workspace`, which this Attempt
+    /// already recorded with the Control Plane, and any other from the host catalog.
     pub(crate) async fn prepare(
         catalog: &McpCatalog,
+        workspace: Option<&WorkspaceMcp>,
         task: &Task,
         cancel: &CancellationToken,
     ) -> Result<Option<Self>, Status> {
@@ -156,27 +161,40 @@ impl AttemptMcp {
         if names.is_empty() {
             return Ok(None);
         }
+        let workspace_names = mcp::workspace_servers(task);
         let mut attempt = Self {
             servers: BTreeMap::new(),
-            secrets: catalog.secrets.clone(),
+            secrets: catalog
+                .secrets
+                .iter()
+                .chain(workspace.iter().flat_map(|workspace| &workspace.secrets))
+                .cloned()
+                .collect(),
         };
         let client = http::client()?;
         let discovery_deadline = Instant::now() + DISCOVERY_TIMEOUT;
         let mut bytes = 0usize;
         let mut count = 0usize;
         for name in names {
-            let Some(config) = catalog.servers.get(name) else {
+            let config = if workspace_names.contains(name) {
+                workspace
+                    .and_then(|workspace| workspace.servers.get(name))
+                    .filter(|config| {
+                        workspace.is_some_and(|workspace| {
+                            workspace.record.servers.contains(&config.capability)
+                        })
+                    })
+            } else {
+                catalog.servers.get(name).filter(|config| {
+                    task.attempt_execution.as_ref().is_some_and(|execution| {
+                        execution.mcp_servers.contains(&config.capability)
+                    })
+                })
+            };
+            let Some(config) = config else {
                 attempt.close().await;
                 return Err(Failure::Denied.into());
             };
-            if !task
-                .attempt_execution
-                .as_ref()
-                .is_some_and(|execution| execution.mcp_servers.contains(&config.capability))
-            {
-                attempt.close().await;
-                return Err(Failure::Denied.into());
-            }
             let mut session = match Session::open(&client, config, catalog.logins.as_ref()) {
                 Ok(session) => session,
                 Err(failure) => {

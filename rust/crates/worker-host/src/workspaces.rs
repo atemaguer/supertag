@@ -249,6 +249,31 @@ impl Workspaces {
         }))
     }
 
+    /// A Worker-owned snapshot of the Task's base commit for its Workspace MCP servers.
+    pub(crate) async fn mcp_snapshot(
+        &self,
+        prepared: &PreparedWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<PathBuf> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .mcp_snapshot(
+                &prepared.checkout.task_id,
+                &prepared.checkout.attempt_id,
+                cancel,
+            )
+            .await
+    }
+
+    /// Removes an Attempt's MCP snapshot after its servers stopped; best effort.
+    pub(crate) fn remove_mcp_snapshot(&self, prepared: &PreparedWorkspace) {
+        if let Ok(workspace) = self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {
+            let _ = workspace.remove_mcp_snapshot(
+                &prepared.checkout.task_id,
+                &prepared.checkout.attempt_id,
+            );
+        }
+    }
+
     pub(crate) async fn output_remote(
         &self,
         workspace: &PreparedWorkspace,

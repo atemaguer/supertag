@@ -81,8 +81,22 @@ impl Session {
         let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))
             .map_err(|_| Failure::Unavailable)?;
         value.set_sensitive(true);
-        if !self.tokens.contains(&token) {
-            self.tokens.push(token);
+        // The login's refresh token and client secret are as private as its access tokens:
+        // the token endpoint shares the server's origin, so the server could echo them.
+        let stored = login
+            .read(&self.server.name)
+            .ok()
+            .flatten()
+            .map(|login| {
+                std::iter::once(login.refresh_token)
+                    .chain(login.client_secret)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for secret in std::iter::once(token).chain(stored) {
+            if !secret.is_empty() && !self.tokens.contains(&secret) {
+                self.tokens.push(secret);
+            }
         }
         self.access_token = Some(value);
         Ok(())
@@ -143,10 +157,15 @@ impl Session {
             .send()
             .await
             .map_err(|_| Failure::Unavailable)?;
-        // A refused access token means the request was not processed: refresh the login once
-        // and resend. A refused refresh marks the login lapsed.
-        if response.status() == StatusCode::UNAUTHORIZED && self.login.is_some() {
-            let rejected = self.tokens.last().cloned();
+        // A refused access token (401, or 403 from servers that answer so for an expired token)
+        // means the request was not processed: refresh the login once and resend. A refused
+        // refresh marks the login lapsed.
+        if matches!(
+            response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+        ) && self.login.is_some()
+        {
+            let rejected = self.access_token_text();
             self.authorize(rejected.as_deref()).await?;
             response = self
                 .request(Method::POST)
@@ -185,6 +204,16 @@ impl Session {
             }
         }
         Ok(())
+    }
+
+    /// The access token this session last sent.
+    fn access_token_text(&self) -> Option<String> {
+        self.access_token
+            .as_ref()?
+            .to_str()
+            .ok()?
+            .strip_prefix("Bearer ")
+            .map(str::to_owned)
     }
 
     pub(super) fn session_id(&self) -> Option<&str> {
@@ -342,7 +371,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oauth_login_supplies_the_bearer_and_refreshes_once_on_401() {
+    async fn oauth_login_supplies_the_bearer_and_refreshes_once_on_401_or_403() {
+        for refused in [401, 403] {
+            refresh_once_after(refused).await;
+        }
+    }
+
+    /// The server refuses the stored access token with `refused`; the session refreshes once,
+    /// resends, and withholds every credential of the login, not only access tokens.
+    async fn refresh_once_after(refused: u16) {
         use crate::mcp::{
             oauth::{McpLogin, McpLoginStore, now_ms},
             test_http::serve,
@@ -352,7 +389,7 @@ mod tests {
         }})
         .to_string();
         let (address, served) = serve(vec![
-            (401, "application/json", String::new()),
+            (refused, "application/json", String::new()),
             (
                 200,
                 "application/json",
@@ -372,7 +409,7 @@ mod tests {
                     url: url.clone(),
                     token_endpoint: format!("http://127.0.0.1:{}/token", address.port()),
                     client_id: "client".into(),
-                    client_secret: None,
+                    client_secret: Some("client-secret-value".into()),
                     refresh_token: "refresh-1".into(),
                     access_token: Some("access-1".into()),
                     access_token_expires_at: Some(now_ms() + 3_600_000),
@@ -391,7 +428,10 @@ mod tests {
         };
         let mut session = Session::new(client().unwrap(), server, Some(&store));
         session.initialize().await.unwrap();
-        assert_eq!(session.tokens, ["access-1", "access-2"]);
+        assert_eq!(
+            session.tokens,
+            ["access-1", "refresh-1", "client-secret-value", "access-2"]
+        );
         let requests = served.await.unwrap();
         assert!(
             requests[0]

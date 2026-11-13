@@ -182,6 +182,7 @@ async fn contract(url: String) {
         instructions: "Read only".into(),
         allowed_actions: vec!["files:read".into()],
         workspace: Some(WorkspaceSpec {
+            mcp_servers: vec![],
             mounts: vec![],
             workspace_id: "project".into(),
             base_commit: BASE.into(),

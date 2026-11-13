@@ -123,7 +123,27 @@ pub fn normalize_capabilities(servers: &mut [McpServerCapability]) -> bool {
     servers.windows(2).all(|pair| pair[0].name != pair[1].name)
 }
 
+/// The granted servers a Task's Workspace provides from its `.mcp.json`, by name. A Worker Host
+/// that serves the Workspace provides them, so no host catalog needs to declare them.
+pub fn workspace_servers(task: &Task) -> std::collections::BTreeSet<&str> {
+    let Some(declared) = task.workspace.as_ref().map(|spec| &spec.mcp_servers) else {
+        return Default::default();
+    };
+    grants(task)
+        .filter_map(|(_, grant)| parse_action(&grant.action).map(|(server, _)| server))
+        .filter(|server| declared.iter().any(|name| name == server))
+        .collect()
+}
+
+/// Valid Workspace MCP server names: sorted, unique, and within the server bound.
+pub fn normalize_workspace_servers(names: &mut Vec<String>) -> bool {
+    names.sort_unstable();
+    names.dedup();
+    names.len() <= MAX_SERVERS && names.iter().all(|name| server_name(name))
+}
+
 pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionProfile) -> bool {
+    let workspace = workspace_servers(task);
     grants(task).all(|(_, grant)| {
         if harness != HarnessKind::ClaudeCode || profile.remote_file_workspace {
             return false;
@@ -131,15 +151,18 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
         let Some((server, pattern)) = parse_action(&grant.action) else {
             return false;
         };
-        profile.mcp_servers.iter().any(|candidate| {
-            candidate.name == server
-                && candidate.provider_binding.is_some()
-                && (grant.resource.is_empty()
-                    || candidate
-                        .mapped_tools
-                        .iter()
-                        .any(|tool| tool_matches(pattern, tool)))
-        })
+        // The Workspace's own server runs on whichever host serves the Workspace. A grant scoped
+        // to a resource matches no tool there: `.mcp.json` declares no resource mapping.
+        workspace.contains(server)
+            || profile.mcp_servers.iter().any(|candidate| {
+                candidate.name == server
+                    && candidate.provider_binding.is_some()
+                    && (grant.resource.is_empty()
+                        || candidate
+                            .mapped_tools
+                            .iter()
+                            .any(|tool| tool_matches(pattern, tool)))
+            })
     })
 }
 
@@ -147,13 +170,15 @@ pub fn selected_servers(
     task: &Task,
     profile: &HarnessExecutionProfile,
 ) -> Vec<McpServerCapability> {
+    let workspace = workspace_servers(task);
     profile
         .mcp_servers
         .iter()
         .filter(|server| {
-            grants(task).any(|(_, grant)| {
-                parse_action(&grant.action).is_some_and(|(name, _)| name == server.name)
-            })
+            !workspace.contains(server.name.as_str())
+                && grants(task).any(|(_, grant)| {
+                    parse_action(&grant.action).is_some_and(|(name, _)| name == server.name)
+                })
         })
         .cloned()
         .collect()

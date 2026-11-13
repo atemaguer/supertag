@@ -31,6 +31,7 @@ fn report(sequence: u64) -> ReportHostRequest {
         harness_kind: HarnessKind::Codex as i32,
         workspace_ids: vec!["project".into()],
         execution_profile: Some(HarnessExecutionProfile {
+            mcp_login_servers: vec![],
             workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec!["codex-alpha".into(), "codex-beta".into()],

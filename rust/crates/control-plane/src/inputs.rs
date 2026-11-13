@@ -393,7 +393,8 @@ async fn compatible_policy_in(
            AND active.harness_kind=follower.harness_kind
            AND active.workspace_id IS NOT DISTINCT FROM follower.workspace_id
            AND active.workspace_base_commit IS NOT DISTINCT FROM follower.workspace_base_commit
-           AND active.workspace_mounts IS NOT DISTINCT FROM follower.workspace_mounts",
+           AND active.workspace_mounts IS NOT DISTINCT FROM follower.workspace_mounts
+           AND active.workspace_mcp_servers IS NOT DISTINCT FROM follower.workspace_mcp_servers",
     )
     .bind(task_id)
     .bind(follower_id)

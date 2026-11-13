@@ -425,6 +425,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts.
         #[arg(long, requires = "workspace_base")]
         workspace_mounts: Option<PathBuf>,
+        /// A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read
+        /// from the Task's base commit. May be repeated.
+        #[arg(long = "workspace-mcp", requires = "workspace_id")]
+        workspace_mcp: Vec<String>,
         /// Required harness for Tasks accepted from this Tag.
         #[arg(long)]
         harness: Option<Harness>,
@@ -1086,6 +1090,7 @@ async fn run(command: Command) -> Result<()> {
             workspace_id,
             workspace_base,
             workspace_mounts,
+            workspace_mcp,
             harness,
             models,
             efforts,
@@ -1097,6 +1102,7 @@ async fn run(command: Command) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
+                mcp_servers: workspace_mcp,
                 workspace_id,
                 base_commit: workspace_base.unwrap_or_default(),
                 github_source: None,
@@ -2241,6 +2247,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
         "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
+        "workspace_mcp_servers": tag.workspace.as_ref().map(|spec| &spec.mcp_servers),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
     })
@@ -2257,6 +2264,7 @@ fn print_task(task: &Task) {
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
                 "mounts": workspace_mounts::describe(&spec.mounts),
+                "mcp_servers": spec.mcp_servers,
                 "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),

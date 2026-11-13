@@ -64,6 +64,9 @@ impl Session {
             .stderr(Stdio::null())
             .process_group(0)
             .kill_on_drop(true);
+        if let Some(cwd) = &server.cwd {
+            command.current_dir(cwd);
+        }
         let mut child = command.spawn().map_err(|_| Failure::Unavailable)?;
         let pid = child.id().and_then(|pid| libc::pid_t::try_from(pid).ok());
         let stdin = child.stdin.take().ok_or(Failure::Unavailable)?;
@@ -262,6 +265,7 @@ mod tests {
                 mode.into(),
             ],
             env: BTreeMap::from([("CATALOG_TOKEN".into(), "stdio-secret-value-7f3a".into())]),
+            cwd: None,
         }
     }
 
@@ -393,6 +397,7 @@ mod tests {
         let missing = StdioServer {
             command: vec!["/nonexistent/supertag-missing-mcp-server".into()],
             env: BTreeMap::new(),
+            cwd: None,
         };
         assert!(matches!(
             Session::start(&missing),

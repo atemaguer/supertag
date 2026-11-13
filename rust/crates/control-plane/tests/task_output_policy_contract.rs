@@ -22,6 +22,7 @@ async fn exercise(url: &str, remote: bool) {
             instructions: "Preserve the report".into(),
             allowed_actions: vec!["files:read".into()],
             workspace: Some(WorkspaceSpec {
+                mcp_servers: vec![],
                 mounts: vec![],
                 workspace_id: "project".into(),
                 base_commit: BASE.into(),

@@ -19,8 +19,8 @@ use sha2::{Digest, Sha256};
 use supertag_protocol::{
     mcp,
     v2::{
-        McpResourceBinding, McpResourceComponent, McpResourceCondition, McpResourceRule,
-        McpServerCapability,
+        HarnessExecutionProfile, McpResourceBinding, McpResourceComponent, McpResourceCondition,
+        McpResourceRule, McpServerCapability,
     },
 };
 
@@ -61,6 +61,8 @@ pub(super) struct HttpServer {
 pub(super) struct StdioServer {
     pub(super) command: Vec<String>,
     pub(super) env: BTreeMap<String, String>,
+    /// A Workspace server runs in the Worker-owned snapshot of its Task's base commit.
+    pub(super) cwd: Option<std::path::PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -225,25 +227,55 @@ impl McpCatalog {
     }
 
     /// Loads the catalog. Servers with `"oauth": true` take their tokens from `logins`, the
-    /// store `supertag mcp login` writes; each must be logged in for its URL.
+    /// store `supertag mcp login` writes. A server without a current login is advertised as
+    /// needing one, so Tasks that need it wait, as in the TypeScript Worker.
     pub fn load(path: Option<&Path>, logins: Option<McpLoginStore>) -> Result<Self> {
         let Some(path) = path else {
             return Ok(Self::default());
         };
         let bytes = read_private(path)?;
         let mut catalog = Self::parse(&bytes, |name| std::env::var(name).ok())?;
-        for server in catalog.servers.values() {
-            if let Transport::Http(http) = &server.transport
-                && http.oauth
-            {
-                let store = logins.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("MCP server {} needs an MCP login store", http.name)
-                })?;
-                store.check(&http.name, http.endpoint.as_str())?;
-            }
+        if let Some(server) = catalog.servers.values().find(|server| {
+            matches!(&server.transport, Transport::Http(http) if http.oauth)
+        }) && logins.is_none()
+        {
+            anyhow::bail!(
+                "MCP server {} needs an MCP login store",
+                server.capability.name
+            );
         }
         catalog.logins = logins;
         Ok(catalog)
+    }
+
+    /// OAuth servers without a current login on this host: never logged in, logged in for
+    /// another URL, or lapsed. Each needs `supertag mcp login NAME`.
+    pub fn lapsed_logins(&self) -> Vec<String> {
+        self.servers
+            .iter()
+            .filter(|(name, server)| match &server.transport {
+                Transport::Http(http) if http.oauth => !self.logins.as_ref().is_some_and(|store| {
+                    store.check(name, http.endpoint.as_str()).is_ok()
+                }),
+                _ => false,
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    /// The profile this host advertises now: each server in `lapsed` moves from `mcp_servers`
+    /// to `mcp_login_servers`, so no Task that needs it is placed here until its login.
+    pub fn advertised(
+        profile: &HarnessExecutionProfile,
+        lapsed: &[String],
+    ) -> HarnessExecutionProfile {
+        let mut advertised = profile.clone();
+        advertised
+            .mcp_servers
+            .retain(|server| !lapsed.contains(&server.name));
+        advertised.mcp_login_servers = lapsed.to_vec();
+        advertised.mcp_login_servers.sort_unstable();
+        advertised
     }
 
     pub(super) fn parse(
@@ -450,7 +482,7 @@ fn http_server(
 
 /// Values shorter than this are passed to a stdio server but are too short to recognize in its
 /// output; `env` is meant for credentials, which are longer.
-const TRACKED_ENV_VALUE_BYTES: usize = 8;
+pub(super) const TRACKED_ENV_VALUE_BYTES: usize = 8;
 
 fn stdio_server(
     server: &ServerConfig,
@@ -495,10 +527,11 @@ fn stdio_server(
     Ok(StdioServer {
         command: command.to_vec(),
         env,
+        cwd: None,
     })
 }
 
-fn valid_server_env(value: &str) -> bool {
+pub(super) fn valid_server_env(value: &str) -> bool {
     value.len() <= 128
         && value
             .as_bytes()
@@ -509,7 +542,7 @@ fn valid_server_env(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'_')
 }
 
-fn validate_url(value: &str) -> Result<Url> {
+pub(super) fn validate_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|_| anyhow::anyhow!("invalid MCP endpoint"))?;
     let loopback = value
         .strip_prefix("http://")
@@ -540,7 +573,7 @@ fn validate_url(value: &str) -> Result<Url> {
     Ok(url)
 }
 
-fn valid_header(name: &HeaderName) -> bool {
+pub(super) fn valid_header(name: &HeaderName) -> bool {
     let name = name.as_str();
     !name.starts_with("mcp-")
         && !name.starts_with("x-supertag-")
@@ -705,11 +738,17 @@ mod tests {
         .unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
         let store = McpLoginStore::new(root.path().join("mcp-logins"));
-        let error = McpCatalog::load(Some(&file), Some(store.clone()))
-            .err()
-            .unwrap()
-            .to_string();
-        assert!(error.contains("supertag mcp login docs"), "{error}");
+        assert!(McpCatalog::load(Some(&file), None).is_err());
+        // Without a login the host starts and advertises the server as needing one.
+        let waiting = McpCatalog::load(Some(&file), Some(store.clone())).unwrap();
+        assert_eq!(waiting.lapsed_logins(), ["docs"]);
+        let profile = HarnessExecutionProfile {
+            mcp_servers: waiting.capabilities(),
+            ..Default::default()
+        };
+        let advertised = McpCatalog::advertised(&profile, &waiting.lapsed_logins());
+        assert!(advertised.mcp_servers.is_empty());
+        assert_eq!(advertised.mcp_login_servers, ["docs"]);
         store
             .store(
                 "docs",
@@ -727,7 +766,17 @@ mod tests {
                 },
             )
             .unwrap();
-        let catalog = McpCatalog::load(Some(&file), Some(store)).unwrap();
+        let catalog = McpCatalog::load(Some(&file), Some(store.clone())).unwrap();
+        assert!(catalog.lapsed_logins().is_empty());
+        assert_eq!(
+            McpCatalog::advertised(&profile, &catalog.lapsed_logins()),
+            profile
+        );
+        // A login refused later is advertised again as needing one, without a restart.
+        let mut lapsed = store.read("docs").unwrap().unwrap();
+        lapsed.lapsed_at = Some(2);
+        store.store("docs", &lapsed).unwrap();
+        assert_eq!(catalog.lapsed_logins(), ["docs"]);
         let Transport::Http(server) = &catalog.servers["docs"].transport else {
             panic!("HTTP server expected");
         };

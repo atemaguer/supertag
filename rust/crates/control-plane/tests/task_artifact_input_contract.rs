@@ -105,6 +105,7 @@ async fn exercise(url: &str) {
             harness_kind: HarnessKind::Cursor.into(),
             allowed_actions: vec!["files:read".into()],
             workspace: Some(WorkspaceSpec {
+                mcp_servers: vec![],
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
