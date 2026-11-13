@@ -454,6 +454,25 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long)]
         all_tags: bool,
     },
+    /// Check an operator token against a Gateway, then save the Gateway under a name for
+    /// `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
+    /// from standard input when that is not set.
+    ConnectGateway {
+        /// The Gateway origin, such as https://supertag.example.com.
+        url: String,
+        /// The name to save it under.
+        #[arg(long)]
+        name: String,
+        /// Replace a Gateway already saved under this name for the same origin.
+        #[arg(long)]
+        replace: bool,
+        #[arg(long)]
+        server_ca_file: Option<PathBuf>,
+        #[arg(long, requires = "client_key_file")]
+        client_cert_file: Option<PathBuf>,
+        #[arg(long, requires = "client_cert_file")]
+        client_key_file: Option<PathBuf>,
+    },
     /// Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled.
     RevokeAuthKey {
         #[command(flatten)]
@@ -1247,6 +1266,27 @@ async fn run(command: Command) -> Result<()> {
                     "labels": key.labels,
                 })
             );
+        }
+        Command::ConnectGateway {
+            url,
+            name,
+            replace,
+            server_ca_file,
+            client_cert_file,
+            client_key_file,
+        } => {
+            connect_gateway(
+                profiles::NewGateway {
+                    name,
+                    url,
+                    token: String::new(),
+                    server_ca_file,
+                    client_cert_file,
+                    client_key_file,
+                },
+                replace,
+            )
+            .await?;
         }
         Command::RevokeAuthKey { connection, key_id } => {
             placement::revoke_auth_key(connection, key_id).await?;
@@ -2590,6 +2630,57 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
             client_key: saved.client_key_file,
         }),
     })
+}
+
+/// Reads the operator token, proves it against the Gateway, and saves the Gateway by name.
+async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Result<()> {
+    gateway.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .context("read the operator token from standard input")?;
+            line
+        }
+    }
+    .trim()
+    .to_owned();
+    ensure!(
+        !gateway.token.is_empty(),
+        "the operator token must not be empty"
+    );
+    let target = OperatorTarget {
+        url: gateway.url.clone(),
+        token: gateway.token.clone(),
+        tls: Some(network::TlsFiles {
+            server_ca: gateway.server_ca_file.clone(),
+            client_cert: gateway.client_cert_file.clone(),
+            client_key: gateway.client_key_file.clone(),
+        }),
+    };
+    let channel = target
+        .endpoint(Duration::from_secs(15))
+        .await?
+        .connect()
+        .await
+        .with_context(|| format!("could not reach the Gateway at {}", gateway.url))?;
+    OperatorClient::new(channel)
+        .list_tags(request(
+            ListTagsRequest {
+                limit: 1,
+                ..Default::default()
+            },
+            &target.token,
+        )?)
+        .await
+        .context("the Gateway refused the operator token")?;
+    let store = profiles::save(&gateway, replace)?;
+    println!(
+        "{}",
+        json!({"name": gateway.name, "saved_in": store.display().to_string(), "active": true})
+    );
+    Ok(())
 }
 
 fn required_env(name: &str) -> Result<String> {

@@ -1,10 +1,13 @@
 //! Resolve a saved Gateway by name from the stores the terminal UI and the
-//! desktop app maintain. The CLI only reads them; the clients own saving,
-//! switching, and removal.
+//! desktop app maintain, and save one in the terminal UI's store for
+//! `supertag connect-gateway`. Saving follows the terminal UI's own protocol
+//! (`apps/tui/gateway_store.go`): an exclusive non-blocking lock on
+//! `tui-gateways.json.lock`, a private staged file renamed into place, and the
+//! saved Gateway made active. The clients own switching and removal.
 use std::{
     fs::{File, OpenOptions},
     io::Read,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
 
@@ -239,6 +242,189 @@ pub fn resolve(name: &str) -> Result<SavedGateway> {
         "saved Gateway {name:?} must name both the client certificate and key"
     );
     Ok(first)
+}
+
+/// One Gateway to save: a name, an origin, the operator token, and optional TLS files.
+pub struct NewGateway {
+    pub name: String,
+    pub url: String,
+    pub token: String,
+    pub server_ca_file: Option<PathBuf>,
+    pub client_cert_file: Option<PathBuf>,
+    pub client_key_file: Option<PathBuf>,
+}
+
+/// The origin form the terminal UI stores: lowercase scheme and host, no default port.
+fn gateway_origin(raw: &str) -> Result<String> {
+    let url = url::Url::parse(raw.trim()).context("enter a Gateway URL")?;
+    ensure!(
+        matches!(url.scheme(), "http" | "https")
+            && url.host_str().is_some_and(|host| !host.is_empty())
+            && url.username().is_empty()
+            && url.password().is_none()
+            && matches!(url.path(), "" | "/")
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && raw.len() <= 2048,
+        "enter a Gateway origin without credentials, path, query or fragment"
+    );
+    let host = url.host().context("enter a Gateway URL")?;
+    if url.scheme() == "http" {
+        let loopback = match host {
+            url::Host::Ipv4(address) => address.is_loopback(),
+            url::Host::Ipv6(address) => address.is_loopback(),
+            url::Host::Domain(_) => false,
+        };
+        ensure!(
+            loopback,
+            "remote Gateways require HTTPS; HTTP requires a loopback IP"
+        );
+    }
+    let host = match host {
+        url::Host::Ipv6(address) => format!("[{address}]"),
+        other => other.to_string().to_lowercase(),
+    };
+    Ok(match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
+    })
+}
+
+fn path_text(path: &Option<PathBuf>) -> Result<String> {
+    let Some(path) = path else {
+        return Ok(String::new());
+    };
+    let text = path.to_str().context("TLS file paths must be UTF-8")?;
+    ensure!(
+        text.len() <= 4096 && !text.chars().any(char::is_control),
+        "invalid TLS file path"
+    );
+    Ok(text.to_owned())
+}
+
+/// Saves `gateway` in the terminal UI's store and makes it active. A name already saved for
+/// this origin is replaced only with `replace`; a name saved for another origin is refused.
+pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
+    let name = gateway.name.as_str();
+    ensure!(
+        !name.trim().is_empty() && name.len() <= 64 && !name.chars().any(char::is_control),
+        "enter a Gateway name of 1 to 64 characters"
+    );
+    ensure!(valid_token(&gateway.token), "enter a valid operator token");
+    let url = gateway_origin(&gateway.url)?;
+    let [server_ca, client_cert, client_key] = [
+        &gateway.server_ca_file,
+        &gateway.client_cert_file,
+        &gateway.client_key_file,
+    ]
+    .map(path_text);
+    let (server_ca, client_cert, client_key) = (server_ca?, client_cert?, client_key?);
+    ensure!(
+        client_cert.is_empty() == client_key.is_empty(),
+        "provide both the client certificate and key"
+    );
+    ensure!(
+        url.starts_with("https:") || (server_ca.is_empty() && client_cert.is_empty()),
+        "TLS files require an HTTPS Gateway"
+    );
+    let path = tui_store()?;
+    let directory = path
+        .parent()
+        .context("saved Gateway store has no directory")?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)
+        .context("could not create the saved Gateway directory")?;
+    let metadata = std::fs::symlink_metadata(directory)?;
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    ensure!(
+        metadata.is_dir() && metadata.uid() == uid && metadata.mode() & TUI_DIRECTORY_MASK == 0,
+        "saved Gateway directory {} must be private and owned by this user",
+        directory.display()
+    );
+    let mut lock_path = path.clone().into_os_string();
+    lock_path.push(".lock");
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(&lock_path)
+        .context("could not safely lock saved Gateways")?;
+    check_private(&lock, Path::new(&lock_path))?;
+    lock.try_lock()
+        .map_err(|_| anyhow::anyhow!("saved Gateways are busy; try again"))?;
+
+    let mut profiles = match read_private(&path, TUI_DIRECTORY_MASK)? {
+        Some(bytes) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .context("saved Gateway file has an unsupported format")?;
+            ensure!(
+                value["version"] == 1 && value.is_object(),
+                "saved Gateway file has an unsupported format"
+            );
+            value
+        }
+        None => serde_json::json!({"version": 1, "gateways": []}),
+    };
+    let mut entry = serde_json::json!({"url": url, "token": gateway.token, "name": name});
+    for (field, value) in [
+        ("server_ca_file", server_ca),
+        ("client_cert_file", client_cert),
+        ("client_key_file", client_key),
+    ] {
+        if !value.is_empty() {
+            entry[field] = value.into();
+        }
+    }
+    let gateways = profiles["gateways"]
+        .as_array_mut()
+        .context("saved Gateway file has an unsupported format")?;
+    match gateways.iter_mut().find(|saved| saved["name"] == name) {
+        Some(saved) => {
+            let origin = saved["url"].as_str().map(gateway_origin);
+            ensure!(
+                matches!(origin, Some(Ok(ref origin)) if origin == &url),
+                "this name belongs to another Gateway URL"
+            );
+            ensure!(
+                replace,
+                "Gateway {name:?} is already saved; pass --replace to replace it"
+            );
+            *saved = entry;
+        }
+        None => gateways.push(entry),
+    }
+    profiles["active"] = name.into();
+    let mut data = serde_json::to_vec(&profiles)?;
+    data.push(b'\n');
+    ensure!(
+        data.len() <= 1 << 20,
+        "saved Gateways exceed the storage limit"
+    );
+    let staged = directory.join(format!(".tui-gateways-{}", uuid::Uuid::new_v4().simple()));
+    let written = (|| -> std::io::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&staged)?;
+        std::io::Write::write_all(&mut file, &data)?;
+        file.sync_all()?;
+        std::fs::rename(&staged, &path)?;
+        File::open(directory)?.sync_all()
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    written.context("could not save Gateway connections")?;
+    drop(lock);
+    Ok(path)
 }
 
 #[cfg(test)]

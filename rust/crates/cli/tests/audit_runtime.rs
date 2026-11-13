@@ -1,5 +1,6 @@
-//! Audit entries through separate Control Plane and Gateway processes: an entry commits with the
-//! change it records, and Worker Hosts joining with an Auth Key are recorded under that key.
+//! Operator access through separate Control Plane and Gateway processes: an audit entry commits
+//! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
+//! and `supertag connect-gateway` saves a proven operator token for `--gateway NAME`.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -153,6 +154,8 @@ database_tests! {
     audit_entry_commits_with_the_change_it_records;
     #[tokio::test]
     worker_host_joins_are_recorded_under_their_auth_key;
+    #[tokio::test]
+    connect_gateway_saves_a_proven_token_for_later_commands;
 }
 
 /// The Control Plane dies after committing an audited change and before answering. The change
@@ -265,6 +268,83 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         entry(&actor, "worker-host.join", "WorkerHost", "failed", "")[..4]
     );
     assert_eq!(joins[1][4], "PERMISSION_DENIED");
+    services.stop().await?;
+    Ok(())
+}
+
+/// `supertag connect-gateway` checks the token first, saves the Gateway owner-only in the
+/// terminal UI's store as the active one, and later commands use it by name.
+async fn connect_gateway_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
+    let services = Services::start(&database, None).await?;
+    let home = tempfile::tempdir()?;
+    let connect = |token: &str, name: &str, url: &str, replace: bool| {
+        let mut command = binary(&["connect-gateway", url, "--name", name]);
+        if replace {
+            command.arg("--replace");
+        }
+        command
+            .env("HOME", home.path())
+            .env("SUPERTAG_OPERATOR_TOKEN", token);
+        async move {
+            let output = timeout(WAIT, command.output()).await??;
+            anyhow::Ok((
+                output.status.success(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ))
+        }
+    };
+    let store = if cfg!(target_os = "macos") {
+        home.path()
+            .join("Library/Application Support/supertag/tui-gateways.json")
+    } else {
+        home.path().join(".config/supertag/tui-gateways.json")
+    };
+
+    let (saved, stderr) = connect("not-the-token", "prod", &services.public, false).await?;
+    ensure!(!saved, "a refused token was saved");
+    ensure!(stderr.contains("refused the operator token"), "{stderr}");
+    ensure!(!store.exists(), "nothing is saved for a refused token");
+
+    let token = services.operator_token.clone();
+    let (saved, stderr) = connect(&token, "prod", &services.public, false).await?;
+    ensure!(saved, "{stderr}");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&store)?.permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(store.parent().context("store directory")?)?
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["version"], 1);
+    assert_eq!(profiles["active"], "prod");
+    assert_eq!(profiles["gateways"][0]["name"], "prod");
+    assert_eq!(profiles["gateways"][0]["url"], services.public.as_str());
+    assert_eq!(profiles["gateways"][0]["token"], token.as_str());
+
+    // A later command names the saved Gateway and needs no token in its environment.
+    let mut listed = binary(&["list-tags", "--gateway", "prod"]);
+    listed.env("HOME", home.path());
+    let output = timeout(WAIT, listed.output()).await??;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let (saved, stderr) = connect(&token, "prod", &services.public, false).await?;
+    ensure!(!saved && stderr.contains("--replace"), "{stderr}");
+    let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
+    ensure!(saved, "{stderr}");
+    let (saved, stderr) = connect(&token, "prod", "http://127.0.0.2:1", true).await?;
+    ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
     services.stop().await?;
     Ok(())
 }

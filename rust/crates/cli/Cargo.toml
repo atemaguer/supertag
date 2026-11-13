@@ -39,6 +39,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
+url = "2"
 uuid.workspace = true
 
 [dev-dependencies]
