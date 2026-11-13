@@ -1,5 +1,5 @@
 import type { FormEvent, RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,93 +10,46 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { nativeGateway, type Tag } from "../gateway";
-import { describe } from "../lib/polling";
+import type { GatewayProfile } from "../gateway";
 
 interface ConnectionDialogProps {
-  open: boolean;
-  address: string;
-  connected: boolean;
+  profile?: GatewayProfile;
+  busy: boolean;
+  error: string;
   opener: RefObject<HTMLButtonElement | null>;
   onClose(): void;
-  onReset(): void;
-  onConnect(address: string, tags: Tag[], connectionId: string): void;
+  onSave(address: string, name: string, token: string): void;
+  onForget(origin: string): void;
 }
 
 export function ConnectionDialog({
-  open,
-  address,
-  connected,
+  profile,
+  busy,
+  error,
   opener,
   onClose,
-  onReset,
-  onConnect,
+  onSave,
+  onForget,
 }: ConnectionDialogProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const pending = useRef(false);
   const token = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (open && error && !busy) token.current?.focus();
-  }, [busy, error, open]);
-
-  function close() {
-    if (pending.current) return;
-    setError("");
-    onClose();
-  }
-
-  async function connect(event: FormEvent<HTMLFormElement>) {
+  function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const field = token.current;
-    const url = event.currentTarget.elements.namedItem("gateway");
-    if (pending.current || !field || !(url instanceof HTMLInputElement)) return;
-    const destination = url.value.trim();
-    pending.current = true;
-    setBusy(true);
-    setError("");
-    onReset();
-    try {
-      const connecting = nativeGateway.connect(destination, field.value.trim());
-      field.value = "";
-      const connectionId = await connecting;
-      try {
-        onConnect(destination, await nativeGateway.tags(), connectionId);
-      } catch (error) {
-        await nativeGateway.disconnect();
-        throw error;
-      }
-    } catch (error) {
-      setError(describe(error));
-    } finally {
-      pending.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function disconnect() {
-    if (pending.current) return;
-    pending.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      await nativeGateway.disconnect();
-      onReset();
-      onClose();
-    } catch (error) {
-      setError(describe(error));
-    } finally {
-      pending.current = false;
-      setBusy(false);
-    }
+    const data = new FormData(event.currentTarget);
+    const address = profile?.origin ?? data.get("gateway");
+    const name = data.get("name");
+    if (busy || !field || typeof address !== "string" || typeof name !== "string") return;
+    const secret = field.value.trim();
+    field.value = "";
+    onSave(address.trim(), name, secret);
   }
 
   return (
     <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) close();
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
       }}
     >
       <DialogContent
@@ -110,29 +63,45 @@ export function ConnectionDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Gateway connection</DialogTitle>
-          <DialogDescription>Connect to the Gateway for your SuperTag workspace.</DialogDescription>
+          <DialogTitle>{profile ? "Edit Gateway" : "Add Gateway"}</DialogTitle>
+          <DialogDescription>
+            {profile
+              ? "Update the name or operator token for this connection."
+              : "Use the Gateway URL and operator token for your SuperTag workspace."}
+          </DialogDescription>
         </DialogHeader>
-        <form onSubmit={(event) => void connect(event)}>
+        <form onSubmit={save}>
+          <label htmlFor="gateway-name">Name (optional)</label>
+          <Input
+            id="gateway-name"
+            name="name"
+            defaultValue={profile?.name}
+            placeholder="Engineering"
+            maxLength={80}
+            disabled={busy}
+          />
           <label htmlFor="gateway-url">Gateway URL</label>
           <Input
             id="gateway-url"
             name="gateway"
             type="url"
-            defaultValue={address}
+            defaultValue={profile?.origin}
             placeholder="http://127.0.0.1:7001"
             autoComplete="off"
             spellCheck={false}
             required
+            readOnly={Boolean(profile)}
             disabled={busy}
           />
-          <label htmlFor="gateway-token">Operator token</label>
+          <label htmlFor="gateway-token">
+            {profile ? "New operator token (optional)" : "Operator token"}
+          </label>
           <Input
             id="gateway-token"
             ref={token}
             type="password"
             autoComplete="off"
-            required
+            required={!profile}
             disabled={busy}
           />
           {error && (
@@ -141,19 +110,19 @@ export function ConnectionDialog({
             </p>
           )}
           <DialogFooter className="dialog-actions">
-            {connected && (
+            {profile && (
               <Button
                 type="button"
                 variant="outline"
                 className="secondary"
-                onClick={() => void disconnect()}
                 disabled={busy}
+                onClick={() => onForget(profile.origin)}
               >
-                Disconnect
+                Forget Gateway
               </Button>
             )}
             <Button type="submit" className="primary" disabled={busy}>
-              {busy ? "Connecting…" : "Connect"}
+              {busy ? "Working…" : profile ? "Save changes" : "Connect"}
             </Button>
           </DialogFooter>
         </form>

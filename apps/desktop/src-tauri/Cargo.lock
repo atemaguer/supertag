@@ -4667,6 +4667,7 @@ dependencies = [
 name = "supertag-desktop"
 version = "0.2.0-alpha.9"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -14,7 +14,7 @@ use crate::{Connection, network, operator_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn default_connection() -> Result<Connection> {
+fn default_connection() -> Result<Connection> {
     ensure!(
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
         "run supertag in a terminal or select a command with --help"
@@ -25,13 +25,12 @@ pub fn default_connection() -> Result<Connection> {
             state_directory: None,
         });
     }
-    let directory = std::env::var_os("SUPERTAG_STATE_DIR")
+    let state_directory = std::env::var_os("SUPERTAG_STATE_DIR")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".supertag")))
-        .context("set SUPERTAG_STATE_DIR to the running local service directory")?;
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".supertag")));
     Ok(Connection {
         gateway: None,
-        state_directory: Some(directory),
+        state_directory,
     })
 }
 
@@ -40,15 +39,20 @@ pub async fn launch(
     binary: Option<PathBuf>,
     workspace: Option<String>,
 ) -> Result<()> {
-    let (url, token) = operator_target(connection)?;
-    let endpoint = network::endpoint(url.clone(), false).await?;
-    let tls = endpoint.uri().scheme_str() == Some("https");
-    let certificate = |name| {
-        if tls {
-            certificate_path(name)
-        } else {
-            Ok(None)
-        }
+    let implicit = connection.gateway.is_none() && connection.state_directory.is_none();
+    let connection = if implicit {
+        default_connection()?
+    } else {
+        connection
+    };
+    let allow_saved_only = implicit
+        && connection.gateway.is_none()
+        && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
+        && workspace.is_none();
+    let target = match operator_target(connection) {
+        Ok(target) => Some(target),
+        Err(_) if allow_saved_only => None,
+        Err(error) => return Err(error),
     };
     let binary = match binary.or_else(|| std::env::var_os("SUPERTAG_TUI_BINARY").map(PathBuf::from))
     {
@@ -60,6 +64,23 @@ pub async fn launch(
     };
     check_version(&binary).await?;
 
+    let Some((url, token)) = target else {
+        let status = terminal_command(&binary)
+            .status()
+            .await
+            .context("run supertag-tui")?;
+        ensure!(status.success(), "supertag-tui exited with {status}");
+        return Ok(());
+    };
+    let endpoint = network::endpoint(url.clone(), false).await?;
+    let tls = endpoint.uri().scheme_str() == Some("https");
+    let certificate = |name| {
+        if tls {
+            certificate_path(name)
+        } else {
+            Ok(None)
+        }
+    };
     let payload = serde_json::to_vec(&json!({
         "protocol": "runtime.v2",
         "current": 0,

@@ -139,14 +139,17 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert!(json["latestTask"].get("prompt").is_none());
 }
 
-#[tokio::test]
-async fn native_client_uses_authenticated_gateway_and_durable_message_operations() {
-    let directory = tempfile::tempdir().unwrap();
+async fn gateway_fixture(
+    database: &std::path::Path,
+    tag_id: &str,
+    token: &str,
+) -> (
+    String,
+    tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
+    tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
+) {
     let cp = ControlPlane::open(
-        &format!(
-            "sqlite://{}?mode=rwc",
-            directory.path().join("state.sqlite").display()
-        ),
+        &format!("sqlite://{}?mode=rwc", database.display()),
         "private-test-token".into(),
     )
     .await
@@ -167,7 +170,7 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
     let gateway = Gateway::new(
         channel,
         "private-test-token".into(),
-        "operator-test-token".into(),
+        token.into(),
         "operator:desktop-test".into(),
     )
     .unwrap();
@@ -184,13 +187,13 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
         .put_tag(
             authenticated_request(
                 v2::PutTagRequest {
-                    tag_id: "engineer".into(),
+                    tag_id: tag_id.into(),
                     instructions: "Help with engineering".into(),
                     allowed_actions: vec!["files:read".into()],
                     harness_kind: v2::HarnessKind::Codex as i32,
                     ..Default::default()
                 },
-                "operator-test-token",
+                token,
                 None,
             )
             .unwrap(),
@@ -198,26 +201,51 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
         .await
         .unwrap();
 
+    (address, gateway_task, cp_task)
+}
+
+#[tokio::test]
+async fn native_client_uses_authenticated_gateway_and_durable_message_operations() {
+    let directory = tempfile::tempdir().unwrap();
+    let (address, gateway_task, cp_task) = gateway_fixture(
+        &directory.path().join("state.sqlite"),
+        "engineer",
+        "operator-test-token",
+    )
+    .await;
     let client = GatewayState::default();
-    assert!(client.tags().await.is_err());
+    let profiles = directory.path().join("gateways.json");
+    assert!(client.tags("0").await.is_err());
     assert_eq!(
         client
-            .connect(address.clone(), "wrong-token".into())
+            .save_gateway(
+                &profiles,
+                address.clone(),
+                "Engineering".into(),
+                "wrong-token".into()
+            )
             .await
             .unwrap_err(),
         "The Gateway rejected the operator token."
     );
-    assert!(client.tags().await.is_err());
-    client
-        .connect(address.clone(), "operator-test-token".into())
+    assert!(!profiles.exists());
+    let first_connection = client
+        .save_gateway(
+            &profiles,
+            address.clone(),
+            "Engineering".into(),
+            "operator-test-token".into(),
+        )
         .await
         .unwrap();
-    let tags = client.tags().await.unwrap();
+    let id = first_connection.connection_id();
+    let tags = client.tags(id).await.unwrap();
     assert_eq!(tags.len(), 1);
     assert_eq!(tags[0].tag_id, "engineer");
     assert_eq!(tags[0].harness_kind, "codex");
     let first = client
         .send(
+            id,
             "engineer".into(),
             "planning".into(),
             "Explain the change".into(),
@@ -227,6 +255,7 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
         .unwrap();
     let replay = client
         .send(
+            id,
             "engineer".into(),
             "planning".into(),
             "Explain the change".into(),
@@ -239,6 +268,7 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
     assert!(
         client
             .send(
+                id,
                 "engineer".into(),
                 "planning".into(),
                 "Different content".into(),
@@ -247,21 +277,21 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
             .await
             .is_err()
     );
-    let conversations = client.conversations("engineer".into()).await.unwrap();
+    let conversations = client.conversations(id, "engineer".into()).await.unwrap();
     assert_eq!(conversations.len(), 1);
     assert_eq!(conversations[0].name, "planning");
     let latest_task = conversations[0].latest_task.as_ref().unwrap();
     assert_eq!(latest_task.task_id, first.task.task_id);
     assert_eq!(latest_task.prompt.as_deref(), Some("Explain the change"));
     let page = client
-        .messages("engineer".into(), "planning".into(), None)
+        .messages(id, "engineer".into(), "planning".into(), None)
         .await
         .unwrap();
     assert_eq!(page.messages.len(), 1);
     assert!(page.next_cursor.is_empty());
     assert_eq!(
         client
-            .message("engineer".into(), first.task.task_id.clone())
+            .message(id, "engineer".into(), first.task.task_id.clone())
             .await
             .unwrap()
             .task
@@ -271,25 +301,152 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
     );
     assert!(
         client
-            .events("engineer".into(), first.task.task_id, 0)
+            .events(id, "engineer".into(), first.task.task_id, 0)
             .await
             .unwrap()
             .is_empty()
     );
-    let previous = client.session().await.unwrap();
+    let previous = client.session(id).await.unwrap();
     client.disconnect().await;
     assert!(client.current(&previous, ()).await.is_err());
-    assert!(client.tags().await.is_err());
-    client
-        .connect(address.clone(), "operator-test-token".into())
+    assert!(client.tags(id).await.is_err());
+    let replacement = client
+        .select_gateway(&profiles, address.clone())
         .await
         .unwrap();
+    let replacement_id = replacement.connection_id();
+    assert_ne!(id, replacement_id);
     assert!(client.current(&previous, ()).await.is_err());
-    // A failed replacement cannot leave the old privileged session connected.
-    assert!(client.connect(address, "wrong-token".into()).await.is_err());
-    assert!(client.tags().await.is_err());
+    assert!(client.tags(id).await.is_err());
+    assert!(
+        client
+            .save_gateway(
+                &profiles,
+                address,
+                "Engineering".into(),
+                "wrong-token".into()
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        client.tags(replacement_id).await.unwrap()[0].tag_id,
+        "engineer"
+    );
     gateway_task.abort();
     cp_task.abort();
+}
+
+#[tokio::test]
+async fn saved_gateways_switch_rosters_and_scope_late_ipc_requests() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("gateways.json");
+    let (first, first_gateway, first_plane) = gateway_fixture(
+        &directory.path().join("first.sqlite"),
+        "first-tag",
+        "first-operator",
+    )
+    .await;
+    let (second, second_gateway, second_plane) = gateway_fixture(
+        &directory.path().join("second.sqlite"),
+        "second-tag",
+        "second-operator",
+    )
+    .await;
+
+    let state = GatewayState::default();
+    let a = state
+        .save_gateway(
+            &store,
+            format!("{first}/"),
+            "First".into(),
+            "first-operator".into(),
+        )
+        .await
+        .unwrap();
+    let b = state
+        .save_gateway(
+            &store,
+            second.clone(),
+            "Second".into(),
+            "second-operator".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        state.tags(b.connection_id()).await.unwrap()[0].tag_id,
+        "second-tag"
+    );
+    assert_eq!(
+        state
+            .send(
+                a.connection_id(),
+                "second-tag".into(),
+                "default".into(),
+                "Old workspace".into(),
+                "stale".into()
+            )
+            .await
+            .unwrap_err(),
+        "The connection changed. Refresh this view."
+    );
+    assert!(
+        state
+            .conversations(b.connection_id(), "second-tag".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let snapshot = serde_json::to_value(state.saved_gateways(&store).await.unwrap()).unwrap();
+    assert_eq!(snapshot["active"], second);
+    assert_eq!(
+        snapshot["profiles"][0],
+        serde_json::json!({"origin": first, "name": "First"})
+    );
+    assert_eq!(
+        snapshot["profiles"][1],
+        serde_json::json!({"origin": second, "name": "Second"})
+    );
+    let resumed = GatewayState::default();
+    let a = resumed.select_gateway(&store, first.clone()).await.unwrap();
+    assert_eq!(
+        resumed.tags(a.connection_id()).await.unwrap()[0].tag_id,
+        "first-tag"
+    );
+    let edited = resumed
+        .save_gateway(&store, first.clone(), "Renamed".into(), String::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed.tags(edited.connection_id()).await.unwrap()[0].tag_id,
+        "first-tag"
+    );
+    let forgotten = resumed
+        .clear_gateway(&store, Some(second.clone()))
+        .await
+        .unwrap();
+    assert_eq!(serde_json::to_value(forgotten).unwrap()["active"], first);
+    assert!(resumed.select_gateway(&store, second).await.is_err());
+    resumed.clear_gateway(&store, None).await.unwrap();
+    assert!(resumed.tags(edited.connection_id()).await.is_err());
+    assert!(
+        serde_json::to_value(resumed.saved_gateways(&store).await.unwrap()).unwrap()["active"]
+            .is_null()
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(&store, &alias).unwrap();
+        assert!(resumed.saved_gateways(&alias).await.is_err());
+    }
+    for server in [first_gateway, first_plane, second_gateway, second_plane] {
+        server.abort();
+    }
 }
 
 #[tokio::test]
@@ -317,6 +474,16 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
 
         type DownloadFileStream =
             tokio_stream::Iter<std::vec::IntoIter<std::result::Result<ArtifactDownload, Status>>>;
+
+        type DownloadAcquiredFileStream = Self::DownloadFileStream;
+
+        async fn download_acquired_file(
+            &self,
+            _: Request<v2::GetAcquiredArtifactFileRequest>,
+        ) -> std::result::Result<tonic::Response<Self::DownloadAcquiredFileStream>, Status>
+        {
+            Err(Status::unimplemented("unused"))
+        }
 
         async fn download_file(
             &self,
@@ -375,13 +542,13 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
 
     assert!(
         !client
-            .save_artifact("valid".into(), PATH.into(), |_| async { Ok(None) })
+            .save_artifact("0", "valid".into(), PATH.into(), |_| async { Ok(None) })
             .await
             .unwrap()
     );
     assert!(
         client
-            .save_artifact("corrupted".into(), PATH.into(), |_| async {
+            .save_artifact("0", "corrupted".into(), PATH.into(), |_| async {
                 Ok(Some(destination.clone()))
             })
             .await
@@ -392,7 +559,7 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     let first_destination = destination.clone();
     assert!(
         client
-            .save_artifact("valid".into(), PATH.into(), |name| async move {
+            .save_artifact("0", "valid".into(), PATH.into(), |name| async move {
                 assert_eq!(name, "report.txt");
                 Ok(Some(first_destination))
             })
@@ -404,7 +571,7 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     std::fs::write(&destination, b"operator file").unwrap();
     assert!(
         client
-            .save_artifact("valid".into(), PATH.into(), |_| async {
+            .save_artifact("0", "valid".into(), PATH.into(), |_| async {
                 Ok(Some(destination.clone()))
             })
             .await
@@ -416,7 +583,7 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     let obsolete = directory.path().join("obsolete.txt");
     assert!(
         client
-            .save_artifact("valid".into(), PATH.into(), |_| async {
+            .save_artifact("0", "valid".into(), PATH.into(), |_| async {
                 client.disconnect().await;
                 Ok(Some(obsolete.clone()))
             })

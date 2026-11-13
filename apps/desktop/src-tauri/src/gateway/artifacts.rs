@@ -21,6 +21,7 @@ const SAVE_ERROR: &str = "Could not write the selected file.";
 impl GatewayState {
     pub(crate) async fn save_artifact<F>(
         &self,
+        connection_id: &str,
         artifact_id: String,
         path: String,
         choose: impl FnOnce(String) -> F,
@@ -29,7 +30,7 @@ impl GatewayState {
         F: Future<Output = Result<Option<PathBuf>>>,
     {
         validate_artifact_path(&path).map_err(rpc_error)?;
-        let session = self.session().await?;
+        let session = self.session(connection_id).await?;
         let basename = path.rsplit('/').next().expect("validated artifact path");
         let Some(destination) = choose(basename.to_owned()).await? else {
             return Ok(false);

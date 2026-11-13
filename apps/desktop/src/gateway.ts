@@ -61,35 +61,50 @@ export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
   | { kind: "conversation"; tagId: string; conversation: string };
 
-interface NativeGateway extends Gateway {
-  connect(gateway: string, token: string): Promise<string>;
-  disconnect(): Promise<void>;
-  watch(
-    connectionId: string,
-    watchEpoch: number,
-    onUpdate: (update: WatchUpdate) => void,
-  ): Promise<() => Promise<void>>;
+export interface GatewayProfile {
+  name: string;
+  origin: string;
 }
 
-export const nativeGateway: NativeGateway = {
-  connect: (gateway, token) => invoke("connect_gateway", { gateway, token }),
-  disconnect: () => invoke("disconnect_gateway"),
-  tags: () => invoke("list_tags"),
-  conversations: (tagId) => invoke("list_conversations", { tagId }),
-  messages: (tagId, conversation, cursor) =>
-    invoke("list_messages", { tagId, conversation, cursor }),
-  send: (tagId, conversation, text, operationId) =>
-    invoke("send_message", { tagId, conversation, text, operationId }),
-  events: (tagId, taskId, afterSequence) =>
-    invoke("list_message_events", { tagId, taskId, afterSequence }),
-  saveArtifact: (artifactId, path) => invoke("save_result_artifact", { artifactId, path }),
-  async watch(connectionId, watchEpoch, receive) {
+export interface GatewayList {
+  profiles: GatewayProfile[];
+  active?: string | null;
+}
+
+export interface GatewayActivation {
+  gateways: GatewayList;
+  connectionId: string;
+  tags: Tag[];
+}
+
+export function gatewaySession(connectionId: string): Gateway {
+  return {
+    tags: () => invoke("list_tags", { connectionId }),
+    conversations: (tagId) => invoke("list_conversations", { connectionId, tagId }),
+    messages: (tagId, conversation, cursor) =>
+      invoke("list_messages", { connectionId, tagId, conversation, cursor }),
+    send: (tagId, conversation, text, operationId) =>
+      invoke("send_message", { connectionId, tagId, conversation, text, operationId }),
+    events: (tagId, taskId, afterSequence) =>
+      invoke("list_message_events", { connectionId, tagId, taskId, afterSequence }),
+    saveArtifact: (artifactId, path) =>
+      invoke("save_result_artifact", { connectionId, artifactId, path }),
+  };
+}
+
+export const nativeGateway = {
+  list: () => invoke<GatewayList>("list_gateways"),
+  save: (gateway: string, name: string, token: string) =>
+    invoke<GatewayActivation>("save_gateway", { gateway, name, token }),
+  select: (origin: string) => invoke<GatewayActivation>("select_gateway", { origin }),
+  clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
+  async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);
     const watchId = await invoke<string>("start_gateway_watch", {
       connectionId,
       watchEpoch,
       onUpdate,
     });
-    return () => invoke("stop_gateway_watch", { watchId });
+    return () => invoke<void>("stop_gateway_watch", { watchId });
   },
 };

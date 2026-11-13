@@ -2,8 +2,10 @@
 identifier = "gateway-client"
 description = "Connect to a Gateway and read or send personal conversation messages and save Task result files."
 commands.allow = [
-  "connect_gateway",
-  "disconnect_gateway",
+  "list_gateways",
+  "save_gateway",
+  "select_gateway",
+  "clear_gateway",
   "start_gateway_watch",
   "stop_gateway_watch",
   "list_tags",

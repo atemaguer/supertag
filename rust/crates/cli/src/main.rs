@@ -249,10 +249,12 @@ enum Command {
         #[arg(long, requires = "microsoft_teams_listen")]
         microsoft_teams_state_directory: Option<PathBuf>,
     },
-    /// Open the Go terminal UI for a running Gateway.
+    /// Open the terminal UI for a saved or explicitly configured Gateway.
     Tui {
-        #[command(flatten)]
-        connection: Connection,
+        #[arg(long, conflicts_with = "state_directory")]
+        gateway: Option<String>,
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
         #[arg(long)]
         binary: Option<PathBuf>,
         #[arg(long)]
@@ -573,7 +575,8 @@ fn main() -> Result<()> {
     let command = match Cli::parse().command {
         Some(command) => command,
         None => Command::Tui {
-            connection: tui::default_connection()?,
+            gateway: None,
+            state_directory: None,
             binary: None,
             workspace: None,
         },
@@ -756,11 +759,20 @@ async fn run(command: Command) -> Result<()> {
             .await?
         }
         Command::Tui {
-            connection,
+            gateway,
+            state_directory,
             binary,
             workspace,
         } => {
-            tui::launch(connection, binary, workspace).await?;
+            tui::launch(
+                Connection {
+                    gateway,
+                    state_directory,
+                },
+                binary,
+                workspace,
+            )
+            .await?;
         }
         Command::WorkerHost {
             gateway,

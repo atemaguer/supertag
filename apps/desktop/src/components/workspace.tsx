@@ -1,4 +1,4 @@
-import { ChevronRight, Menu, MessageSquare, Plus } from "lucide-react";
+import { Menu, MessageSquare, Plus } from "lucide-react";
 import { type MouseEvent, type ReactNode, useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,12 +36,11 @@ interface ShellProps {
   conversation?: string;
   names?: string[];
   connected: boolean;
-  preview?: boolean;
-  busy: boolean;
+  switching?: boolean;
+  selector: ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
   onSelectConversation?(name: string): void;
-  onSettings: SettingsAction;
   children: ReactNode;
 }
 
@@ -51,21 +50,15 @@ export function WorkspaceShell({
   conversation,
   names,
   connected,
-  preview,
-  busy,
+  switching,
+  selector,
   error,
   onSelectTag,
   onSelectConversation,
-  onSettings,
   children,
 }: ShellProps) {
   const [railOpen, setRailOpen] = useState(false);
   const provider = tag && harness(tag.harnessKind);
-  const connectionLabel = preview
-    ? "Preview workspace"
-    : connected
-      ? "Gateway connected"
-      : "Gateway disconnected";
   const threadNames =
     conversation && !names?.includes(conversation)
       ? [conversation, ...(names ?? [])]
@@ -136,20 +129,9 @@ export function WorkspaceShell({
               </nav>
             )}
           </div>
-          <Button
-            variant="outline"
-            className="connection"
-            data-connected={connected}
-            title={preview ? "Exit preview" : "Gateway settings"}
-            onClick={onSettings}
-            disabled={busy}
-          >
-            <span className="connection-dot" aria-hidden />
-            <span>{connectionLabel}</span>
-            <ChevronRight className="connection-arrow" size={15} aria-hidden />
-          </Button>
+          {selector}
         </aside>
-        <main className="main" aria-label="Conversation">
+        <main className="main" aria-label="Conversation" aria-busy={switching}>
           <header className="topbar">
             <Button
               variant="ghost"
@@ -185,7 +167,9 @@ export function WorkspaceShell({
               {error}
             </div>
           )}
-          {children}
+          <div className="workspace-body" inert={switching}>
+            {children}
+          </div>
         </main>
       </div>
     </div>
@@ -246,15 +230,19 @@ function NewConversation({ onChoose }: { onChoose(name: string): void }) {
 
 export function EmptyWorkspace({
   connected,
+  switching,
   onSettings,
 }: {
-  connected: boolean;
-  onSettings: SettingsAction;
+  connected?: boolean;
+  switching?: boolean;
+  onSettings?: SettingsAction;
 }) {
   return (
     <div className="work-area">
       <div className="empty">
-        {connected ? (
+        {switching ? (
+          <p role="status">Connecting to Gateway…</p>
+        ) : connected ? (
           <>
             <h2>No Tags available</h2>
             <p>Configure a Tag in this workspace to start a conversation.</p>
@@ -265,7 +253,7 @@ export function EmptyWorkspace({
             <h2>Your Tags, in one place</h2>
             <p>Connect to a SuperTag Gateway to work with your persistent coding agents.</p>
             <Button className="primary" onClick={onSettings}>
-              Connect Gateway
+              Add Gateway
             </Button>
           </>
         )}
@@ -278,9 +266,9 @@ interface WorkspaceProps {
   connectionId?: string;
   gateway: Gateway;
   initialTags: Tag[];
-  preview: boolean;
-  busy: boolean;
-  onSettings: SettingsAction;
+  selector: ReactNode;
+  switching: boolean;
+  connectionError: string;
   onWriteChange(delta: 1 | -1): void;
 }
 
@@ -288,9 +276,9 @@ export function Workspace({
   connectionId,
   gateway,
   initialTags,
-  preview,
-  busy,
-  onSettings,
+  selector,
+  switching,
+  connectionError,
   onWriteChange,
 }: WorkspaceProps) {
   const [tags, setTags] = useState(initialTags);
@@ -319,12 +307,11 @@ export function Workspace({
 
   const shell = {
     tags,
-    preview,
-    busy,
-    onSettings,
+    selector,
+    switching,
     connected: true,
     onSelectTag: setSelectedTag,
-    error,
+    error: connectionError || error,
   };
   return tag ? (
     <TagWorkspace
@@ -339,7 +326,7 @@ export function Workspace({
     />
   ) : (
     <WorkspaceShell {...shell}>
-      <EmptyWorkspace connected onSettings={onSettings} />
+      <EmptyWorkspace connected />
     </WorkspaceShell>
   );
 }

@@ -1,22 +1,58 @@
 mod gateway;
 
-use gateway::{Conversation, Event, GatewayState, Message, Messages, Tag, WatchUpdate};
+use std::path::PathBuf;
+
+use gateway::{
+    Conversation, Event, GatewayActivation, GatewayList, GatewayState, Message, Messages, Tag,
+    WatchUpdate,
+};
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 use tauri_plugin_dialog::DialogExt;
 
-#[tauri::command]
-async fn connect_gateway(
-    state: State<'_, GatewayState>,
-    gateway: String,
-    token: String,
-) -> Result<String, String> {
-    state.connect(gateway, token).await
+fn gateway_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|directory| directory.join("gateways.json"))
+        .map_err(|_| "Could not locate your saved Gateway connections.".into())
 }
 
 #[tauri::command]
-async fn disconnect_gateway(state: State<'_, GatewayState>) -> Result<(), String> {
-    state.disconnect().await;
-    Ok(())
+async fn list_gateways<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, GatewayState>,
+) -> Result<GatewayList, String> {
+    state.saved_gateways(&gateway_store(&app)?).await
+}
+
+#[tauri::command]
+async fn save_gateway<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, GatewayState>,
+    gateway: String,
+    name: String,
+    token: String,
+) -> Result<GatewayActivation, String> {
+    state
+        .save_gateway(&gateway_store(&app)?, gateway, name, token)
+        .await
+}
+
+#[tauri::command]
+async fn select_gateway<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, GatewayState>,
+    origin: String,
+) -> Result<GatewayActivation, String> {
+    state.select_gateway(&gateway_store(&app)?, origin).await
+}
+
+#[tauri::command]
+async fn clear_gateway<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, GatewayState>,
+    forget: Option<String>,
+) -> Result<GatewayList, String> {
+    state.clear_gateway(&gateway_store(&app)?, forget).await
 }
 
 #[tauri::command]
@@ -41,83 +77,103 @@ async fn stop_gateway_watch(
 }
 
 #[tauri::command]
-async fn list_tags(state: State<'_, GatewayState>) -> Result<Vec<Tag>, String> {
-    state.tags().await
+async fn list_tags(
+    state: State<'_, GatewayState>,
+    connection_id: String,
+) -> Result<Vec<Tag>, String> {
+    state.tags(&connection_id).await
 }
 
 #[tauri::command]
 async fn list_conversations(
     state: State<'_, GatewayState>,
+    connection_id: String,
     tag_id: String,
 ) -> Result<Vec<Conversation>, String> {
-    state.conversations(tag_id).await
+    state.conversations(&connection_id, tag_id).await
 }
 
 #[tauri::command]
 async fn list_messages(
     state: State<'_, GatewayState>,
+    connection_id: String,
     tag_id: String,
     conversation: String,
     cursor: Option<String>,
 ) -> Result<Messages, String> {
-    state.messages(tag_id, conversation, cursor).await
+    state
+        .messages(&connection_id, tag_id, conversation, cursor)
+        .await
 }
 
 #[tauri::command]
 async fn send_message(
     state: State<'_, GatewayState>,
+    connection_id: String,
     tag_id: String,
     conversation: String,
     text: String,
     operation_id: String,
 ) -> Result<Message, String> {
-    state.send(tag_id, conversation, text, operation_id).await
+    state
+        .send(&connection_id, tag_id, conversation, text, operation_id)
+        .await
 }
 
 #[tauri::command]
 async fn get_message(
     state: State<'_, GatewayState>,
+    connection_id: String,
     tag_id: String,
     task_id: String,
 ) -> Result<Message, String> {
-    state.message(tag_id, task_id).await
+    state.message(&connection_id, tag_id, task_id).await
 }
 
 #[tauri::command]
 async fn list_message_events(
     state: State<'_, GatewayState>,
+    connection_id: String,
     tag_id: String,
     task_id: String,
     after_sequence: u64,
 ) -> Result<Vec<Event>, String> {
-    state.events(tag_id, task_id, after_sequence).await
+    state
+        .events(&connection_id, tag_id, task_id, after_sequence)
+        .await
 }
 
 #[tauri::command]
 async fn save_result_artifact<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, GatewayState>,
+    connection_id: String,
     artifact_id: String,
     path: String,
 ) -> Result<bool, String> {
     state
-        .save_artifact(artifact_id, path, move |filename| async move {
-            let (send, receive) = tokio::sync::oneshot::channel();
-            app.dialog()
-                .file()
-                .set_file_name(filename)
-                .save_file(move |file| {
-                    let _ = send.send(file);
-                });
-            receive
-                .await
-                .map_err(|_| "Could not open the save dialog.".to_owned())?
-                .map(|file| {
-                    file.into_path()
-                        .map_err(|_| "Choose a local file location.".to_owned())
-                })
-                .transpose()
-        })
+        .save_artifact(
+            &connection_id,
+            artifact_id,
+            path,
+            move |filename| async move {
+                let (send, receive) = tokio::sync::oneshot::channel();
+                app.dialog()
+                    .file()
+                    .set_file_name(filename)
+                    .save_file(move |file| {
+                        let _ = send.send(file);
+                    });
+                receive
+                    .await
+                    .map_err(|_| "Could not open the save dialog.".to_owned())?
+                    .map(|file| {
+                        file.into_path()
+                            .map_err(|_| "Choose a local file location.".to_owned())
+                    })
+                    .transpose()
+            },
+        )
         .await
 }
 
@@ -154,8 +210,10 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            connect_gateway,
-            disconnect_gateway,
+            list_gateways,
+            save_gateway,
+            select_gateway,
+            clear_gateway,
             start_gateway_watch,
             stop_gateway_watch,
             list_tags,
@@ -200,7 +258,7 @@ mod tests {
             error: tauri::ipc::CallbackFn(1),
             url: url.parse().unwrap(),
             body: tauri::ipc::InvokeBody::Json(json!({
-                "tagId": "engineer", "conversation": "planning", "text": "hello", "operationId": "ipc-test"
+                "connectionId": "1", "tagId": "engineer", "conversation": "planning", "text": "hello", "operationId": "ipc-test"
             })),
             headers: Default::default(),
             invoke_key: tauri::test::INVOKE_KEY.to_string(),
@@ -233,7 +291,7 @@ mod tests {
         let save = |url: &str| tauri::webview::InvokeRequest {
             cmd: "save_result_artifact".into(),
             body: tauri::ipc::InvokeBody::Json(json!({
-                "artifactId": "capture", "path": "outputs/report.txt"
+                "connectionId": "1", "artifactId": "capture", "path": "outputs/report.txt"
             })),
             ..request(url)
         };

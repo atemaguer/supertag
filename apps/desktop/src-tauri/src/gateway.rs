@@ -5,7 +5,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{self, conversations_client::ConversationsClient, operator_client::OperatorClient},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tonic::{
     Code, Request, Status,
     metadata::{Ascii, MetadataValue},
@@ -13,7 +13,9 @@ use tonic::{
 };
 
 mod artifacts;
+mod profiles;
 mod watch;
+pub use profiles::{GatewayActivation, GatewayList};
 pub use watch::WatchUpdate;
 
 type Result<T> = std::result::Result<T, String>;
@@ -21,12 +23,13 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
 
 #[derive(Default)]
-pub struct GatewayState(RwLock<Connection>);
+pub struct GatewayState(RwLock<Connection>, Mutex<()>);
 
 #[derive(Default)]
 struct Connection {
     generation: u64,
     session: Option<Arc<Session>>,
+    origin: Option<String>,
     watch: Option<watch::Registration>,
     watch_epoch: u64,
 }
@@ -35,6 +38,7 @@ impl Connection {
     fn replace(&mut self) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         self.session = None;
+        self.origin = None;
         self.watch = None;
         self.watch_epoch = 0;
         self.generation
@@ -49,6 +53,17 @@ struct Session {
 }
 
 impl Session {
+    async fn connect(endpoint: Endpoint, token: &str) -> Result<Self> {
+        let authorization = bearer(token)?;
+        let channel = endpoint.connect().await.map_err(|_| {
+            "Could not connect to the Gateway. Check its address and TLS certificate.".to_owned()
+        })?;
+        Ok(Self {
+            channel,
+            authorization,
+        })
+    }
+
     fn authenticated<T>(&self, value: T) -> Request<T> {
         let mut request = Request::new(value);
         request
@@ -74,49 +89,45 @@ impl Session {
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
+    async fn tags(&self) -> Result<Vec<Tag>> {
+        let mut tags = Vec::new();
+        let mut cursor = String::new();
+        for _ in 0..MAX_PAGES {
+            let page = self
+                .operator()
+                .list_tags(self.request(v2::ListTagsRequest {
+                    limit: 100,
+                    cursor: cursor.clone(),
+                    include_retired: false,
+                }))
+                .await
+                .map_err(rpc_error)?
+                .into_inner();
+            tags.extend(page.tags.into_iter().map(Tag::from));
+            if page.next_cursor.is_empty() {
+                return Ok(tags);
+            }
+            if page.next_cursor == cursor {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        Err("The Tag list is too large to load. Use the CLI to narrow the view.".into())
+    }
 }
 
 impl GatewayState {
-    pub async fn connect(&self, gateway: String, token: String) -> Result<String> {
-        // Replacing or disconnecting a connection invalidates pending connects.
-        let generation = self.0.write().await.replace();
-        let endpoint = endpoint(&gateway)?;
-        let authorization = bearer(&token)?;
-        let channel = endpoint.connect().await.map_err(|_| {
-            "Could not connect to the Gateway. Check its address and TLS certificate.".to_owned()
-        })?;
-        let session = Arc::new(Session {
-            channel,
-            authorization,
-        });
-        session
-            .operator()
-            .list_tags(session.request(v2::ListTagsRequest {
-                limit: 1,
-                cursor: String::new(),
-                include_retired: false,
-            }))
-            .await
-            .map_err(rpc_error)?;
-        let mut state = self.0.write().await;
-        if state.generation != generation {
-            return Err("The connection changed. Connect again.".into());
-        }
-        state.session = Some(session);
-        Ok(generation.to_string())
-    }
-
     pub async fn disconnect(&self) {
         self.0.write().await.replace();
     }
 
-    async fn session(&self) -> Result<Arc<Session>> {
-        self.0
-            .read()
-            .await
-            .session
-            .clone()
-            .ok_or_else(|| "Connect to a Gateway first.".into())
+    async fn session(&self, connection_id: &str) -> Result<Arc<Session>> {
+        let state = self.0.read().await;
+        let session = state.session.clone().ok_or("Connect to a Gateway first.")?;
+        if state.generation.to_string() != connection_id {
+            return Err("The connection changed. Refresh this view.".into());
+        }
+        Ok(session)
     }
 
     async fn current<T>(&self, session: &Arc<Session>, value: T) -> Result<T> {
@@ -134,35 +145,18 @@ impl GatewayState {
         }
     }
 
-    pub async fn tags(&self) -> Result<Vec<Tag>> {
-        let session = self.session().await?;
-        let mut tags = Vec::new();
-        let mut cursor = String::new();
-        for _ in 0..MAX_PAGES {
-            let page = session
-                .operator()
-                .list_tags(session.request(v2::ListTagsRequest {
-                    limit: 100,
-                    cursor: cursor.clone(),
-                    include_retired: false,
-                }))
-                .await
-                .map_err(rpc_error)?
-                .into_inner();
-            tags.extend(page.tags.into_iter().map(Tag::from));
-            if page.next_cursor.is_empty() {
-                return self.current(&session, tags).await;
-            }
-            if page.next_cursor == cursor {
-                break;
-            }
-            cursor = page.next_cursor;
-        }
-        Err("The Tag list is too large to load. Use the CLI to narrow the view.".into())
+    pub async fn tags(&self, connection_id: &str) -> Result<Vec<Tag>> {
+        let session = self.session(connection_id).await?;
+        let tags = session.tags().await?;
+        self.current(&session, tags).await
     }
 
-    pub async fn conversations(&self, tag_id: String) -> Result<Vec<Conversation>> {
-        let session = self.session().await?;
+    pub async fn conversations(
+        &self,
+        connection_id: &str,
+        tag_id: String,
+    ) -> Result<Vec<Conversation>> {
+        let session = self.session(connection_id).await?;
         let mut conversations = Vec::new();
         let mut cursor = String::new();
         for _ in 0..MAX_PAGES {
@@ -190,11 +184,12 @@ impl GatewayState {
 
     pub async fn messages(
         &self,
+        connection_id: &str,
         tag_id: String,
         conversation: String,
         cursor: Option<String>,
     ) -> Result<Messages> {
-        let session = self.session().await?;
+        let session = self.session(connection_id).await?;
         let page = session
             .conversations()
             .list_messages(session.request(v2::ListMessagesRequest {
@@ -223,12 +218,13 @@ impl GatewayState {
 
     pub async fn send(
         &self,
+        connection_id: &str,
         tag_id: String,
         conversation: String,
         text: String,
         operation_id: String,
     ) -> Result<Message> {
-        let session = self.session().await?;
+        let session = self.session(connection_id).await?;
         let value = session
             .conversations()
             .send_message(session.request(v2::SendMessageRequest {
@@ -245,8 +241,13 @@ impl GatewayState {
         self.current(&session, Message::try_from(value)?).await
     }
 
-    pub async fn message(&self, tag_id: String, task_id: String) -> Result<Message> {
-        let session = self.session().await?;
+    pub async fn message(
+        &self,
+        connection_id: &str,
+        tag_id: String,
+        task_id: String,
+    ) -> Result<Message> {
+        let session = self.session(connection_id).await?;
         let value = session
             .conversations()
             .get_message(session.request(v2::GetMessageRequest { tag_id, task_id }))
@@ -258,11 +259,12 @@ impl GatewayState {
 
     pub async fn events(
         &self,
+        connection_id: &str,
         tag_id: String,
         task_id: String,
         after_sequence: u64,
     ) -> Result<Vec<Event>> {
-        let session = self.session().await?;
+        let session = self.session(connection_id).await?;
         let page = session
             .conversations()
             .list_message_events(session.request(v2::ListMessageEventsRequest {
