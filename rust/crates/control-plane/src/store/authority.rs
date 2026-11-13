@@ -558,7 +558,7 @@ pub(super) async fn mark_uncertain(
     Ok(())
 }
 
-fn system_now_ms() -> i64 {
+pub(crate) fn system_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))

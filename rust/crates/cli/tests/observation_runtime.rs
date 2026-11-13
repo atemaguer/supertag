@@ -1183,6 +1183,82 @@ async fn exercise(database_url: &str) -> Result<()> {
     let (success, _, stderr) = run(&home, &complete, None).await?;
     ensure!(!success && stderr.contains("already completed"), "{stderr}");
 
+    // The per-Objective timeline: a closed Objective is replayed and the watch returns; its
+    // owner's turn still runs, so a zero settle time ends the wait for its delivery.
+    let timeline = ok(
+        &home,
+        &[
+            "--control-plane",
+            "local",
+            "watch",
+            "objective",
+            "launch",
+            "--output",
+            "json",
+            "--settle-seconds",
+            "0",
+        ],
+        None,
+    )
+    .await?;
+    let events: Vec<Value> = timeline
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let first = events.first().context("no events")?;
+    let last = events.last().context("no events")?;
+    assert_eq!(first["kind"], "objective.created", "{timeline}");
+    assert_eq!(first["actor"], "operator");
+    assert_eq!(first["objective_id"], "launch");
+    assert_eq!(last["kind"], "objective.closed", "{timeline}");
+    assert_eq!(last["status"], "completed");
+    ensure!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "task.status"
+                && event["task_id"] == objective_task.as_str()),
+        "{timeline}"
+    );
+    let timeline = ok(
+        &home,
+        &[
+            "--control-plane",
+            "local",
+            "watch",
+            "objective",
+            "launch",
+            "--settle-seconds",
+            "0",
+        ],
+        None,
+    )
+    .await?;
+    ensure!(
+        timeline.contains("operator      Objective launch created for builder: Launch the release"),
+        "{timeline}"
+    );
+    ensure!(
+        timeline.contains("Objective launch is completed.\nResult: Launched to all regions."),
+        "{timeline}"
+    );
+    let (success, _, stderr) = run(
+        &home,
+        &["--control-plane", "local", "watch", "objective", "nobody"],
+        None,
+    )
+    .await?;
+    ensure!(!success && stderr.contains("not found"), "{stderr}");
+    let (success, _, stderr) = run(
+        &home,
+        &["--control-plane", "local", "watch", "launch"],
+        None,
+    )
+    .await?;
+    ensure!(
+        !success && stderr.contains("unknown kind launch"),
+        "{stderr}"
+    );
+
     // Each client's store directory rule applies: the terminal UI's must be
     // private, the desktop app's only owner-writable.
     let tui_directory = tui_store.parent().context("store directory")?;

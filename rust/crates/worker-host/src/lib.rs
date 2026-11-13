@@ -112,6 +112,9 @@ pub struct HostOptions {
 pub struct Lane {
     pub incarnation_id: String,
     pub observer: LaneObserver,
+    /// Cancelled when the supervisor lowers the Host's concurrency below this lane: the lane
+    /// claims no more work and returns once it holds no Attempt, so its journal is left empty.
+    pub retire: CancellationToken,
 }
 
 #[derive(Clone)]
@@ -485,9 +488,15 @@ pub async fn run(
     };
     let outcome = async {
     let mut ready = Some(ready);
+    let retire = options.lane.as_ref().map(|lane| lane.retire.clone());
     while !shutdown.is_cancelled() {
         let entry = match journal.load()? {
             Some(entry) => entry,
+            // A retired lane leaves before it records a new Claim.
+            None if retire.as_ref().is_some_and(CancellationToken::is_cancelled) => {
+                presence.set(readiness::State::Stopping);
+                return Ok(());
+            }
             None => {
                 let operation_id = Uuid::new_v4().to_string();
                 let claim = claim_request(&options, &workspaces, operation_id.clone());
@@ -548,7 +557,13 @@ pub async fn run(
                     if options.once {
                         return Ok(());
                     }
-                    wait_for_work(&shutdown).await;
+                    match &retire {
+                        Some(retire) => tokio::select! {
+                            () = wait_for_work(&shutdown) => {}
+                            () = retire.cancelled() => {}
+                        },
+                        None => wait_for_work(&shutdown).await,
+                    }
                 }
             }
             Entry::Starting { attempt } | Entry::PreparingInputs { attempt, .. } => {

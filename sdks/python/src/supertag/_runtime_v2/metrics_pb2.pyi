@@ -13,7 +13,7 @@ class GetMetricsRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class MetricSnapshot(_message.Message):
-    __slots__ = ("captured_at_ms", "resources", "tasks", "usage", "scheduling", "mailbox", "reply_delivery")
+    __slots__ = ("captured_at_ms", "resources", "tasks", "usage", "scheduling", "mailbox", "reply_delivery", "recovery")
     CAPTURED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
@@ -21,6 +21,7 @@ class MetricSnapshot(_message.Message):
     SCHEDULING_FIELD_NUMBER: _ClassVar[int]
     MAILBOX_FIELD_NUMBER: _ClassVar[int]
     REPLY_DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    RECOVERY_FIELD_NUMBER: _ClassVar[int]
     captured_at_ms: int
     resources: MetricResources
     tasks: MetricTaskCounts
@@ -28,7 +29,24 @@ class MetricSnapshot(_message.Message):
     scheduling: MetricScheduling
     mailbox: MetricBacklog
     reply_delivery: MetricReplyDelivery
-    def __init__(self, captured_at_ms: _Optional[int] = ..., resources: _Optional[_Union[MetricResources, _Mapping]] = ..., tasks: _Optional[_Union[MetricTaskCounts, _Mapping]] = ..., usage: _Optional[_Union[MetricUsage, _Mapping]] = ..., scheduling: _Optional[_Union[MetricScheduling, _Mapping]] = ..., mailbox: _Optional[_Union[MetricBacklog, _Mapping]] = ..., reply_delivery: _Optional[_Union[MetricReplyDelivery, _Mapping]] = ...) -> None: ...
+    recovery: MetricRecovery
+    def __init__(self, captured_at_ms: _Optional[int] = ..., resources: _Optional[_Union[MetricResources, _Mapping]] = ..., tasks: _Optional[_Union[MetricTaskCounts, _Mapping]] = ..., usage: _Optional[_Union[MetricUsage, _Mapping]] = ..., scheduling: _Optional[_Union[MetricScheduling, _Mapping]] = ..., mailbox: _Optional[_Union[MetricBacklog, _Mapping]] = ..., reply_delivery: _Optional[_Union[MetricReplyDelivery, _Mapping]] = ..., recovery: _Optional[_Union[MetricRecovery, _Mapping]] = ...) -> None: ...
+
+class MetricRecovery(_message.Message):
+    __slots__ = ("awaiting_decision", "cleanup_unconfirmed", "resolved_failed", "resolved_retried", "blocked_sessions", "unknown_live_inputs")
+    AWAITING_DECISION_FIELD_NUMBER: _ClassVar[int]
+    CLEANUP_UNCONFIRMED_FIELD_NUMBER: _ClassVar[int]
+    RESOLVED_FAILED_FIELD_NUMBER: _ClassVar[int]
+    RESOLVED_RETRIED_FIELD_NUMBER: _ClassVar[int]
+    BLOCKED_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    UNKNOWN_LIVE_INPUTS_FIELD_NUMBER: _ClassVar[int]
+    awaiting_decision: int
+    cleanup_unconfirmed: int
+    resolved_failed: int
+    resolved_retried: int
+    blocked_sessions: int
+    unknown_live_inputs: int
+    def __init__(self, awaiting_decision: _Optional[int] = ..., cleanup_unconfirmed: _Optional[int] = ..., resolved_failed: _Optional[int] = ..., resolved_retried: _Optional[int] = ..., blocked_sessions: _Optional[int] = ..., unknown_live_inputs: _Optional[int] = ...) -> None: ...
 
 class MetricResources(_message.Message):
     __slots__ = ("tags", "roles", "role_assignments", "surface_accounts", "permission_sets", "context_sets", "sessions")
@@ -85,12 +103,26 @@ class MetricUsage(_message.Message):
     def __init__(self, attempts: _Optional[int] = ..., reported_tokens: _Optional[int] = ..., unknown_token_attempts: _Optional[int] = ..., reported_cost: _Optional[_Iterable[_Union[_spend_pb2.SpendAmount, _Mapping]]] = ..., unknown_cost_attempts: _Optional[int] = ..., estimated_cost_attempts: _Optional[int] = ...) -> None: ...
 
 class MetricScheduling(_message.Message):
-    __slots__ = ("queued", "worker_hosts")
+    __slots__ = ("queued", "worker_hosts", "oldest_queued_at_ms", "placed_tasks", "average_queue_wait_ms", "maximum_queue_wait_ms", "started_attempts", "average_start_wait_ms", "maximum_start_wait_ms")
     QUEUED_FIELD_NUMBER: _ClassVar[int]
     WORKER_HOSTS_FIELD_NUMBER: _ClassVar[int]
+    OLDEST_QUEUED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    PLACED_TASKS_FIELD_NUMBER: _ClassVar[int]
+    AVERAGE_QUEUE_WAIT_MS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_QUEUE_WAIT_MS_FIELD_NUMBER: _ClassVar[int]
+    STARTED_ATTEMPTS_FIELD_NUMBER: _ClassVar[int]
+    AVERAGE_START_WAIT_MS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_START_WAIT_MS_FIELD_NUMBER: _ClassVar[int]
     queued: int
     worker_hosts: _containers.RepeatedCompositeFieldContainer[MetricWorkerHost]
-    def __init__(self, queued: _Optional[int] = ..., worker_hosts: _Optional[_Iterable[_Union[MetricWorkerHost, _Mapping]]] = ...) -> None: ...
+    oldest_queued_at_ms: int
+    placed_tasks: int
+    average_queue_wait_ms: int
+    maximum_queue_wait_ms: int
+    started_attempts: int
+    average_start_wait_ms: int
+    maximum_start_wait_ms: int
+    def __init__(self, queued: _Optional[int] = ..., worker_hosts: _Optional[_Iterable[_Union[MetricWorkerHost, _Mapping]]] = ..., oldest_queued_at_ms: _Optional[int] = ..., placed_tasks: _Optional[int] = ..., average_queue_wait_ms: _Optional[int] = ..., maximum_queue_wait_ms: _Optional[int] = ..., started_attempts: _Optional[int] = ..., average_start_wait_ms: _Optional[int] = ..., maximum_start_wait_ms: _Optional[int] = ...) -> None: ...
 
 class MetricWorkerHost(_message.Message):
     __slots__ = ("host_id", "phase", "draining", "capacity", "available_slots", "active_attempts")

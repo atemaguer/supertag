@@ -4,8 +4,9 @@
 use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::v2::{
-    ObjectiveAttentionKind, ObjectiveBudgetMeasure, ObjectiveOverview, ObjectiveSessionStatus,
-    ObjectiveStatus, ObjectiveTurn, TaskState,
+    HarnessKind, ObjectiveAttentionKind, ObjectiveBudgetMeasure, ObjectiveOverview,
+    ObjectiveSessionDelivery, ObjectiveSessionFailure, ObjectiveSessionStatus,
+    ObjectiveSessionView, ObjectiveStatus, ObjectiveTurn, TaskState,
 };
 
 use crate::observe::money;
@@ -164,12 +165,26 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
 
     lines.push(String::new());
     lines.push("Delivered:".into());
+    let delivered: Vec<_> = view
+        .sessions
+        .iter()
+        .filter_map(|session| {
+            session
+                .delivery
+                .as_ref()
+                .map(|delivery| (session, delivery))
+        })
+        .collect();
     match (&objective.completion_summary, status) {
         (Some(summary), ObjectiveStatus::Completed) if !summary.trim().is_empty() => {
             lines.push(format!("  {}", first_line(summary)))
         }
+        _ if !delivered.is_empty() => {}
         _ if closed => lines.push("  Nothing was delivered.".into()),
         _ => lines.push("  Nothing yet.".into()),
+    }
+    for (session, delivery) in delivered {
+        lines.extend(delivery_lines(session, delivery));
     }
 
     lines.push(String::new());
@@ -208,13 +223,7 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         .max()
         .unwrap_or(0);
     for session in &view.sessions {
-        let label = if session.owner {
-            "Objective conversation".to_owned()
-        } else if session.title.is_empty() {
-            format!("Session {}", session.session_id)
-        } else {
-            first_line(&session.title)
-        };
+        let label = session_label(session);
         let latest = if session.latest_task_id.is_empty() {
             String::new()
         } else {
@@ -229,6 +238,12 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
             session_words(session.status()),
             session.tag_id
         ));
+    }
+    // A failed or uncertain latest turn explains itself under its Session.
+    for session in &view.sessions {
+        if let Some(failure) = &session.failure {
+            lines.extend(failure_lines(session, failure));
+        }
     }
     if view.total_sessions as usize > view.sessions.len() {
         lines.push(format!(
@@ -322,7 +337,7 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         ));
     }
     if !closed {
-        lines.push("  Follow it: supertag watch objective".into());
+        lines.push(format!("  Follow it: supertag watch objective {id}"));
     }
     lines.push(format!(
         "  Full record: supertag describe objective {id} --output json"
@@ -341,6 +356,81 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         .join("\n");
     out.push('\n');
     out
+}
+
+/// How a Session is named in text: the Objective's conversation, its title, or its ID.
+pub(crate) fn session_label(session: &ObjectiveSessionView) -> String {
+    if session.owner {
+        "Objective conversation".to_owned()
+    } else if session.title.is_empty() {
+        format!("Session {}", session.session_id)
+    } else {
+        first_line(&session.title)
+    }
+}
+
+fn short_commit(commit: &str) -> &str {
+    commit.get(..12).unwrap_or(commit)
+}
+
+/// A Session's latest delivery: what it changed, where, and how to fetch it.
+pub(crate) fn delivery_summary(delivery: &ObjectiveSessionDelivery) -> String {
+    let files = plural(delivery.changed_files, "changed file");
+    if delivery.committed {
+        format!(
+            "Commit {} in Workspace {}, {files} since {}",
+            short_commit(&delivery.head_commit),
+            delivery.workspace_id,
+            short_commit(&delivery.base_commit)
+        )
+    } else {
+        format!(
+            "Uncommitted changes in Workspace {}, {files}",
+            delivery.workspace_id
+        )
+    }
+}
+
+fn delivery_lines(
+    session: &ObjectiveSessionView,
+    delivery: &ObjectiveSessionDelivery,
+) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            "  {} ({}, Task {})",
+            session_label(session),
+            session.tag_id,
+            delivery.task_id
+        ),
+        format!("    {}", delivery_summary(delivery)),
+    ];
+    if delivery.patch {
+        lines.push(format!(
+            "    Download: supertag task download {} --kind patch --output FILE",
+            delivery.task_id
+        ));
+    }
+    lines
+}
+
+fn failure_lines(session: &ObjectiveSessionView, failure: &ObjectiveSessionFailure) -> Vec<String> {
+    let mut lines = vec![format!(
+        "    {}: Task {} {}{}",
+        session_label(session),
+        failure.task_id,
+        task_words(failure.state()),
+        match failure.harness_kind() {
+            HarnessKind::Unspecified => String::new(),
+            kind => format!(" on {}", words(kind.as_str_name(), "HARNESS_KIND_")),
+        }
+    )];
+    if !failure.message.trim().is_empty() {
+        lines.push(format!("      {}", block(&failure.message, "      ")));
+    }
+    for action in &failure.next_actions {
+        lines.push(format!("      {action}"));
+    }
+    lines
 }
 
 fn turn_json(turn: &ObjectiveTurn) -> Value {
@@ -402,6 +492,23 @@ pub(crate) fn json(view: &ObjectiveOverview) -> Value {
             "question": session.question,
             "task_count": session.task_count,
             "latest_task_id": session.latest_task_id,
+            "latest_completed_at_ms": session.latest_completed_at_ms,
+            "delivery": session.delivery.as_ref().map(|delivery| json!({
+                "task_id": delivery.task_id,
+                "workspace_id": delivery.workspace_id,
+                "base_commit": delivery.base_commit,
+                "head_commit": delivery.head_commit,
+                "committed": delivery.committed,
+                "changed_files": delivery.changed_files,
+                "patch": delivery.patch,
+            })),
+            "failure": session.failure.as_ref().map(|failure| json!({
+                "task_id": failure.task_id,
+                "state": failure.state().as_str_name(),
+                "harness_kind": failure.harness_kind().as_str_name(),
+                "message": failure.message,
+                "next_actions": failure.next_actions,
+            })),
         })).collect::<Vec<_>>(),
         "total_sessions": view.total_sessions,
         "conversation": view.conversation.iter().map(turn_json).collect::<Vec<_>>(),
@@ -527,6 +634,71 @@ mod tests {
         assert!(text.contains("at most 2 turns at once across its Objectives; 1 running now"));
         budgeted.team.as_mut().unwrap().max_concurrency = None;
         assert!(super::text(&budgeted).contains("turns limited only by Worker Host capacity"));
+    }
+
+    #[test]
+    fn names_each_delivery_and_explains_a_failed_turn() {
+        let mut working = view(ObjectiveStatus::Working);
+        working.sessions.push(ObjectiveSessionView {
+            session_id: "s2".into(),
+            tag_id: "builder".into(),
+            title: "Build the exporter".into(),
+            status: ObjectiveSessionStatus::Succeeded as i32,
+            task_count: 1,
+            latest_task_id: "t2".into(),
+            delivery: Some(ObjectiveSessionDelivery {
+                task_id: "t2".into(),
+                workspace_id: "product".into(),
+                base_commit: "fedcba9876543210".into(),
+                head_commit: "0123456789abcdef".into(),
+                committed: true,
+                changed_files: 3,
+                patch: true,
+            }),
+            ..Default::default()
+        });
+        working.sessions[0].status = ObjectiveSessionStatus::Failed as i32;
+        working.sessions[0].failure = Some(ObjectiveSessionFailure {
+            task_id: "t1".into(),
+            state: TaskState::Failed as i32,
+            harness_kind: HarnessKind::Codex as i32,
+            message: "The harness is not signed in.\u{1b}[2J".into(),
+            next_actions: vec!["supertag task events t1".into()],
+        });
+        working.total_sessions = 2;
+        let text = text(&working);
+        assert!(
+            text.contains(
+                "Delivered:\n  Build the exporter (builder, Task t2)\n    Commit 0123456789ab in Workspace product, 3 changed files since fedcba987654\n    Download: supertag task download t2 --kind patch --output FILE\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "    Objective conversation: Task t1 failed on codex\n      The harness is not signed in. [2J\n      supertag task events t1\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Follow it: supertag watch objective ship-sso"),
+            "{text}"
+        );
+        let json = json(&working);
+        assert_eq!(json["sessions"][1]["delivery"]["changed_files"], 3);
+        assert_eq!(json["sessions"][1]["delivery"]["patch"], true);
+        assert_eq!(json["sessions"][0]["failure"]["state"], "TASK_STATE_FAILED");
+        assert_eq!(
+            json["sessions"][0]["failure"]["next_actions"][0],
+            "supertag task events t1"
+        );
+        // An uncommitted delivery names its Workspace without a commit.
+        let mut uncommitted = working.sessions[1].delivery.clone().unwrap();
+        uncommitted.committed = false;
+        uncommitted.changed_files = 1;
+        assert_eq!(
+            delivery_summary(&uncommitted),
+            "Uncommitted changes in Workspace product, 1 changed file"
+        );
     }
 
     #[test]

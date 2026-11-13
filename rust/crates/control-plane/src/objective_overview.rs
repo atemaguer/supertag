@@ -118,7 +118,7 @@ fn task_state(row: &sqlx::any::AnyRow) -> Result<TaskState> {
     Ok(TaskState::try_from(row.try_get::<i64, _>("state")? as i32).unwrap_or_default())
 }
 
-fn turn(row: &sqlx::any::AnyRow, starting_task_id: &str) -> Result<ObjectiveTurn> {
+fn turn(row: &sqlx::any::AnyRow, starting_task_id: &str, now_ms: i64) -> Result<ObjectiveTurn> {
     let task_id: String = row.try_get("task_id")?;
     let link: Option<String> = row.try_get("link_kind")?;
     let report: Option<i64> = row.try_get("session_kind")?;
@@ -135,8 +135,10 @@ fn turn(row: &sqlx::any::AnyRow, starting_task_id: &str) -> Result<ObjectiveTurn
             _ => "message",
         }
     };
+    let state = task_state(row)?;
     Ok(ObjectiveTurn {
-        state: task_state(row)? as i32,
+        failure: failure(row, state, now_ms)?,
+        state: state as i32,
         tag_id: row.try_get("tag_id")?,
         session_id: row.try_get("session_id")?,
         kind: kind.into(),
@@ -151,28 +153,102 @@ fn turn(row: &sqlx::any::AnyRow, starting_task_id: &str) -> Result<ObjectiveTurn
     })
 }
 
-const TURN_COLUMNS: &str = "t.task_id, t.tag_id, t.session_id, t.state, t.prompt, t.result, t.completed_at_ms, ot.kind AS link_kind, wt.kind AS session_kind";
+const TURN_COLUMNS: &str = "t.task_id, t.tag_id, t.session_id, t.state, t.prompt, t.result, t.completed_at_ms, t.attempt_id, t.harness_kind, t.cleanup_pending, t.cleanup_observed, t.lease_expires_at_ms, ot.kind AS link_kind, wt.kind AS session_kind";
 
-/// The status of a Session from its latest turn, and the question it waits on.
+/// A Session as its latest turn and its latest delivery show it.
+struct SessionState {
+    status: ObjectiveSessionStatus,
+    question: String,
+    latest_task_id: String,
+    task_count: u32,
+    started_at_ms: Option<i64>,
+    latest_completed_at_ms: Option<i64>,
+    delivery: Option<ObjectiveSessionDelivery>,
+    failure: Option<ObjectiveSessionFailure>,
+}
+
+/// Why a failed, uncertain, or uncleanly cancelled turn did not succeed, with the commands
+/// that act on it. The recovery command matches `supertag ps`: a cancelled Task can only be
+/// marked failed, and the host's own report that execution stopped stands in for the
+/// operator's confirmation. `None` for a cancelled turn whose cleanup finished.
+fn failure(
+    row: &sqlx::any::AnyRow,
+    state: TaskState,
+    now_ms: i64,
+) -> Result<Option<ObjectiveSessionFailure>> {
+    let task_id: String = row.try_get("task_id")?;
+    let attempt_id: Option<String> = row.try_get("attempt_id")?;
+    let cleanup_pending = row.try_get::<i64, _>("cleanup_pending")? == 1;
+    let observed = row.try_get::<i64, _>("cleanup_observed")? == 1;
+    let lapsed = row
+        .try_get::<Option<i64>, _>("lease_expires_at_ms")?
+        .is_none_or(|at| at <= now_ms);
+    let result = row
+        .try_get::<Option<String>, _>("result")?
+        .unwrap_or_default();
+    let (decision, message) = match state {
+        TaskState::Failed => (None, result),
+        TaskState::Uncertain => (Some("retry"), result),
+        TaskState::Cancelled if cleanup_pending && lapsed => (
+            Some("failed"),
+            "Cancelled, but the host did not confirm its execution stopped before its lease lapsed.".into(),
+        ),
+        TaskState::Cancelled if cleanup_pending => (
+            None,
+            "Cancelled; the host has not yet confirmed its execution stopped.".into(),
+        ),
+        _ => return Ok(None),
+    };
+    let mut next_actions = vec![format!("supertag task events {task_id}")];
+    if let (Some(decision), Some(attempt)) = (decision, &attempt_id) {
+        let confirm = if observed { "" } else { " --confirmed-stopped" };
+        next_actions.push(format!(
+            "supertag task resolve-attempt {task_id} {attempt} --decision {decision} --evidence TEXT{confirm}"
+        ));
+    }
+    Ok(Some(ObjectiveSessionFailure {
+        state: state as i32,
+        harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
+        message: excerpt(&message, RESULT_CHARS),
+        next_actions,
+        task_id,
+    }))
+}
+
+/// The status of a Session from its latest turn, the question it waits on, why its latest turn
+/// failed, and its latest Workspace delivery.
 async fn session_status(
     tx: &mut Transaction<'_, Any>,
     tag_id: &str,
     session_id: &str,
-) -> Result<(ObjectiveSessionStatus, String, String, u32)> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2",
+    now_ms: i64,
+) -> Result<SessionState> {
+    let counted = sqlx::query(
+        "SELECT COUNT(*) AS n, MIN(accepted_at_ms) AS started FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2",
     )
     .bind(tag_id)
     .bind(session_id)
     .fetch_one(&mut **tx)
     .await?;
-    let Some(latest) = sqlx::query("SELECT task_id, state FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order DESC LIMIT 1")
+    let count: i64 = counted.try_get("n")?;
+    let started_at_ms: Option<i64> = counted.try_get("started")?;
+    let Some(latest) = sqlx::query("SELECT task_id, attempt_id, state, result, harness_kind, completed_at_ms, cleanup_pending, cleanup_observed, lease_expires_at_ms FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order DESC LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **tx).await? else {
-        return Ok((ObjectiveSessionStatus::NotStarted, String::new(), String::new(), 0));
+        return Ok(SessionState {
+            status: ObjectiveSessionStatus::NotStarted,
+            question: String::new(),
+            latest_task_id: String::new(),
+            task_count: 0,
+            started_at_ms: None,
+            latest_completed_at_ms: None,
+            delivery: None,
+            failure: None,
+        });
     };
     let task_id: String = latest.try_get("task_id")?;
+    let state = task_state(&latest)?;
     let mut question = String::new();
-    let status = match task_state(&latest)? {
+    let status = match state {
         TaskState::Queued | TaskState::Claimed | TaskState::Unspecified => {
             ObjectiveSessionStatus::Queued
         }
@@ -198,7 +274,51 @@ async fn session_status(
             }
         }
     };
-    Ok((status, question, task_id, count as u32))
+    let failure = failure(&latest, state, now_ms)?;
+    let delivered = sqlx::query("SELECT task_id, workspace_delivery FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND workspace_delivery IS NOT NULL ORDER BY accepted_order DESC LIMIT 1")
+        .bind(tag_id).bind(session_id).bind(TaskState::Succeeded as i64)
+        .fetch_optional(&mut **tx).await?;
+    let delivery = match delivered {
+        Some(row) => crate::workspaces::delivery_from_row(&row)?.map(|delivery| {
+            Ok::<_, crate::store::StoreError>(ObjectiveSessionDelivery {
+                task_id: row.try_get("task_id")?,
+                patch: delivery.patch.is_some(),
+                workspace_id: delivery.workspace_id,
+                base_commit: delivery.base_commit,
+                head_commit: delivery.head_commit,
+                committed: delivery.committed,
+                changed_files: delivery.changed_files,
+            })
+        }),
+        None => None,
+    }
+    .transpose()?;
+    Ok(SessionState {
+        status,
+        question,
+        latest_task_id: task_id,
+        task_count: count as u32,
+        started_at_ms,
+        latest_completed_at_ms: latest.try_get("completed_at_ms")?,
+        delivery,
+        failure,
+    })
+}
+
+fn session_view(session_id: String, tag_id: String, state: SessionState) -> ObjectiveSessionView {
+    ObjectiveSessionView {
+        session_id,
+        tag_id,
+        status: state.status as i32,
+        question: state.question,
+        task_count: state.task_count,
+        latest_task_id: state.latest_task_id,
+        latest_completed_at_ms: state.latest_completed_at_ms,
+        started_at_ms: state.started_at_ms,
+        delivery: state.delivery,
+        failure: state.failure,
+        ..Default::default()
+    }
 }
 
 impl Store {
@@ -271,18 +391,21 @@ impl Store {
         };
 
         // The owner's Session, then each Work Session under the Objective.
-        let (owner_status, owner_question, owner_latest, owner_count) =
-            session_status(&mut tx, &objective.owner_tag_id, &objective.session_id).await?;
-        let mut sessions = vec![ObjectiveSessionView {
-            session_id: objective.session_id.clone(),
-            tag_id: objective.owner_tag_id.clone(),
-            owner: true,
-            status: owner_status as i32,
-            question: owner_question.clone(),
-            task_count: owner_count,
-            latest_task_id: owner_latest.clone(),
-            ..Default::default()
-        }];
+        let owner = session_status(
+            &mut tx,
+            &objective.owner_tag_id,
+            &objective.session_id,
+            now_ms,
+        )
+        .await?;
+        let owner_question = owner.question.clone();
+        let owner_latest = owner.latest_task_id.clone();
+        let mut sessions = vec![session_view(
+            objective.session_id.clone(),
+            objective.owner_tag_id.clone(),
+            owner,
+        )];
+        sessions[0].owner = true;
         let total_work: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM supertag_v2_work_sessions WHERE objective_id=$1",
         )
@@ -294,19 +417,11 @@ impl Store {
         for row in work {
             let session_id: String = row.try_get("work_session_id")?;
             let tag_id: String = row.try_get("tag_id")?;
-            let (status, question, latest, count) =
-                session_status(&mut tx, &tag_id, &session_id).await?;
-            sessions.push(ObjectiveSessionView {
-                session_id,
-                tag_id,
-                owner: false,
-                title: row.try_get("title")?,
-                parent_session_id: row.try_get("parent_session_id")?,
-                status: status as i32,
-                question,
-                task_count: count,
-                latest_task_id: latest,
-            });
+            let state = session_status(&mut tx, &tag_id, &session_id, now_ms).await?;
+            let mut view = session_view(session_id, tag_id, state);
+            view.title = row.try_get("title")?;
+            view.parent_session_id = row.try_get("parent_session_id")?;
+            sessions.push(view);
         }
 
         let pending_approvals: i64 = sqlx::query_scalar(
@@ -398,7 +513,7 @@ impl Store {
             .bind(&objective.owner_tag_id).bind(&objective.session_id).bind(CONVERSATION_TURNS)
             .fetch_all(&mut *tx).await?
         {
-            conversation.push(turn(&row, &objective.starting_task_id)?);
+            conversation.push(turn(&row, &objective.starting_task_id, now_ms)?);
         }
         conversation.reverse();
 
@@ -414,7 +529,7 @@ impl Store {
             .bind(&id).bind(i64::from(limit)).bind(i64::from(input.offset))
             .fetch_all(&mut *tx).await?
         {
-            tasks.push(turn(&row, &objective.starting_task_id)?);
+            tasks.push(turn(&row, &objective.starting_task_id, now_ms)?);
         }
         let next = u64::from(input.offset) + tasks.len() as u64;
         let next_offset = (next < total_tasks as u64 && !tasks.is_empty()).then_some(next as u32);
@@ -434,6 +549,12 @@ impl Store {
             }
             posts.reverse();
         }
+        let times = sqlx::query(
+            "SELECT created_at_ms, updated_at_ms FROM supertag_v2_objectives WHERE objective_id=$1",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
         tx.commit().await?;
 
         let notices = limits::limit_events(&model)
@@ -446,6 +567,8 @@ impl Store {
             })
             .collect();
         Ok(ObjectiveOverview {
+            objective_created_at_ms: times.try_get("created_at_ms")?,
+            objective_updated_at_ms: times.try_get("updated_at_ms")?,
             pool: Some(pool(&objective, &model)),
             deadline: deadline(&model, now_ms),
             objective: Some(objective),

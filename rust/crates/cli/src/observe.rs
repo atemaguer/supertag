@@ -110,6 +110,7 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
     let scheduling = snapshot.scheduling.clone().unwrap_or_default();
     let mailbox = snapshot.mailbox.unwrap_or_default();
     let replies = snapshot.reply_delivery.unwrap_or_default();
+    let recovery = snapshot.recovery.unwrap_or_default();
     json!({
         "captured_at": Timestamp::from_millis(snapshot.captured_at_ms).map(|at| at.to_string()),
         "tags": resources.tags,
@@ -140,8 +141,29 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
             "unknown_cost_attempts": usage.unknown_cost_attempts,
             "estimated_cost_attempts": usage.estimated_cost_attempts,
         },
+        "recovery": {
+            "awaiting_decision": recovery.awaiting_decision,
+            "cleanup_unconfirmed": recovery.cleanup_unconfirmed,
+            "resolved_failed": recovery.resolved_failed,
+            "resolved_retried": recovery.resolved_retried,
+            "blocked_sessions": recovery.blocked_sessions,
+            "unknown_live_inputs": recovery.unknown_live_inputs,
+        },
         "scheduling": {
             "queued": scheduling.queued,
+            "oldest_queued_at": scheduling
+                .oldest_queued_at_ms
+                .and_then(Timestamp::from_millis)
+                .map(|at| at.to_string()),
+            "oldest_queued_age_seconds": scheduling
+                .oldest_queued_at_ms
+                .map(|at| age_seconds(snapshot.captured_at_ms, at)),
+            "placed_tasks": scheduling.placed_tasks,
+            "average_queue_wait_ms": scheduling.average_queue_wait_ms,
+            "maximum_queue_wait_ms": scheduling.maximum_queue_wait_ms,
+            "started_attempts": scheduling.started_attempts,
+            "average_start_wait_ms": scheduling.average_start_wait_ms,
+            "maximum_start_wait_ms": scheduling.maximum_start_wait_ms,
             "worker_hosts": scheduling.worker_hosts.iter().map(|host| json!({
                 "id": host.host_id,
                 "phase": host_phase(host.phase()),
@@ -149,6 +171,7 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
                 "capacity": host.capacity,
                 "available_slots": host.available_slots,
                 "active_attempts": host.active_attempts,
+                "utilization": utilization(host),
             })).collect::<Vec<_>>(),
         },
         "mailbox": {
@@ -175,6 +198,29 @@ fn host_phase(phase: HostPhase) -> &'static str {
     }
 }
 
+/// Whole seconds from `at_ms` to the snapshot, never negative.
+fn age_seconds(captured_at_ms: i64, at_ms: i64) -> i64 {
+    captured_at_ms.saturating_sub(at_ms).max(0) / 1_000
+}
+
+/// The share of a Worker Host's slots its Attempts hold, from 0 to 1.
+fn utilization(host: &supertag_protocol::v2::MetricWorkerHost) -> f64 {
+    if host.capacity == 0 {
+        0.0
+    } else {
+        (f64::from(host.active_attempts) / f64::from(host.capacity)).min(1.0)
+    }
+}
+
+/// A duration in milliseconds, in the largest unit that keeps it readable.
+fn wait(ms: i64) -> String {
+    match ms {
+        ms if ms < 1_000 => format!("{ms}ms"),
+        ms if ms < 60_000 => format!("{:.1}s", ms as f64 / 1_000.0),
+        ms => format!("{}m {}s", ms / 60_000, ms % 60_000 / 1_000),
+    }
+}
+
 fn metrics_text(snapshot: &MetricSnapshot) -> String {
     let resources = snapshot.resources.unwrap_or_default();
     let tasks = snapshot.tasks.unwrap_or_default();
@@ -182,6 +228,7 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
     let scheduling = snapshot.scheduling.clone().unwrap_or_default();
     let mailbox = snapshot.mailbox.unwrap_or_default();
     let replies = snapshot.reply_delivery.unwrap_or_default();
+    let recovery = snapshot.recovery.unwrap_or_default();
     let cost = usage
         .reported_cost
         .iter()
@@ -192,6 +239,8 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
          Tasks {}: {} queued, {} claimed, {} running, {} uncertain, {} succeeded, {} failed, {} cancelled\n\
          Attempts {}: tokens {}, cost {}\n\
          Worker Hosts {}: {} active of {} slots\n\
+         Queue: {} placed, waited {} on average and {} at most before a claim; started {} on average and {} at most after it{}\n\
+         Recovery: {} Attempts await a decision, {} cancelled Attempts await cleanup; {} resolved as failed, {} retried; {} Sessions wait behind an unfinished Task; {} live inputs have an unknown delivery\n\
          Mailbox backlog {}, reply backlog {}, failed replies {}\n",
         resources.tags,
         resources.sessions,
@@ -228,6 +277,24 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
             .iter()
             .map(|host| u64::from(host.capacity))
             .sum::<u64>(),
+        scheduling.placed_tasks,
+        wait(scheduling.average_queue_wait_ms),
+        wait(scheduling.maximum_queue_wait_ms),
+        wait(scheduling.average_start_wait_ms),
+        wait(scheduling.maximum_start_wait_ms),
+        scheduling
+            .oldest_queued_at_ms
+            .and_then(|at| Some((Timestamp::from_millis(at)?, at)))
+            .map_or_else(String::new, |(at, ms)| format!(
+                "; oldest queued Task accepted {at}, {} ago",
+                wait(age_seconds(snapshot.captured_at_ms, ms) * 1_000)
+            )),
+        recovery.awaiting_decision,
+        recovery.cleanup_unconfirmed,
+        recovery.resolved_failed,
+        recovery.resolved_retried,
+        recovery.blocked_sessions,
+        recovery.unknown_live_inputs,
         mailbox.pending,
         replies.backlog,
         replies.failed,
@@ -505,7 +572,7 @@ fn scalar(value: &Value) -> String {
 
 /// A kind of change `watch` follows: a resource kind marked `watch` in
 /// [`crate::resources::KINDS`], or one of [`WATCH_EVENT_STREAMS`].
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum WatchKindArg {
     #[value(alias = "tags")]
     Tag,
@@ -540,11 +607,57 @@ impl From<WatchKindArg> for WatchKind {
     }
 }
 
+/// A `watch` argument: a kind of change, or the ID that follows `objective`.
+#[derive(Clone)]
+pub enum WatchTarget {
+    Kind(WatchKindArg),
+    Id(String),
+}
+
+/// Parses kinds as their value enum does, keeps anything else as an ID, and offers the kinds as
+/// the argument's possible values.
+#[derive(Clone)]
+struct WatchTargetParser;
+
+impl clap::builder::TypedValueParser for WatchTargetParser {
+    type Value = WatchTarget;
+
+    fn parse_ref(
+        &self,
+        command: &clap::Command,
+        _argument: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<WatchTarget, clap::Error> {
+        let text = value.to_str().ok_or_else(|| {
+            clap::Error::new(clap::error::ErrorKind::InvalidUtf8).with_cmd(command)
+        })?;
+        Ok(match WatchKindArg::from_str(text, true) {
+            Ok(kind) => WatchTarget::Kind(kind),
+            Err(_) => WatchTarget::Id(text.to_owned()),
+        })
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(
+            WatchKindArg::value_variants()
+                .iter()
+                .filter_map(ValueEnum::to_possible_value),
+        ))
+    }
+}
+
 #[derive(Args)]
 pub struct WatchArgs {
-    /// Only these kinds of change; omit for every kind.
-    #[arg(value_enum, value_name = "KIND")]
-    kinds: Vec<WatchKindArg>,
+    /// Only these kinds of change; omit for every kind. `watch objective ID` follows one
+    /// Objective's progress as a timeline until it closes.
+    #[arg(value_name = "KIND", value_parser = WatchTargetParser)]
+    kinds: Vec<WatchTarget>,
+    /// With `watch objective ID`: seconds to wait after the Objective closes for its running
+    /// Sessions to record their turns.
+    #[arg(long, default_value_t = 10)]
+    settle_seconds: u64,
     /// Continue after the last notice a previous watch printed.
     #[arg(long)]
     resume_token: Option<String>,
@@ -564,12 +677,31 @@ pub struct WatchArgs {
 /// resume token, so no notice is missed or repeated across reconnects; a
 /// resync notice means the feed moved past the token and state must be reread.
 pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
-    let target = resolve_target(connection)?;
+    if let [
+        WatchTarget::Kind(WatchKindArg::Objective),
+        WatchTarget::Id(id),
+    ] = args.kinds.as_slice()
+    {
+        return crate::objective_watch::watch(
+            connection,
+            id.clone(),
+            args.output,
+            Duration::from_secs(args.settle_seconds),
+        )
+        .await;
+    }
     let kinds = args
         .kinds
         .iter()
-        .map(|kind| WatchKind::from(*kind) as i32)
-        .collect::<Vec<_>>();
+        .map(|target| match target {
+            WatchTarget::Kind(kind) => Ok(WatchKind::from(*kind) as i32),
+            WatchTarget::Id(id) => Err(anyhow::anyhow!(
+                "unknown kind {}; to follow one Objective, run supertag watch objective ID",
+                crate::terminal::text(id)
+            )),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let target = resolve_target(connection)?;
     let mut resume = args.resume_token.unwrap_or_default();
     let mut changes = 0_u64;
     let mut announced = false;

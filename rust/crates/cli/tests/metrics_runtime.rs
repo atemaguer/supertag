@@ -70,6 +70,7 @@ database_tests! {
 }
 
 async fn metrics_count_every_record_beyond_list_pages(database: String) -> Result<()> {
+    let began = std::time::Instant::now();
     let directory = tempfile::tempdir()?;
     let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
@@ -103,6 +104,20 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     assert_eq!(empty["mailbox"]["pending"], 0, "{empty}");
     assert!(empty["mailbox"]["oldest_pending_at"].is_null(), "{empty}");
     assert_eq!(empty["reply_delivery"]["backlog"], 0, "{empty}");
+    assert!(empty["scheduling"]["oldest_queued_at"].is_null(), "{empty}");
+    assert_eq!(empty["scheduling"]["placed_tasks"], 0, "{empty}");
+    assert_eq!(
+        empty["recovery"],
+        serde_json::json!({
+            "awaiting_decision": 0,
+            "cleanup_unconfirmed": 0,
+            "resolved_failed": 0,
+            "resolved_retried": 0,
+            "blocked_sessions": 0,
+            "unknown_live_inputs": 0,
+        }),
+        "{empty}"
+    );
 
     for tag in ["reviewer", "writer"] {
         output(operator(&["tag", "put", tag, "--instructions", "Echo"])).await?;
@@ -165,12 +180,55 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
         "{snapshot}"
     );
     assert_eq!(snapshot["scheduling"]["queued"], TASKS - 2, "{snapshot}");
+    // The run Task was claimed once and started once; queued Tasks keep their acceptance time.
+    assert_eq!(snapshot["scheduling"]["placed_tasks"], 1, "{snapshot}");
+    assert_eq!(snapshot["scheduling"]["started_attempts"], 1, "{snapshot}");
+    for field in [
+        "average_queue_wait_ms",
+        "maximum_queue_wait_ms",
+        "average_start_wait_ms",
+        "maximum_start_wait_ms",
+    ] {
+        ensure!(
+            snapshot["scheduling"][field]
+                .as_i64()
+                .is_some_and(|ms| ms >= 0),
+            "{field}: {snapshot}"
+        );
+    }
+    // Every wait happened during this test, and an average never exceeds its maximum.
+    let elapsed = i64::try_from(began.elapsed().as_millis())?;
+    let field = |name: &str| snapshot["scheduling"][name].as_i64().unwrap_or(-1);
+    for (average, maximum) in [
+        ("average_queue_wait_ms", "maximum_queue_wait_ms"),
+        ("average_start_wait_ms", "maximum_start_wait_ms"),
+    ] {
+        ensure!(
+            field(average) <= field(maximum) && field(maximum) <= elapsed,
+            "{average}/{maximum} beyond {elapsed}ms: {snapshot}"
+        );
+    }
+    ensure!(
+        snapshot["scheduling"]["oldest_queued_at"]
+            .as_str()
+            .is_some_and(|at| at.ends_with('Z')),
+        "{snapshot}"
+    );
+    ensure!(
+        (0..=elapsed / 1_000 + 1).contains(&field("oldest_queued_age_seconds")),
+        "{snapshot}"
+    );
+    // The queued Tasks wait behind nothing: no Session has an unfinished Task.
+    assert_eq!(snapshot["recovery"]["blocked_sessions"], 0, "{snapshot}");
+    assert_eq!(snapshot["recovery"]["awaiting_decision"], 0, "{snapshot}");
     let hosts = snapshot["scheduling"]["worker_hosts"]
         .as_array()
         .context("worker_hosts")?;
     ensure!(!hosts.is_empty(), "{snapshot}");
     ensure!(
-        hosts.iter().all(|host| host["active_attempts"] == 0),
+        hosts
+            .iter()
+            .all(|host| host["active_attempts"] == 0 && host["utilization"] == 0.0),
         "{snapshot}"
     );
     // The one claimed Attempt, as `supertag spend` counts it.
@@ -194,6 +252,13 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
             "Tasks {TASKS}: {} queued, 0 claimed, 0 running, 0 uncertain, 1 succeeded, 0 failed, 1 cancelled",
             TASKS - 2
         )),
+        "{text}"
+    );
+    ensure!(text.contains("Queue: 1 placed, waited "), "{text}");
+    ensure!(
+        text.contains(
+            "Recovery: 0 Attempts await a decision, 0 cancelled Attempts await cleanup; 0 resolved as failed, 0 retried; 0 Sessions wait behind an unfinished Task; 0 live inputs have an unknown delivery"
+        ),
         "{text}"
     );
     Ok(())

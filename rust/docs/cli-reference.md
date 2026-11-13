@@ -4249,13 +4249,15 @@ Stream change notices, reconnecting from the last resume token
 Usage: supertag watch [OPTIONS] [KIND]...
 
 Arguments:
-  [KIND]...  Only these kinds of change; omit for every kind [possible values: tag, task, conversation-message, objective, team, workstream-post]
+  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes [possible values: tag, task, conversation-message, objective, team, workstream-post]
 
 Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
+      --settle-seconds <SETTLE_SECONDS>
+          With `watch objective ID`: seconds to wait after the Objective closes for its running Sessions to record their turns [default: 10]
       --resume-token <RESUME_TOKEN>
           Continue after the last notice a previous watch printed
       --limit <LIMIT>

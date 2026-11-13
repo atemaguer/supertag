@@ -43,6 +43,9 @@ message ObjectiveOverview {
   uint32 pending_approvals = 14;
   // Every Session of the Objective; at most 100 are listed.
   uint32 total_sessions = 15;
+  int64 objective_created_at_ms = 5400;
+  // When the Objective's status, limits or summary last changed.
+  int64 objective_updated_at_ms = 5401;
 }
 
 message ObjectiveOverviewTeam {
@@ -144,6 +147,36 @@ message ObjectiveSessionView {
   string question = 7;
   uint32 task_count = 8;
   string latest_task_id = 9;
+  // The Session's latest Workspace delivery. Absent when none was recorded.
+  ObjectiveSessionDelivery delivery = 5400;
+  // Why the latest turn did not succeed. Absent unless it failed, is uncertain, or was
+  // cancelled before its execution cleanup was confirmed.
+  ObjectiveSessionFailure failure = 5401;
+  // When the latest turn finished. Absent while it runs or when not recorded.
+  optional int64 latest_completed_at_ms = 5402;
+  // When the Session's first turn was accepted. Absent when not recorded.
+  optional int64 started_at_ms = 5403;
+}
+
+message ObjectiveSessionDelivery {
+  string task_id = 1;
+  string workspace_id = 2;
+  string base_commit = 3;
+  string head_commit = 4;
+  bool committed = 5;
+  uint64 changed_files = 6;
+  // Whether a patch is published for `supertag task download --kind patch`.
+  bool patch = 7;
+}
+
+message ObjectiveSessionFailure {
+  string task_id = 1;
+  TaskState state = 2;
+  HarnessKind harness_kind = 3;
+  // The Attempt's own failure text, bounded; empty when the host recorded none.
+  string message = 4;
+  // Commands that act on it, each a complete `supertag ...` line.
+  repeated string next_actions = 5;
 }
 
 message ObjectiveTurn {
@@ -157,6 +190,8 @@ message ObjectiveTurn {
   string prompt = 6;
   string result = 7;
   optional int64 completed_at_ms = 8;
+  // Why the turn did not succeed, as `ObjectiveSessionView.failure` explains a latest turn.
+  ObjectiveSessionFailure failure = 5400;
 }
 
 message ObjectiveTeamPost {

@@ -79,6 +79,9 @@ pub struct SupervisorStatus {
     pub version: String,
     pub instance: String,
     pub fingerprint: String,
+    /// The configuration's digest without host `concurrency`; see `local_config::Config::shape`.
+    #[serde(default)]
+    pub shape: String,
     pub started_at_ms: u64,
     pub endpoint: Option<String>,
     pub services: Vec<ServiceStatus>,
@@ -96,6 +99,9 @@ pub struct ServiceStatus {
     pub host_id: Option<String>,
     /// A host connected to a Control Plane this supervisor does not run.
     pub remote: bool,
+    /// A host's Attempts per harness at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
 }
 
 fn now_ms() -> u64 {
@@ -113,6 +119,7 @@ fn started_at_ms() -> u64 {
 pub fn record(
     directory: &Path,
     fingerprint: &str,
+    shape: &str,
     instance: &str,
     endpoint: Option<&str>,
     services: Vec<ServiceStatus>,
@@ -123,6 +130,7 @@ pub fn record(
         version: env!("CARGO_PKG_VERSION").into(),
         instance: instance.into(),
         fingerprint: fingerprint.into(),
+        shape: shape.into(),
         started_at_ms: started_at_ms(),
         endpoint: endpoint.map(str::to_owned),
         services,
@@ -332,6 +340,16 @@ pub async fn up(options: Background) -> Result<()> {
             if status.fingerprint == fingerprint && unit_current {
                 outln!("SuperTag already runs with these settings, so it was left alone.");
                 summary(&options.state, &status);
+                retire_removed_hosts(&options.state, options.config.as_ref()).await;
+                return Ok(());
+            }
+            if let Some(config) = &options.config
+                && unit_current
+                && !status.shape.is_empty()
+                && status.shape == config.shape
+            {
+                change_concurrency(&options.state, &status, config).await?;
+                retire_removed_hosts(&options.state, Some(config)).await;
                 return Ok(());
             }
             outln!("SuperTag's settings changed, so it restarts.");
@@ -402,6 +420,141 @@ pub async fn up(options: Background) -> Result<()> {
     outln!(
         "Follow the logs with supertag logs -f, list services with supertag ps, and stop with supertag down."
     );
+    retire_removed_hosts(&state, options.config.as_ref()).await;
+    Ok(())
+}
+
+/// Removes the state of host services supertag.yaml no longer names once their Worker Host is
+/// revoked, and says what retires the others. A failure here leaves SuperTag running.
+async fn retire_removed_hosts(state: &Path, config: Option<&local_config::Config>) {
+    let Some(config) = config else {
+        return;
+    };
+    let configured = config.hosts.iter().map(|host| host.name.clone()).collect();
+    let local = local::connection(state).ok();
+    let check = async |host_id: &str| {
+        use crate::removed_hosts::Registration;
+        let (url, token) = local
+            .as_ref()
+            .context("the local Control Plane is not running")?;
+        let endpoint = crate::network::endpoint(url.clone()).await?;
+        let mut client = OperatorClient::new(crate::network::operator_channel(&endpoint).await?);
+        match client
+            .get_host(crate::request(
+                GetHostRequest {
+                    host_id: host_id.into(),
+                },
+                token,
+            )?)
+            .await
+        {
+            Ok(host) => {
+                let host = host.into_inner();
+                Ok(
+                    if host.revoked_at_ms.is_some() || host.removed_at_ms.is_some() {
+                        Registration::Retired
+                    } else {
+                        Registration::Active
+                    },
+                )
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(Registration::Retired),
+            Err(status) => Err(anyhow::Error::from(status)),
+        }
+    };
+    match crate::removed_hosts::retire(
+        state,
+        &configured,
+        local.as_ref().map(|(url, _)| url.as_str()),
+        check,
+    )
+    .await
+    {
+        Ok(lines) => {
+            for line in lines {
+                outln!("{line}");
+            }
+        }
+        Err(error) => outln!(
+            "Could not check for host services supertag.yaml no longer names: {}",
+            crate::terminal::text(&format!("{error:#}"))
+        ),
+    }
+}
+
+/// A running supervisor's request to run a different number of lanes for some hosts, written
+/// by `supertag up` when nothing else in supertag.yaml changed.
+#[derive(Serialize, Deserialize)]
+pub struct ConcurrencyRequest {
+    /// The file digest the supervisor records once it applied the request.
+    pub fingerprint: String,
+    /// Each configured host's `concurrency`.
+    pub hosts: std::collections::BTreeMap<String, u32>,
+}
+
+pub const CONCURRENCY_REQUEST: &str = "concurrency-request.json";
+
+/// Read and remove a pending request. A request that cannot be read is removed and ignored:
+/// the next `supertag up` writes it again.
+pub fn take_concurrency_request(directory: &Path) -> Option<ConcurrencyRequest> {
+    let path = directory.join(CONCURRENCY_REQUEST);
+    fs::symlink_metadata(&path).ok()?;
+    let request = read_bounded(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let _ = remove_if_present(&path);
+    request
+}
+
+/// Remove a request no supervisor applied. A new supervisor starts with its file's
+/// `concurrency`, so an older request must not resize it.
+pub fn clear_concurrency_request(directory: &Path) -> io::Result<()> {
+    remove_if_present(&directory.join(CONCURRENCY_REQUEST))
+}
+
+/// Change the running hosts' concurrency in place: raised lanes start under the host's current
+/// registration, and lowered lanes finish their Attempt and stop, so running work is neither
+/// drained nor restarted.
+async fn change_concurrency(
+    state: &Path,
+    status: &SupervisorStatus,
+    config: &local_config::Config,
+) -> Result<()> {
+    let request = ConcurrencyRequest {
+        fingerprint: config.digest.clone(),
+        hosts: config
+            .hosts
+            .iter()
+            .map(|host| (host.name.clone(), host.concurrency))
+            .collect(),
+    };
+    write_private(state, CONCURRENCY_REQUEST, &serde_json::to_vec(&request)?)?;
+    let pid = status.pid;
+    let applied = wait_ready(state, |status| status.pid == pid && status.fingerprint == request.fingerprint, None)
+        .await
+        .context("the running supervisor did not apply the concurrency change; run supertag up --force to restart it")?;
+    let mut changed = false;
+    for host in &config.hosts {
+        let before = status
+            .services
+            .iter()
+            .find(|service| service.kind == HOST && service.name == host.name)
+            .and_then(|service| service.concurrency);
+        if let Some(before) = before
+            && before != host.concurrency
+        {
+            changed = true;
+            outln!(
+                "Worker Host {} runs up to {} Task Attempts per harness at once, changed from {before} without a restart.",
+                host.name,
+                host.concurrency
+            );
+        }
+    }
+    if !changed {
+        outln!("SuperTag already runs with these settings, so it was left alone.");
+    }
+    summary(state, &applied);
     Ok(())
 }
 
@@ -782,6 +935,49 @@ struct Row {
     attempts: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capacity: Option<u32>,
+    /// Attempts that may have executed and keep a slot until an operator resolves them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    uncertain_attempts: Vec<UncertainAttempt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uncertain_total: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct UncertainAttempt {
+    task_id: String,
+    attempt_id: String,
+    reason: String,
+    since: Option<String>,
+    cancelled: bool,
+    cleanup_observed: bool,
+    /// The command that records the operator's decision once execution is known to have stopped.
+    recover: String,
+}
+
+impl UncertainAttempt {
+    fn from(attempt: &supertag_protocol::v2::HostUncertainAttempt) -> Self {
+        // A cancelled Task can only be marked failed; the host's own report of stopped
+        // execution stands in for the operator's confirmation.
+        let decision = if attempt.cancelled { "failed" } else { "retry" };
+        let confirm = if attempt.cleanup_observed {
+            ""
+        } else {
+            " --confirmed-stopped"
+        };
+        Self {
+            recover: format!(
+                "supertag task resolve-attempt {} {} --decision {decision} --evidence TEXT{confirm}",
+                attempt.task_id, attempt.attempt_id
+            ),
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            reason: attempt.reason.clone(),
+            since: (attempt.since_ms > 0)
+                .then(|| timestamp(UNIX_EPOCH + Duration::from_millis(attempt.since_ms as u64))),
+            cancelled: attempt.cancelled,
+            cleanup_observed: attempt.cleanup_observed,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -853,6 +1049,17 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                     draining: host.map(|host| host.draining),
                     attempts: host.map(|host| host.active_attempts),
                     capacity: host.map(|host| host.capacity),
+                    uncertain_attempts: host
+                        .map(|host| {
+                            host.uncertain_attempts
+                                .iter()
+                                .map(UncertainAttempt::from)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    uncertain_total: host
+                        .map(|host| host.total_uncertain_attempts)
+                        .filter(|total| *total > 0),
                 });
             }
         }
@@ -895,6 +1102,8 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         draining: None,
         attempts: None,
         capacity: None,
+        uncertain_attempts: Vec::new(),
+        uncertain_total: None,
     }
 }
 
@@ -982,6 +1191,9 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
             if let (Some(attempts), Some(capacity)) = (row.attempts, row.capacity) {
                 detail.push(format!("{attempts}/{capacity} Task Attempts"));
             }
+            if let Some(total) = row.uncertain_total {
+                detail.push(format!("{total} uncertain"));
+            }
             [
                 text(&row.service),
                 text(&row.kind),
@@ -1024,6 +1236,36 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
     out.push_str(&line(header));
     for row in &rows {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
+    }
+    // A slot held by an uncertain Attempt counts as occupied, so a host can look full while
+    // nothing runs. Each one is named with the command that frees it.
+    for row in &report.services {
+        for attempt in &row.uncertain_attempts {
+            out.push_str(&format!(
+                "{}: Task {} Attempt {} may have executed and keeps a slot ({}{}).\n",
+                text(&row.service),
+                text(&attempt.task_id),
+                text(&attempt.attempt_id),
+                text(&attempt.reason),
+                attempt
+                    .since
+                    .as_deref()
+                    .map_or_else(String::new, |since| format!(", since {since}")),
+            ));
+            out.push_str(&format!(
+                "  Once you confirm its execution stopped: {}\n",
+                text(&attempt.recover)
+            ));
+        }
+        if let Some(total) = row.uncertain_total
+            && total as usize > row.uncertain_attempts.len()
+        {
+            out.push_str(&format!(
+                "{}: {} more uncertain Task Attempts; list them with supertag get tasks.\n",
+                text(&row.service),
+                total as usize - row.uncertain_attempts.len()
+            ));
+        }
     }
     out
 }
@@ -1200,6 +1442,8 @@ mod tests {
             draining: None,
             attempts: None,
             capacity: None,
+            uncertain_attempts: Vec::new(),
+            uncertain_total: None,
         };
         let report = PsReport {
             state_directory: format!("/tmp/{hostile}"),
@@ -1219,6 +1463,106 @@ mod tests {
         );
         assert!(!text.contains('\x1b'), "{text}");
         assert!(text.contains("x fake line [2J"), "{text}");
+    }
+
+    #[test]
+    fn ps_lists_uncertain_attempts_with_the_command_that_frees_their_slot() {
+        use supertag_protocol::v2::HostUncertainAttempt;
+        let uncertain = |task: &str, cancelled: bool, cleanup_observed: bool| {
+            UncertainAttempt::from(&HostUncertainAttempt {
+                task_id: task.into(),
+                attempt_id: format!("{task}-attempt"),
+                reason: "its lease lapsed".into(),
+                since_ms: 1_791_000_000_000,
+                cancelled,
+                cleanup_observed,
+                ..Default::default()
+            })
+        };
+        let host = Row {
+            service: "laptop".into(),
+            kind: HOST.into(),
+            state: "running",
+            address: None,
+            pid: Some(42),
+            worker_host_id: Some("laptop".into()),
+            connected: Some(true),
+            draining: Some(false),
+            attempts: Some(2),
+            capacity: Some(2),
+            uncertain_attempts: vec![
+                uncertain("task-1", false, false),
+                uncertain("task-2", true, true),
+            ],
+            uncertain_total: Some(3),
+        };
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![host],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        // A full host with nothing running names what holds its slots.
+        assert!(text.contains("2/2 Task Attempts, 3 uncertain"), "{text}");
+        assert!(
+            text.contains(
+                "laptop: Task task-1 Attempt task-1-attempt may have executed and keeps a slot (its lease lapsed, since 2026-10-03T"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "  Once you confirm its execution stopped: supertag task resolve-attempt task-1 task-1-attempt --decision retry --evidence TEXT --confirmed-stopped\n"
+            ),
+            "{text}"
+        );
+        // A cancelled Task is only marked failed, and the host's report confirms it stopped.
+        assert!(
+            text.contains(
+                "supertag task resolve-attempt task-2 task-2-attempt --decision failed --evidence TEXT\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "laptop: 1 more uncertain Task Attempts; list them with supertag get tasks."
+            ),
+            "{text}"
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["services"][0]["uncertain_attempts"][0]["recover"],
+            "supertag task resolve-attempt task-1 task-1-attempt --decision retry --evidence TEXT --confirmed-stopped"
+        );
+    }
+
+    #[test]
+    fn host_without_uncertain_attempts_shows_nothing_extra() {
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![Row {
+                service: "laptop".into(),
+                kind: HOST.into(),
+                state: "running",
+                address: None,
+                pid: Some(42),
+                worker_host_id: Some("laptop".into()),
+                connected: Some(true),
+                draining: Some(false),
+                attempts: Some(0),
+                capacity: Some(2),
+                uncertain_attempts: Vec::new(),
+                uncertain_total: None,
+            }],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(!text.contains("ncertain"), "{text}");
+        assert!(
+            serde_json::to_value(&report).unwrap()["services"][0]
+                .get("uncertain_attempts")
+                .is_none()
+        );
     }
 
     #[test]
