@@ -1513,6 +1513,9 @@ message Task {
   optional string workspace_selection = 3500;
   // Limits the current Attempt's adapter confirmed it applies, and how; absent until it does.
   AppliedExecutionLimits applied_execution_limits = 5001;
+  // What each Attempt's read-write Workspace copies wrote back to their Volumes. Set only by
+  // GetTask; the Control Plane records the summary, never the bytes.
+  repeated AttemptWorkspaceMountWrites workspace_mount_writes = 5100;
 }
 
 message TaskArtifactInputSelection {
@@ -1993,18 +1996,66 @@ message WorkspaceCopyMount {
   uint64 max_bytes = 3;
   // Resolved and frozen by the Control Plane at Task admission.
   WorkspaceVolume volume = 4;
+  // The Worker Host writes changed and created files back to the Volume after a successful
+  // Attempt. Requires `files:write`.
+  bool read_write = 5100;
 }
 
 message WorkspaceMountCapability {
   string volume_id = 1;
   string source = 2;
   string destination_root = 3;
+  // The credential name an object-store mapping holds; empty for file Volumes.
+  string credential = 5100;
 }
 
 message WorkspaceVolume {
   string volume_id = 1;
   string source = 2;
   uint64 revision = 3;
+  // The name of the credential each Worker Host maps to reach an object-store source, never its
+  // value. Empty for file Volumes, whose host mapping is the consent.
+  string credential = 5100;
+}
+
+enum WorkspaceMountWriteStatus {
+  WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED = 0;
+  // Every changed and created file was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE = 1;
+  // Writing stopped at the first failure; `files` lists what was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL = 2;
+  // The change set exceeded a bound, so nothing was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_REFUSED = 3;
+}
+
+message WorkspaceMountWrittenFile {
+  // Path relative to the Volume source, with `/` separators.
+  string key = 1;
+  uint64 size = 2;
+  // Lowercase hex SHA-256 of the written bytes.
+  string sha256 = 3;
+}
+
+// One read-write copy's write-back, reported by the Worker Host that ran the Attempt.
+message WorkspaceMountWrite {
+  string volume_id = 1;
+  string destination = 2;
+  WorkspaceMountWriteStatus status = 3;
+  repeated WorkspaceMountWrittenFile files = 4;
+  // Files unchanged since the copy.
+  uint64 skipped = 5;
+  // The failed or refused key and why; empty when complete. A refusal
+  // whose entry has no Volume key names its nearest directory, or none
+  // for the copy root.
+  string error_key = 6;
+  string error_reason = 7;
+  // Changed keys not written, including a non-empty `error_key`.
+  repeated string not_attempted = 8;
+}
+
+message AttemptWorkspaceMountWrites {
+  string attempt_id = 1;
+  repeated WorkspaceMountWrite writes = 2;
 }
 
 message GithubWorkspaceBundle {

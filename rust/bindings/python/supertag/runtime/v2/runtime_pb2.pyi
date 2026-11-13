@@ -207,6 +207,13 @@ class ExecutionLimitEnforcement(int, metaclass=_enum_type_wrapper.EnumTypeWrappe
     EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT: _ClassVar[ExecutionLimitEnforcement]
     EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET: _ClassVar[ExecutionLimitEnforcement]
 
+class WorkspaceMountWriteStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED: _ClassVar[WorkspaceMountWriteStatus]
+    WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE: _ClassVar[WorkspaceMountWriteStatus]
+    WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL: _ClassVar[WorkspaceMountWriteStatus]
+    WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: _ClassVar[WorkspaceMountWriteStatus]
+
 class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: _ClassVar[WorkspaceArtifactKind]
@@ -392,6 +399,10 @@ EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED: ExecutionLimitEnforcement
 EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD: ExecutionLimitEnforcement
 EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT: ExecutionLimitEnforcement
 EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET: ExecutionLimitEnforcement
+WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED: WorkspaceMountWriteStatus
+WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE: WorkspaceMountWriteStatus
+WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL: WorkspaceMountWriteStatus
+WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: WorkspaceMountWriteStatus
 WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
@@ -2057,7 +2068,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection", "applied_execution_limits")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection", "applied_execution_limits", "workspace_mount_writes")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2081,6 +2092,7 @@ class Task(_message.Message):
     INPUT_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_SELECTION_FIELD_NUMBER: _ClassVar[int]
     APPLIED_EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_MOUNT_WRITES_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -2104,7 +2116,8 @@ class Task(_message.Message):
     input_artifacts: _containers.RepeatedCompositeFieldContainer[AcceptedTaskArtifactInput]
     workspace_selection: str
     applied_execution_limits: AppliedExecutionLimits
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ...) -> None: ...
+    workspace_mount_writes: _containers.RepeatedCompositeFieldContainer[AttemptWorkspaceMountWrites]
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ...) -> None: ...
 
 class TaskArtifactInputSelection(_message.Message):
     __slots__ = ("artifact_id", "paths", "require_accepted", "publication_approval_id")
@@ -2805,36 +2818,80 @@ class WorkspaceSpec(_message.Message):
     def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class WorkspaceCopyMount(_message.Message):
-    __slots__ = ("volume_id", "destination", "max_bytes", "volume")
+    __slots__ = ("volume_id", "destination", "max_bytes", "volume", "read_write")
     VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     DESTINATION_FIELD_NUMBER: _ClassVar[int]
     MAX_BYTES_FIELD_NUMBER: _ClassVar[int]
     VOLUME_FIELD_NUMBER: _ClassVar[int]
+    READ_WRITE_FIELD_NUMBER: _ClassVar[int]
     volume_id: str
     destination: str
     max_bytes: int
     volume: WorkspaceVolume
-    def __init__(self, volume_id: _Optional[str] = ..., destination: _Optional[str] = ..., max_bytes: _Optional[int] = ..., volume: _Optional[_Union[WorkspaceVolume, _Mapping]] = ...) -> None: ...
+    read_write: bool
+    def __init__(self, volume_id: _Optional[str] = ..., destination: _Optional[str] = ..., max_bytes: _Optional[int] = ..., volume: _Optional[_Union[WorkspaceVolume, _Mapping]] = ..., read_write: _Optional[bool] = ...) -> None: ...
 
 class WorkspaceMountCapability(_message.Message):
-    __slots__ = ("volume_id", "source", "destination_root")
+    __slots__ = ("volume_id", "source", "destination_root", "credential")
     VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     DESTINATION_ROOT_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
     volume_id: str
     source: str
     destination_root: str
-    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., destination_root: _Optional[str] = ...) -> None: ...
+    credential: str
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., destination_root: _Optional[str] = ..., credential: _Optional[str] = ...) -> None: ...
 
 class WorkspaceVolume(_message.Message):
-    __slots__ = ("volume_id", "source", "revision")
+    __slots__ = ("volume_id", "source", "revision", "credential")
     VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
     volume_id: str
     source: str
     revision: int
-    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., revision: _Optional[int] = ...) -> None: ...
+    credential: str
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., revision: _Optional[int] = ..., credential: _Optional[str] = ...) -> None: ...
+
+class WorkspaceMountWrittenFile(_message.Message):
+    __slots__ = ("key", "size", "sha256")
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    SIZE_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    key: str
+    size: int
+    sha256: str
+    def __init__(self, key: _Optional[str] = ..., size: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
+
+class WorkspaceMountWrite(_message.Message):
+    __slots__ = ("volume_id", "destination", "status", "files", "skipped", "error_key", "error_reason", "not_attempted")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    SKIPPED_FIELD_NUMBER: _ClassVar[int]
+    ERROR_KEY_FIELD_NUMBER: _ClassVar[int]
+    ERROR_REASON_FIELD_NUMBER: _ClassVar[int]
+    NOT_ATTEMPTED_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    destination: str
+    status: WorkspaceMountWriteStatus
+    files: _containers.RepeatedCompositeFieldContainer[WorkspaceMountWrittenFile]
+    skipped: int
+    error_key: str
+    error_reason: str
+    not_attempted: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, volume_id: _Optional[str] = ..., destination: _Optional[str] = ..., status: _Optional[_Union[WorkspaceMountWriteStatus, str]] = ..., files: _Optional[_Iterable[_Union[WorkspaceMountWrittenFile, _Mapping]]] = ..., skipped: _Optional[int] = ..., error_key: _Optional[str] = ..., error_reason: _Optional[str] = ..., not_attempted: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class AttemptWorkspaceMountWrites(_message.Message):
+    __slots__ = ("attempt_id", "writes")
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    WRITES_FIELD_NUMBER: _ClassVar[int]
+    attempt_id: str
+    writes: _containers.RepeatedCompositeFieldContainer[WorkspaceMountWrite]
+    def __init__(self, attempt_id: _Optional[str] = ..., writes: _Optional[_Iterable[_Union[WorkspaceMountWrite, _Mapping]]] = ...) -> None: ...
 
 class GithubWorkspaceBundle(_message.Message):
     __slots__ = ("workspace", "bundle")

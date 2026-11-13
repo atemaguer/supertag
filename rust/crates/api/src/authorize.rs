@@ -219,6 +219,8 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("AttemptChangedPaths", "*", HOST),
     ("AttemptEffects", "*", HOST),
     ("AttemptWorkspaceMounts", "*", HOST),
+    // A read-write Workspace copy's write-back summary, from the Attempt's own Worker Host.
+    ("AttemptWorkspaceMounts", "RecordWrites", HOST),
     ("AttemptArtifacts", "*", HOST),
     ("ArtifactTransfers", "*", HOST),
     ("Transfers", "*", HOST),
@@ -600,6 +602,8 @@ mod tests {
         assert_eq!(roles("WorkerHost/ClaimTask"), ["host"]);
         assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
+        assert_eq!(roles("AttemptWorkspaceMounts/RecordWrites"), ["host"]);
+        assert_eq!(roles("WorkspaceVolumes/Put"), ["operator"]);
         assert_eq!(
             roles("ManifestRelationships/ReconcileManifestFields"),
             ["operator"]

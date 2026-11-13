@@ -42,6 +42,9 @@ const (
 	// AttemptWorkspaceMountsPreflightProcedure is the fully-qualified name of the
 	// AttemptWorkspaceMounts's Preflight RPC.
 	AttemptWorkspaceMountsPreflightProcedure = "/supertag.runtime.v2.AttemptWorkspaceMounts/Preflight"
+	// AttemptWorkspaceMountsRecordWritesProcedure is the fully-qualified name of the
+	// AttemptWorkspaceMounts's RecordWrites RPC.
+	AttemptWorkspaceMountsRecordWritesProcedure = "/supertag.runtime.v2.AttemptWorkspaceMounts/RecordWrites"
 )
 
 // WorkspaceVolumesClient is a client for the supertag.runtime.v2.WorkspaceVolumes service.
@@ -144,6 +147,8 @@ func (UnimplementedWorkspaceVolumesHandler) Get(context.Context, *connect.Reques
 // service.
 type AttemptWorkspaceMountsClient interface {
 	Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
+	// Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
+	RecordWrites(context.Context, *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error)
 }
 
 // NewAttemptWorkspaceMountsClient constructs a client for the
@@ -163,12 +168,19 @@ func NewAttemptWorkspaceMountsClient(httpClient connect.HTTPClient, baseURL stri
 			connect.WithSchema(attemptWorkspaceMountsMethods.ByName("Preflight")),
 			connect.WithClientOptions(opts...),
 		),
+		recordWrites: connect.NewClient[runtimev2.RecordWorkspaceMountWritesRequest, runtimev2.RecordWorkspaceMountWritesResponse](
+			httpClient,
+			baseURL+AttemptWorkspaceMountsRecordWritesProcedure,
+			connect.WithSchema(attemptWorkspaceMountsMethods.ByName("RecordWrites")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptWorkspaceMountsClient implements AttemptWorkspaceMountsClient.
 type attemptWorkspaceMountsClient struct {
-	preflight *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceMountPreflight]
+	preflight    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceMountPreflight]
+	recordWrites *connect.Client[runtimev2.RecordWorkspaceMountWritesRequest, runtimev2.RecordWorkspaceMountWritesResponse]
 }
 
 // Preflight calls supertag.runtime.v2.AttemptWorkspaceMounts.Preflight.
@@ -176,10 +188,17 @@ func (c *attemptWorkspaceMountsClient) Preflight(ctx context.Context, req *conne
 	return c.preflight.CallUnary(ctx, req)
 }
 
+// RecordWrites calls supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites.
+func (c *attemptWorkspaceMountsClient) RecordWrites(ctx context.Context, req *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error) {
+	return c.recordWrites.CallUnary(ctx, req)
+}
+
 // AttemptWorkspaceMountsHandler is an implementation of the
 // supertag.runtime.v2.AttemptWorkspaceMounts service.
 type AttemptWorkspaceMountsHandler interface {
 	Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error)
+	// Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
+	RecordWrites(context.Context, *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error)
 }
 
 // NewAttemptWorkspaceMountsHandler builds an HTTP handler from the service implementation. It
@@ -195,10 +214,18 @@ func NewAttemptWorkspaceMountsHandler(svc AttemptWorkspaceMountsHandler, opts ..
 		connect.WithSchema(attemptWorkspaceMountsMethods.ByName("Preflight")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptWorkspaceMountsRecordWritesHandler := connect.NewUnaryHandler(
+		AttemptWorkspaceMountsRecordWritesProcedure,
+		svc.RecordWrites,
+		connect.WithSchema(attemptWorkspaceMountsMethods.ByName("RecordWrites")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptWorkspaceMounts/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptWorkspaceMountsPreflightProcedure:
 			attemptWorkspaceMountsPreflightHandler.ServeHTTP(w, r)
+		case AttemptWorkspaceMountsRecordWritesProcedure:
+			attemptWorkspaceMountsRecordWritesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -210,4 +237,8 @@ type UnimplementedAttemptWorkspaceMountsHandler struct{}
 
 func (UnimplementedAttemptWorkspaceMountsHandler) Preflight(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceMountPreflight], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkspaceMounts.Preflight is not implemented"))
+}
+
+func (UnimplementedAttemptWorkspaceMountsHandler) RecordWrites(context.Context, *connect.Request[runtimev2.RecordWorkspaceMountWritesRequest]) (*connect.Response[runtimev2.RecordWorkspaceMountWritesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkspaceMounts.RecordWrites is not implemented"))
 }

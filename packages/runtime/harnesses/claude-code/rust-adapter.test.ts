@@ -45,7 +45,7 @@ import {
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it } from "vitest";
-import { permissionHook } from "./src/rust-adapter/adapter.js";
+import { mountRoots, permissionHook } from "./src/rust-adapter/adapter.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const native = join(here, "fixtures/rust-native-claude.mjs");
@@ -713,6 +713,56 @@ it("denies native file access through a workspace symlink", async () => {
       { signal: new AbortController().signal },
     );
     expect(result).toMatchObject({ hookSpecificOutput: { permissionDecision: decision } });
+  }
+});
+
+it("reads staged Workspace copies and writes only read-write ones", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-claude-mounts-")));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  for (const name of ["workspace", "mounts/data", "mounts/out", "mounts/other"])
+    await mkdir(join(directory, name), { recursive: true });
+  const workspace = join(directory, "workspace");
+  const mounts = mountRoots([
+    { destination: join(directory, "mounts/data"), readWrite: false },
+    { destination: join(directory, "mounts/out"), readWrite: true },
+  ]);
+  expect(mounts).toEqual({
+    read: [join(directory, "mounts/data")],
+    write: [join(directory, "mounts/out")],
+  });
+  const hook = permissionHook(
+    ["Read", "Write"],
+    workspace,
+    new AbortController().signal,
+    new Set(),
+    [],
+    new Map(),
+    mounts,
+  );
+  for (const [tool, path, decision] of [
+    ["Read", "mounts/data/rows.csv", "allow"],
+    ["Write", "mounts/data/rows.csv", "deny"],
+    ["Read", "mounts/out/report.md", "allow"],
+    ["Write", "mounts/out/report.md", "allow"],
+    ["Read", "mounts/other/secret", "deny"],
+    ["Write", "mounts/other/secret", "deny"],
+  ] as const) {
+    const result = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "session",
+        cwd: workspace,
+        transcript_path: "",
+        tool_name: tool,
+        tool_input: { file_path: join(directory, path) },
+        tool_use_id: "tool",
+      },
+      "tool",
+      { signal: new AbortController().signal },
+    );
+    expect(result, `${tool} ${path}`).toMatchObject({
+      hookSpecificOutput: { permissionDecision: decision },
+    });
   }
 });
 

@@ -160,6 +160,11 @@ class AttemptWorkspaceMountsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.FromString,
                 _registered_method=True)
+        self.RecordWrites = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkspaceMounts/RecordWrites',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptWorkspaceMountsServicer:
@@ -173,6 +178,13 @@ class AttemptWorkspaceMountsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RecordWrites(self, request, context):
+        """Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptWorkspaceMountsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -180,6 +192,11 @@ def add_AttemptWorkspaceMountsServicer_to_server(servicer, server):
                     servicer.Preflight,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.SerializeToString,
+            ),
+            'RecordWrites': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordWrites,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -211,6 +228,33 @@ class AttemptWorkspaceMounts:
             '/supertag.runtime.v2.AttemptWorkspaceMounts/Preflight',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.WorkspaceMountPreflight.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecordWrites(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkspaceMounts/RecordWrites',
+            supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__volume__pb2.RecordWorkspaceMountWritesResponse.FromString,
             options,
             channel_credentials,
             insecure,

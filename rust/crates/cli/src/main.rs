@@ -459,7 +459,9 @@ enum Command {
         supervised_lane: Option<String>,
         #[command(flatten)]
         adapter: Box<AdapterOptions>,
-        /// Owner-controlled JSON mappings for read-only Workspace Volume copies.
+        /// Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a
+        /// destination root, and an S3 Volume's credential name to an endpoint, region, and key
+        /// variables.
         #[arg(long)]
         workspace_mount_mappings: Option<PathBuf>,
         /// Listen for authorized artifact reads from other Worker Hosts.
@@ -2630,6 +2632,7 @@ fn task_json(task: &Task) -> serde_json::Value {
             "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
         })),
         "workspace_selection": task.workspace_selection,
+        "workspace_mount_writes": workspace_mounts::describe_writes(&task.workspace_mount_writes),
         "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
         "artifacts": task.artifacts.iter().map(|selection| json!({
             "artifact_id": selection.artifact_id,

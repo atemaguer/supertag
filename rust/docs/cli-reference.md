@@ -2188,7 +2188,7 @@ Options:
           Retrieve each Workspace's accepted GitHub source from the Control Plane
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
-          Owner-controlled JSON mappings for read-only Workspace Volume copies
+          Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a destination root, and an S3 Volume's credential name to an endpoint, region, and key variables
 
       --artifact-transfer-listen <ARTIFACT_TRANSFER_LISTEN>
           Listen for authorized artifact reads from other Worker Hosts
@@ -2494,7 +2494,7 @@ Options:
       --workspace-base <WORKSPACE_BASE>
           Full local Git base commit. Omit for a configured GitHub source
       --workspace-mounts <WORKSPACE_MOUNTS>
-          JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts
+          JSON array of {volumeId,destination,maxBytes,access} for local copy mounts; access is read-only (default) or read-write
       --workspace-mcp <WORKSPACE_MCP>
           A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read from the Task's base commit. May be repeated
       --harness <HARNESS>
@@ -3044,7 +3044,7 @@ Register a file Volume for read-only Workspace data
 Usage: supertag workspace-volume [OPTIONS] <COMMAND>
 
 Commands:
-  put   Register a canonical file Volume for Workspace data
+  put   Register a Volume for Workspace data: a host directory or an S3 bucket and prefix
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -3059,7 +3059,7 @@ Options:
 ## `supertag workspace-volume put`
 
 ```text
-Register a canonical file Volume for Workspace data
+Register a Volume for Workspace data: a host directory or an S3 bucket and prefix
 
 Usage: supertag workspace-volume put [OPTIONS] --source <SOURCE> <VOLUME_ID>
 
@@ -3070,11 +3070,13 @@ Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --source <SOURCE>
-          Canonical file:///absolute/path of the data directory
-      --expected-revision <EXPECTED_REVISION>
-          The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
+          Canonical file:///absolute/path of the data directory, or s3://bucket/prefix
+      --credential <CREDENTIAL>
+          For an s3:// source, the credential name each serving Worker Host maps; never a secret
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
+      --expected-revision <EXPECTED_REVISION>
+          The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
   -h, --help
           Print help
 ```

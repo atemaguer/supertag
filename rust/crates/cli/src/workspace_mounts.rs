@@ -11,12 +11,15 @@ use crate::{Connection, connect_operator, request};
 
 #[derive(Subcommand)]
 pub enum VolumeCommand {
-    /// Register a canonical file Volume for Workspace data.
+    /// Register a Volume for Workspace data: a host directory or an S3 bucket and prefix.
     Put {
         volume_id: String,
-        /// Canonical file:///absolute/path of the data directory.
+        /// Canonical file:///absolute/path of the data directory, or s3://bucket/prefix.
         #[arg(long)]
         source: String,
+        /// For an s3:// source, the credential name each serving Worker Host maps; never a secret.
+        #[arg(long)]
+        credential: Option<String>,
         /// The revision you last read, or 0 to create. The change is refused when it no longer matches.
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
@@ -30,6 +33,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
         VolumeCommand::Put {
             volume_id,
             source,
+            credential,
             expected_revision,
         } => {
             client
@@ -38,6 +42,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
                         volume_id,
                         source,
                         expected_revision,
+                        credential: credential.unwrap_or_default(),
                     },
                     &token,
                 )?)
@@ -50,7 +55,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
 }
 
 fn volume_json(volume: &WorkspaceVolume) -> Value {
-    json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision})
+    json!({"volume_id":volume.volume_id,"source":volume.source,"credential":(!volume.credential.is_empty()).then_some(&volume.credential),"revision":volume.revision})
 }
 
 pub(crate) async fn fetch(
@@ -76,6 +81,15 @@ pub fn read_declarations(
         volume_id: String,
         destination: String,
         max_bytes: u64,
+        #[serde(default)]
+        access: Access,
+    }
+    #[derive(serde::Deserialize, Default, PartialEq)]
+    #[serde(rename_all = "kebab-case")]
+    enum Access {
+        #[default]
+        ReadOnly,
+        ReadWrite,
     }
     let mut bytes = Vec::new();
     std::fs::File::open(path)?
@@ -94,6 +108,7 @@ pub fn read_declarations(
             destination: value.destination,
             max_bytes: value.max_bytes,
             volume: None,
+            read_write: value.access == Access::ReadWrite,
         })
         .collect())
 }
@@ -107,10 +122,45 @@ pub fn describe(mounts: &[supertag_protocol::v2::WorkspaceCopyMount]) -> serde_j
                 "volume_id": mount.volume_id,
                 "destination": mount.destination,
                 "max_bytes": mount.max_bytes,
+                "access": if mount.read_write { "read-write" } else { "read-only" },
                 "volume": mount.volume.as_ref().map(|volume| json!({
                     "source": volume.source,
+                    "credential": (!volume.credential.is_empty()).then_some(&volume.credential),
                     "revision": volume.revision,
                 })),
+            })
+        })
+        .collect()
+}
+
+/// Operator JSON for what each Attempt's read-write copies wrote back.
+pub fn describe_writes(
+    attempts: &[supertag_protocol::v2::AttemptWorkspaceMountWrites],
+) -> serde_json::Value {
+    use supertag_protocol::v2::WorkspaceMountWriteStatus;
+    attempts
+        .iter()
+        .map(|attempt| {
+            json!({
+                "attempt_id": attempt.attempt_id,
+                "writes": attempt.writes.iter().map(|write| json!({
+                    "volume_id": write.volume_id,
+                    "destination": write.destination,
+                    "status": match WorkspaceMountWriteStatus::try_from(write.status) {
+                        Ok(WorkspaceMountWriteStatus::Complete) => "complete",
+                        Ok(WorkspaceMountWriteStatus::Partial) => "partial",
+                        Ok(WorkspaceMountWriteStatus::Refused) => "refused",
+                        _ => "unknown",
+                    },
+                    "files": write.files.iter().map(|file| json!({
+                        "key": file.key, "size": file.size, "sha256": file.sha256,
+                    })).collect::<Vec<_>>(),
+                    "skipped": write.skipped,
+                    "error": (!write.error_key.is_empty() || !write.error_reason.is_empty()).then(|| json!({
+                        "key": write.error_key, "reason": write.error_reason,
+                    })),
+                    "not_attempted": write.not_attempted,
+                })).collect::<Vec<_>>(),
             })
         })
         .collect()

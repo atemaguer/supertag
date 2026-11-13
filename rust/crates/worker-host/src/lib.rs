@@ -50,7 +50,8 @@ use supertag_protocol::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
         HostRecord, InspectAttemptRequest, ReclaimAttemptRequest, RecordWorkspaceMcpRequest,
-        RegisterHostRequest, ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState,
+        RecordWorkspaceMountWritesRequest, RegisterHostRequest, ResolvedSkill, ServiceRole,
+        StartTaskRequest, Task, TaskState, WorkspaceMountWriteStatus,
         artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
@@ -295,12 +296,12 @@ pub async fn run(
     let local_roots: Vec<&std::path::Path> = local_roots.iter().map(PathBuf::as_path).collect();
     if !options.workspace_mounts.is_empty() {
         ensure!(
-            options.harness == HarnessKind::Codex
+            supertag_protocol::workspace_mounts::mount_harness(options.harness)
                 && !options.workspaces.is_empty()
                 && local_roots.len() == options.workspaces.len()
                 && options.remote_provider.is_none()
                 && options.shared_execution.is_none(),
-            "Workspace copy mounts require a local Codex Worker Host"
+            "Workspace copy mounts require a local Codex or Claude Code Worker Host"
         );
         let state_directory = options.state_directory.clone();
         let artifact_storage = options
@@ -674,6 +675,64 @@ pub async fn run(
                         )?,
                     }
                     continue;
+                }
+                if succeeded && !options.workspace_mounts.is_empty() {
+                    // Read-write copies are written back directly to their
+                    // Volumes; the Control Plane records only the summary.
+                    let cancellation = shutdown.child_token();
+                    let mounts = options.workspace_mounts.clone();
+                    let state = options.state_directory.clone();
+                    let attempt_id = attempt.attempt_id.clone();
+                    let copy_cancel = cancellation.clone();
+                    let mut client = coordination.workspace_mounts.clone();
+                    let reported = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
+                        let writes = tokio::task::spawn_blocking(move || {
+                            workspace_mounts::write_back(&mounts, &state, &attempt_id, &copy_cancel)
+                        })
+                        .await
+                        .map_err(|_| Status::internal("Workspace Volume write-back failed"))?
+                        .map_err(|error| {
+                            supertag_protocol::terminal_text::warn(&format!(
+                                "Workspace Volume write-back failed: {error:#}"
+                            ));
+                            Status::failed_precondition("Workspace Volume write-back failed")
+                        })?;
+                        if writes.is_empty() {
+                            return Ok(true);
+                        }
+                        let complete = writes
+                            .iter()
+                            .all(|write| write.status == WorkspaceMountWriteStatus::Complete as i32);
+                        let report = RecordWorkspaceMountWritesRequest {
+                            task_id: attempt.task_id.clone(),
+                            attempt_id: attempt.attempt_id.clone(),
+                            lease_token: attempt.lease_token.clone(),
+                            writes,
+                        };
+                        client
+                            .record_writes(request(report, &token).map_err(|_| Status::internal("Workspace Volume write-back failed"))?)
+                            .await
+                            .map(|_| complete)
+                    })
+                    .await;
+                    match reported {
+                        Ok((true, _)) => {}
+                        // A partial or refused write-back fails the Task; its
+                        // summary is recorded for `describe task`.
+                        Ok((false, _)) => {
+                            save_finish(&journal, attempt, adapter::failed("Workspace Volume write-back was partial or refused"))?;
+                            continue;
+                        }
+                        Err(_) if shutdown.is_cancelled() => return Ok(()),
+                        Err(error) if retryable(&error) => {
+                            wait_for_work(&shutdown).await;
+                            continue;
+                        }
+                        Err(_) => {
+                            save_finish(&journal, attempt, adapter::failed("Workspace Volume write-back failed"))?;
+                            continue;
+                        }
+                    }
                 }
                 let cancellation = shutdown.child_token();
                 let finalization = with_authority(

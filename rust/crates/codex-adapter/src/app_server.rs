@@ -1169,6 +1169,7 @@ mod tests {
         // starts a turn, reads native credentials, or calls a model provider.
         let mut params = crate::config::thread_parameters(
             &workspace,
+            &policy,
             &crate::config::arguments(&workspace, None, None, &policy)?,
         )?;
         params["dynamicTools"] =

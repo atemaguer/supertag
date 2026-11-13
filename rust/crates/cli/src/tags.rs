@@ -65,7 +65,8 @@ pub struct PutArgs {
     /// Full local Git base commit. Omit for a configured GitHub source.
     #[arg(long, requires = "workspace_id")]
     workspace_base: Option<String>,
-    /// JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts.
+    /// JSON array of {volumeId,destination,maxBytes,access} for local copy mounts; access is
+    /// read-only (default) or read-write.
     #[arg(long, requires = "workspace_base")]
     workspace_mounts: Option<PathBuf>,
     /// A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read

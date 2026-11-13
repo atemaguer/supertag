@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fake Codex app server that reads staged read-only Workspace Volume copies."""
+"""Fake Codex app server that reads staged Workspace Volume copies and edits read-write ones."""
 import json
 import os
 from pathlib import Path
@@ -9,10 +9,16 @@ if sys.argv[1:] == ["--version"]:
     print("codex-cli 0.163.0")
     sys.exit(0)
 assert sys.argv[1:4] == ["app-server", "--listen", "stdio://"]
-assert 'sandbox_mode="read-only"' in sys.argv
+READ_ONLY = 'sandbox_mode="read-only"' in sys.argv
+# A read-write copy is the only writable root besides the checkout.
+WRITE_GRANTS = [arg for arg in sys.argv if arg.startswith("permissions.supertag.filesystem=")]
+if not READ_ONLY:
+    assert 'permissions.supertag.extends=":workspace"' in sys.argv
+    assert len(WRITE_GRANTS) == 1 and '= "write"' in WRITE_GRANTS[0], sys.argv
 for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_CREDENTIAL"]:
     assert not os.environ.get(name)
 MARKER = "Read-only Workspace data is available at these paths: "
+WRITABLE = "Read-write Workspace data is available at these paths: "
 thread = "mount-thread"
 turn = "mount-turn"
 
@@ -29,7 +35,26 @@ def notify(method, params):
     emit({"method": method, "params": params})
 
 
+def edit(prompt):
+    start = prompt.index(WRITABLE) + len(WRITABLE)
+    paths, _ = json.JSONDecoder().raw_decode(prompt[start:])
+    lines = []
+    for path in map(Path, paths):
+        assert f'"{path}" = "write"' in WRITE_GRANTS[0], WRITE_GRANTS
+        rows = path.joinpath("rows.csv").read_text()
+        path.joinpath("rows.csv").write_text(rows.replace("42", "43"))
+        path.joinpath("reports").mkdir()
+        path.joinpath("reports", "new.txt").write_text("created")
+        path.joinpath("nested", "notes.txt").unlink()
+        if "with a hard link" in prompt:
+            os.link(path.joinpath("rows.csv"), path.joinpath("alias.csv"))
+        lines.append(f"edited {path.name}")
+    return "\n".join(lines)
+
+
 def inspect(prompt):
+    if WRITABLE in prompt:
+        return edit(prompt)
     start = prompt.index(MARKER) + len(MARKER)
     paths, _ = json.JSONDecoder().raw_decode(prompt[start:])
     lines = []
@@ -60,7 +85,12 @@ for line in sys.stdin:
     elif method == "skills/list":
         reply(request, {"data": [{"cwd": str(Path.cwd()), "skills": [], "errors": []}]})
     elif method in ("thread/start", "thread/resume"):
-        assert request["params"]["sandbox"] == "read-only"
+        if READ_ONLY:
+            assert request["params"]["sandbox"] == "read-only"
+        else:
+            assert "sandbox" not in request["params"]
+            grants = request["params"]["config"]["permissions.supertag.filesystem"]
+            assert "write" in grants.values(), grants
         sessions = Path(os.environ["CODEX_HOME"]).joinpath("sessions")
         sessions.mkdir(exist_ok=True)
         records = [{"type": "session_meta", "payload": {"id": thread, "cwd": str(Path.cwd())}}, {"type": "response_item", "payload": {"role": "user", "content": [{"type": "input_text", "text": "mount history"}]}}]

@@ -8,6 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+aws-credential-types = "1.2.14"
+aws-sigv4 = { version = "1.4.2", default-features = false, features = ["sign-http", "http1"] }
 hmac.workspace = true
 libc.workspace = true
 prost.workspace = true
@@ -28,3 +30,7 @@ tokio-util.workspace = true
 tonic.workspace = true
 uuid.workspace = true
 base64 = "0.22"
+tracing = "0.1"
+
+[dev-dependencies]
+axum = "0.8"

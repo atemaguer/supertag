@@ -91,7 +91,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 74;
+        const SCHEMA_VERSION: i64 = 75;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -252,6 +252,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0072_coordination_observation.sql"),
                 include_str!("../migrations/sqlite/0073_objective_notice_homes.sql"),
                 include_str!("../migrations/sqlite/0074_manifest_ownership.sql"),
+                include_str!("../migrations/sqlite/0075_workspace_mount_writes.sql"),
             ]
         } else {
             [
@@ -331,6 +332,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0072_coordination_observation.sql"),
                 include_str!("../migrations/postgresql/0073_objective_notice_homes.sql"),
                 include_str!("../migrations/postgresql/0074_manifest_ownership.sql"),
+                include_str!("../migrations/postgresql/0075_workspace_mount_writes.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -639,7 +641,10 @@ impl Store {
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
-        task_row(&row)
+        let mut task = task_row(&row)?;
+        task.workspace_mount_writes =
+            crate::workspace_mounts::writes_for(&self.pool, task_id).await?;
+        Ok(task)
     }
 
     pub async fn cancel_task(&self, task_id: &str) -> Result<Task> {
@@ -2119,6 +2124,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
             .as_deref()
             .map(crate::policy::decode)
             .transpose()?,
+        workspace_mount_writes: vec![],
     })
 }
 
