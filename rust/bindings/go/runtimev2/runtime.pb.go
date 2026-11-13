@@ -29,8 +29,9 @@ const (
 	ApplySetPruneAction_APPLY_SET_PRUNE_ACTION_DELETE ApplySetPruneAction = 1
 	// The member is still in use. It stays in the set for the next prune.
 	ApplySetPruneAction_APPLY_SET_PRUNE_ACTION_KEEP ApplySetPruneAction = 2
-	// Another writer changed the member after this apply set last applied it.
-	// It is left in place and leaves the set.
+	// Another writer changed the member after this apply set last applied it,
+	// or the set claimed it but never recorded creating it. It is left in place
+	// and leaves the set.
 	ApplySetPruneAction_APPLY_SET_PRUNE_ACTION_RELEASE ApplySetPruneAction = 3
 	// The member no longer exists. It leaves the set.
 	ApplySetPruneAction_APPLY_SET_PRUNE_ACTION_FORGET ApplySetPruneAction = 4
@@ -1757,8 +1758,10 @@ type ApplySetDeclaration struct {
 	// The resource's revision as this apply left it: the revision its write
 	// returned, or the revision it planned against when it did not write.
 	Revision uint64 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
-	// True when this apply created the resource. Only a resource an apply set
-	// created joins it; an existing resource is never adopted.
+	// True when this apply is about to create the resource. Declaring a missing
+	// resource as created claims it for the set before the write, and the next
+	// reconcile that finds it records it as a member. Only a resource an apply
+	// set claimed joins it; an existing resource is never adopted.
 	Created       bool `protobuf:"varint,4,opt,name=created,proto3" json:"created,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

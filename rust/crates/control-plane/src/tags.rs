@@ -217,12 +217,16 @@ pub(crate) async fn active_revision_in(
     Ok(revision.map(|value| value as u64))
 }
 
-/// Retires an active, unused Tag at `expected_revision`, as `retire_tag` does.
+/// Retires an active, unused Tag at `expected_revision` for `apply_set`, as
+/// `retire_tag` does. Retiring removes the Tag's Host scopes, Mailbox grants
+/// and Role assignments, so it is also in use while any of them was made by
+/// someone other than `apply_set`.
 pub(crate) async fn retire_in(
     tx: &mut Transaction<'_, Any>,
     tag_id: &str,
     expected_revision: u64,
     now_ms: i64,
+    apply_set: &str,
 ) -> Result<()> {
     if active_revision_in(tx, tag_id).await? != Some(expected_revision) {
         return Err(StoreError::Conflict("Tag revision changed".into()));
@@ -240,6 +244,7 @@ pub(crate) async fn retire_in(
     if let Some(location) = location {
         blockers.push(format!("Surface location {location}"));
     }
+    blockers.extend(foreign_bindings(tx, tag_id, apply_set).await?);
     if !blockers.is_empty() {
         return Err(StoreError::FailedPrecondition(format!(
             "Tag {tag_id} is in use by {}",
@@ -248,6 +253,96 @@ pub(crate) async fn retire_in(
     }
     retire_unused_in(tx, tag_id, now_ms).await?;
     Ok(())
+}
+
+/// What retiring the Tag would remove that `apply_set` did not make: Host
+/// scopes, grants letting it message another Tag, and grants and Role
+/// assignments on it that the set's manifest relationships do not own at
+/// their current version.
+async fn foreign_bindings(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    apply_set: &str,
+) -> Result<Vec<String>> {
+    let mut reasons = Vec::new();
+    let owned = sqlx::query(
+        "SELECT kind,related_id,observed_version FROM supertag_v2_manifest_relationships
+         WHERE tag_id=$1 AND manager=$2",
+    )
+    .bind(tag_id)
+    .bind(apply_set)
+    .fetch_all(&mut **tx)
+    .await?
+    .iter()
+    .map(|row| -> Result<(String, String, String)> {
+        Ok((
+            row.try_get("kind")?,
+            row.try_get("related_id")?,
+            row.try_get("observed_version")?,
+        ))
+    })
+    .collect::<Result<std::collections::BTreeSet<_>>>()?;
+    let hosts: Vec<String> = sqlx::query_scalar(
+        "SELECT host_id FROM supertag_v2_host_tags WHERE tag_id=$1 ORDER BY host_id LIMIT 10",
+    )
+    .bind(tag_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    reasons.extend(hosts.into_iter().map(|host| format!("Host {host} (scope)")));
+    let recipients: Vec<String> = sqlx::query_scalar(
+        "SELECT recipient_tag_id FROM supertag_v2_mailbox_grants
+         WHERE sender_tag_id=$1 ORDER BY recipient_tag_id LIMIT 10",
+    )
+    .bind(tag_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    reasons.extend(
+        recipients
+            .into_iter()
+            .map(|recipient| format!("Tag {recipient} (accepts messages from it)")),
+    );
+    let grants = sqlx::query(
+        "SELECT sender_tag_id,granted_by,granted_at_ms FROM supertag_v2_mailbox_grants
+         WHERE recipient_tag_id=$1 ORDER BY sender_tag_id",
+    )
+    .bind(tag_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in grants {
+        let sender: String = row.try_get("sender_tag_id")?;
+        let version = format!(
+            "{}:{}",
+            row.try_get::<String, _>("granted_by")?,
+            row.try_get::<i64, _>("granted_at_ms")?
+        );
+        if !owned.contains(&("acceptsMessagesFrom".into(), sender.clone(), version)) {
+            reasons.push(format!(
+                "a Mailbox grant from Tag {sender} not made by apply set {apply_set}"
+            ));
+        }
+    }
+    let assignments = sqlx::query(
+        "SELECT role_id,assignment_id,revision FROM supertag_v2_role_assignments
+         WHERE tag_id=$1 AND status=$2 ORDER BY role_id",
+    )
+    .bind(tag_id)
+    .bind(RoleAssignmentStatus::Active as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in assignments {
+        let role: String = row.try_get("role_id")?;
+        let version = format!(
+            "{}:{}",
+            row.try_get::<String, _>("assignment_id")?,
+            row.try_get::<i64, _>("revision")?
+        );
+        if !owned.contains(&("roles".into(), role.clone(), version)) {
+            reasons.push(format!(
+                "a Role {role} assignment not made by apply set {apply_set}"
+            ));
+        }
+    }
+    Ok(reasons)
 }
 
 async fn blockers(tx: &mut Transaction<'_, Any>, tag_id: &str) -> Result<Vec<String>> {

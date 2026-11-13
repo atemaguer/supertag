@@ -568,18 +568,24 @@ release Volume/archive: changed outside apply set engineering after it was appli
 ```
 
 - `delete` or `retire` removes the member. Tags and Roles are retired, keeping their history.
-- `keep` leaves a member that something still uses. It stays in the set for the next prune.
+- `keep` leaves a member that something still uses. It stays in the set for the next prune. A Tag
+  is also in use while it has a Host scope, a Role assignment or Mailbox grant the set's own
+  `roles` and `acceptsMessagesFrom` did not make, or a grant letting it message another Tag,
+  because retiring it would remove them.
 - `release` leaves a member that another writer changed after the set last applied it, and
   removes it from the set. A member that a second set also declares leaves both sets the same way.
+  So does a resource an interrupted apply was creating that the set never recorded, if the input
+  stops declaring it before an apply of the set finishes.
 - `forget` drops a member that no longer exists, such as a `SurfaceLocation` removed when its Tag
   was retired. Deleting or retiring a member with a command removes it from its set directly.
 
-`diff` previews the prune against the current state and changes nothing. `apply` writes the
-declared resources first, then records membership and prunes in one Control Plane write, so a
-prune either finishes completely or changes nothing. A concurrent write waits for that write, and
-a member it changes first is released instead of removed. If an apply fails partway, nothing is
-pruned and the resources it already created stay in the set; run the same command again to
-finish.
+`diff` previews the prune against the current state and changes nothing. `apply` first claims
+for the set every resource it is about to create, then writes the declared resources, then
+records membership and prunes in one Control Plane write, so a prune either finishes completely
+or changes nothing. A concurrent write waits for that write, and a member it changes first is
+released instead of removed. If an apply fails or is interrupted partway, even after a create
+whose reply never arrived, nothing is pruned and the resources it created stay claimed by the
+set; run the same command again to finish recording them.
 
 ### supertag.yaml is not a manifest
 

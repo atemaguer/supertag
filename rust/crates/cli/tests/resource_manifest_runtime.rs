@@ -6,7 +6,8 @@ use sqlx::{Connection, Executor};
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        GetTagRequest, GetTaskRequest, ProvisionTag, ProvisionTagsRequest, PutTagRequest,
+        ApplySetDeclaration, GetTagRequest, GetTaskRequest, ProvisionTag, ProvisionTagsRequest,
+        PutTagRequest, ReconcileApplySetRequest,
         manifest_relationships_client::ManifestRelationshipsClient,
         operator_client::OperatorClient,
     },
@@ -421,6 +422,7 @@ spec: {purpose: Observe releases.}
     assert_eq!(grants["grants"].as_array().unwrap().len(), 2);
 
     prune_apply_set(root, &gateway).await?;
+    resume_apply_set(root, &gateway).await?;
 
     gateway_process.kill().await?;
     plane.kill().await?;
@@ -434,6 +436,154 @@ async fn volume_exists(gateway: &str, id: &str) -> Result<bool> {
     )
     .await??;
     Ok(output.status.success())
+}
+
+/// An apply set still owns what a failed or interrupted apply created, and
+/// rerunning the same apply finishes it.
+async fn resume_apply_set(root: &Path, gateway: &str) -> Result<()> {
+    let set = root.join("resume-set");
+    std::fs::create_dir(&set)?;
+    let path = set.to_str().context("resume set path")?;
+    let resources = set.join("resources.yaml");
+    // Only the Control Plane refuses to lower an Objective's budget, and an
+    // Objective is written last: an apply that lowers it fails after creating
+    // every other resource.
+    let goal = |budget: u64| {
+        format!(
+            "apiVersion: supertag/v1\nkind: Objective\nmetadata: {{name: resume-goal}}\n\
+             spec: {{ownerTag: builder, outcome: \"Finish.\", budgetLimitMinor: {budget}, budgetCurrency: USD}}\n"
+        )
+    };
+    let existing = root.join("resume-goal.yaml");
+    std::fs::write(&existing, goal(200))?;
+    command(gateway, &["apply", "-f", existing.to_str().unwrap()], true).await?;
+    let manifest = |budget: u64| {
+        format!(
+            r#"
+apiVersion: supertag/v1
+kind: Volume
+metadata: {{name: resume-a}}
+spec: {{source: "file:///srv/resume-a"}}
+---
+apiVersion: supertag/v1
+kind: Volume
+metadata: {{name: resume-crashed}}
+spec: {{source: "file:///srv/resume-crashed"}}
+---
+apiVersion: supertag/v1
+kind: ContextSet
+metadata: {{name: resume-context}}
+spec: {{items: []}}
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: {{name: resume-worker}}
+spec: {{instructions: "Finish the work."}}
+---
+apiVersion: supertag/v1
+kind: Team
+metadata: {{name: resume-crew}}
+spec: {{members: [resume-worker]}}
+---
+{}"#,
+            goal(budget)
+        )
+    };
+
+    // A previous run was interrupted after creating a Volume and before it
+    // recorded membership: it had claimed the Volume first.
+    let mut client = ManifestRelationshipsClient::connect(gateway.to_owned()).await?;
+    client
+        .reconcile_apply_set(authenticated_request(
+            ReconcileApplySetRequest {
+                apply_set: "resume".into(),
+                declared: vec![ApplySetDeclaration {
+                    kind: "Volume".into(),
+                    name: "resume-crashed".into(),
+                    revision: 0,
+                    created: true,
+                }],
+                prune: false,
+                preview: false,
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?;
+    command(
+        gateway,
+        &[
+            "volume",
+            "put",
+            "resume-crashed",
+            "--source",
+            "file:///srv/resume-crashed",
+            "--operation-id",
+            "resume-crashed",
+        ],
+        true,
+    )
+    .await?;
+
+    // This run creates every prunable resource, then fails.
+    std::fs::write(&resources, manifest(100))?;
+    let error = command(gateway, &["apply", "-f", path, "--set", "resume"], false).await?;
+    assert!(error.contains("Objective/resume-goal"), "{error}");
+    assert!(volume_exists(gateway, "resume-a").await?, "{error}");
+    // It pruned nothing and still owns what it created.
+    let partial = command(
+        gateway,
+        &["diff", "-f", path, "--set", "resume", "--prune"],
+        true,
+    )
+    .await?;
+    assert!(!partial.contains("delete "), "{partial}");
+
+    // Rerunning the corrected input finishes the apply.
+    std::fs::write(&resources, manifest(200))?;
+    command(gateway, &["apply", "-f", path, "--set", "resume"], true).await?;
+
+    // Every resource either run created belongs to the set.
+    std::fs::write(
+        &resources,
+        "apiVersion: supertag/v1\nkind: Volume\nmetadata: {name: resume-keep}\nspec: {source: \"file:///srv/resume-keep\"}\n",
+    )?;
+    let expected = "delete Team/resume-crew\n\
+         retire Tag/resume-worker\n\
+         delete ContextSet/resume-context\n\
+         delete Volume/resume-a\n\
+         delete Volume/resume-crashed";
+    let preview = command(
+        gateway,
+        &["diff", "-f", path, "--set", "resume", "--prune"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        preview.trim(),
+        format!("create Volume/resume-keep\n{expected}"),
+        "{preview}"
+    );
+    let applied = command(
+        gateway,
+        &["apply", "-f", path, "--set", "resume", "--prune"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        applied.trim(),
+        format!(
+            "configured Volume/resume-keep\n{}",
+            expected
+                .replace("delete ", "deleted ")
+                .replace("retire ", "retired ")
+        ),
+        "{applied}"
+    );
+    for removed in ["resume-a", "resume-crashed"] {
+        assert!(!volume_exists(gateway, removed).await?, "{removed}");
+    }
+    Ok(())
 }
 
 async fn prune_apply_set(root: &Path, gateway: &str) -> Result<()> {

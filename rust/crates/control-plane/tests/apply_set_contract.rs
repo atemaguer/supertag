@@ -46,6 +46,15 @@ async fn reconcile(
         .collect()
 }
 
+/// Claims resources an apply is about to create, as the CLI does before writing.
+async fn claim(store: &Store, set: &str, items: &[(&str, &str)]) {
+    let claims = items
+        .iter()
+        .map(|(kind, name)| declared(kind, name, 0, true))
+        .collect();
+    assert!(reconcile(store, set, claims, false, false).await.is_empty());
+}
+
 async fn volume(store: &Store, id: &str, expected: u64, source: &str) -> ArtifactVolume {
     store
         .put_artifact_volume(
@@ -92,7 +101,23 @@ async fn team(store: &Store, id: &str, members: &[&str]) -> Team {
 async fn exercise(url: &str) {
     let store = Store::open(url).await.unwrap();
 
-    // Resources the set creates, which depend on one another.
+    // Resources the set creates, which depend on one another. The set claims
+    // them before it creates them.
+    claim(
+        &store,
+        "team-a",
+        &[
+            ("Tag", "builder"),
+            ("ContextSet", "practice"),
+            ("Role", "Engineer"),
+            ("Team", "crew"),
+            ("Volume", "owned"),
+            ("Volume", "edited"),
+            ("Volume", "shared"),
+            ("Team", "replaced"),
+        ],
+    )
+    .await;
     let tag = store
         .put_tag_spec(PutTagRequest {
             tag_id: "builder".into(),
@@ -166,6 +191,8 @@ async fn exercise(url: &str) {
         declared("Team", "replaced", replaced.revision, true),
         // Declared by the set but not created by it: never adopted.
         declared("Volume", "imperative", imperative.revision, false),
+        // Claiming an existing resource adopts nothing either.
+        declared("Volume", "untouched", 1, true),
     ];
     assert!(
         reconcile(&store, "team-a", first.clone(), true, false)
@@ -333,6 +360,7 @@ async fn exercise(url: &str) {
 
     // A writer racing a prune is serialized: either the prune sees the edit and
     // releases the member, or the edit loses to the deletion. Never both.
+    claim(&store, "team-a", &[("Volume", "raced")]).await;
     let raced = volume(&store, "raced", 0, "file:///srv/raced").await;
     reconcile(
         &store,
@@ -364,6 +392,9 @@ async fn exercise(url: &str) {
         outcome => panic!("prune and write did not serialize: {outcome:?}"),
     }
 
+    resumable(&store).await;
+    foreign_tag_bindings(&store).await;
+
     // Names are validated, and pruning needs a named set.
     for set in ["", "apply", "cli", "Team-A"] {
         assert!(matches!(
@@ -394,6 +425,235 @@ async fn exercise(url: &str) {
         Err(StoreError::InvalidArgument(_))
     ));
     store.close().await;
+}
+
+/// An apply that stops after a create, before it records membership, still
+/// owns what it created: rerunning it records the member.
+async fn resumable(store: &Store) {
+    claim(
+        store,
+        "team-c",
+        &[
+            ("Volume", "resumed"),
+            ("Volume", "never"),
+            ("Volume", "orphan"),
+        ],
+    )
+    .await;
+    // The first run creates two Volumes, then stops before recording them.
+    let resumed = volume(store, "resumed", 0, "file:///srv/resumed").await;
+    volume(store, "orphan", 0, "file:///srv/orphan").await;
+    // The rerun finds the first Volume already there and declares it as existing.
+    assert!(
+        reconcile(
+            store,
+            "team-c",
+            vec![
+                declared("Volume", "resumed", resumed.revision, false),
+                declared("Volume", "orphan", 1, true),
+                declared("Volume", "never", 0, true),
+            ],
+            false,
+            false,
+        )
+        .await
+        .is_empty()
+    );
+    // Without a recorded write, a claimed resource is released, never removed;
+    // a claim whose resource was never created is forgotten.
+    let orphan = store
+        .reconcile_apply_set(
+            OP,
+            &ReconcileApplySetRequest {
+                apply_set: "team-c".into(),
+                declared: vec![declared("Volume", "resumed", resumed.revision, false)],
+                prune: true,
+                preview: false,
+            },
+        )
+        .await
+        .unwrap()
+        .pruned;
+    assert_eq!(
+        orphan
+            .iter()
+            .map(|item| (format!("{}/{}", item.kind, item.name), item.action()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Volume/never".to_owned(), ApplySetPruneAction::Forget),
+            ("Volume/orphan".to_owned(), ApplySetPruneAction::Delete),
+        ]
+    );
+    assert!(!volume_exists(store, "orphan").await);
+
+    claim(store, "team-c", &[("Volume", "stray")]).await;
+    volume(store, "stray", 0, "file:///srv/stray").await;
+    let stray = store
+        .reconcile_apply_set(
+            OP,
+            &ReconcileApplySetRequest {
+                apply_set: "team-c".into(),
+                declared: vec![declared("Volume", "resumed", resumed.revision, false)],
+                prune: true,
+                preview: false,
+            },
+        )
+        .await
+        .unwrap()
+        .pruned;
+    assert_eq!(stray.len(), 1);
+    assert_eq!(stray[0].action(), ApplySetPruneAction::Release);
+    assert_eq!(
+        stray[0].reason,
+        "apply set team-c claimed it but never recorded creating it"
+    );
+    assert!(volume_exists(store, "stray").await);
+
+    assert_eq!(
+        reconcile(store, "team-c", vec![], true, false).await,
+        vec![("Volume/resumed".to_owned(), ApplySetPruneAction::Delete)]
+    );
+    assert!(!volume_exists(store, "resumed").await);
+}
+
+async fn tag(store: &Store, id: &str) -> Tag {
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: id.into(),
+            instructions: "Review releases".into(),
+            expected_revision: Some(0),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+}
+
+/// Retiring a Tag removes its grants and Role assignments, so prune keeps a
+/// Tag while any of them belongs to someone other than the set.
+async fn foreign_tag_bindings(store: &Store) {
+    claim(store, "team-d", &[("Tag", "messenger")]).await;
+    let messenger = tag(store, "messenger").await;
+    // Another set's Tag accepts messages from the set's Tag, the set's Tag
+    // accepts messages from it, and the operator assigns a Role imperatively.
+    let listener = tag(store, "listener").await;
+    store
+        .reconcile_tag_relationships(
+            OP,
+            &ReconcileTagRelationshipsRequest {
+                tag_id: listener.tag_id.clone(),
+                manager: "team-e".into(),
+                mailbox_senders: vec![messenger.tag_id.clone()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .reconcile_tag_relationships(
+            OP,
+            &ReconcileTagRelationshipsRequest {
+                tag_id: messenger.tag_id.clone(),
+                manager: "team-d".into(),
+                mailbox_senders: vec![listener.tag_id.clone()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let role = store
+        .put_role(
+            OP,
+            &PutRoleRequest {
+                operation_id: op(),
+                role: Some(Role {
+                    role_id: "reviewer-id".into(),
+                    name: "Reviewer".into(),
+                    purpose: "Review releases".into(),
+                    ..Default::default()
+                }),
+                expected_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+    let assignment = store
+        .assign_role(
+            OP,
+            &AssignRoleRequest {
+                operation_id: op(),
+                role: role.role_id.clone(),
+                tag_id: messenger.tag_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let revision = store.get_tag("messenger").await.unwrap().revision;
+    reconcile(
+        store,
+        "team-d",
+        vec![declared("Tag", "messenger", revision, true)],
+        false,
+        false,
+    )
+    .await;
+
+    let kept = store
+        .reconcile_apply_set(
+            OP,
+            &ReconcileApplySetRequest {
+                apply_set: "team-d".into(),
+                prune: true,
+                preview: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .pruned;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].action(), ApplySetPruneAction::Keep);
+    assert_eq!(
+        kept[0].reason,
+        "Tag messenger is in use by Tag listener (accepts messages from it), \
+         a Role reviewer-id assignment not made by apply set team-d"
+    );
+
+    // Once the other set and the operator remove theirs, the set's own grant
+    // goes with the Tag.
+    store
+        .reconcile_tag_relationships(
+            OP,
+            &ReconcileTagRelationshipsRequest {
+                tag_id: listener.tag_id.clone(),
+                manager: "team-e".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .deactivate_role_assignment(
+            OP,
+            &DeactivateRoleAssignmentRequest {
+                operation_id: op(),
+                assignment_id: assignment.assignment_id,
+                expected_revision: assignment.revision,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reconcile(store, "team-d", vec![], true, false).await,
+        vec![("Tag/messenger".to_owned(), ApplySetPruneAction::Delete)]
+    );
+    assert!(
+        store
+            .get_tag("messenger")
+            .await
+            .unwrap()
+            .retired_at_ms
+            .is_some()
+    );
 }
 
 #[tokio::test]
