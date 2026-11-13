@@ -1,6 +1,7 @@
 mod artifact_acquisition;
 mod budget;
 mod commit_reviews;
+mod partition_calls;
 
 use std::{io::Read, time::Duration};
 
@@ -11,10 +12,9 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, HarnessAskQuestionRequest, HarnessAskWorkSessionQuestionRequest,
         HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
-        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessReadMailboxRequest,
-        HarnessSendTagMessageRequest, HarnessSettleLiveInputRequest,
-        HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
-        LiveInput, LiveInputReceipt, LiveInputState, NativeTokenUsage, TagMessageOrigin,
+        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
+        HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
+        LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin,
         harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
@@ -653,54 +653,22 @@ async fn main() -> Result<()> {
             .map(std::path::PathBuf::from)
     }) {
         let deadline = Instant::now() + Duration::from_secs(300);
-        if std::env::args().any(|arg| arg == "--calls-after-release") {
-            // Tells the test the adapter is attached and idle before it partitions.
-            let mut waiting = release.clone().into_os_string();
-            waiting.push(".waiting");
-            std::fs::write(waiting, "")?;
-        }
         while !release.exists() {
             ensure!(Instant::now() < deadline, "release file never appeared");
             sleep(Duration::from_millis(20)).await;
         }
     }
-    // `--calls-after-release` makes host-relayed calls once released, while the
-    // test holds the host's Gateway partitioned: the Worker Host must answer
-    // each after the partition heals instead of failing the Attempt.
-    if std::env::args().any(|arg| arg == "--calls-after-release") {
-        harness
-            .report_usage(authenticated_request(
-                HarnessUsageRequest {
-                    sequence: 1,
-                    native_usage: Some(NativeTokenUsage {
-                        input_tokens: 3,
-                        cached_input_tokens: 0,
-                        output_tokens: 2,
-                        observed_model: None,
-                        total_tokens: Some(5),
-                    }),
-                    amount_minor: None,
-                    currency: None,
-                    estimated: false,
-                },
-                &bootstrap.token,
-                None,
-            )?)
-            .await
-            .context("usage report through a Gateway partition")?;
-        HarnessMailboxClient::connect(bootstrap.endpoint.clone())
-            .await?
-            .read(authenticated_request(
-                HarnessReadMailboxRequest {
-                    limit: 10,
-                    cursor: String::new(),
-                },
-                &bootstrap.token,
-                None,
-            )?)
-            .await
-            .context("Mailbox read through a Gateway partition")?;
-        result.push_str("\nRelayed through partition: usage, Mailbox");
+    if let Some(base) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--partition-steps=")
+            .map(std::path::PathBuf::from)
+    }) {
+        let peer = std::env::args()
+            .find_map(|arg| arg.strip_prefix("--partition-peer=").map(str::to_owned))
+            .context("partition steps require a peer Tag")?;
+        result.push('\n');
+        result.push_str(
+            &partition_calls::exercise(&base, &peer, &bootstrap, &task, &mut harness).await?,
+        );
     }
     if take_live {
         let input = take_input(&mut harness, &bootstrap.token).await?;

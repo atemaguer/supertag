@@ -1107,12 +1107,60 @@ async fn postgres_sixteen_host_partition_storm_preserves_invariants() -> Result<
 // ---------------------------------------------------------------------------
 // Adapter calls relayed through a partition
 
-/// The adapter reports usage and reads its Mailbox while its Worker Host cannot
-/// reach the Gateway for 18 seconds: longer than a host channel holds one call
-/// (15 seconds) and shorter than the 30-second execution lease. The host
-/// repeats each idempotent call within execution authority, so the Attempt
-/// succeeds once the partition heals, the usage is recorded once, and the
-/// adapter runs once.
+/// The steps `--partition-steps` makes, in order (see the fixture's
+/// `partition_calls` module). `take` runs connected: a take is never repeated.
+const PARTITION_STEPS: [&str; 9] = [
+    "usage",
+    "mailbox-read",
+    "mailbox-send",
+    "workstream-read",
+    "workstream-post",
+    "question",
+    "work-session-start",
+    "take",
+    "settle",
+];
+
+fn step_marker(base: &Path, step: &str, suffix: &str) -> PathBuf {
+    let mut path = base.as_os_str().to_owned();
+    path.push(format!(".{step}.{suffix}"));
+    PathBuf::from(path)
+}
+
+async fn wait_for_marker(path: &Path, host: &Host) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !path.exists() {
+        ensure!(
+            Instant::now() < deadline,
+            "{} never appeared\n{}\nadapter: {}",
+            path.display(),
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    Ok(())
+}
+
+async fn operator_cli(services: &Services, tokens: &Tokens, args: &[&str]) -> Result<Value> {
+    let gateway = format!("http://{}", services.gateway_address);
+    let mut full = vec![args[0], "--gateway", gateway.as_str()];
+    full.extend_from_slice(&args[1..]);
+    let mut command = binary(&full);
+    command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+    run_json(command).await
+}
+
+/// Every adapter-facing call the Worker Host may repeat starts while its host
+/// cannot reach the Gateway: usage, Mailbox read and send, Workstream read and
+/// post, an Objective question, a Work Session start, and a live-input
+/// settlement. The first partition lasts 18 seconds: longer than a host
+/// channel holds one call (15 seconds) and shorter than the 30-second
+/// execution lease; the rest last 4 seconds, inside the live input's
+/// 10-second acknowledgement window, and the host reconnects and renews its
+/// lease between partitions. Each call is still outstanding when its
+/// partition heals, the Attempt succeeds, the adapter runs once, and every
+/// effect the Control Plane deduplicates is recorded exactly once.
 async fn exercise_adapter_calls_through_partition(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1120,19 +1168,56 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
     let services = Services::start(&database, root, &tokens).await?;
     let mut operator = OperatorClient::new(services.channel().await?);
     let tag = "partition-calls";
-    operator
-        .put_tag(tokens.request(PutTagRequest {
-            tag_id: tag.into(),
-            instructions: "Relay calls".into(),
-            allowed_actions: vec![],
-            workspace: None,
-            harness_kind: 0,
-            approval_rules: vec![],
-            execution: None,
-            name: None,
-            expected_revision: None,
-        })?)
+    let peer = "partition-peer";
+    for id in [tag, peer] {
+        operator_cli(
+            &services,
+            &tokens,
+            &["put-tag", id, "--instructions", "Relay calls"],
+        )
         .await?;
+    }
+    operator_cli(
+        &services,
+        &tokens,
+        &[
+            "mailbox-grants",
+            "allow",
+            tag,
+            peer,
+            "--operation-id",
+            "allow-peer",
+        ],
+    )
+    .await?;
+    operator_cli(
+        &services,
+        &tokens,
+        &["team", "create", "relay", "--member", tag, "--member", peer],
+    )
+    .await?;
+    let objective = operator_cli(
+        &services,
+        &tokens,
+        &[
+            "objective",
+            "create",
+            "partition-objective",
+            "--owner",
+            tag,
+            "--team",
+            "relay",
+            "Relay through the partition",
+        ],
+    )
+    .await?;
+    let task_id = objective["starting_task_id"]
+        .as_str()
+        .context("Objective starting Task")?
+        .to_owned();
+    let steps = root.join("partition-steps");
+    let steps_argument = format!("--partition-steps={}", steps.display());
+    let peer_argument = format!("--partition-peer={peer}");
     let host = start_host(
         &mut operator,
         &tokens,
@@ -1140,48 +1225,96 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         root,
         0,
         tag,
-        &["--calls-after-release"],
+        &[&steps_argument, &peer_argument],
     )
     .await?;
-    let task = operator
-        .submit_task(tokens.request(SubmitTaskRequest {
-            output_policy: None,
-            execution_limits: None,
-            tag_id: tag.into(),
-            session_id: "partition-calls".into(),
-            operation_id: "partition-calls".into(),
-            prompt: "relay through the partition".into(),
-            input_artifacts: vec![],
-        })?)
-        .await?
-        .into_inner();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut waiting = host.release.clone().into_os_string();
-    waiting.push(".waiting");
-    while !Path::new(&waiting).exists() {
-        ensure!(Instant::now() < deadline, "the adapter never attached");
-        sleep(Duration::from_millis(20)).await;
-    }
-    host.proxy.partition();
+    // A Work Session may be delegated only to a Tag with a registered Worker
+    // Host. This one holds whatever it claims for the peer and is never released.
+    let _peer_host = start_host(
+        &mut operator,
+        &tokens,
+        services.gateway_address,
+        root,
+        1,
+        peer,
+        &[],
+    )
+    .await?;
     std::fs::write(&host.release, "")?;
-    sleep(Duration::from_secs(18)).await;
-    ensure!(
-        task_state(&mut operator, &tokens, &task.task_id)
-            .await?
-            .state()
-            == TaskState::Running,
-        "the Attempt did not ride out the partition"
-    );
-    host.proxy.restore();
+    let mut input_id = String::new();
+    for (index, step) in PARTITION_STEPS.iter().enumerate() {
+        wait_for_marker(&step_marker(&steps, step, "ready"), &host).await?;
+        if *step == "take" {
+            let queued = operator_cli(
+                &services,
+                &tokens,
+                &[
+                    "input",
+                    "queue",
+                    &task_id,
+                    "Check the partition",
+                    "--operation-id",
+                    "partition-input",
+                ],
+            )
+            .await?;
+            input_id = queued["input_id"]
+                .as_str()
+                .context("live input ID")?
+                .to_owned();
+            std::fs::write(step_marker(&steps, step, "go"), "")?;
+            continue;
+        }
+        let refused = host.proxy.refused();
+        host.proxy.partition();
+        std::fs::write(step_marker(&steps, step, "go"), "")?;
+        sleep(if index == 0 {
+            Duration::from_secs(18)
+        } else {
+            Duration::from_secs(4)
+        })
+        .await;
+        // The call cannot have finished: the fixture would have moved on.
+        if let Some(next) = PARTITION_STEPS.get(index + 1) {
+            ensure!(
+                !step_marker(&steps, next, "ready").exists(),
+                "{step} finished while its Worker Host was partitioned"
+            );
+        }
+        let current = task_state(&mut operator, &tokens, &task_id).await?;
+        ensure!(
+            current.state() == TaskState::Running,
+            "the Attempt did not ride out the {step} partition: {:?} {:?}\n{}\nadapter: {}",
+            current.state(),
+            current.result,
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        ensure!(
+            host.proxy.refused() > refused,
+            "the {step} partition refused no reconnect"
+        );
+        let accepted = host.proxy.accepted();
+        host.proxy.restore();
+        // Let the host reconnect and renew its lease before the next partition,
+        // so partitions never add up to more than one lease.
+        let reconnected = Instant::now() + Duration::from_secs(20);
+        while host.proxy.accepted() == accepted {
+            ensure!(
+                Instant::now() < reconnected,
+                "the Worker Host never reconnected after the {step} partition"
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+        sleep(Duration::from_secs(3)).await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
     let finished = loop {
-        let current = task_state(&mut operator, &tokens, &task.task_id).await?;
+        let current = task_state(&mut operator, &tokens, &task_id).await?;
         if !matches!(current.state(), TaskState::Queued | TaskState::Running) {
             break current;
         }
-        ensure!(
-            Instant::now() < deadline + Duration::from_secs(30),
-            "Task never finished"
-        );
+        ensure!(Instant::now() < deadline, "Task never finished");
         sleep(Duration::from_millis(50)).await;
     };
     ensure!(
@@ -1195,13 +1328,16 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         finished
             .result
             .as_deref()
-            .is_some_and(|result| result.contains("Relayed through partition: usage, Mailbox")),
+            .is_some_and(|result| result.contains(&format!(
+                "Relayed through partition: {}; input Check the partition",
+                PARTITION_STEPS.join(", ")
+            ))),
         "unexpected result {:?}",
         finished.result
     );
     let usage = operator
         .list_native_usage(tokens.request(ListNativeUsageRequest {
-            task_id: task.task_id.clone(),
+            task_id: task_id.clone(),
             attempt_id: finished.attempt_id.clone().unwrap_or_default(),
             after_sequence: 0,
             limit: 10,
@@ -1217,11 +1353,62 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         "usage was not recorded exactly once: {:?}",
         usage.reports
     );
-    ensure!(host.launches()? == 1, "the adapter ran more than once");
+    let mailbox = operator_cli(&services, &tokens, &["mailbox", peer]).await?;
+    let messages = mailbox["messages"].as_array().context("Mailbox messages")?;
     ensure!(
-        host.proxy.refused() > 0,
-        "the partition refused no reconnect"
+        messages
+            .iter()
+            .filter(|message| message["text"] == "Sent through a partition")
+            .count()
+            == 1,
+        "the Mailbox message was not delivered exactly once: {mailbox}"
     );
+    let posts = operator_cli(&services, &tokens, &["team", "posts", "relay"]).await?;
+    ensure!(
+        posts["posts"]
+            .as_array()
+            .context("Workstream posts")?
+            .iter()
+            .filter(|post| post["body"] == "Posted through a partition")
+            .count()
+            == 1,
+        "the Workstream post was not written exactly once: {posts}"
+    );
+    // The live input's follower Task is newer in the same Session, so the
+    // question is not listed as actionable; it is still published once.
+    let question = operator_cli(&services, &tokens, &["inbox", "question", &task_id]).await?;
+    ensure!(
+        question["text"] == "Which route survives the partition?",
+        "the question was not published: {question}"
+    );
+    let session = finished.session_id.clone();
+    let sessions = operator_cli(
+        &services,
+        &tokens,
+        &[
+            "work-sessions",
+            "list",
+            "--parent-tag",
+            tag,
+            "--parent-session",
+            &session,
+        ],
+    )
+    .await?;
+    ensure!(
+        sessions["work_sessions"]
+            .as_array()
+            .context("Work Sessions")?
+            .len()
+            == 1,
+        "the Work Session was not started exactly once: {sessions}"
+    );
+    let receipt = operator_cli(&services, &tokens, &["input", "get", &input_id]).await?;
+    ensure!(
+        receipt["state"] == "LIVE_INPUT_STATE_ACCEPTED",
+        "live input was not settled: {receipt}"
+    );
+    ensure!(host.launches()? == 1, "the adapter ran more than once");
     Ok(())
 }
 

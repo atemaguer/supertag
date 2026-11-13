@@ -904,6 +904,9 @@ pub(crate) async fn execute(
                     // A take that a Gateway partition interrupted delivered nothing to
                     // Codex. Any input its lost answer carried lapses to unknown at the
                     // Control Plane and is never replayed, so polling simply continues.
+                    // When the host did receive a committed take whose dispatch
+                    // authority had already ended, it records the input Rejected
+                    // itself and answers with an empty take.
                     if let Some(input)=taken?.and_then(|taken|taken.input.map(|input|(input,taken.valid_for_ms))) {
                         let (input,valid_for_ms)=input;
                         ensure!(input.task_id==task.task_id && input.attempt_id==attempt_id && input.state()==LiveInputState::Dispatching,"Codex input has mismatched Attempt identity or state");

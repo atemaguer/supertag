@@ -104,37 +104,15 @@ impl Bridge {
             .map(Response::into_inner)
     }
 
-    /// Repeats one upstream call while execution authority lasts. Use it only
-    /// for calls the Control Plane deduplicates (an operation ID, a usage
-    /// sequence, an exact receipt) or that only read, so a call whose answer
-    /// the transport lost is safely sent again. Each try is bounded to five
-    /// seconds; a refusal from the Control Plane is returned at once.
-    async fn retry<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<Response<R>, Status>
+    /// Repeats one idempotent upstream call within execution authority; see
+    /// `InputLane::retry`, which every adapter-facing retry goes through.
+    async fn retry<M, R, F, Fut>(&self, message: M, call: F) -> Result<Response<R>, Status>
     where
         M: Clone,
         F: FnMut(Request<M>) -> Fut,
         Fut: std::future::Future<Output = Result<Response<R>, Status>>,
     {
-        loop {
-            let deadline = self.inputs.active_deadline()?;
-            let sent = Instant::now();
-            let attempt_deadline = deadline.min(sent + Duration::from_secs(5));
-            let mut upstream = authenticated_request(message.clone(), &self.host_token, None)?;
-            upstream.set_timeout(attempt_deadline.saturating_duration_since(sent));
-            // The channel would otherwise hold a call across a broken connection
-            // for its whole endpoint timeout; bound each try here instead.
-            let outcome = time::timeout_at(attempt_deadline, call(upstream))
-                .await
-                .unwrap_or_else(|_| Err(Status::deadline_exceeded("upstream call timed out")));
-            match outcome {
-                Ok(response) => return Ok(response),
-                Err(error) if crate::retryable(&error) => {
-                    time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(250)))
-                        .await;
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        self.inputs.retry(message, &self.host_token, call).await
     }
 
     fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
