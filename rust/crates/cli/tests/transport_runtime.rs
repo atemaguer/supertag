@@ -192,7 +192,7 @@ impl Tokens {
 
 /// A Control Plane and Gateway in separate processes.
 struct Services {
-    _control_plane: Service,
+    control_plane: Service,
     control_plane_address: SocketAddr,
     gateway: Service,
     gateway_address: SocketAddr,
@@ -213,7 +213,7 @@ impl Services {
         let mut gateway = Service::spawn(command, directory, "gateway")?;
         let gateway_address = gateway.address().await?;
         Ok(Self {
-            _control_plane: control_plane,
+            control_plane,
             control_plane_address: private,
             gateway,
             gateway_address,
@@ -222,6 +222,43 @@ impl Services {
 
     async fn channel(&self) -> Result<ProtocolChannel> {
         protocol::negotiated(connect(self.gateway_address).await?).await
+    }
+
+    /// Stops the Control Plane and starts it again on the same address and database,
+    /// leaving the Gateway to reconnect. Returns how long it was down.
+    async fn restart_control_plane(
+        &mut self,
+        database: &str,
+        directory: &Path,
+        tokens: &Tokens,
+    ) -> Result<Duration> {
+        let pid = self.control_plane.pid().context("Control Plane exited")?;
+        let stopped = Instant::now();
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+        let _ = timeout(STARTUP, self.control_plane.child.wait()).await?;
+        let listen = self.control_plane_address.to_string();
+        let deadline = Instant::now() + STARTUP;
+        loop {
+            let mut command = binary(&["control-plane", "--listen", &listen]);
+            command
+                .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+                .env("SUPERTAG_DATABASE_URL", database);
+            let mut restarted = Service::spawn(command, directory, "control-plane")?;
+            match restarted.address().await {
+                Ok(address) => {
+                    ensure!(address == self.control_plane_address);
+                    self.control_plane = restarted;
+                    return Ok(stopped.elapsed());
+                }
+                // The port can still be held briefly by the killed process.
+                Err(error) => {
+                    ensure!(Instant::now() < deadline, "{error:#}");
+                    sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
     }
 
     /// A Gateway channel that has not negotiated.
@@ -444,9 +481,27 @@ struct Host {
     release: PathBuf,
     launches: PathBuf,
     process: Service,
+    /// The `worker-host` arguments, so the same host can be started again.
+    arguments: Vec<std::ffi::OsString>,
+    directory: PathBuf,
 }
 
 impl Host {
+    /// Stops the Worker Host process and starts it again on the same state directory.
+    async fn restart(&mut self) -> Result<()> {
+        if let Some(pid) = self.process.pid() {
+            // A Worker Host stops its adapter and exits on SIGTERM.
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
+        }
+        timeout(STARTUP, self.process.child.wait()).await??;
+        let mut command = binary(&[]);
+        command.args(&self.arguments);
+        self.process = Service::spawn(command, &self.directory, &self.id)?;
+        Ok(())
+    }
+
     fn launches(&self) -> Result<usize> {
         Ok(std::fs::read_to_string(&self.launches)
             .unwrap_or_default()
@@ -530,19 +585,21 @@ async fn start_host(
     std::fs::remove_file(key)?;
     let (adapter, launches) = recording_adapter(directory, &id)?;
     let release = directory.join(format!("{id}.release"));
-    let mut command = binary(&["worker-host", "--gateway", &proxy.url()]);
-    command
-        .arg("--state-directory")
-        .arg(&state)
-        .arg("--adapter")
-        .arg(&adapter)
-        .arg(format!(
-            "--adapter-arg=--wait-for-file={}",
-            release.display()
-        ));
+    let mut arguments: Vec<std::ffi::OsString> = vec![
+        "worker-host".into(),
+        "--gateway".into(),
+        proxy.url().into(),
+        "--state-directory".into(),
+        state.into(),
+        "--adapter".into(),
+        adapter.into(),
+        format!("--adapter-arg=--wait-for-file={}", release.display()).into(),
+    ];
     for argument in adapter_args {
-        command.arg(format!("--adapter-arg={argument}"));
+        arguments.push(format!("--adapter-arg={argument}").into());
     }
+    let mut command = binary(&[]);
+    command.args(&arguments);
     let process = Service::spawn(command, directory, &id)?;
     Ok(Host {
         id,
@@ -550,6 +607,8 @@ async fn start_host(
         release,
         launches,
         process,
+        arguments,
+        directory: directory.to_owned(),
     })
 }
 
@@ -1104,6 +1163,294 @@ async fn postgres_sixteen_host_partition_storm_preserves_invariants() -> Result<
         let summary = exercise_workload(HEAVY, database, "postgresql").await?;
         check_summary(&summary, &HEAVY);
         Ok(())
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Soak: sustained work across a partition and service restarts
+
+/// How long the soak runs its steady workload: `SUPERTAG_TRANSPORT_SOAK_SECONDS`, at
+/// least 30, default 120 (the TypeScript Docker soak's default).
+fn soak_seconds() -> Result<u64> {
+    let seconds = match std::env::var("SUPERTAG_TRANSPORT_SOAK_SECONDS") {
+        Ok(value) => value
+            .parse()
+            .context("SUPERTAG_TRANSPORT_SOAK_SECONDS must be an unsigned integer")?,
+        Err(_) => 120,
+    };
+    ensure!(
+        seconds >= 30,
+        "SUPERTAG_TRANSPORT_SOAK_SECONDS must be at least 30"
+    );
+    Ok(seconds)
+}
+
+async fn submit_soak_task(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    tag: usize,
+    name: &str,
+) -> Result<Submitted> {
+    let prompt = format!("soak {name}");
+    let accepted = operator
+        .submit_task(tokens.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: format!("soak-tag-{tag}"),
+            session_id: format!("soak-{name}"),
+            operation_id: format!("soak-{name}"),
+            prompt: prompt.clone(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    Ok(Submitted {
+        task_id: accepted.task_id,
+        tag,
+        instructions: format!("Finish soak item for tag {tag}"),
+        prompt,
+        queued_from: Instant::now(),
+        attempt_id: None,
+    })
+}
+
+/// Waits until `host` has opened a new Gateway connection since `accepted`.
+async fn reconnected(host: &Host, accepted: u64, bound: Duration) -> Result<Duration> {
+    let started = Instant::now();
+    while host.proxy.accepted() == accepted {
+        ensure!(
+            started.elapsed() <= bound,
+            "{} did not reconnect within {bound:?}: {}",
+            host.id,
+            host.process.logs()
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+    Ok(started.elapsed())
+}
+
+/// Ports `scripts/worklet-grpc-docker-soak.ts` (`tests/worklet-grpc-docker-soak.test.ts`
+/// checks its report) to the shipped Rust processes: two Worker Hosts, each the only
+/// host of its Tag, behind TCP relays to a Gateway in front of a separate Control Plane.
+/// Three faults come first, as in TypeScript: a Worker Host loses the Gateway while its
+/// Task runs and finishes during the partition; the Control Plane is killed and
+/// restarted while work runs; a Worker Host is restarted and then runs new work. A steady
+/// workload of two concurrent Tasks then runs for the soak duration. Every Task must
+/// succeed with one Attempt and one adapter launch; the JSON report gives latencies and
+/// fault recovery times (`SUPERTAG_TRANSPORT_REPORT` writes it to a file).
+///
+/// Deliberate difference: TypeScript ran each service in its own Docker container and
+/// partitioned with `docker network disconnect`; here the partition is the relay, as in
+/// the rest of this file, and restarts are process restarts. Docker added network
+/// namespaces, not behavior the services see.
+async fn exercise_soak(database: String) -> Result<Value> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let seconds = soak_seconds()?;
+    let tokens = Tokens::new();
+    let mut services = Services::start(&database, root, &tokens).await?;
+    let mut operator = OperatorClient::new(services.channel().await?);
+    let mut hosts = Vec::new();
+    for tag in 0..2 {
+        operator
+            .put_tag(tokens.request(PutTagRequest {
+                tag_id: format!("soak-tag-{tag}"),
+                instructions: format!("Finish soak item for tag {tag}"),
+                allowed_actions: vec![],
+                workspace: None,
+                harness_kind: 0,
+                approval_rules: vec![],
+                execution: None,
+                name: None,
+                expected_revision: None,
+            })?)
+            .await?;
+        hosts.push(
+            start_host(
+                &mut operator,
+                &tokens,
+                services.gateway_address,
+                root,
+                tag,
+                &format!("soak-tag-{tag}"),
+                &[],
+            )
+            .await?,
+        );
+    }
+    let bound = Duration::from_secs(45);
+    let mut report = Report::default();
+    let mut tasks = Vec::new();
+    let mut faults = Vec::new();
+
+    // A partition while a Task runs; the Task finishes while partitioned.
+    let mut partitioned = vec![submit_soak_task(&mut operator, &tokens, 0, "partition").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut partitioned,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let refused = hosts[0].proxy.refused();
+    let disconnected = Instant::now();
+    hosts[0].proxy.partition();
+    std::fs::write(&hosts[0].release, b"release")?;
+    sleep(Duration::from_millis(2500)).await;
+    ensure!(
+        hosts[0].proxy.refused() > refused,
+        "the partitioned Worker Host never retried"
+    );
+    let accepted = hosts[0].proxy.accepted();
+    let restored = Instant::now();
+    hosts[0].proxy.restore();
+    let reconnect = reconnected(&hosts[0], accepted, bound).await?;
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut partitioned,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push(json!({
+        "kind": "control-network-partition", "target": hosts[0].id,
+        "downtime_ms": restored.duration_since(disconnected).as_millis(),
+        "reconnect_latency_ms": reconnect.as_millis(),
+        "recovery_latency_ms": restored.elapsed().as_millis(),
+    }));
+    tasks.append(&mut partitioned);
+
+    // A Control Plane restart while a Task runs.
+    let _ = std::fs::remove_file(&hosts[1].release);
+    let mut restarting = vec![submit_soak_task(&mut operator, &tokens, 1, "restart").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut restarting,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let downtime = services
+        .restart_control_plane(&database, root, &tokens)
+        .await?;
+    let back = Instant::now();
+    std::fs::write(&hosts[1].release, b"release")?;
+    operator = OperatorClient::new(services.channel().await?);
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut restarting,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push(json!({
+        "kind": "control-plane-restart", "target": "control-plane",
+        "downtime_ms": downtime.as_millis(),
+        "recovery_latency_ms": back.elapsed().as_millis(),
+    }));
+    tasks.append(&mut restarting);
+
+    // A Worker Host restart, then new work on it.
+    let accepted = hosts[0].proxy.accepted();
+    let stopped = Instant::now();
+    hosts[0].restart().await?;
+    let reconnect = reconnected(&hosts[0], accepted, bound).await?;
+    let mut after = vec![submit_soak_task(&mut operator, &tokens, 0, "postrestart").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut after,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push(json!({
+        "kind": "worker-host-restart", "target": hosts[0].id,
+        "reconnect_latency_ms": reconnect.as_millis(),
+        "recovery_latency_ms": stopped.elapsed().as_millis(),
+    }));
+    tasks.append(&mut after);
+
+    // Steady work: one Task per host at a time until the duration runs out.
+    let started = Instant::now();
+    let mut completion = Vec::new();
+    let mut sequence = 0;
+    while started.elapsed() < Duration::from_secs(seconds) {
+        let mut batch = Vec::new();
+        for tag in 0..2 {
+            batch.push(
+                submit_soak_task(&mut operator, &tokens, tag, &format!("steady-{sequence}"))
+                    .await?,
+            );
+            sequence += 1;
+        }
+        let submitted = Instant::now();
+        wait_for_all(
+            &mut operator,
+            &tokens,
+            &mut batch,
+            TaskState::Succeeded,
+            bound,
+            &mut report,
+        )
+        .await?;
+        completion.push(submitted.elapsed().as_millis());
+        tasks.append(&mut batch);
+    }
+    let launches: usize = hosts.iter().map(Host::launches).sum::<Result<_>>()?;
+    ensure!(
+        launches == tasks.len(),
+        "{launches} adapter launches for {} Tasks",
+        tasks.len()
+    );
+    completion.sort_unstable();
+    let percentile = |values: &[u128], rank: usize| {
+        values
+            .get((values.len() * rank).div_ceil(100).saturating_sub(1))
+            .copied()
+            .unwrap_or_default()
+    };
+    let summary = json!({
+        "database": if database.starts_with("postgres") { "postgresql" } else { "sqlite" },
+        "duration_seconds": seconds,
+        "tasks": tasks.len(),
+        "completed": tasks.len(),
+        "attempts": tasks.len(),
+        "adapter_launches": launches,
+        "duplicate_executions": launches - tasks.len(),
+        "batch_completion_ms": {"p50": percentile(&completion, 50), "p95": percentile(&completion, 95)},
+        "faults": faults,
+        "gates": {"passed": true},
+    });
+    println!("{}", serde_json::to_string_pretty(&summary)?);
+    if let Some(path) = std::env::var_os("SUPERTAG_TRANSPORT_REPORT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&summary)?)?;
+    }
+    Ok(summary)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "soak; opt in with --ignored (SUPERTAG_TRANSPORT_SOAK_SECONDS, default 120)"]
+async fn sqlite_soak_survives_partition_and_service_restarts() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_soak(sqlite(directory.path())).await.map(drop)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "soak on PostgreSQL via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE (SUPERTAG_TRANSPORT_SOAK_SECONDS, default 120)"]
+async fn postgres_soak_survives_partition_and_service_restarts() -> Result<()> {
+    with_postgres("soak", |database| async move {
+        exercise_soak(database).await.map(drop)
     })
     .await
 }
