@@ -15,6 +15,7 @@ mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
 pub mod microsoft_teams;
+mod operator_access;
 mod policy;
 #[cfg(test)]
 mod readiness_tests;
@@ -26,7 +27,10 @@ mod watch;
 mod work_sessions;
 mod workspace_mounts;
 
+pub use operator_access::{OPERATOR_TOKEN_SECRET_PREFIX, is_operator_token_secret};
 pub use watch::GatewayWatch;
+
+use operator_access::OperatorCredential;
 
 use std::{future::Future, sync::Arc, time::Duration};
 
@@ -86,6 +90,10 @@ impl Gateway {
             gateway_token != operator_token,
             "Gateway and operator tokens must be distinct"
         );
+        ensure!(
+            !operator_principal.starts_with("operator:token:"),
+            "the admin operator principal must not name an Operator Token"
+        );
         Ok(Self {
             control_plane,
             credentials: Arc::new(Credentials {
@@ -129,10 +137,28 @@ impl Gateway {
     where
         F: Future<Output = Result<Response<R>, Status>>,
     {
-        let (request, timeout) = self.credentials.forwarded(request, principal)?;
-        tokio::time::timeout(timeout, call(self.control_plane.clone(), request))
-            .await
-            .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+        let presented = self.credentials.presented_operator(&request)?;
+        let OperatorCredential::Token(token_digest) = presented else {
+            let (request, timeout) = self.credentials.forwarded(request, principal)?;
+            return tokio::time::timeout(timeout, call(self.control_plane.clone(), request))
+                .await
+                .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?;
+        };
+        let timeout = request_budget(&request)?;
+        let deadline = tokio::time::Instant::now() + timeout;
+        tokio::time::timeout_at(deadline, async {
+            let identity = self.authenticate_operator(token_digest, timeout).await?;
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(Status::deadline_exceeded("Control Plane request timed out"));
+            }
+            let upstream = self
+                .credentials
+                .upstream(request.into_inner(), identity, remaining);
+            call(self.control_plane.clone(), upstream).await
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
     }
 
     async fn forward_host<T, R, F>(

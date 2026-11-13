@@ -14,6 +14,7 @@ mod manifests;
 mod network;
 mod node_bridges;
 mod objectives;
+mod operator_access;
 mod output_policy;
 mod policy;
 mod replies;
@@ -183,6 +184,15 @@ enum Command {
         #[command(subcommand)]
         command: work_sessions::WorkSessionCommand,
     },
+    /// Issue, list, rotate, and revoke named Operator Tokens. Admin operator token only.
+    OperatorToken {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: operator_access::OperatorTokenCommand,
+    },
+    /// List recorded operator changes, newest first, with actor, action, target, and outcome.
+    Audit(operator_access::AuditArgs),
     /// Manage Teams and read their Workstream posts.
     Team {
         #[command(flatten)]
@@ -708,6 +718,11 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => teams::run(connection, command).await?,
+        Command::OperatorToken {
+            connection,
+            command,
+        } => operator_access::run_tokens(connection, command).await?,
+        Command::Audit(args) => operator_access::run_audit(args).await?,
         Command::Up {
             file,
             state_directory,
@@ -1405,7 +1420,7 @@ async fn run(command: Command) -> Result<()> {
 }
 
 async fn control_plane(listen: SocketAddr) -> Result<()> {
-    let mut builder = network::server(listen, true).await?;
+    let builder = network::server(listen, true).await?;
     let plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
         required_env("SUPERTAG_GATEWAY_TOKEN")?,
@@ -1422,6 +1437,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     }
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<ControlPlane>>().await;
+    health
+        .set_serving::<supertag_protocol::v2::operator_access_server::OperatorAccessServer<ControlPlane>>()
+        .await;
     health
         .set_serving::<ConversationsServer<ControlPlane>>()
         .await;
@@ -1482,8 +1500,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         }
     });
     let watch_shutdown = CancellationToken::new();
+    let mut builder = builder.layer(plane.audit_layer());
     let served = builder
         .add_service(health_service)
+        .add_service(plane.operator_access_service())
+        .add_service(plane.operator_directory_service())
         .add_service(
             OperatorServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -1672,6 +1693,9 @@ async fn gateway(
     )?;
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<Gateway>>().await;
+    health
+        .set_serving::<supertag_protocol::v2::operator_access_server::OperatorAccessServer<Gateway>>()
+        .await;
     health.set_serving::<ConversationsServer<Gateway>>().await;
     health.set_serving::<WorkerHostServer<Gateway>>().await;
     health.set_serving::<HostEnrollmentServer<Gateway>>().await;
@@ -1746,6 +1770,7 @@ async fn gateway(
     let router = builder
         .add_service(health_service)
         .add_service(gateway.operator_service())
+        .add_service(gateway.operator_access_service())
         .add_service(gateway.conversations_service())
         .add_service(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
