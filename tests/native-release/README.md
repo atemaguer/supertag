@@ -69,7 +69,9 @@ state, sign binaries, notarize applications, or publish a release.
 
 Archive, checksum, build receipt, extracted receipt, and installed receipt are published
 into the local output directory together only after the requested checks pass. A failing
-installed smoke leaves no final archive. Keep temporary paths below a private or sticky
+installed smoke leaves no final archive. After assembly, disposable compiler caches,
+source dependencies, and unpacked staging are removed before the smoke tests extract the
+archive; only the exact fixture equipment is retained. Keep temporary paths below a private or sticky
 parent; the installer intentionally refuses shared writable non-sticky ancestors.
 
 The manual `native-release-check.yml` workflow has a fast `contracts` mode and a full

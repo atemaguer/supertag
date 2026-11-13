@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -143,6 +144,26 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
     return final_archive
 
 
+def prune_build_scratch(scratch):
+    """Release disposable build inputs before smoke extracts another full copy."""
+    require(scratch.name.startswith("supertag-release-build-") and scratch.is_dir()
+            and not scratch.is_symlink(), "cleanup requires owned build scratch")
+    for name in ("source", "release", "cargo-target", "go-cache", "go", "home"):
+        path = scratch / name
+        if path.is_symlink():
+            path.unlink()
+        elif path.exists():
+            # Go's module cache is read-only. Make only owned real directories
+            # removable; never traverse or chmod a dependency symlink target.
+            path.chmod(0o700)
+            for parent, directories, _files in os.walk(path, followlinks=False):
+                for directory in directories:
+                    child = Path(parent) / directory
+                    if not child.is_symlink():
+                        child.chmod(0o700)
+            shutil.rmtree(path)
+
+
 def smoke_built_release(archive, source, env, profile, node, *, install_smoke=False):
     # Test equipment is built separately after the production binary was
     # captured. No test feature or fixture binary enters the archive.
@@ -152,18 +173,34 @@ def smoke_built_release(archive, source, env, profile, node, *, install_smoke=Fa
         command.append("--release")
     subprocess.run(command, cwd=source, env=env, check=True)
     fixture = Path(env["CARGO_TARGET_DIR"]) / ("release" if profile == "release" else "debug") / "supertag-fixture-adapter"
+    scratch = source.parent
+    require(source == scratch / "source" and Path(env["CARGO_TARGET_DIR"]) == scratch / "cargo-target",
+            "smoke requires the owned build scratch")
+    equipment = scratch / "smoke-equipment"
+    equipment.mkdir(mode=0o700)
+    retained = {}
+    for name, path, limit in (
+        ("fixture", fixture, MAX_BINARY_BYTES), ("node", Path(node), MAX_BINARY_BYTES),
+        ("native-opencode.mjs", source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs", 1024 * 1024),
+        ("environment.proto", source / "rust/proto/supertag/environment/v2/environment.proto", 4 * 1024 * 1024),
+    ):
+        retained[name] = equipment / name
+        copy_bounded(path, retained[name], limit)
+        retained[name].chmod(0o700 if name in ("fixture", "node") else 0o600)
+    # The archive has already been validated and the exact smoke equipment is
+    # retained. Keeping Cargo, Go, pnpm and unpacked helper trees here doubles
+    # peak disk use without adding evidence to extracted/installed verification.
+    prune_build_scratch(scratch)
+    fixture, node = retained["fixture"], retained["node"]
+    native_fixture, provider_proto = retained["native-opencode.mjs"], retained["environment.proto"]
     from smoke_native_release import smoke_release
-    receipt = smoke_release(archive, fixture, Path(node),
-                            source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs",
-                            source / "rust/proto/supertag/environment/v2/environment.proto")
+    receipt = smoke_release(archive, fixture, node, native_fixture, provider_proto)
     with Path(str(archive) + ".smoke.json").open("x") as target:
         json.dump(receipt, target, indent=2, sort_keys=True)
         target.write("\n")
     if install_smoke:
         from smoke_native_install import smoke_install
-        installed = smoke_install(archive, fixture, Path(node),
-            source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs",
-            source / "rust/proto/supertag/environment/v2/environment.proto")
+        installed = smoke_install(archive, fixture, node, native_fixture, provider_proto)
         with Path(str(archive) + ".install-smoke.json").open("x") as target:
             json.dump(installed, target, indent=2, sort_keys=True)
             target.write("\n")

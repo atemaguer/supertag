@@ -184,6 +184,31 @@ class NativeReleaseContracts(unittest.TestCase):
         self.assertEqual(env["HOME"], str(self.root / "home"))
         self.assertNotIn("sensitive", env["NODE_OPTIONS"])
 
+    def test_smoke_prunes_only_owned_build_trees_and_keeps_equipment(self):
+        with tempfile.TemporaryDirectory(prefix="supertag-release-build-") as temporary:
+            scratch = Path(temporary)
+            outside = self.root / "outside"
+            outside.mkdir()
+            (outside / "sentinel").write_text("preserved")
+            for name in ("source", "release", "cargo-target", "go-cache", "go", "home"):
+                root = scratch / name
+                root.mkdir()
+                (root / "payload").write_text("discard")
+                (root / "external-link").symlink_to(outside, target_is_directory=True)
+                root.chmod(0o500)
+            equipment = scratch / "smoke-equipment"
+            equipment.mkdir()
+            (equipment / "fixture").write_text("verified fixture")
+            assembly.prune_build_scratch(scratch)
+            self.assertEqual(sorted(p.name for p in scratch.iterdir()), ["smoke-equipment"])
+            self.assertEqual((equipment / "fixture").read_text(), "verified fixture")
+            self.assertEqual((outside / "sentinel").read_text(), "preserved")
+            assembly.prune_build_scratch(scratch)
+
+    def test_smoke_pruning_refuses_an_unowned_root(self):
+        with self.assertRaisesRegex(ArchiveError, "owned build scratch"):
+            assembly.prune_build_scratch(self.root)
+
     def test_exact_source_rejects_wrong_head_and_dirty_tracked_files(self):
         repo = self.root / "repo"
         repo.mkdir()
