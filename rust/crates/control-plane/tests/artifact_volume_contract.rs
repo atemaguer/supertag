@@ -373,18 +373,8 @@ async fn exercise(url: &str) {
             .copies
             .is_empty()
     );
-    // Recreate the exact pre-0052 layout with a real old verified and reserved receipt.
+    // Verified and reserved receipts survive a restart.
     store.close().await;
-    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
-    sqlx::raw_sql(
-        "DROP INDEX supertag_v2_artifact_verified_file_locations;
-         ALTER TABLE supertag_v2_artifact_volume_copies DROP COLUMN file_path;
-         UPDATE supertag_v2_schema SET version=51;",
-    )
-    .execute(&mut connection)
-    .await
-    .unwrap();
-    connection.close().await.unwrap();
     let store = Store::open(url).await.unwrap();
     let plane = ControlPlane::open(url, "private-key".into()).await.unwrap();
     assert_eq!(

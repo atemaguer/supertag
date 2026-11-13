@@ -98,6 +98,7 @@ pub async fn launch(
     let mut parent = tokio::net::UnixStream::from_std(parent)?;
     let mut command = terminal_command(&binary);
     command
+        .env("SUPERTAG_TUI_HANDOVER", "3")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());

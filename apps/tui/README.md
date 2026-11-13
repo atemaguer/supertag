@@ -6,7 +6,8 @@ and Glamour.
 ## Runtime v2
 
 The Rust CLI launches the Go TUI with a Gateway URL and an operator credential over file
-descriptor 3. The handover identifies the protocol as `runtime.v2` and can include a trusted
+descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`. The TUI reads descriptor 3 only when that variable
+is set, so a plain launch with no handover never touches a descriptor it does not own. The handover identifies the protocol as `runtime.v2` and can include a trusted
 server certificate authority and client certificate and key paths. The TUI uses the generated
 runtime v2 Go bindings over gRPC and HTTP/2. Cleartext connections require a loopback IP address.
 
@@ -140,7 +141,7 @@ SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
 
 Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
 Control Plane as every other command does, and the others it can switch to, starts the binary with
-an extra pipe as file descriptor 3, and writes one JSON line to it:
+an extra pipe as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON line to it:
 `{"contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`, where `current` is the
 index of the selected Control Plane and `name` is left out for this machine's. When
 `SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane

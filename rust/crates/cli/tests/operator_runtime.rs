@@ -752,10 +752,13 @@ impl Tmux {
             if pane.contains(text) {
                 return Ok(());
             }
-            ensure!(
-                tokio::time::Instant::now() < deadline,
-                "terminal did not show {text:?}:\n{pane}"
-            );
+            if tokio::time::Instant::now() >= deadline {
+                let history = self
+                    .run(&["capture-pane", "-p", "-S", "-", "-t", "runtime"])
+                    .await
+                    .unwrap_or(pane);
+                anyhow::bail!("terminal did not show {text:?}:\n{history}");
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -840,6 +843,12 @@ async fn bare_launcher_saves_and_switches_gateway_rosters() -> Result<()> {
         "-y",
         "35",
         &shell,
+        ";",
+        "set-option",
+        "-t",
+        "runtime",
+        "remain-on-exit",
+        "on",
     ])
     .await?;
     tmux.wait_for("Gateways").await?;

@@ -79,6 +79,7 @@ it("hands the target to the binary on fd 3, never in argv or the environment", a
   expect(JSON.parse(received.fd3)).toEqual({ contexts: [target], current: 0 });
   expect(JSON.stringify(received.argv)).not.toContain(token);
   expect(JSON.stringify(received.env)).not.toContain(token);
+  expect(received.env["SUPERTAG_TUI_HANDOVER"]).toBe("3");
 });
 
 it("hands every saved Control Plane to the binary on fd 3, marking the current one", async () => {

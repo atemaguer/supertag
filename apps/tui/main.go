@@ -1,5 +1,5 @@
-// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it and hands it
-// the Control Planes to talk to over file descriptor 3.
+// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it. When
+// `supertag` resolved a Gateway, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
 package main
 
 import (
@@ -20,17 +20,27 @@ var version = "dev"
 
 const launchHint = "Run supertag in a terminal to start the terminal UI."
 
+// handoverVariable names the descriptor `supertag` passed its handover on. It is set only when one
+// was passed.
+const handoverVariable = "SUPERTAG_TUI_HANDOVER"
+
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(version)
 		return
 	}
+	// Adopt descriptor 3 only when the launcher says it passed one. Otherwise the number may
+	// belong to this process (such as the runtime's network poller), and closing it is fatal.
+	var targetFile *os.File
+	if os.Getenv(handoverVariable) == "3" {
+		targetFile = os.NewFile(3, "supertag-target")
+	}
+	os.Unsetenv(handoverVariable)
 	store, storeErr := defaultGatewayStore()
 	var profiles gatewayProfiles
 	if storeErr == nil {
 		profiles, storeErr = store.load()
 	}
-	targetFile := os.NewFile(3, "supertag-target")
 	noHandover := true
 	if targetFile != nil {
 		if info, err := targetFile.Stat(); err == nil && info.Mode()&(os.ModeNamedPipe|os.ModeSocket) != 0 {

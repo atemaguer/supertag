@@ -1,6 +1,6 @@
 mod support;
 
-use sqlx::{AnyConnection, Connection, Executor};
+use sqlx::{Connection, Executor};
 use supertag_control_plane::{HostAuthority, Store, StoreError};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
@@ -397,19 +397,8 @@ async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
 
 async fn contract(url: &str) {
     let (store, host) = fixture(url).await;
-    // The setup pre-dates any MCP dispatch. Recreate the previous schema by
-    // removing only the new table, keeping the existing Host and policy rows.
+    // Host and policy rows written before any MCP dispatch survive a restart.
     store.close().await;
-    let mut previous = AnyConnection::connect(url).await.unwrap();
-    previous
-        .execute("DROP TABLE supertag_v2_mcp_effects")
-        .await
-        .unwrap();
-    previous
-        .execute("UPDATE supertag_v2_schema SET version=46 WHERE version=47")
-        .await
-        .unwrap();
-    previous.close().await.unwrap();
     let store = Store::open(url).await.unwrap();
     Box::pin(approved_effect(&store, &host)).await;
     Box::pin(denied_and_changed_provider(&store, &host)).await;

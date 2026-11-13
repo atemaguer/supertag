@@ -235,7 +235,8 @@ function launch(binary: string, handover: TuiHandover, env: NodeJS.ProcessEnv): 
   return new Promise((resolve, reject) => {
     const child = spawn(binary, [], {
       stdio: ["inherit", "inherit", "inherit", "pipe"],
-      env: withoutCredentials(env),
+      // The terminal UI adopts descriptor 3 only when told it carries the handover.
+      env: { ...withoutCredentials(env), SUPERTAG_TUI_HANDOVER: "3" },
     });
     const forward = (signal: NodeJS.Signals) => () => {
       child.kill(signal);
