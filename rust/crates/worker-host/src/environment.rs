@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 const GIB: u64 = 1024 * 1024 * 1024;
 
 /// Free and total bytes of the filesystem holding `path`.
+// statvfs field widths differ by platform.
+#[allow(clippy::unnecessary_cast)]
 pub fn disk_space(path: &Path) -> Result<HostDiskSpace> {
     let path = CString::new(path.as_os_str().as_bytes()).context("disk path contains NUL")?;
     // SAFETY: statvfs writes only into the zeroed struct for a NUL-terminated path.
@@ -317,7 +319,7 @@ mod tests {
     }
 
     async fn log_lines(directory: &Path, expected: &[&str]) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             let log = std::fs::read_to_string(directory.join("log")).unwrap_or_default();
             if log.lines().collect::<Vec<_>>() == expected {

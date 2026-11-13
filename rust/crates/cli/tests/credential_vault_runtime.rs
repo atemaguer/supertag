@@ -210,10 +210,13 @@ async fn challenge(endpoint: &str, secret: &str) -> Result<(reqwest::StatusCode,
     Ok((response.status(), response.text().await?))
 }
 
+type Read = (String, Option<String>);
+
 #[derive(Clone, Default)]
 struct FakeVault {
     entries: Arc<Mutex<HashMap<String, Value>>>,
-    reads: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    /// Path and Vault namespace of each read.
+    reads: Arc<Mutex<Vec<Read>>>,
 }
 
 async fn read_secret(

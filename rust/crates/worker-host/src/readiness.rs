@@ -68,6 +68,7 @@ pub(crate) struct Presence {
 }
 
 impl Presence {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn start(
         journal: Arc<Journal>,
         disk: DiskSpaceSource,

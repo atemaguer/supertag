@@ -564,10 +564,13 @@ mod tests {
 
     use super::*;
 
+    /// Method, path, and Vault namespace of one request.
+    type Observed = (String, String, Option<String>);
+
     #[derive(Clone, Default)]
     struct FakeVault {
         entries: Arc<Mutex<HashMap<String, Value>>>,
-        requests: Arc<Mutex<Vec<(String, String, Option<String>)>>>,
+        requests: Arc<Mutex<Vec<Observed>>>,
     }
 
     /// A loopback KV v2 endpoint: `/v1/<mount>/{data,metadata}/<path>`.
