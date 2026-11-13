@@ -196,13 +196,13 @@ impl Platform {
                 "Paste control-plane.env into the supertag-control-plane service's variables, add its TLS PEM variables, and use deploy/native/railway/control-plane.json as its config file. For collaboration surfaces, also paste gateway.env into a supertag-gateway service configured by deploy/native/railway/gateway.json (see deploy/native/README.md)."
             }
             Self::Render => {
-                "Set the hosted image digest in deploy/render/render.yaml and create the Blueprint; its database supplies SUPERTAG_DATABASE_URL. Add control-plane.env and the TLS PEM variables to supertag-control-plane, and, for collaboration surfaces, gateway.env and its PEM variables to supertag-gateway (see deploy/render/README.md)."
+                "Set the hosted image digest in deploy/render/render.yaml and create the Blueprint; its database supplies SUPERTAG_DATABASE_URL. Render subdomains are global, so read the Control Plane's hostname on its service page; if it is not supertag-control-plane.onrender.com, issue the certificate for it and change the Gateway's --control-plane. Then add control-plane.env and the TLS PEM variables to supertag-control-plane, and, for Lark or webhook notifications, gateway.env, its connector settings, and its PEM variables to supertag-gateway, with its connector flags appended to its dockerCommand (see docs/guides/deploy-render.md)."
             }
             Self::Cloudflare => {
-                "Tag the hosted image as supertag-hosted:local, upload control-plane.env, gateway.env (when SUPERTAG_GATEWAY is on), and the TLS PEM values as Worker secrets with `wrangler secret bulk`, then run `wrangler deploy` in deploy/cloudflare (see deploy/cloudflare/README.md)."
+                "Tag the hosted image as supertag-hosted:local, upload control-plane.env and the TLS PEM values as Worker secrets with `wrangler secret bulk`, then run `wrangler deploy` in deploy/cloudflare. For Lark or webhook notifications, also upload gateway.env and the connector settings and set SUPERTAG_GATEWAY to on and SUPERTAG_GATEWAY_FLAGS in wrangler.json (see docs/guides/deploy-cloudflare.md)."
             }
             Self::Modal => {
-                "Create the Modal secrets supertag-control-plane from control-plane.env plus its TLS PEM values and, for collaboration surfaces, supertag-gateway from gateway.env plus its PEM values, then run `modal deploy deploy/modal/app.py` with SUPERTAG_MODAL_IMAGE set to the hosted image by digest (see deploy/modal/README.md)."
+                "Create the Modal secrets supertag-control-plane from control-plane.env plus its TLS PEM values and, for Lark or webhook notifications, supertag-gateway from gateway.env plus the connector settings and supertag-gateway-tls from its PEM values, then run `modal deploy deploy/modal/app.py` with SUPERTAG_MODAL_IMAGE set to the hosted image by digest, plus SUPERTAG_MODAL_GATEWAY=on and SUPERTAG_MODAL_GATEWAY_FLAGS for the Gateway (see docs/guides/deploy-modal.md)."
             }
         }
     }
@@ -1839,6 +1839,9 @@ mod tests {
         assert_eq!(container["max_instances"], 1);
         assert_eq!(container["image"], "./Dockerfile");
         assert_eq!(wrangler["vars"]["SUPERTAG_GATEWAY"], "off");
+        // The Gateway's connector flags are the operator's; the Worker appends them to the pair.
+        assert_eq!(wrangler["vars"]["SUPERTAG_GATEWAY_FLAGS"], "");
+        assert!(routing.contains("[...PAIR_COMMAND, ...words]"));
         assert_eq!(wrangler["triggers"]["crons"][0], "* * * * *");
         assert!(cloudflare_image.contains("FROM supertag-hosted:local"));
         assert_eq!(
@@ -1883,6 +1886,17 @@ mod tests {
             let name = key.trim_start_matches("SUPERTAG_").trim_end_matches("_PEM");
             assert!(entrypoint.contains(&format!("\"{name} ")), "{key}");
         }
+        // Plus the outbound connectors' settings, which the pair gives the Gateway alone.
+        assert_eq!(
+            command_literal(&routing, "CONTAINER_KEY_PREFIXES"),
+            ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"]
+        );
+        for prefix in ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"] {
+            assert!(
+                pair.contains(&format!("^\\({prefix}[A-Z0-9_]*\\)=")),
+                "{prefix}"
+            );
+        }
 
         // Modal: one always-on container behind a labelled web endpoint on the tunnel port.
         assert_eq!(
@@ -1900,6 +1914,10 @@ mod tests {
             "max_containers=1",
             "@modal.web_server(TUNNEL_PORT",
             "\"@sha256:\" not in image_ref",
+            "return PAIR_COMMAND + flags",
+            // A container whose service exited ends, so Modal replaces it; shutdown stops it.
+            "exit=os._exit",
+            "@modal.exit()",
         ] {
             assert!(modal.contains(expected), "{expected}");
         }
@@ -1912,10 +1930,12 @@ mod tests {
         assert!(pair.contains(&format!("--transfer-directory {STATE_DIRECTORY}/transfers")));
         for platform in [Platform::Cloudflare, Platform::Modal] {
             assert!(pair.contains(&format!(
-                "gateway --listen {GATEWAY_LISTEN} --control-plane {}",
+                "gateway --listen {GATEWAY_LISTEN} --control-plane {} \\\n    \"$@\" &",
                 platform.gateway_upstream()
             )));
         }
+        // tini reaps orphans even where it is not PID 1 (the Modal function).
+        assert!(entrypoint.contains("/usr/bin/tini -s --"));
         for key in [
             "SUPERTAG_DATABASE_URL",
             "SUPERTAG_OPERATOR_TOKEN",

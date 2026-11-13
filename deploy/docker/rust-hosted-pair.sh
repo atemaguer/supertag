@@ -1,24 +1,30 @@
 #!/bin/sh
 # Runs the Control Plane and a Gateway side by side in one container, for platforms that give
 # containers no network between them (Cloudflare Containers, a Modal app). Started by
-# `supertag-hosted-entrypoint pair TUNNEL_ADDRESS`, already as UID 10001 under tini.
+# `supertag-hosted-entrypoint pair TUNNEL_ADDRESS [GATEWAY_FLAG...]`, already as UID 10001 under
+# tini. Each GATEWAY_FLAG is passed to the Gateway, which runs no connector without one: these
+# platforms route no inbound traffic to it, so only outbound connectors work here, such as
+# `--lark-state-directory /var/lib/supertag/lark` and `--notify webhook:HTTPS_URL`.
 #
 # The Control Plane accepts the platform's WebSocket tunnel on TUNNEL_ADDRESS (whose plain
 # GET /healthz serves the platform health check) and native gRPC on loopback only. The Gateway
 # dials that loopback listener with its client certificate, so the Control Plane's certificate
-# must also name IP 127.0.0.1. Each process gets only its own role's settings: the Gateway never
-# sees the database URL, the operator token, or the Control Plane's TLS key. Both run as the
-# same user in one container, so they share one trust boundary.
+# must also name IP 127.0.0.1. Each process is given only its own role's settings: the Gateway
+# is not given the database URL, the operator token, or the Control Plane's TLS settings, and the
+# Control Plane is not given surface settings. Both run as the same user in one container, so they
+# share one trust boundary: either could read the other's files, including the TLS key.
 #
-# When either process exits, the other is stopped and this script exits non-zero, so the
-# platform restarts the container. SIGTERM and SIGINT stop both and exit 0.
+# When either process exits, the other is stopped and this script exits non-zero; the caller
+# (tini on Cloudflare, the Modal function's supervisor) then ends the container so the platform
+# restarts it. SIGTERM and SIGINT stop both and exit 0.
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  echo "usage: supertag-hosted-pair TUNNEL_ADDRESS" >&2
+if [ "$#" -lt 1 ]; then
+  echo "usage: supertag-hosted-pair TUNNEL_ADDRESS [GATEWAY_FLAG...]" >&2
   exit 2
 fi
 tunnel=$1
+shift
 supertag=/usr/local/bin/supertag
 control=
 gateway=
@@ -36,20 +42,31 @@ trap stop TERM INT
 as_gateway="env -u SUPERTAG_DATABASE_URL -u SUPERTAG_OPERATOR_TOKEN -u SUPERTAG_TLS_CERT_FILE
   -u SUPERTAG_TLS_KEY_FILE -u SUPERTAG_TLS_CLIENT_CA_FILE -u SUPERTAG_GITHUB_TOKEN
   -u SUPERTAG_GITHUB_PRIVATE_KEY_FILE"
+# The Control Plane's view: no client identity and no surface settings, which only the Gateway
+# reads. A line inside a multi-line value that looks like such a setting only adds an `-u` for a
+# name that is not set, which changes nothing.
+surface_settings=$(env | sed -n \
+  -e 's/^\(SUPERTAG_SLACK_[A-Z0-9_]*\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_LARK_[A-Z0-9_]*\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_LINEAR_[A-Z0-9_]*\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_MICROSOFT_TEAMS_[A-Z0-9_]*\)=.*/-u \1/p' \
+  -e 's/^\(SUPERTAG_NOTIFY_SECRET_[A-Z0-9_]*\)=.*/-u \1/p')
 # Sleeps in the background so a signal interrupts the wait at once.
 pause() {
   sleep 1 &
   wait $! || true
 }
 
+# shellcheck disable=SC2086 # each -u NAME is two words
 env -u SUPERTAG_CLIENT_CERT_FILE -u SUPERTAG_CLIENT_KEY_FILE -u SUPERTAG_SERVER_CA_FILE \
+  $surface_settings \
   "$supertag" control-plane --listen 127.0.0.1:3434 --websocket-listen "$tunnel" \
   --transfer-directory /var/lib/supertag/transfers &
 control=$!
 
 # A Gateway exits when it cannot reach the Control Plane at startup, so wait until the Control
 # Plane (which migrates its database first) answers health checks over the Gateway's own TLS.
-waited=0
+deadline=$(($(date +%s) + 300))
 until [ "$stopping" = 1 ] || $as_gateway "$supertag" health --endpoint https://127.0.0.1:3434 \
   >/dev/null 2>&1; do
   if ! kill -0 "$control" 2>/dev/null; then
@@ -57,8 +74,7 @@ until [ "$stopping" = 1 ] || $as_gateway "$supertag" health --endpoint https://1
     wait "$control" || true
     exit 1
   fi
-  waited=$((waited + 1))
-  if [ "$waited" -ge 300 ]; then
+  if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "supertag-hosted-pair: the Control Plane was not healthy after 300 seconds" >&2
     stop
     wait "$control" || true
@@ -67,7 +83,8 @@ until [ "$stopping" = 1 ] || $as_gateway "$supertag" health --endpoint https://1
   pause
 done
 if [ "$stopping" = 0 ]; then
-  $as_gateway "$supertag" gateway --listen 127.0.0.1:3436 --control-plane https://127.0.0.1:3434 &
+  $as_gateway "$supertag" gateway --listen 127.0.0.1:3436 --control-plane https://127.0.0.1:3434 \
+    "$@" &
   gateway=$!
 fi
 

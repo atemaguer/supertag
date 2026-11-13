@@ -25,19 +25,25 @@ operators, Worker Hosts ── wss:// ──> Worker ──> Durable Object ─�
 
 | File | Role |
 | --- | --- |
-| [`wrangler.json`](../../deploy/cloudflare/wrangler.json) | One Container instance (`max_instances: 1`), its Durable Object, a cron trigger every minute, and `SUPERTAG_GATEWAY` (`off` or `on`) |
+| [`wrangler.json`](../../deploy/cloudflare/wrangler.json) | One Container instance (`max_instances: 1`), its Durable Object, a cron trigger every minute, `SUPERTAG_GATEWAY` (`off` or `on`), and `SUPERTAG_GATEWAY_FLAGS` |
 | [`src/routing.ts`](../../deploy/cloudflare/src/routing.ts) | What the Worker forwards (WebSocket upgrades and `GET /healthz`), the container commands, and the settings passed into the container |
 | [`src/index.ts`](../../deploy/cloudflare/src/index.ts) | The Worker and the Container class |
 | [`Dockerfile`](../../deploy/cloudflare/Dockerfile) | The Container image: the hosted image tagged `supertag-hosted:local` |
 
 Cloudflare gives containers no network to each other, so the Gateway, when on, runs in the same
-container as the Control Plane and reaches it on `https://127.0.0.1:3434`. The Gateway never
-receives the database URL, the operator token, or the Control Plane's TLS key, but both share the
-container's trust boundary.
+container as the Control Plane and reaches it on `https://127.0.0.1:3434`. The Gateway is not
+given the database URL, the operator token, or the Control Plane's TLS settings, and the Control
+Plane is not given the surface settings. Both run as one user in one container, though, so either
+could read the other's files, including the TLS key: they share one trust boundary. When either
+exits, the container stops, and the next request or cron run starts it again.
 
 ## Before you start
 
-- The installed `supertag` CLI, matching the release you deploy.
+- The native `supertag` CLI, from the release you deploy. No native release archive is published
+  yet, so build it from that release's checkout with
+  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
+  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
+  installs the TypeScript CLI, which cannot set up or verify this deployment.
 - The Workers Paid plan, which Containers require, and Wrangler authenticated with your account.
 - Docker, and the `hosted` service image for `linux/amd64` (see
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image)), tagged locally:
@@ -82,10 +88,12 @@ npx wrangler secret put SUPERTAG_TLS_KEY_PEM < server.key
 npx wrangler deploy
 ```
 
-With the Gateway on, set `"SUPERTAG_GATEWAY": "on"` in `wrangler.json`, and also upload
-`gateway.env` with `wrangler secret bulk` and the PEM values `SUPERTAG_TLS_CLIENT_CA_PEM` (your
-CA), `SUPERTAG_SERVER_CA_PEM` (your CA), `SUPERTAG_CLIENT_CERT_PEM`, and
-`SUPERTAG_CLIENT_KEY_PEM`. The Worker passes only the deployment settings and these PEM values
+With the Gateway on, set `"SUPERTAG_GATEWAY": "on"` and `SUPERTAG_GATEWAY_FLAGS` in
+`wrangler.json` (see [Collaboration surfaces](#collaboration-surfaces)), and also upload
+`gateway.env` and the connector settings with `wrangler secret bulk`, and the PEM values
+`SUPERTAG_TLS_CLIENT_CA_PEM` (your CA), `SUPERTAG_SERVER_CA_PEM` (your CA),
+`SUPERTAG_CLIENT_CERT_PEM`, and `SUPERTAG_CLIENT_KEY_PEM`. The Worker passes only the deployment
+settings, these PEM values, and settings named `SUPERTAG_LARK_*` or `SUPERTAG_NOTIFY_SECRET_*`
 into the container; the image entrypoint writes each PEM value to a file and runs the services as
 an unprivileged user.
 
@@ -115,7 +123,8 @@ machine that owns the **harness** (the coding agent that does the work, such as 
 supertag auth-key create build-1 --host build-1 --tag engineering \
   --control-plane wss://supertag.YOUR-SUBDOMAIN.workers.dev
 # Save the printed key as build-1.key (mode 0600) on the Worker Host, then, with the same
-# SUPERTAG_SERVER_CA_FILE:
+# SUPERTAG_SERVER_CA_FILE (and, with a Gateway, the host's own SUPERTAG_CLIENT_CERT_FILE and
+# SUPERTAG_CLIENT_KEY_FILE):
 supertag host enroll build-1 --control-plane wss://supertag.YOUR-SUBDOMAIN.workers.dev \
   --state-directory ~/.supertag-host --auth-key file:build-1.key
 supertag worker-host --control-plane wss://supertag.YOUR-SUBDOMAIN.workers.dev \
@@ -125,6 +134,35 @@ supertag worker-host --control-plane wss://supertag.YOUR-SUBDOMAIN.workers.dev \
 Operator commands read the operator token from `SUPERTAG_OPERATOR_TOKEN`. The Worker Host
 connects outbound and needs no inbound port.
 
+## Collaboration surfaces
+
+The Worker forwards only the Control Plane's tunnel, so the Gateway can serve only connectors that
+connect outbound. Name them in `SUPERTAG_GATEWAY_FLAGS`, separated by spaces; the Worker refuses to
+start the Gateway without one.
+
+- **Lark or Feishu**, over its outbound long connection:
+  `--lark-state-directory /var/lib/supertag/lark`, with `SUPERTAG_LARK_ACCOUNT_ID`,
+  `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
+  `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
+  `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) as Worker secrets. The app secret comes from the
+  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
+  `SUPERTAG_LARK_APP_SECRET`. The container's disk does not survive a restart, so the
+  reply receipts in the state directory do not either.
+- **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
+  secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
+
+Slack, GitHub, Linear, and Microsoft Teams need inbound webhooks, which this deployment cannot
+receive, and the native Gateway has no Slack Socket Mode. For them, run a Gateway on a host that
+can receive webhooks (see [native service deployments](../../deploy/native/README.md)); it dials
+this Control Plane's `wss://` URL with its client certificate.
+
+```json
+"vars": {
+  "SUPERTAG_GATEWAY": "on",
+  "SUPERTAG_GATEWAY_FLAGS": "--lark-state-directory /var/lib/supertag/lark"
+}
+```
+
 ## Check that it worked
 
 ```sh
@@ -132,7 +170,7 @@ supertag verify deployment wss://supertag.YOUR-SUBDOMAIN.workers.dev \
   --env-file supertag-deployment/operator.env --require-ready
 ```
 
-Then mention a Tag in a connected collaboration surface and confirm that it replies.
+With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm that it replies.
 
 ## Cold starts and restarts
 
@@ -154,8 +192,8 @@ Then mention a Tag in a connected collaboration surface and confirm that it repl
   retried.
 - Native gRPC (`https://`) does not reach this deployment. The terminal UI and the desktop app need
   an `https://` URL, so they cannot connect to it yet.
-- The Worker forwards no webhook routes, so webhook-based surfaces (GitHub, Linear, Microsoft
-  Teams, Slack over HTTP) are not served. Slack Socket Mode and Lark long connections need none.
+- The Worker forwards no webhook routes, so the Gateway here serves Lark and webhook
+  notifications only. Slack, GitHub, Linear, and Microsoft Teams need a Gateway on another host.
 - `wrangler dev` runs this Worker locally only where Docker supports Wrangler's egress proxy
   container.
 
@@ -175,9 +213,9 @@ Then delete the database and the Vault path if they were dedicated to this deplo
   Cloudflare dashboard. A missing secret or an unreachable database stops the Control Plane.
 - **Verification cannot reach the Control Plane over TLS.** Check `SUPERTAG_SERVER_CA_FILE` and
   that the certificate names the host in the `wss://` URL.
-- **The container restarts repeatedly with the Gateway on.** The pair exits when either service
-  exits; check the Gateway's client certificate, `SUPERTAG_TLS_CLIENT_CA_PEM`, and that the
-  certificate names `IP:127.0.0.1`.
+- **The container restarts repeatedly with the Gateway on.** The container exits when either
+  service exits; check the Gateway's client certificate, its connector settings,
+  `SUPERTAG_TLS_CLIENT_CA_PEM`, and that the certificate names `IP:127.0.0.1`.
 
 ## Next
 

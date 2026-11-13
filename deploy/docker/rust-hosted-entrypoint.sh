@@ -9,8 +9,9 @@
 #      SUPERTAG_<NAME>_FILE, and removes the PEM value from the environment,
 # then runs `supertag "$@"` as UID 10001 with no capabilities and no new privileges.
 #
-# `pair TUNNEL_ADDRESS` instead runs supertag-hosted-pair, which starts the Control Plane and a
-# Gateway side by side in this one container (Cloudflare and Modal; see that script).
+# `pair TUNNEL_ADDRESS [GATEWAY_FLAG...]` instead runs supertag-hosted-pair, which starts the
+# Control Plane and a Gateway side by side in this one container (Cloudflare and Modal; see that
+# script).
 #
 # Some platforms' start commands replace the image entrypoint and others only its command, so
 # definitions name this entrypoint; when the platform also runs the entrypoint, that leading
@@ -63,5 +64,6 @@ chmod 0500 "$tls"
 
 cd "$state"
 export HOME="$state"
+# tini -s also reaps orphans where it is not PID 1, such as under the Modal function.
 exec setpriv --reuid=10001 --regid=10001 --clear-groups --inh-caps=-all --bounding-set=-all \
-  --no-new-privs /usr/bin/tini -- "$program" "$@"
+  --no-new-privs /usr/bin/tini -s -- "$program" "$@"

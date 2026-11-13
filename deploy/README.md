@@ -10,7 +10,7 @@ Render, Cloudflare, and Modal directories.
 
 ```text
 deploy/
-  shared/                 Common runtime and environment contract (private workspace package)
+  shared/                 TypeScript templates' runtime and environment contract (private package)
   generate.ts             Native manifest generator and drift check
   docker/
     Dockerfile            Shared Control Plane image; build context is the repository root
@@ -65,7 +65,8 @@ If an existing installation used another project name, retain it with `COMPOSE_P
 `-p` when using the relocated Compose file. The local `.env` stays at the repository root.
 
 Cloudflare tooling runs from `deploy/cloudflare`. The package under `shared/` is internal, is
-never published, and serves only the TypeScript definitions.
+never published, and serves only the TypeScript Railway and Fly.io definitions and the TypeScript
+CLI's `setup deployment --platform railway|fly`.
 Test fixture images and example applications keep their Dockerfiles with their respective code.
 
 ## Choose a host

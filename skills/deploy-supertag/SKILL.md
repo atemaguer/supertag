@@ -63,14 +63,20 @@ the rest of this skill:
   Plane requires client certificates from every caller.
 - **Gateway.** Render runs it as a background worker dialing the public `wss://` URL. Cloudflare
   and Modal run it in the Control Plane's container (`supertag-hosted-entrypoint pair`), dialing
-  `https://127.0.0.1:3434`, so the certificate also names `IP:127.0.0.1`.
+  `https://127.0.0.1:3434`, so the certificate also names `IP:127.0.0.1`. It runs only the
+  connectors its flags name (Render's `dockerCommand`, `SUPERTAG_GATEWAY_FLAGS`, or
+  `SUPERTAG_MODAL_GATEWAY_FLAGS`), and only outbound ones work: Lark and webhook notifications.
+- **Native CLI.** These guides need the native `supertag` CLI, built from the release's checkout
+  (`cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`);
+  the npm package is the TypeScript CLI.
 - **Health.** The tunnel listener answers plain `GET /healthz` with `200 ok`; it refuses requests
   with an `Origin` header and anything else that is not a WebSocket upgrade.
 - **Verify and join.** The native CLI's `verify deployment wss://HOST --env-file DIR/operator.env`,
   then `auth-key create`, `host enroll`, and `worker-host` with `--control-plane wss://HOST`; see
   the platform guide.
 - **Limits.** One instance. Cloudflare transfer files are lost on restart. The terminal UI and
-  desktop app need `https://`, so they cannot connect yet. No webhook-based surface ingress.
+  desktop app need `https://`, so they cannot connect yet. No webhook-based surface ingress and
+  no Slack: run a Gateway on another host for Slack, GitHub, Linear, or Microsoft Teams.
 
 Docker Compose and the native option need a checkout of the repository for `deploy/compose.yaml` and
 `deploy/.env.example`. You also need the CLI ([install from npm](../../docs/operations/install.md)) to manage the running
@@ -150,12 +156,14 @@ credential rotation reconcile while the Control Plane runs — do not restart pe
 ## Known limits
 
 **Single Control Plane instance only.** The file-backed collaboration surface secret store is attached to one
-service volume, so Railway and Render run one instance. Moving collaboration surface secrets to an external
+service volume, so Railway and Fly.io run one instance. Moving collaboration surface secrets to an external
 secret store is required before horizontal scaling is safe. Do not scale the Control Plane
 horizontally on the current design.
 
 Webhook-based surfaces (GitHub, Linear, Teams, Slack HTTP) need their Gateway webhook route
-reachable through the proxy. Slack Socket Mode and Lark long connections do not. Check the
+reachable through the proxy. Slack Socket Mode and Lark long connections do not. On Render, Modal,
+and Cloudflare the native Gateway has no Slack Socket Mode and receives no webhooks, so only Lark
+and webhook notifications work there. Check the
 collaboration surface guide before exposing a route.
 
 ## Ongoing

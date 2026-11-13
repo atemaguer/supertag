@@ -15,6 +15,8 @@ Settings read at deploy time:
 
     SUPERTAG_MODAL_IMAGE           required; an image reference pinned by digest
     SUPERTAG_MODAL_GATEWAY         "on" to also run a Gateway in the same container (default off)
+    SUPERTAG_MODAL_GATEWAY_FLAGS   with the Gateway on, its connector flags (required), such as
+                                   "--lark-state-directory /var/lib/supertag/lark"
     SUPERTAG_MODAL_APP             app name (default supertag)
     SUPERTAG_MODAL_LABEL           web endpoint label, the URL's last part (default supertag)
     SUPERTAG_MODAL_REGISTRY_SECRET Modal secret with REGISTRY_USERNAME and REGISTRY_PASSWORD
@@ -22,11 +24,18 @@ Settings read at deploy time:
 
 Modal secrets: supertag-control-plane holds control-plane.env from `supertag setup deployment
 modal`, and supertag-control-plane-tls the Control Plane's TLS PEM values. With the Gateway on,
-supertag-gateway holds gateway.env and supertag-gateway-tls the Gateway's PEM values.
+supertag-gateway holds gateway.env, the connector settings, and supertag-gateway-tls the Gateway's
+PEM values.
+
+The container's service is supervised: when it exits, this container exits too, so Modal starts a
+replacement (min_containers=1). Container shutdown stops the service with SIGTERM.
 """
 
 import os
+import shlex
 import subprocess
+import sys
+import threading
 
 import modal
 
@@ -44,13 +53,60 @@ CONTROL_PLANE_COMMAND = [
     "--transfer-directory",
     "/var/lib/supertag/transfers",
 ]
-# The Control Plane and a Gateway in this one container; the Gateway dials it on loopback.
+# The Control Plane and a Gateway in this one container; the Gateway dials it on loopback and
+# gets SUPERTAG_MODAL_GATEWAY_FLAGS appended.
 PAIR_COMMAND = [ENTRYPOINT, "pair", "0.0.0.0:8080"]
 # Holds the Control Plane's transfer files and the Gateway's connector state.
 STATE_DIRECTORY = "/var/lib/supertag"
+# How long a stopping service gets before it is killed.
+STOP_SECONDS = 25
+
+
+def service_command(gateway: str, gateway_flags: str) -> list[str]:
+    """The container's service: the Control Plane alone, or with a Gateway given its flags."""
+    flags = shlex.split(gateway_flags)
+    if gateway == "on":
+        if not flags:
+            raise ValueError("Set SUPERTAG_MODAL_GATEWAY_FLAGS to the Gateway's connector flags")
+        return PAIR_COMMAND + flags
+    if gateway == "off":
+        if flags:
+            raise ValueError("SUPERTAG_MODAL_GATEWAY_FLAGS needs SUPERTAG_MODAL_GATEWAY=on")
+        return list(CONTROL_PLANE_COMMAND)
+    raise ValueError("SUPERTAG_MODAL_GATEWAY must be on or off")
+
+
+class Service:
+    """The service process. When it exits unasked, `exit` ends this container (by default the
+    whole Python process at once), because Modal keeps a container whose web server died."""
+
+    def __init__(self, command: list[str], exit=os._exit):
+        self._stopping = threading.Event()
+        self._exit = exit
+        self.process = subprocess.Popen(command)
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def _watch(self) -> None:
+        code = self.process.wait()
+        if self._stopping.is_set():
+            return
+        print(f"supertag: the service exited with status {code}; stopping the container", file=sys.stderr, flush=True)
+        self._exit(1)
+
+    def stop(self, seconds: float = STOP_SECONDS) -> None:
+        """SIGTERM, then SIGKILL after `seconds`."""
+        self._stopping.set()
+        self.process.terminate()
+        try:
+            self.process.wait(seconds)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
 
 image_ref = os.environ.get("SUPERTAG_MODAL_IMAGE", "")
 gateway = os.environ.get("SUPERTAG_MODAL_GATEWAY", "off")
+gateway_flags = os.environ.get("SUPERTAG_MODAL_GATEWAY_FLAGS", "")
 app_name = os.environ.get("SUPERTAG_MODAL_APP", "supertag")
 label = os.environ.get("SUPERTAG_MODAL_LABEL", "supertag")
 registry_secret = os.environ.get("SUPERTAG_MODAL_REGISTRY_SECRET")
@@ -58,8 +114,10 @@ registry_secret = os.environ.get("SUPERTAG_MODAL_REGISTRY_SECRET")
 if modal.is_local():
     if "@sha256:" not in image_ref:
         raise SystemExit("Set SUPERTAG_MODAL_IMAGE to the hosted image pinned by digest (IMAGE@sha256:...)")
-    if gateway not in ("on", "off"):
-        raise SystemExit("SUPERTAG_MODAL_GATEWAY must be on or off")
+    try:
+        service_command(gateway, gateway_flags)
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
 
 image = (
     modal.Image.from_registry(
@@ -67,12 +125,13 @@ image = (
         add_python="3.12",
         secret=modal.Secret.from_name(registry_secret) if registry_secret else None,
     )
-    # Modal runs the function; the service command below names the image entrypoint.
+    # Modal runs the class; the service command names the image entrypoint.
     .entrypoint([])
     # The container re-imports this file, so it carries the deploy-time settings.
     .env({
         "SUPERTAG_MODAL_IMAGE": image_ref,
         "SUPERTAG_MODAL_GATEWAY": gateway,
+        "SUPERTAG_MODAL_GATEWAY_FLAGS": gateway_flags,
         "SUPERTAG_MODAL_APP": app_name,
         "SUPERTAG_MODAL_LABEL": label,
     })
@@ -85,7 +144,7 @@ state = modal.Volume.from_name(f"{app_name}-state", create_if_missing=True)
 app = modal.App(app_name)
 
 
-@app.function(
+@app.cls(
     image=image,
     secrets=secrets,
     volumes={STATE_DIRECTORY: state},
@@ -100,6 +159,15 @@ app = modal.App(app_name)
 )
 # Every open tunnel holds one input, so the one container accepts many at once.
 @modal.concurrent(max_inputs=1000)
-@modal.web_server(TUNNEL_PORT, startup_timeout=120, label=label)
-def supertag():
-    subprocess.Popen(PAIR_COMMAND if gateway == "on" else CONTROL_PLANE_COMMAND)
+class SuperTag:
+    @modal.enter()
+    def start(self) -> None:
+        self.service = Service(service_command(gateway, gateway_flags))
+
+    @modal.web_server(TUNNEL_PORT, startup_timeout=120, label=label)
+    def serve(self) -> None:
+        """The service started in `start` listens on TUNNEL_PORT."""
+
+    @modal.exit()
+    def stop(self) -> None:
+        self.service.stop()

@@ -29,14 +29,16 @@ export const CONTROL_PLANE_COMMAND = [
 ];
 /**
  * The Control Plane and a Gateway in this one container (Cloudflare gives containers no network
- * between them). The Gateway dials the Control Plane on loopback.
+ * between them). The Gateway dials the Control Plane on loopback. `SUPERTAG_GATEWAY_FLAGS` is
+ * appended: the Gateway runs no connector without one.
  */
 export const PAIR_COMMAND = [ENTRYPOINT, "pair", "0.0.0.0:8080"];
 
 /**
  * Worker secrets and variables passed into the container: the settings from
- * `supertag setup deployment cloudflare` and the TLS PEM values the image entrypoint writes to
- * files. Anything else stays in the Worker.
+ * `supertag setup deployment cloudflare`, the TLS PEM values the image entrypoint writes to
+ * files, and the Gateway's connector settings ({@link CONTAINER_KEY_PREFIXES}). Anything else
+ * stays in the Worker.
  */
 export const CONTAINER_KEYS = [
   "SUPERTAG_DATABASE_URL",
@@ -65,21 +67,48 @@ export const CONTAINER_KEYS = [
   "SUPERTAG_CLIENT_KEY_PEM",
 ] as const;
 
-/** The container's environment: only {@link CONTAINER_KEYS} that are set to a string. */
+/**
+ * Settings of the Gateway's outbound connectors, the only ones this deployment can serve: the
+ * Lark or Feishu connection and webhook notification secrets. The pair gives them to the Gateway
+ * alone.
+ */
+export const CONTAINER_KEY_PREFIXES = ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"] as const;
+
+/**
+ * The container's environment: {@link CONTAINER_KEYS} and names starting with
+ * {@link CONTAINER_KEY_PREFIXES}, when set to a non-empty string.
+ */
 export function containerEnvironment(env: Record<string, unknown>): Record<string, string> {
   const environment: Record<string, string> = {};
-  for (const key of CONTAINER_KEYS) {
-    const value = env[key];
-    if (typeof value === "string" && value !== "") environment[key] = value;
+  for (const [key, value] of Object.entries(env)) {
+    const passed =
+      (CONTAINER_KEYS as readonly string[]).includes(key) ||
+      CONTAINER_KEY_PREFIXES.some((prefix) => key.startsWith(prefix) && key.length > prefix.length);
+    if (passed && typeof value === "string" && value !== "") environment[key] = value;
   }
   return environment;
 }
 
-/** The container command: with `SUPERTAG_GATEWAY` set to `on`, the Control Plane and a Gateway. */
+/**
+ * The container command: with `SUPERTAG_GATEWAY` set to `on`, the Control Plane and a Gateway
+ * given the whitespace-separated `SUPERTAG_GATEWAY_FLAGS`, such as
+ * `--lark-state-directory /var/lib/supertag/lark`.
+ */
 export function containerCommand(env: Record<string, unknown>): string[] {
   const gateway = env["SUPERTAG_GATEWAY"];
-  if (gateway === "on") return [...PAIR_COMMAND];
-  if (gateway === undefined || gateway === "off") return [...CONTROL_PLANE_COMMAND];
+  const flags = env["SUPERTAG_GATEWAY_FLAGS"] ?? "";
+  if (typeof flags !== "string") throw new Error("SUPERTAG_GATEWAY_FLAGS must be a string");
+  const words = flags.split(/\s+/u).filter((word) => word !== "");
+  if (gateway === "on") {
+    if (words.length === 0)
+      throw new Error("SUPERTAG_GATEWAY_FLAGS must enable a connector when SUPERTAG_GATEWAY is on");
+    return [...PAIR_COMMAND, ...words];
+  }
+  if (gateway === undefined || gateway === "off") {
+    if (words.length > 0)
+      throw new Error("SUPERTAG_GATEWAY_FLAGS needs SUPERTAG_GATEWAY set to on");
+    return [...CONTROL_PLANE_COMMAND];
+  }
   throw new Error("SUPERTAG_GATEWAY must be on or off");
 }
 

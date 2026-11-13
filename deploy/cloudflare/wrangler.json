@@ -29,6 +29,7 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "SUPERTAG_GATEWAY": "off"
+    "SUPERTAG_GATEWAY": "off",
+    "SUPERTAG_GATEWAY_FLAGS": ""
   }
 }

@@ -57,11 +57,16 @@ describe("Cloudflare tunnel Worker", () => {
     }
   });
 
-  it("passes only deployment settings and TLS PEM values into the container", () => {
+  it("passes only deployment, TLS PEM, and outbound connector settings into the container", () => {
     const environment = containerEnvironment({
       SUPERTAG_DATABASE_URL: "postgresql://user:secret@db.example.com/supertag",
       SUPERTAG_TLS_CERT_PEM: "-----BEGIN CERTIFICATE-----",
+      SUPERTAG_LARK_APP_ID: "cli_app",
+      SUPERTAG_NOTIFY_SECRET_OPS: "hook-secret",
+      SUPERTAG_LARK_: "no name",
+      SUPERTAG_SLACK_SIGNING_SECRET: "no Slack ingress here",
       SUPERTAG_GATEWAY: "on",
+      SUPERTAG_GATEWAY_FLAGS: "--lark-state-directory /x",
       SUPERTAG: { binding: true },
       CLOUDFLARE_API_TOKEN: "not-for-the-container",
       VAULT_TOKEN: "",
@@ -69,14 +74,34 @@ describe("Cloudflare tunnel Worker", () => {
     expect(environment).toEqual({
       SUPERTAG_DATABASE_URL: "postgresql://user:secret@db.example.com/supertag",
       SUPERTAG_TLS_CERT_PEM: "-----BEGIN CERTIFICATE-----",
+      SUPERTAG_LARK_APP_ID: "cli_app",
+      SUPERTAG_NOTIFY_SECRET_OPS: "hook-secret",
     });
     expect(CONTAINER_KEYS).not.toContain("SUPERTAG_TLS_CERT_FILE");
   });
 
-  it("runs the Control Plane alone unless SUPERTAG_GATEWAY is on", () => {
+  it("runs the Control Plane alone unless SUPERTAG_GATEWAY is on, then the Gateway's flags", () => {
     expect(containerCommand({})).toEqual(CONTROL_PLANE_COMMAND);
-    expect(containerCommand({ SUPERTAG_GATEWAY: "off" })).toEqual(CONTROL_PLANE_COMMAND);
-    expect(containerCommand({ SUPERTAG_GATEWAY: "on" })).toEqual(PAIR_COMMAND);
+    expect(containerCommand({ SUPERTAG_GATEWAY: "off", SUPERTAG_GATEWAY_FLAGS: " " })).toEqual(
+      CONTROL_PLANE_COMMAND,
+    );
+    expect(
+      containerCommand({
+        SUPERTAG_GATEWAY: "on",
+        SUPERTAG_GATEWAY_FLAGS:
+          " --lark-state-directory /var/lib/supertag/lark\n--notify webhook:https://h.example/x#ops ",
+      }),
+    ).toEqual([
+      ...PAIR_COMMAND,
+      "--lark-state-directory",
+      "/var/lib/supertag/lark",
+      "--notify",
+      "webhook:https://h.example/x#ops",
+    ]);
+    expect(() => containerCommand({ SUPERTAG_GATEWAY: "on" })).toThrow(/enable a connector/u);
+    expect(() =>
+      containerCommand({ SUPERTAG_GATEWAY: "off", SUPERTAG_GATEWAY_FLAGS: "--notify desktop" }),
+    ).toThrow(/needs SUPERTAG_GATEWAY/u);
     expect(() => containerCommand({ SUPERTAG_GATEWAY: "yes" })).toThrow(/on or off/u);
     expect(CONTROL_PLANE_COMMAND).toContain("--websocket-listen");
     expect(CONTROL_PLANE_COMMAND[CONTROL_PLANE_COMMAND.indexOf("--listen") + 1]).toBe(

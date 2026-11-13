@@ -1,0 +1,2 @@
+# wrangler builds the image from supertag-hosted:local alone; send it no files.
+*

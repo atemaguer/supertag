@@ -508,7 +508,7 @@ Starts the persistent Control Plane, including its Gateway surface supervision, 
 Events are admitted durably; Worker execution and reply delivery continue asynchronously.
 
 Environment:
-  SUPERTAG_DEPLOYMENT_PLATFORM=railway|render|cloudflare
+  SUPERTAG_DEPLOYMENT_PLATFORM=railway|fly
                             Validates hosted database, credentials, storage, and public URL at startup
   PORT                      Platform-provided default for --port (default: 3434)
   SUPERTAG_STATE_DIR        Local credentials, artifacts, and default SQLite directory (default: ~/.supertag)

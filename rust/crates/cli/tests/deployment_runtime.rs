@@ -923,7 +923,8 @@ async fn deploys_and_verifies_behind_an_http_only_edge(database: String) -> Resu
         "/healthz",
         "SUPERTAG_SERVER_CA_FILE",
         "wss://supertag-control-plane.onrender.com",
-        "deploy/render/README.md",
+        "docs/guides/deploy-render.md",
+        "dockerCommand",
     ] {
         assert!(message.contains(expected), "{expected}: {message}");
     }

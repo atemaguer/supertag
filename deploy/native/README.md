@@ -27,8 +27,10 @@ Hosts and shared Volumes.
 
 The Gateway runs collaboration surfaces: Slack, GitHub, Linear, Lark, and Microsoft Teams
 ingress, reply delivery, and operator notifications. Deploy it only when you use a surface or
-notification. Its webhook listeners are loopback only, so put a reverse proxy for them in the
-same container or host. Its own gRPC listener serves only `supertag test notification`, on
+notification. It runs only the connectors its flags name. Its webhook listeners are loopback only,
+so put a reverse proxy for them in the same container or host; Lark and webhook notifications
+connect outbound and need none. Render, Cloudflare, and Modal route no inbound traffic to the
+Gateway, so there it serves only Lark and webhook notifications. Its own gRPC listener serves only `supertag test notification`, on
 loopback inside its container. It holds no operator credential.
 
 A Gateway needs a Control Plane that requires client certificates. Gateways share one Gateway
@@ -134,12 +136,16 @@ own path when it receives it. Set these secrets per role:
 
 ### Build the hosted image
 
-Build it from a verified Linux `supertag` binary (from a Linux native release archive, or built
-for Linux from this checkout), with the two scripts beside it, and push it to a registry your
-platform can pull from. Deploy it by digest.
+Build it from a Linux `supertag` binary with the two scripts beside it, and push it to a registry
+your platform can pull from. Deploy it by digest. No native release archive is published yet, so
+build the binary for Linux from a checkout of the release you deploy, in the Rust image whose
+Debian release matches the runtime image:
 
 ```sh
-mkdir hosted && cp /path/to/linux/supertag hosted/
+docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src/rust \
+  -e CARGO_TARGET_DIR=/src/rust/target/linux-amd64 rust:1.93.1-bookworm \
+  cargo build --release --locked -p supertag-cli --bin supertag
+mkdir hosted && cp rust/target/linux-amd64/release/supertag hosted/
 cp deploy/docker/rust-hosted-entrypoint.sh deploy/docker/rust-hosted-pair.sh hosted/
 docker build --platform linux/amd64 --file deploy/docker/rust-service.Dockerfile \
   --target hosted --tag REGISTRY/supertag-hosted:VERSION hosted
@@ -243,8 +249,9 @@ variables, and a volume at `/var/lib/supertag`, and give the Control Plane
 [`../render/render.yaml`](../render/render.yaml) is a Blueprint: a web service running the Control
 Plane with `--websocket-listen` on port 8080 (its `PORT`), a disk at `/var/lib/supertag` for
 transfers, Render PostgreSQL supplying `SUPERTAG_DATABASE_URL`, and an optional background worker
-running the Gateway, which dials `wss://supertag-control-plane.onrender.com`. Render's health check
-probes `/healthz` on the tunnel listener. See the [Render guide](../../docs/guides/deploy-render.md).
+running the Gateway, which dials `wss://supertag-control-plane.onrender.com`; append its connector
+flags to its `dockerCommand`, and change that URL if Render assigns the Control Plane another
+hostname. Render's health check probes `/healthz` on the tunnel listener. See the [Render guide](../../docs/guides/deploy-render.md).
 
 ## Cloudflare
 
@@ -266,14 +273,23 @@ Volume at `/var/lib/supertag` holds transfer files. PostgreSQL is external. See 
 ## One container: Cloudflare and Modal
 
 With the Gateway turned on (`SUPERTAG_GATEWAY=on` in Wrangler's `vars`, or
-`SUPERTAG_MODAL_GATEWAY=on` at deploy), the command is `supertag-hosted-entrypoint pair 0.0.0.0:8080`.
-[`rust-hosted-pair.sh`](../docker/rust-hosted-pair.sh) starts the Control Plane, waits until it
-answers health checks, then starts the Gateway against `https://127.0.0.1:3434` with its client
-certificate. The Gateway never receives the database URL, the operator token, or the Control
-Plane's TLS key, but both run as UID 10001 in one container and share one trust boundary. When
-either service exits, the container exits non-zero so the platform restarts it; `SIGTERM` stops
-both cleanly. The container receives both roles' settings: `control-plane.env`, `gateway.env`, and
-all six PEM values.
+`SUPERTAG_MODAL_GATEWAY=on` at deploy), the command is
+`supertag-hosted-entrypoint pair 0.0.0.0:8080 GATEWAY_FLAG...`, with the Gateway's connector flags
+from `SUPERTAG_GATEWAY_FLAGS` or `SUPERTAG_MODAL_GATEWAY_FLAGS`; both platforms refuse the Gateway
+without one. [`rust-hosted-pair.sh`](../docker/rust-hosted-pair.sh) starts the Control Plane,
+waits until it answers health checks, then starts the Gateway against `https://127.0.0.1:3434`
+with its client certificate and those flags. The container receives both roles' settings:
+`control-plane.env`, `gateway.env`, all six PEM values, and the connector settings. The pair
+gives the Gateway none of the database URL, the operator token, or the Control Plane's TLS
+settings, and the Control Plane none of the surface settings (`SUPERTAG_LARK_*`,
+`SUPERTAG_NOTIFY_SECRET_*`, and the other surfaces' prefixes). Both run as UID 10001 in one
+container, though, so either could read the other's files, including the TLS key: they share one
+trust boundary.
+
+When either service exits, the pair stops the other and exits non-zero, and the container ends:
+on Cloudflare, tini is the container's first process and exits with it, and the next request or
+cron run starts a new container; on Modal, the function ends its container and Modal starts a
+replacement. `SIGTERM` stops both cleanly.
 
 ## WebSocket tunnel for HTTP-only platforms
 
