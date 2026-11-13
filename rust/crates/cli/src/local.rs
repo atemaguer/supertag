@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fmt::Write as _,
     fs::{self, DirBuilder, File, OpenOptions, TryLockError},
     future::Future,
@@ -44,6 +45,9 @@ const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
 const BASE_ENVIRONMENT: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 ];
+/// The HTTP proxy every local service reaches a remote service through, from the process
+/// environment, then `env_file`, so a service unit can name it too.
+const PROXY_ENVIRONMENT: [&str; 4] = ["HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
 /// The GitHub account the Control Plane reads, given only when a Host serves a GitHub Workspace.
 const GITHUB_WORKSPACE_ENVIRONMENT: [&str; 7] = [
     "SUPERTAG_GITHUB_ACCOUNT_ID",
@@ -130,6 +134,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     let executable = std::env::current_exe()?;
 
     let mut children = Children::new(&directory)?;
+    children.database = postgres_database(None, &Environment::default())?;
     tokio::pin!(shutdown);
     let start = tokio::select! {
         result = async {
@@ -263,6 +268,50 @@ struct Children {
     worker_host: Option<Service>,
     /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
     notify: (Vec<String>, Vec<(String, String)>),
+    /// The Control Plane's database: the state directory's SQLite file unless set.
+    database: Option<PostgresDatabase>,
+    /// What every service gets from [`PROXY_ENVIRONMENT`].
+    proxy: Vec<(String, OsString)>,
+}
+
+/// A PostgreSQL database for the local Control Plane, and the password it connects with.
+struct PostgresDatabase {
+    url: String,
+    password: Option<String>,
+}
+
+/// `SUPERTAG_DATABASE_URL` (the process environment, then `env_file`) wins over the
+/// control-plane service's `database`; neither means the state directory's SQLite file.
+/// A password secret becomes `PGPASSWORD` unless the environment already sets one.
+fn postgres_database(
+    configured: Option<&crate::local_config::Database>,
+    environment: &Environment,
+) -> Result<Option<PostgresDatabase>> {
+    let variable = |name: &str| {
+        environment
+            .variable(name)
+            .and_then(|value| value.into_string().ok())
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let url = match (variable("SUPERTAG_DATABASE_URL"), configured) {
+        (Some(url), _) => url,
+        (None, Some(database)) => database.url.clone(),
+        (None, None) => return Ok(None),
+    };
+    ensure!(
+        url.starts_with("postgres://") || url.starts_with("postgresql://"),
+        "the local Control Plane database must be a postgresql:// URL"
+    );
+    let password = match variable("PGPASSWORD") {
+        Some(password) => Some(password),
+        None => configured
+            .and_then(|database| database.password.as_ref())
+            .map(|secret| secret.read(environment))
+            .transpose()
+            .context("read the database password")?,
+    };
+    Ok(Some(PostgresDatabase { url, password }))
 }
 
 struct Service {
@@ -281,6 +330,8 @@ impl Children {
             gateway_address: None,
             worker_host: None,
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
+            database: None,
+            proxy: proxy_environment(&Environment::default()),
         })
     }
 
@@ -299,20 +350,30 @@ impl Children {
             workspace,
             surfaces,
         } = extras;
-        let database = directory.join("runtime.sqlite3");
-        open_private_file(&database, true)?;
-        let database_url = sqlite_url(&database)?;
         let mut plane = command(executable, "control-plane");
         plane
+            .envs(self.proxy.iter().cloned())
             .args(["--listen", &listen.to_string()])
             .arg("--transfer-directory")
             .arg(directory.join("checkpoints"))
-            .env("SUPERTAG_DATABASE_URL", database_url)
             .env(
                 "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
                 &credentials.gateway,
             )
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+        match &self.database {
+            None => {
+                let database = directory.join("runtime.sqlite3");
+                open_private_file(&database, true)?;
+                plane.env("SUPERTAG_DATABASE_URL", sqlite_url(&database)?);
+            }
+            Some(database) => {
+                plane.env("SUPERTAG_DATABASE_URL", &database.url);
+                if let Some(password) = &database.password {
+                    plane.env("PGPASSWORD", password);
+                }
+            }
+        }
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
         }
@@ -345,6 +406,7 @@ impl Children {
 
         let mut gateway = command(executable, "gateway");
         gateway
+            .envs(self.proxy.iter().cloned())
             .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
         let mut needed = !self.notify.0.is_empty();
@@ -430,7 +492,8 @@ impl Children {
             )
             .await?;
         let mut host = command(executable, "worker-host");
-        host.args(["--control-plane", &endpoint, "--state-directory"])
+        host.envs(self.proxy.iter().cloned())
+            .args(["--control-plane", &endpoint, "--state-directory"])
             .arg(directory.join("host"))
             .arg("--wait-for-recovery")
             .args(options.adapter.worker_args())
@@ -527,6 +590,23 @@ impl Children {
         );
         Ok(())
     }
+}
+
+/// The proxy variables a service gets: the process environment's, then `env_file`'s.
+fn proxy_environment(environment: &Environment) -> Vec<(String, OsString)> {
+    environment
+        .selected(PROXY_ENVIRONMENT)
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+}
+
+/// The proxy the supervisor itself reaches a remote service through, as its services do.
+fn proxy(environment: &Environment) -> Option<supertag_transport::Proxy> {
+    supertag_transport::Proxy::from_variables(|name| {
+        environment
+            .variable(name)
+            .and_then(|value| value.into_string().ok())
+    })
 }
 
 fn command(executable: &Path, mode: &str) -> Command {
@@ -1028,7 +1108,9 @@ impl ManagedHost {
 
     /// Register the Host once, report its aggregate presence, then start every lane.
     async fn start(&mut self, executable: &Path) -> Result<()> {
-        let control_plane = crate::network::endpoint(self.endpoint.clone()).await?;
+        let control_plane =
+            crate::network::endpoint_through(self.endpoint.clone(), proxy(&self.environment))
+                .await?;
         let stranded = self.stranded_journals()?;
         let shared = supertag_worker_host::SharedHost::register(
             control_plane,
@@ -1087,7 +1169,8 @@ impl ManagedHost {
         let lane = &mut self.lanes[index];
         let adapter = &self.definition.harnesses[lane.harness];
         let mut host = command(executable, "worker-host");
-        host.args(["--control-plane", &self.endpoint, "--state-directory"])
+        host.envs(proxy_environment(&self.environment))
+            .args(["--control-plane", &self.endpoint, "--state-directory"])
             .arg(&lane.directory)
             .arg("--wait-for-recovery")
             .args(["--supervised-lane", incarnation])
@@ -1344,6 +1427,8 @@ pub async fn configured(
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
             base.notify = plane.notify.resolve(&environment);
+            base.database = postgres_database(plane.database.as_ref(), &environment)?;
+            base.proxy = proxy_environment(&environment);
             let endpoint = base
                 .start_base(
                     &executable,

@@ -89,6 +89,29 @@ impl Drop for Process {
         let _ = self.child.wait();
     }
 }
+/// The supervisor environment that puts the local Control Plane on `database`: none for
+/// SQLite, which `up` keeps in the state directory, and `SUPERTAG_DATABASE_URL` for PostgreSQL.
+fn database_env(database: &str) -> Vec<(&'static str, &str)> {
+    if database.starts_with("postgres") {
+        vec![("SUPERTAG_DATABASE_URL", database)]
+    } else {
+        Vec::new()
+    }
+}
+/// That the local Control Plane in `state` keeps its state in `database`: on PostgreSQL the
+/// state directory has no SQLite file, so `up` cannot have fallen back to one.
+fn uses_database(state: &Path, database: &str) -> Result<()> {
+    ensure!(
+        state.join("runtime.sqlite3").exists() != database.starts_with("postgres"),
+        "the local Control Plane did not use {}",
+        if database.starts_with("postgres") {
+            "PostgreSQL"
+        } else {
+            "SQLite"
+        }
+    );
+    Ok(())
+}
 fn yaml(path: &Path, value: &Value) -> Result<()> {
     fs::write(path, serde_json::to_vec(value)?)?;
     Ok(())
@@ -215,21 +238,29 @@ async fn run_work(
     .await??;
     Ok(())
 }
-#[tokio::test]
-async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> Result<()> {
+async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
+    database: String,
+) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let file = temp.path().join("supertag.yaml");
     yaml(
         &file,
         &serde_json::json!({"version":1,"services":{
-            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"]},
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],
+                "database":if database.starts_with("postgres") {
+                    serde_json::json!({"url": database})
+                } else {
+                    Value::Null
+                }},
             "reader":{"type":"host","adapter":ADAPTER,"restart":"unless-stopped","concurrency":1},
             "writer":{"type":"host","adapter":ADAPTER,"concurrency":1}
         }}),
     )?;
     let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
     let endpoint = supervisor.ready()?;
+    // The configured PostgreSQL database replaces the state directory's SQLite file.
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let mut operator = client(&endpoint).await?;
     let reader = host(&mut operator, &credential, "reader").await?;
@@ -314,8 +345,9 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> 
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("not running"));
     Ok(())
 }
-#[tokio::test]
-async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join() -> Result<()> {
+async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
+    database: String,
+) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let central = temp.path().join("central");
     let central_file = temp.path().join("central.yaml");
@@ -323,8 +355,9 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
         &central_file,
         &serde_json::json!({"services":{"control-plane":{"type":"control-plane","ports":["127.0.0.1:0"]}}}),
     )?;
-    let mut server = Process::spawn(&central, Some(&central_file), &[])?;
+    let mut server = Process::spawn(&central, Some(&central_file), &database_env(&database))?;
     let endpoint = server.ready()?;
+    uses_database(&central, &database)?;
     let credential = token(&central)?;
     let mut operator = client(&endpoint).await?;
     let mut keys = Vec::new();
@@ -378,9 +411,9 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     Ok(())
 }
 
-#[tokio::test]
-async fn local_provision_creates_ordered_resources_once_and_preserves_operator_edits() -> Result<()>
-{
+async fn local_provision_creates_ordered_resources_once_and_preserves_operator_edits(
+    database: String,
+) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("provisioned");
     let file = temp.path().join("supertag.yaml");
@@ -408,8 +441,9 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
         "worker":{"type":"host","adapter":ADAPTER}
     }});
     yaml(&file, &config)?;
-    let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
     let endpoint = supervisor.ready()?;
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let channel =
         protocol::negotiated(Channel::from_shared(endpoint.clone())?.connect().await?).await?;
@@ -518,7 +552,7 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     supervisor.stop().await?;
     config["services"]["control-plane"]["provision"].as_array_mut().unwrap().push(serde_json::json!({"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"later"},"spec":{"instructions":"Added later"}}));
     yaml(&file, &config)?;
-    let mut restarted = Process::spawn(&state, Some(&file), &[])?;
+    let mut restarted = Process::spawn(&state, Some(&file), &database_env(&database))?;
     assert_eq!(restarted.ready()?, endpoint);
     let channel = protocol::negotiated(Channel::from_shared(endpoint)?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -579,8 +613,9 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     Ok(())
 }
 
-#[tokio::test]
-async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()> {
+async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services(
+    database: String,
+) -> Result<()> {
     for linked in [false, true] {
         let temp = tempfile::tempdir()?;
         let state = temp.path().join("unsafe");
@@ -606,7 +641,7 @@ async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -
                 "worker":{"type":"host","adapter":ADAPTER}
             }}),
         )?;
-        let mut supervisor = Process::spawn(&state, Some(&file), &[])?;
+        let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
         assert!(supervisor.ready().is_err());
         let status = timeout(WAIT, async {
             loop {
@@ -700,8 +735,10 @@ fn names(environment: &std::collections::BTreeMap<String, String>) -> Vec<&str> 
     environment.keys().map(String::as_str).collect()
 }
 
-#[tokio::test]
-async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_them() -> Result<()> {
+async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_them(
+    database: String,
+) -> Result<()> {
+    let postgres = database.starts_with("postgres");
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let home = temp.path().join("home");
@@ -709,14 +746,21 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     let env_file = temp.path().join("services.env");
     fs::write(
         &env_file,
-        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\n",
+        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\nHTTPS_PROXY=https://proxy.invalid:443\nNO_PROXY=example.test\nLOCAL_DB_PASSWORD=file-db-password\n",
     )?;
     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
     let file = temp.path().join("supertag.yaml");
     yaml(
         &file,
-        &serde_json::json!({"env_file":"services.env","services":{
-            "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"]},
+        // On PostgreSQL the configured database's password secret comes from env_file and
+        // reaches the Control Plane, and only it, as PGPASSWORD.
+        &serde_json::json!({"env_file":"services.env","secrets":{"db":{"environment":"LOCAL_DB_PASSWORD"}},"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"],
+                "database":if postgres {
+                    serde_json::json!({"url": database, "password": "db"})
+                } else {
+                    Value::Null
+                }},
             "codex-host":{"type":"host","harnesses":["codex"],"concurrency":1},
             "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"],"concurrency":1}
         }}),
@@ -735,7 +779,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         &state,
         Some(&file),
         &[
-            ("PATH", &path),
+            ("PATH", path.as_str()),
             ("HOME", home_value),
             ("CODEX_API_KEY", "shell-codex"),
             ("ANTHROPIC_API_KEY", "shell-anthropic"),
@@ -744,6 +788,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         ],
     )?;
     let endpoint = supervisor.ready()?;
+    uses_database(&state, &database)?;
     let credential = token(&state)?;
     let mut roles = std::collections::BTreeMap::new();
     for (pid, command) in children(supervisor.child.id())? {
@@ -760,7 +805,16 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         };
         roles.insert(role, process_environment(pid)?);
     }
-    let base = ["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"];
+    // The env_file proxy reaches every service, so a service unit can use one. Its https://
+    // URL is one SuperTag cannot use, which fails only connections that would go through it,
+    // never these loopback ones.
+    let base = [
+        "HOME",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SUPERTAG_LOCAL_SERVICE_LIFELINE",
+    ];
     let expected = |extra: &[&'static str]| {
         let mut names = base.iter().chain(extra).copied().collect::<Vec<_>>();
         names.sort_unstable();
@@ -768,12 +822,25 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     };
     assert_eq!(
         names(&roles["control-plane"]),
-        expected(&[
-            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
-            "SUPERTAG_DATABASE_URL",
-            "SUPERTAG_OPERATOR_TOKEN"
-        ])
+        expected(if postgres {
+            &[
+                "PGPASSWORD",
+                "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+                "SUPERTAG_DATABASE_URL",
+                "SUPERTAG_OPERATOR_TOKEN",
+            ]
+        } else {
+            &[
+                "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+                "SUPERTAG_DATABASE_URL",
+                "SUPERTAG_OPERATOR_TOKEN",
+            ]
+        })
     );
+    if postgres {
+        assert_eq!(roles["control-plane"]["PGPASSWORD"], "file-db-password");
+        assert_eq!(roles["control-plane"]["SUPERTAG_DATABASE_URL"], database);
+    }
     // The Gateway holds no operator credential, only its own enrolled one.
     assert_eq!(
         names(&roles["gateway"]),
@@ -794,6 +861,8 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     );
     for environment in roles.values() {
         assert_eq!(environment["HOME"], home_value);
+        assert_eq!(environment["HTTPS_PROXY"], "https://proxy.invalid:443");
+        assert_eq!(environment["NO_PROXY"], "example.test");
         assert!(
             environment
                 .values()
@@ -884,6 +953,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         "file-cursor",
         "shell-codex",
         "file-gateway-token",
+        "file-db-password",
     ] {
         assert!(!log.contains(value));
     }
@@ -1869,8 +1939,9 @@ async fn webhook_mock() -> Result<(
 /// TypeScript parity: `notify` on the Control Plane service of `supertag.yaml`
 /// (`apps/cli/src/notification-command.ts`, `tests/operator-channel-runtime.test.ts`).
 // The webhook mock must answer while this test blocks on CLI processes.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn configured_notify_destinations_tell_the_operator_about_a_question() -> Result<()> {
+async fn configured_notify_destinations_tell_the_operator_about_a_question(
+    database: String,
+) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let file = temp.path().join("supertag.yaml");
@@ -1920,9 +1991,13 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
             ("FIXTURE_HOOK_SECRET", "synthetic-hook-secret"),
             ("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1"),
             ("SUPERTAG_TEST_DESKTOP_NOTIFIER", notifier_path),
-        ],
+        ]
+        .into_iter()
+        .chain(database_env(&database))
+        .collect::<Vec<_>>(),
     )?;
     supervisor.ready()?;
+    uses_database(&state, &database)?;
     let cli = |args: &[&str]| -> Result<String> {
         let output = Command::new(BIN)
             .arg(args[0])
@@ -1996,4 +2071,130 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
         fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
     );
     supervisor.stop().await
+}
+
+// Each `supertag up` case runs with the local Control Plane on SQLite and on PostgreSQL.
+
+#[tokio::test]
+async fn sqlite_configured_local_hosts_restart_and_reap_with_stable_private_state() -> Result<()> {
+    with_database(
+        false,
+        configured_local_hosts_restart_and_reap_with_stable_private_state,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_configured_local_hosts_restart_and_reap_with_stable_private_state() -> Result<()>
+{
+    with_database(
+        true,
+        configured_local_hosts_restart_and_reap_with_stable_private_state,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn sqlite_remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join()
+-> Result<()> {
+    with_database(
+        false,
+        remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join()
+-> Result<()> {
+    with_database(
+        true,
+        remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn sqlite_local_provision_creates_ordered_resources_once_and_preserves_operator_edits()
+-> Result<()> {
+    with_database(
+        false,
+        local_provision_creates_ordered_resources_once_and_preserves_operator_edits,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_local_provision_creates_ordered_resources_once_and_preserves_operator_edits()
+-> Result<()> {
+    with_database(
+        true,
+        local_provision_creates_ordered_resources_once_and_preserves_operator_edits,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn sqlite_unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()>
+{
+    with_database(
+        false,
+        unsafe_provision_source_stops_before_hosts_start_and_reaps_services,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()>
+{
+    with_database(
+        true,
+        unsafe_provision_source_stops_before_hosts_start_and_reaps_services,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn sqlite_env_file_credentials_reach_only_the_services_and_harnesses_that_need_them()
+-> Result<()> {
+    with_database(
+        false,
+        env_file_credentials_reach_only_the_services_and_harnesses_that_need_them,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_env_file_credentials_reach_only_the_services_and_harnesses_that_need_them()
+-> Result<()> {
+    with_database(
+        true,
+        env_file_credentials_reach_only_the_services_and_harnesses_that_need_them,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_configured_notify_destinations_tell_the_operator_about_a_question() -> Result<()> {
+    with_database(
+        false,
+        configured_notify_destinations_tell_the_operator_about_a_question,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_configured_notify_destinations_tell_the_operator_about_a_question() -> Result<()>
+{
+    with_database(
+        true,
+        configured_notify_destinations_tell_the_operator_about_a_question,
+    )
+    .await
 }

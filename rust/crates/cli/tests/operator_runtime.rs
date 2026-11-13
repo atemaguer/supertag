@@ -103,6 +103,26 @@ database_tests! {
     conversation_scope_survives_api_forwards_and_task_reads;
     #[tokio::test]
     watch_replays_private_conversations_after_services_restart;
+    #[tokio::test]
+    captured_artifact_bytes_survive_control_plane_restart_with_private_metadata;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    go_tui_lists_and_saves_completed_task_files;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    bare_launcher_saves_and_switches_control_plane_rosters;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    rust_launcher_and_go_tui_send_a_real_conversation;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    rust_launcher_and_go_tui_follow_one_work_session_report;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    rust_launcher_and_go_tui_continue_a_questioned_work_session;
+    #[tokio::test]
+    #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+    rust_launcher_and_go_tui_answer_a_harness_question;
 }
 
 async fn retirement_removes_tag_from_roster_and_preserves_identity(database: String) -> Result<()> {
@@ -166,26 +186,23 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     Ok(())
 }
 
-#[tokio::test]
-async fn captured_artifact_bytes_survive_control_plane_restart_with_private_metadata() -> Result<()>
-{
-    captured_artifact_round_trip(None).await
+async fn captured_artifact_bytes_survive_control_plane_restart_with_private_metadata(
+    database: String,
+) -> Result<()> {
+    captured_artifact_round_trip(None, database).await
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn go_tui_lists_and_saves_completed_task_files() -> Result<()> {
+async fn go_tui_lists_and_saves_completed_task_files(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
-    captured_artifact_round_trip(Some(Path::new(&binary))).await
+    captured_artifact_round_trip(Some(Path::new(&binary)), database).await
 }
 
-async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
+async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> Result<()> {
     let directory = tempfile::Builder::new()
         .prefix("files-tui-")
         .tempdir_in("/tmp")?;
-    let database = directory.path().join("control.db");
     let blobs = directory.path().join("blobs");
     let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
@@ -196,10 +213,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
             .arg("--transfer-directory")
             .arg(&blobs)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env(
-                "SUPERTAG_DATABASE_URL",
-                format!("sqlite://{}?mode=rwc", database.display()),
-            );
+            .env("SUPERTAG_DATABASE_URL", &database);
         control
     };
     let (mut control, endpoint) = service(create_control()).await?;
@@ -349,11 +363,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
         .into_inner();
     assert_eq!(captured.files.len(), 2);
     assert_eq!(std::fs::read(blobs.join(digest))?, bytes);
-    assert!(
-        !std::fs::read(&database)?
-            .windows(bytes.len())
-            .any(|window| window == bytes)
-    );
+    control_plane_holds_no_artifact_bytes(&database, bytes).await?;
 
     control.kill().await?;
     let (mut control, endpoint) = service(create_control()).await?;
@@ -433,6 +443,68 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
     }
     control.kill().await?;
     Ok(())
+}
+
+/// The Control Plane database holds the artifact's metadata but never its bytes. SQLite:
+/// the database file itself. PostgreSQL: every row of every table, as text, where `bytea`
+/// columns (the protobuf payloads) appear as hex. Both scans must find the metadata, so a
+/// scan that sees nothing cannot pass.
+async fn control_plane_holds_no_artifact_bytes(database: &str, bytes: &[u8]) -> Result<()> {
+    let contains = |haystack: &[u8], needle: &[u8]| {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+    };
+    let metadata = b"report.txt";
+    if let Some(path) = database.strip_prefix("sqlite://") {
+        let file = std::fs::read(path.split('?').next().unwrap_or(path))?;
+        ensure!(
+            contains(&file, metadata),
+            "the scan saw no artifact metadata"
+        );
+        ensure!(
+            !contains(&file, bytes),
+            "the Control Plane stored artifact bytes"
+        );
+        return Ok(());
+    }
+    use sqlx::{Connection, PgConnection};
+    let mut connection = PgConnection::connect(database).await?;
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT CAST(table_name AS TEXT) FROM information_schema.tables \
+         WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'",
+    )
+    .fetch_all(&mut connection)
+    .await?;
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
+    let (bytes_hex, metadata_hex) = (hex(bytes), hex(metadata));
+    let mut saw_metadata = false;
+    for table in tables {
+        let rows: Vec<String> =
+            sqlx::query_scalar(&format!("SELECT CAST(t AS TEXT) FROM \"{table}\" AS t"))
+                .fetch_all(&mut connection)
+                .await?;
+        for row in rows {
+            saw_metadata |= contains(row.as_bytes(), metadata) || row.contains(&metadata_hex);
+            ensure!(
+                !contains(row.as_bytes(), bytes) && !row.contains(&bytes_hex),
+                "the Control Plane stored artifact bytes in {table}"
+            );
+        }
+    }
+    connection.close().await?;
+    ensure!(saw_metadata, "the scan saw no artifact metadata");
+    Ok(())
+}
+
+/// `supertag up` with its local Control Plane on `database`: the state directory's SQLite
+/// file for a SQLite URL, else the PostgreSQL database.
+fn up_command(database: &str, args: &[&str]) -> Command {
+    let mut up = command(args);
+    if database.starts_with("postgres") {
+        up.env("SUPERTAG_DATABASE_URL", database);
+    }
+    up
 }
 
 async fn tui_save_task_file(
@@ -806,9 +878,7 @@ fn shell_path(path: &Path) -> Result<String> {
     Ok(format!("'{}'", value.replace('\'', "'\\''")))
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn bare_launcher_saves_and_switches_control_plane_rosters() -> Result<()> {
+async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -833,14 +903,18 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters() -> Result<()> 
     ] {
         let private_token =
             supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
-        let mut control = control_plane(&private_token, token, "operator:tui");
-        control.env(
-            "SUPERTAG_DATABASE_URL",
+        // The first roster's Control Plane uses the database under test; the second
+        // needs a database of its own.
+        let url = if tag == "first-tag" {
+            database.clone()
+        } else {
             format!(
                 "sqlite://{}?mode=rwc",
                 directory.path().join(format!("{tag}.sqlite")).display()
-            ),
-        );
+            )
+        };
+        let mut control = control_plane(&private_token, token, "operator:tui");
+        control.env("SUPERTAG_DATABASE_URL", url);
         let (plane, address) = service(control).await?;
         operator_client::OperatorClient::new(channel(&address).await?)
             .put_tag(authenticated_request(
@@ -926,9 +1000,7 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters() -> Result<()> 
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
+async fn rust_launcher_and_go_tui_send_a_real_conversation(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -936,7 +1008,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         .prefix("tui-v2-")
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
-    let mut up = command(&["up", "--foreground", "--adapter", ADAPTER]);
+    let mut up = up_command(&database, &["up", "--foreground", "--adapter", ADAPTER]);
     up.arg("--state-directory").arg(&state);
     let (mut runtime, endpoint) = service(up).await?;
     assert_eq!(
@@ -1046,9 +1118,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()> {
+async fn rust_launcher_and_go_tui_follow_one_work_session_report(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -1056,13 +1126,16 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
         .prefix("work-tui-")
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
-    let mut up = command(&[
-        "up",
-        "--foreground",
-        "--adapter",
-        ADAPTER,
-        "--adapter-arg=--work-session-flow",
-    ]);
+    let mut up = up_command(
+        &database,
+        &[
+            "up",
+            "--foreground",
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--work-session-flow",
+        ],
+    );
     up.arg("--state-directory").arg(&state);
     let (mut runtime, _) = service(up).await?;
     let mut put = command(&[
@@ -1131,9 +1204,9 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result<()> {
+async fn rust_launcher_and_go_tui_continue_a_questioned_work_session(
+    database: String,
+) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -1142,7 +1215,7 @@ async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
     let marker = directory.path().join("fixture-work.json");
-    let mut up = command(&["up", "--foreground", "--adapter", ADAPTER]);
+    let mut up = up_command(&database, &["up", "--foreground", "--adapter", ADAPTER]);
     up.arg(format!(
         "--adapter-arg=--work-session-question-flow={}",
         marker.display()
@@ -1456,9 +1529,7 @@ async fn watch_replays_private_conversations_after_services_restart(
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
+async fn rust_launcher_and_go_tui_answer_a_harness_question(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -1466,13 +1537,16 @@ async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
         .prefix("inbox-v2-")
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
-    let mut up = command(&[
-        "up",
-        "--foreground",
-        "--adapter",
-        ADAPTER,
-        "--adapter-arg=--objective-question",
-    ]);
+    let mut up = up_command(
+        &database,
+        &[
+            "up",
+            "--foreground",
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--objective-question",
+        ],
+    );
     up.arg("--state-directory").arg(&state);
     let (mut runtime, endpoint) = service(up).await?;
     let mut put = command(&[

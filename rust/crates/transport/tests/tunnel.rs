@@ -22,8 +22,9 @@ use supertag_protocol::v2::{
     remote_workspace_provider_server::{RemoteWorkspaceProvider, RemoteWorkspaceProviderServer},
     remote_workspace_stage_chunk,
 };
-use supertag_transport::{Target, incoming, tunneled_uri};
+use supertag_transport::{Proxy, Target, incoming, tunneled_uri};
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     task::{AbortHandle, JoinHandle},
 };
@@ -232,7 +233,7 @@ impl Pki {
     fn leaf(&self, name: &str) -> Result<Leaf> {
         std::fs::write(
             self.directory.join(format!("{name}.ext")),
-            "subjectAltName=IP:127.0.0.1,DNS:localhost\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth,clientAuth\n",
+            "subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:gateway.test\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth,clientAuth\n",
         )?;
         self.openssl(&[
             "req",
@@ -731,5 +732,339 @@ async fn a_dropped_tunnel_fails_calls_as_retryable_and_the_channel_recovers() ->
         }
     }
     ensure!(recovered.is_some(), "the channel never reconnected");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// HTTP CONNECT proxies
+
+/// An HTTP proxy that answers `CONNECT gateway.test:PORT` by relaying to the loopback
+/// port, so the client only reaches the service through it. It records each request
+/// line and `Proxy-Authorization` value, and refuses everything when `refuse` is set.
+/// Each `CONNECT` request line and its `Proxy-Authorization` value.
+type ProxyRequests = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+struct ConnectProxy {
+    address: SocketAddr,
+    requests: ProxyRequests,
+    task: JoinHandle<()>,
+}
+
+impl ConnectProxy {
+    async fn start(refuse: bool) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let requests: ProxyRequests = Arc::default();
+        let seen = requests.clone();
+        let task = tokio::spawn(async move {
+            while let Ok((mut downstream, _)) = listener.accept().await {
+                let seen = seen.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut byte = [0_u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        if downstream.read(&mut byte).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        head.push(byte[0]);
+                    }
+                    let head = String::from_utf8_lossy(&head).into_owned();
+                    let mut lines = head.split("\r\n");
+                    let request = lines.next().unwrap_or_default().to_owned();
+                    let authorization = lines
+                        .find_map(|line| line.strip_prefix("Proxy-Authorization: "))
+                        .map(str::to_owned);
+                    seen.lock().unwrap().push((request.clone(), authorization));
+                    let port = request
+                        .strip_prefix("CONNECT gateway.test:")
+                        .and_then(|rest| rest.strip_suffix(" HTTP/1.1"))
+                        .and_then(|port| port.parse::<u16>().ok());
+                    let (Some(port), false) = (port, refuse) else {
+                        let _ = downstream
+                            .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                            .await;
+                        return;
+                    };
+                    let Ok(mut upstream) = TcpStream::connect(("127.0.0.1", port)).await else {
+                        return;
+                    };
+                    if downstream
+                        .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                        .await
+                        .is_ok()
+                    {
+                        let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+                    }
+                });
+            }
+        });
+        Ok(Self {
+            address,
+            requests,
+            task,
+        })
+    }
+
+    fn url(&self, credentials: &str) -> String {
+        format!("http://{credentials}{}", self.address)
+    }
+
+    fn requests(&self) -> Vec<(String, Option<String>)> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ConnectProxy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// `HTTPS_PROXY` support: a native `https://` target and a `wss://` tunnel both reach a
+/// host the client cannot resolve, only through the proxy's `CONNECT`, with SuperTag's
+/// mutual TLS (and the tunnel's outer TLS) running end to end through it. A host listed
+/// in `NO_PROXY` and a loopback host never reach the proxy, and a proxy that refuses
+/// `CONNECT` fails the call instead of letting the client connect directly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let served = fixture.server(true).await?;
+    let edge = fixture.edge(served.tunnel).await?;
+    let proxy = ConnectProxy::start(false).await?;
+    let configured = || {
+        Proxy::new(
+            &proxy.url("operator:p%40ss@"),
+            "bypass.test, .internal.test",
+        )
+    };
+
+    let native = Endpoint::from_shared(format!("https://gateway.test:{}", served.native.port()))?
+        .connect_timeout(Duration::from_secs(5))
+        .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
+    let native = Target::native(native)
+        .proxy(Some(configured()))
+        .map_err(|error| anyhow::anyhow!(error))?;
+    ensure!(native.proxied() && !native.tunnelled());
+    let mut client = RemoteWorkspaceProviderClient::new(native.connect().await?)
+        .max_decoding_message_size(4 << 20);
+    exercise(&mut client).await?;
+
+    let tunnel = fixture
+        .target(
+            &format!("wss://gateway.test:{}/supertag", edge.port()),
+            Some(&fixture.client),
+        )?
+        .proxy(Some(configured()))
+        .map_err(|error| anyhow::anyhow!(error))?;
+    ensure!(tunnel.proxied() && tunnel.tunnelled());
+    let mut client = RemoteWorkspaceProviderClient::new(tunnel.connect_lazy())
+        .max_decoding_message_size(4 << 20);
+    exercise(&mut client).await?;
+
+    let requests = proxy.requests();
+    let expected = format!(
+        "Basic {}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, "operator:p@ss")
+    );
+    ensure!(
+        requests
+            .iter()
+            .any(|(line, _)| line
+                == &format!("CONNECT gateway.test:{} HTTP/1.1", served.native.port()))
+            && requests
+                .iter()
+                .any(|(line, _)| line == &format!("CONNECT gateway.test:{} HTTP/1.1", edge.port()))
+            && requests
+                .iter()
+                .all(|(_, authorization)| authorization.as_deref() == Some(expected.as_str())),
+        "unexpected proxy requests: {requests:?}"
+    );
+
+    // Excluded hosts and loopback addresses are reached directly.
+    for url in [
+        "https://bypass.test:1".to_owned(),
+        "https://api.internal.test:1".to_owned(),
+        format!("https://127.0.0.1:{}", served.native.port()),
+        format!("https://localhost:{}", served.native.port()),
+    ] {
+        let target = Target::native(Endpoint::from_shared(url.clone())?)
+            .proxy(Some(configured()))
+            .map_err(|error| anyhow::anyhow!(error))?;
+        ensure!(!target.proxied(), "{url} was proxied");
+    }
+    let direct = Endpoint::from_shared(format!("https://localhost:{}", served.native.port()))?
+        .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
+    let direct = Target::native(direct)
+        .proxy(Some(configured()))
+        .map_err(|error| anyhow::anyhow!(error))?;
+    RemoteWorkspaceProviderClient::new(direct.connect().await?)
+        .allocate(RemoteWorkspaceAllocateRequest::default())
+        .await?;
+    ensure!(
+        proxy.requests().len() == requests.len(),
+        "a direct target reached the proxy"
+    );
+
+    // A refusing proxy fails the connection; nothing falls back to a direct dial.
+    let refusing = ConnectProxy::start(true).await?;
+    let native = Endpoint::from_shared(format!("https://gateway.test:{}", served.native.port()))?
+        .connect_timeout(Duration::from_secs(5))
+        .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
+    let native = Target::native(native)
+        .proxy(Some(Proxy::new(&refusing.url(""), "")))
+        .map_err(|error| anyhow::anyhow!(error))?;
+    let error = native
+        .connect()
+        .await
+        .expect_err("a refused CONNECT connected");
+    let chain = format!("{error:?}");
+    ensure!(
+        chain.contains("refused CONNECT") && chain.contains("407"),
+        "unexpected refusal: {chain}"
+    );
+    ensure!(refusing.requests().len() == 1);
+
+    // A proxy URL SuperTag cannot use fails only the targets it applies to: a loopback or
+    // excluded target still connects directly, and a proxied one never dials directly.
+    let unusable = || Proxy::new("https://proxy.corp:443", "bypass.test");
+    for url in [
+        format!("https://127.0.0.1:{}", served.native.port()),
+        "https://bypass.test:1".to_owned(),
+    ] {
+        let target = Target::native(Endpoint::from_shared(url.clone())?)
+            .proxy(Some(unusable()))
+            .map_err(|error| anyhow::anyhow!(error))?;
+        ensure!(!target.proxied(), "{url} was proxied");
+    }
+    let error = Target::native(Endpoint::from_shared("https://gateway.test:1")?)
+        .proxy(Some(unusable()))
+        .err()
+        .context("an unusable proxy was accepted")?
+        .to_string();
+    ensure!(
+        error.contains("must be an http:// URL"),
+        "unexpected error: {error}"
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Connections dropped without a close
+
+/// A TCP relay that can go silent: it stops forwarding in both directions but keeps
+/// both sockets open, as a proxy or NAT that dropped its state does.
+struct SilentRelay {
+    address: SocketAddr,
+    silent: Arc<std::sync::atomic::AtomicBool>,
+    task: JoinHandle<()>,
+}
+
+impl SilentRelay {
+    async fn start(backend: SocketAddr) -> Result<Self> {
+        use std::sync::atomic::Ordering;
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let silent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = silent.clone();
+        let task = tokio::spawn(async move {
+            while let Ok((downstream, _)) = listener.accept().await {
+                let Ok(upstream) = TcpStream::connect(backend).await else {
+                    continue;
+                };
+                let (down_read, down_write) = downstream.into_split();
+                let (up_read, up_write) = upstream.into_split();
+                for (mut from, mut to, flag) in [
+                    (
+                        Box::new(down_read) as Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+                        Box::new(up_write) as Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+                        flag.clone(),
+                    ),
+                    (Box::new(up_read), Box::new(down_write), flag.clone()),
+                ] {
+                    tokio::spawn(async move {
+                        let mut buffer = vec![0_u8; 16 * 1024];
+                        loop {
+                            let Ok(read) = from.read(&mut buffer).await else {
+                                return;
+                            };
+                            if read == 0 {
+                                // Hold the other side open: a silent drop never closes.
+                                std::future::pending::<()>().await;
+                            }
+                            if flag.load(Ordering::SeqCst) {
+                                continue;
+                            }
+                            if to.write_all(&buffer[..read]).await.is_err() {
+                                return;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        Ok(Self {
+            address,
+            silent,
+            task,
+        })
+    }
+
+    fn go_silent(&self) {
+        self.silent.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for SilentRelay {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// HTTP/2 keepalive: a call waiting on a connection that a relay stopped forwarding
+/// (without closing it) fails within the keepalive interval and timeout, as a retryable
+/// transport failure, instead of hanging until a deadline it may not have.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn keepalive_fails_a_call_on_a_connection_dropped_without_a_close() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let served = fixture.server(true).await?;
+    let relay = SilentRelay::start(served.native).await?;
+    let endpoint = Endpoint::from_shared(format!("https://localhost:{}", relay.address.port()))?
+        .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
+    let target =
+        Target::native(endpoint).keepalive(Duration::from_millis(300), Duration::from_millis(500));
+    let mut client = RemoteWorkspaceProviderClient::new(target.connect().await?);
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    sender
+        .send(RemoteMcpServerInput {
+            part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
+                name: "files".into(),
+                ..Default::default()
+            })),
+        })
+        .await?;
+    let mut outputs = client
+        .run_mcp_server(tokio_stream::wrappers::ReceiverStream::new(receiver))
+        .await?
+        .into_inner();
+    outputs.next().await.context("start reply")??;
+    // Idle but healthy: pings are answered and the call stays open.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    relay.go_silent();
+    let started = std::time::Instant::now();
+    let status = tokio::time::timeout(Duration::from_secs(10), outputs.next())
+        .await
+        .context("the call never noticed the silent connection")?
+        .context("the call ended cleanly")?
+        .expect_err("the call succeeded on a silent connection");
+    ensure!(
+        started.elapsed() < Duration::from_secs(5),
+        "keepalive took {:?}",
+        started.elapsed()
+    );
+    ensure!(
+        retryable(&status),
+        "a silently dropped connection is not retryable: {status:?}"
+    );
+    drop(sender);
     Ok(())
 }

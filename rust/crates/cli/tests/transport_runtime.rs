@@ -21,6 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use supertag_protocol::negotiation::ProtocolChannel;
+use supertag_transport::{KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
@@ -31,12 +32,14 @@ use supertag_protocol::{
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
         AcceptEventRequest, ClaimOperatorNotificationRequest, CreateAuthKeyRequest, GetTaskRequest,
-        ListEventsRequest, ListHostsRequest, ListNativeUsageRequest, PrincipalRole, PutTagRequest,
-        ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind,
-        WatchRequest, WhoAmIRequest, connector_client::ConnectorClient,
-        enrollments_client::EnrollmentsClient, operator_client::OperatorClient,
-        operator_events_client::OperatorEventsClient,
+        GetWorkSessionRequest, ListEventsRequest, ListHostsRequest, ListNativeUsageRequest,
+        ListWorkSessionsRequest, PrincipalRole, PutTagRequest, SendMessageRequest, ServiceRole,
+        SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind, WatchRequest,
+        WhoAmIRequest, WorkSession, connector_client::ConnectorClient,
+        conversations_client::ConversationsClient, enrollments_client::EnrollmentsClient,
+        operator_client::OperatorClient, operator_events_client::OperatorEventsClient,
         operator_notifications_client::OperatorNotificationsClient, watch_event::Update,
+        work_sessions_client::WorkSessionsClient,
     },
 };
 use tokio::{
@@ -95,6 +98,10 @@ impl Service {
             .with_context(|| format!("invalid address line {line:?}: {}", self.logs()))?;
         ensure!(address.ip().is_loopback() && address.port() != 0);
         Ok(address)
+    }
+
+    fn pid(&self) -> Option<u32> {
+        self.child.id()
     }
 
     /// Waits for a process that must fail and returns its diagnostics.
@@ -216,6 +223,45 @@ impl Services {
         protocol::negotiated(connect(self.address).await?).await
     }
 
+    /// Stops the Control Plane and starts it again on the same address and database,
+    /// leaving every client and Worker Host to reconnect. Returns how long it was down.
+    async fn restart_control_plane(
+        &mut self,
+        database: &str,
+        directory: &Path,
+        tokens: &Tokens,
+    ) -> Result<Duration> {
+        let pid = self.control_plane.pid().context("Control Plane exited")?;
+        let stopped = Instant::now();
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+        let _ = timeout(STARTUP, self.control_plane.child.wait()).await?;
+        let listen = self.address.to_string();
+        let deadline = Instant::now() + STARTUP;
+        loop {
+            let mut command = binary(&["control-plane", "--listen", &listen]);
+            command
+                .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+                .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
+                .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
+                .env("SUPERTAG_DATABASE_URL", database);
+            let mut restarted = Service::spawn(command, directory, "control-plane")?;
+            match restarted.address().await {
+                Ok(address) => {
+                    ensure!(address == self.address);
+                    self.control_plane = restarted;
+                    return Ok(stopped.elapsed());
+                }
+                // The port can still be held briefly by the killed process.
+                Err(error) => {
+                    ensure!(Instant::now() < deadline, "{error:#}");
+                    sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
+
     /// A Control Plane channel that has not negotiated.
     async fn raw_channel(&self) -> Result<Channel> {
         connect(self.address).await
@@ -268,13 +314,23 @@ fn sqlite(directory: &Path) -> String {
 #[derive(Default)]
 struct ProxyState {
     partitioned: AtomicBool,
+    /// Set by [`Proxy::silence`]: new connections are held open and never forwarded.
+    silent: AtomicBool,
     accepted: AtomicU64,
     refused: AtomicU64,
-    links: Mutex<Vec<AbortHandle>>,
+    links: Mutex<Vec<Link>>,
+}
+
+/// One relayed connection. A dead link keeps both sockets open and forwards nothing.
+struct Link {
+    task: AbortHandle,
+    dead: Arc<AtomicBool>,
 }
 
 /// A TCP relay in front of the Control Plane for one Worker Host. A partition severs every
-/// open connection and refuses new ones until it is restored.
+/// open connection and refuses new ones until it is restored; a silent drop leaves
+/// every connection open but forwards nothing on it again, as a proxy or NAT that lost
+/// its state does.
 struct Proxy {
     address: SocketAddr,
     state: Arc<ProxyState>,
@@ -288,21 +344,23 @@ impl Proxy {
         let state = Arc::new(ProxyState::default());
         let shared = state.clone();
         let task = tokio::spawn(async move {
-            while let Ok((mut downstream, _)) = listener.accept().await {
+            while let Ok((downstream, _)) = listener.accept().await {
                 let mut links = shared.links.lock().unwrap();
                 if shared.partitioned.load(Ordering::SeqCst) {
                     shared.refused.fetch_add(1, Ordering::SeqCst);
                     drop(downstream);
                     continue;
                 }
-                shared.accepted.fetch_add(1, Ordering::SeqCst);
-                let link = tokio::spawn(async move {
-                    if let Ok(mut upstream) = TcpStream::connect(target).await {
-                        let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
-                    }
+                let dead = Arc::new(AtomicBool::new(shared.silent.load(Ordering::SeqCst)));
+                if !dead.load(Ordering::SeqCst) {
+                    shared.accepted.fetch_add(1, Ordering::SeqCst);
+                }
+                let task = tokio::spawn(relay(downstream, target, dead.clone()));
+                links.retain(|link| !link.task.is_finished());
+                links.push(Link {
+                    task: task.abort_handle(),
+                    dead,
                 });
-                links.retain(|link| !link.is_finished());
-                links.push(link.abort_handle());
             }
         });
         Ok(Self {
@@ -316,13 +374,25 @@ impl Proxy {
         let mut links = self.state.links.lock().unwrap();
         self.state.partitioned.store(true, Ordering::SeqCst);
         for link in links.drain(..) {
-            link.abort();
+            link.task.abort();
+        }
+    }
+
+    /// Stops forwarding on every open connection, without closing any, until
+    /// [`Proxy::restore`]; connections opened meanwhile are held open and never forwarded.
+    /// Only a new connection after the restore reaches the Control Plane again.
+    fn silence(&self) {
+        let links = self.state.links.lock().unwrap();
+        self.state.silent.store(true, Ordering::SeqCst);
+        for link in links.iter() {
+            link.dead.store(true, Ordering::SeqCst);
         }
     }
 
     fn restore(&self) {
         let _links = self.state.links.lock().unwrap();
         self.state.partitioned.store(false, Ordering::SeqCst);
+        self.state.silent.store(false, Ordering::SeqCst);
     }
 
     fn accepted(&self) -> u64 {
@@ -343,6 +413,65 @@ impl Drop for Proxy {
         self.partition();
         self.task.abort();
     }
+}
+
+/// Relays one connection until either side closes it, or, once `dead`, holds both sockets
+/// open and discards whatever arrives.
+async fn relay(downstream: TcpStream, target: SocketAddr, dead: Arc<AtomicBool>) {
+    let upstream = if dead.load(Ordering::SeqCst) {
+        None
+    } else {
+        TcpStream::connect(target).await.ok()
+    };
+    let Some(upstream) = upstream else {
+        if dead.load(Ordering::SeqCst) {
+            // Dropping either half would close the connection; hold both until aborted.
+            let (read, _write) = downstream.into_split();
+            discard(read).await;
+            std::future::pending::<()>().await;
+        }
+        return;
+    };
+    let (down_read, down_write) = downstream.into_split();
+    let (up_read, up_write) = upstream.into_split();
+    tokio::join!(
+        pump(down_read, up_write, dead.clone()),
+        pump(up_read, down_write, dead)
+    );
+}
+
+/// Copies `from` to `to` while the link lives. On end of stream it closes `to`, unless
+/// the link is dead: then nothing, not even a close, crosses it.
+async fn pump(
+    mut from: tokio::net::tcp::OwnedReadHalf,
+    mut to: tokio::net::tcp::OwnedWriteHalf,
+    dead: Arc<AtomicBool>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buffer = vec![0_u8; 16 * 1024];
+    loop {
+        let read = match from.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        if dead.load(Ordering::SeqCst) {
+            continue;
+        }
+        if to.write_all(&buffer[..read]).await.is_err() {
+            return;
+        }
+    }
+    if dead.load(Ordering::SeqCst) {
+        // Dropping the write half would send a close; keep it until the link is aborted.
+        std::future::pending::<()>().await;
+    }
+    let _ = to.shutdown().await;
+}
+
+async fn discard(mut from: tokio::net::tcp::OwnedReadHalf) {
+    use tokio::io::AsyncReadExt;
+    let mut buffer = vec![0_u8; 16 * 1024];
+    while matches!(from.read(&mut buffer).await, Ok(read) if read > 0) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -431,9 +560,27 @@ struct Host {
     release: PathBuf,
     launches: PathBuf,
     process: Service,
+    /// The `worker-host` arguments, so the same host can be started again.
+    arguments: Vec<std::ffi::OsString>,
+    directory: PathBuf,
 }
 
 impl Host {
+    /// Stops the Worker Host process and starts it again on the same state directory.
+    async fn restart(&mut self) -> Result<()> {
+        if let Some(pid) = self.process.pid() {
+            // A Worker Host stops its adapter and exits on SIGTERM.
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
+        }
+        timeout(STARTUP, self.process.child.wait()).await??;
+        let mut command = binary(&[]);
+        command.args(&self.arguments);
+        self.process = Service::spawn(command, &self.directory, &self.id)?;
+        Ok(())
+    }
+
     fn launches(&self) -> Result<usize> {
         Ok(std::fs::read_to_string(&self.launches)
             .unwrap_or_default()
@@ -517,19 +664,21 @@ async fn start_host(
     std::fs::remove_file(key)?;
     let (adapter, launches) = recording_adapter(directory, &id)?;
     let release = directory.join(format!("{id}.release"));
-    let mut command = binary(&["worker-host", "--control-plane", &proxy.url()]);
-    command
-        .arg("--state-directory")
-        .arg(&state)
-        .arg("--adapter")
-        .arg(&adapter)
-        .arg(format!(
-            "--adapter-arg=--wait-for-file={}",
-            release.display()
-        ));
+    let mut arguments: Vec<std::ffi::OsString> = vec![
+        "worker-host".into(),
+        "--control-plane".into(),
+        proxy.url().into(),
+        "--state-directory".into(),
+        state.into(),
+        "--adapter".into(),
+        adapter.into(),
+        format!("--adapter-arg=--wait-for-file={}", release.display()).into(),
+    ];
     for argument in adapter_args {
-        command.arg(format!("--adapter-arg={argument}"));
+        arguments.push(format!("--adapter-arg={argument}").into());
     }
+    let mut command = binary(&[]);
+    command.args(&arguments);
     let process = Service::spawn(command, directory, &id)?;
     Ok(Host {
         id,
@@ -537,6 +686,8 @@ async fn start_host(
         release,
         launches,
         process,
+        arguments,
+        directory: directory.to_owned(),
     })
 }
 
@@ -1096,6 +1247,445 @@ async fn postgres_sixteen_host_partition_storm_preserves_invariants() -> Result<
 }
 
 // ---------------------------------------------------------------------------
+// Soak: sustained work across a partition and service restarts
+
+/// How long the soak runs its steady workload: `SUPERTAG_TRANSPORT_SOAK_SECONDS`, at
+/// least 30, default 120 (the TypeScript Docker soak's default).
+fn soak_seconds() -> Result<u64> {
+    let seconds = match std::env::var("SUPERTAG_TRANSPORT_SOAK_SECONDS") {
+        Ok(value) => value
+            .parse()
+            .context("SUPERTAG_TRANSPORT_SOAK_SECONDS must be an unsigned integer")?,
+        Err(_) => 120,
+    };
+    ensure!(
+        seconds >= 30,
+        "SUPERTAG_TRANSPORT_SOAK_SECONDS must be at least 30"
+    );
+    Ok(seconds)
+}
+
+async fn submit_soak_task(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    tag: usize,
+    name: &str,
+) -> Result<Submitted> {
+    let prompt = format!("soak {name}");
+    let accepted = operator
+        .submit_task(tokens.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: format!("soak-tag-{tag}"),
+            session_id: format!("soak-{name}"),
+            operation_id: format!("soak-{name}"),
+            prompt: prompt.clone(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    Ok(Submitted {
+        task_id: accepted.task_id,
+        tag,
+        instructions: format!("Finish soak item for tag {tag}"),
+        prompt,
+        queued_from: Instant::now(),
+        attempt_id: None,
+    })
+}
+
+/// Waits until `host` has opened a new Control Plane connection since `accepted`.
+async fn reconnected(host: &Host, accepted: u64, bound: Duration) -> Result<Duration> {
+    let started = Instant::now();
+    while host.proxy.accepted() == accepted {
+        ensure!(
+            started.elapsed() <= bound,
+            "{} did not reconnect within {bound:?}: {}",
+            host.id,
+            host.process.logs()
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+    Ok(started.elapsed())
+}
+
+/// Ports `scripts/worklet-grpc-docker-soak.ts` (`tests/worklet-grpc-docker-soak.test.ts`
+/// checks its report) to the shipped Rust processes: two Worker Hosts, each the only
+/// host of its Tag and enrolled with its own Auth Key, behind TCP relays to the Control
+/// Plane. Four faults come first: a Worker Host's connection
+/// is severed while its Task runs and the Task finishes during the partition; a Worker
+/// Host's connections go silent (nothing forwarded, nothing closed, as `docker network
+/// disconnect` or a proxy that lost its state does) while its Task runs, so only HTTP/2
+/// keepalive can notice; the Control Plane is killed and restarted while work runs; a
+/// Worker Host is restarted and then runs new work. A steady workload of two concurrent
+/// Tasks then runs for the soak duration.
+///
+/// The report is measured, not assumed: per Task, the Attempt the Control Plane recorded,
+/// the side effect the adapter wrote (`duplicate_task_ids`, `missing_effect_task_ids`),
+/// and the durable event journal (sequences 1 and 2: the Attempt start and the result);
+/// whether the two hosts hold distinct credentials; and whether each fault's Task
+/// `recovered` with one Attempt and one effect. `gates.passed` is their conjunction and
+/// fails the test. `SUPERTAG_TRANSPORT_REPORT` writes the report to a file.
+///
+/// Deliberate difference: TypeScript ran each service in its own Docker container, and a
+/// shared-execution service on a second network that the partition left connected. Here
+/// faults are injected at a TCP relay and restarts are process restarts; there is no
+/// shared-execution service, because the soak's adapter records its side effect itself
+/// (see the capability ledger).
+async fn exercise_soak(database: String) -> Result<Value> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let seconds = soak_seconds()?;
+    let tokens = Tokens::new();
+    let mut services = Services::start(&database, root, &tokens).await?;
+    let mut operator = OperatorClient::new(services.channel().await?);
+    let effects = root.join("soak-effects.log");
+    let effects_arg = format!("--effects-log={}", effects.display());
+    let mut hosts = Vec::new();
+    for tag in 0..2 {
+        operator
+            .put_tag(tokens.request(PutTagRequest {
+                tag_id: format!("soak-tag-{tag}"),
+                instructions: format!("Finish soak item for tag {tag}"),
+                allowed_actions: vec![],
+                workspace: None,
+                harness_kind: 0,
+                approval_rules: vec![],
+                execution: None,
+                name: None,
+                expected_revision: None,
+            })?)
+            .await?;
+        hosts.push(
+            start_host(
+                &mut operator,
+                &tokens,
+                services.address,
+                root,
+                tag,
+                &format!("soak-tag-{tag}"),
+                &[&effects_arg],
+            )
+            .await?,
+        );
+    }
+    let bound = Duration::from_secs(45);
+    // A silent drop is noticed only by an unanswered keepalive ping.
+    let silent_bound = KEEPALIVE_INTERVAL + KEEPALIVE_TIMEOUT + bound;
+    let mut report = Report::default();
+    let mut tasks = Vec::new();
+    // Each fault and the Task that ran through it.
+    let mut faults: Vec<(Value, String)> = Vec::new();
+
+    // A partition while a Task runs; the Task finishes while partitioned.
+    let mut partitioned = vec![submit_soak_task(&mut operator, &tokens, 0, "partition").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut partitioned,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let refused = hosts[0].proxy.refused();
+    let disconnected = Instant::now();
+    hosts[0].proxy.partition();
+    std::fs::write(&hosts[0].release, b"release")?;
+    sleep(Duration::from_millis(2500)).await;
+    ensure!(
+        hosts[0].proxy.refused() > refused,
+        "the partitioned Worker Host never retried"
+    );
+    let accepted = hosts[0].proxy.accepted();
+    let restored = Instant::now();
+    hosts[0].proxy.restore();
+    let reconnect = reconnected(&hosts[0], accepted, bound).await?;
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut partitioned,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push((
+        json!({
+            "kind": "control-network-partition", "target": hosts[0].id,
+            "downtime_ms": restored.duration_since(disconnected).as_millis(),
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": restored.elapsed().as_millis(),
+        }),
+        partitioned[0].task_id.clone(),
+    ));
+    tasks.append(&mut partitioned);
+
+    // A silent drop while a Task runs: every open connection stops forwarding without a
+    // close, and connections opened meanwhile hang, until the drop ends. Only keepalive
+    // can tell the Worker Host and the Control Plane that the connections they hold are gone.
+    let mut silenced = vec![submit_soak_task(&mut operator, &tokens, 1, "silent").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut silenced,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let accepted = hosts[1].proxy.accepted();
+    let dropped = Instant::now();
+    hosts[1].proxy.silence();
+    std::fs::write(&hosts[1].release, b"release")?;
+    sleep(Duration::from_secs(3)).await;
+    let restored = Instant::now();
+    hosts[1].proxy.restore();
+    let reconnect = reconnected(&hosts[1], accepted, silent_bound).await?;
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut silenced,
+        TaskState::Succeeded,
+        silent_bound,
+        &mut report,
+    )
+    .await?;
+    faults.push((
+        json!({
+            "kind": "control-network-silent-drop", "target": hosts[1].id,
+            "downtime_ms": restored.duration_since(dropped).as_millis(),
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": restored.elapsed().as_millis(),
+        }),
+        silenced[0].task_id.clone(),
+    ));
+    tasks.append(&mut silenced);
+
+    // A Control Plane restart while a Task runs.
+    let _ = std::fs::remove_file(&hosts[1].release);
+    let mut restarting = vec![submit_soak_task(&mut operator, &tokens, 1, "restart").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut restarting,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let downtime = services
+        .restart_control_plane(&database, root, &tokens)
+        .await?;
+    let back = Instant::now();
+    std::fs::write(&hosts[1].release, b"release")?;
+    operator = OperatorClient::new(services.channel().await?);
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut restarting,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push((
+        json!({
+            "kind": "control-plane-restart", "target": "control-plane",
+            "downtime_ms": downtime.as_millis(),
+            "recovery_latency_ms": back.elapsed().as_millis(),
+        }),
+        restarting[0].task_id.clone(),
+    ));
+    tasks.append(&mut restarting);
+
+    // A Worker Host restart, then new work on it.
+    let accepted = hosts[0].proxy.accepted();
+    let stopped = Instant::now();
+    hosts[0].restart().await?;
+    let reconnect = reconnected(&hosts[0], accepted, bound).await?;
+    let mut after = vec![submit_soak_task(&mut operator, &tokens, 0, "postrestart").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut after,
+        TaskState::Succeeded,
+        bound,
+        &mut report,
+    )
+    .await?;
+    faults.push((
+        json!({
+            "kind": "worker-host-restart", "target": hosts[0].id,
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": stopped.elapsed().as_millis(),
+        }),
+        after[0].task_id.clone(),
+    ));
+    tasks.append(&mut after);
+
+    // Steady work: one Task per host at a time until the duration runs out.
+    let started = Instant::now();
+    let mut completion = Vec::new();
+    let mut sequence = 0;
+    while started.elapsed() < Duration::from_secs(seconds) {
+        let mut batch = Vec::new();
+        for tag in 0..2 {
+            batch.push(
+                submit_soak_task(&mut operator, &tokens, tag, &format!("steady-{sequence}"))
+                    .await?,
+            );
+            sequence += 1;
+        }
+        let submitted = Instant::now();
+        wait_for_all(
+            &mut operator,
+            &tokens,
+            &mut batch,
+            TaskState::Succeeded,
+            bound,
+            &mut report,
+        )
+        .await?;
+        completion.push(submitted.elapsed().as_millis());
+        tasks.append(&mut batch);
+    }
+
+    // Audit every Task against what the Control Plane recorded and what the adapter did.
+    let mut effect_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for line in std::fs::read_to_string(&effects)?.lines() {
+        *effect_counts.entry(line.to_owned()).or_default() += 1;
+    }
+    let mut attempts = BTreeSet::new();
+    let mut attempt_failures = Vec::new();
+    let mut journal_failures = Vec::new();
+    for task in &tasks {
+        let observed = task_state(&mut operator, &tokens, &task.task_id).await?;
+        let expected = format!("{}: {} []", task.instructions, task.prompt);
+        let attempt = observed.attempt_id.clone().unwrap_or_default();
+        if observed.state() != TaskState::Succeeded
+            || task.attempt_id.as_deref() != Some(attempt.as_str())
+            || observed.result.as_deref() != Some(expected.as_str())
+            || !attempts.insert(attempt.clone())
+        {
+            attempt_failures.push(task.task_id.clone());
+        }
+        let events = operator
+            .list_events(tokens.request(ListEventsRequest {
+                task_id: task.task_id.clone(),
+                after_sequence: 0,
+                limit: 100,
+            })?)
+            .await?
+            .into_inner()
+            .events;
+        let history: Vec<_> = events
+            .iter()
+            .map(|event| (event.sequence, event.text.as_str()))
+            .collect();
+        if history != [(1, format!("{attempt} started").as_str()), (2, &expected)] {
+            journal_failures.push(task.task_id.clone());
+        }
+    }
+    let duplicate_task_ids: Vec<_> = effect_counts
+        .iter()
+        .filter(|(_, count)| **count > 1)
+        .map(|(task, _)| task.clone())
+        .collect();
+    let missing_effect_task_ids: Vec<_> = tasks
+        .iter()
+        .filter(|task| !effect_counts.contains_key(&task.task_id))
+        .map(|task| task.task_id.clone())
+        .collect();
+    let unknown_effects = effect_counts
+        .keys()
+        .filter(|id| !tasks.iter().any(|task| &task.task_id == *id))
+        .count();
+    let credentials = hosts
+        .iter()
+        .map(|host| {
+            let enrollment: Value = serde_json::from_slice(&std::fs::read(
+                host.directory.join(&host.id).join("enrollment.json"),
+            )?)?;
+            Ok(Sha256::digest(
+                enrollment["token"]
+                    .as_str()
+                    .context("enrollment credential missing")?
+                    .as_bytes(),
+            )
+            .to_vec())
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    let credentials_distinct = credentials.len() == hosts.len();
+    let faults: Vec<Value> = faults
+        .into_iter()
+        .map(|(mut fault, task)| {
+            fault["task_id"] = json!(task);
+            fault["recovered"] = json!(
+                !attempt_failures.contains(&task)
+                    && !journal_failures.contains(&task)
+                    && effect_counts.get(&task) == Some(&1)
+            );
+            fault
+        })
+        .collect();
+    let launches: usize = hosts.iter().map(Host::launches).sum::<Result<_>>()?;
+    let passed = attempt_failures.is_empty()
+        && journal_failures.is_empty()
+        && duplicate_task_ids.is_empty()
+        && missing_effect_task_ids.is_empty()
+        && unknown_effects == 0
+        && launches == tasks.len()
+        && credentials_distinct
+        && faults.iter().all(|fault| fault["recovered"] == true);
+    completion.sort_unstable();
+    let percentile = |values: &[u128], rank: usize| {
+        values
+            .get((values.len() * rank).div_ceil(100).saturating_sub(1))
+            .copied()
+            .unwrap_or_default()
+    };
+    let summary = json!({
+        "database": if database.starts_with("postgres") { "postgresql" } else { "sqlite" },
+        "duration_seconds": seconds,
+        "tasks": tasks.len(),
+        "attempts": attempts.len(),
+        "attempt_failure_task_ids": attempt_failures,
+        "adapter_launches": launches,
+        "duplicate_task_ids": duplicate_task_ids,
+        "missing_effect_task_ids": missing_effect_task_ids,
+        "unknown_effects": unknown_effects,
+        "durable_journal_failure_task_ids": journal_failures,
+        "independent_worker_credentials": credentials_distinct,
+        "batch_completion_ms": {"p50": percentile(&completion, 50), "p95": percentile(&completion, 95)},
+        "faults": faults,
+        "gates": {"passed": passed},
+    });
+    println!("{}", serde_json::to_string_pretty(&summary)?);
+    if let Some(path) = std::env::var_os("SUPERTAG_TRANSPORT_REPORT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&summary)?)?;
+    }
+    ensure!(passed, "soak gates failed: {summary}");
+    Ok(summary)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "soak; opt in with --ignored (SUPERTAG_TRANSPORT_SOAK_SECONDS, default 120)"]
+async fn sqlite_soak_survives_partition_and_service_restarts() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_soak(sqlite(directory.path())).await.map(drop)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "soak on PostgreSQL via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE (SUPERTAG_TRANSPORT_SOAK_SECONDS, default 120)"]
+async fn postgres_soak_survives_partition_and_service_restarts() -> Result<()> {
+    with_postgres("soak", |database| async move {
+        exercise_soak(database).await.map(drop)
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
 // Adapter calls relayed through a partition
 
 /// The steps `--partition-steps` makes, in order (see the fixture's
@@ -1410,6 +2000,263 @@ async fn sqlite_adapter_calls_ride_out_a_control_plane_partition() -> Result<()>
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
 async fn postgres_adapter_calls_ride_out_a_control_plane_partition() -> Result<()> {
     with_postgres("partition_calls", exercise_adapter_calls_through_partition).await
+}
+
+// ---------------------------------------------------------------------------
+// Work Session continue and ask through a partition
+
+async fn work_session(
+    work: &mut WorkSessionsClient<ProtocolChannel>,
+    tokens: &Tokens,
+    id: &str,
+) -> Result<WorkSession> {
+    Ok(work
+        .get(tokens.request(GetWorkSessionRequest {
+            work_session_id: id.into(),
+            report_task_id: None,
+        })?)
+        .await?
+        .into_inner())
+}
+
+async fn wait_for_work_session(
+    work: &mut WorkSessionsClient<ProtocolChannel>,
+    tokens: &Tokens,
+    id: &str,
+    host: &Host,
+    predicate: impl Fn(&WorkSession) -> bool,
+) -> Result<WorkSession> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let current = work_session(work, tokens, id).await?;
+        if predicate(&current) {
+            return Ok(current);
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "Work Session never reached the expected state: {current:?}\n{}\nadapter: {}",
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Holds `host` partitioned from its Control Plane while the fixture makes one gated Work
+/// Session call, checks the call is still outstanding and its Task still running when
+/// the partition heals, and waits for the host to reconnect.
+async fn partition_work_call(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    host: &Host,
+    base: &Path,
+    step: &str,
+    task_id: &str,
+) -> Result<()> {
+    wait_for_marker(&step_marker(base, step, "ready"), host).await?;
+    let refused = host.proxy.refused();
+    host.proxy.partition();
+    std::fs::write(step_marker(base, step, "go"), "")?;
+    sleep(Duration::from_secs(4)).await;
+    ensure!(
+        !step_marker(base, step, "done").exists(),
+        "{step} finished while its Worker Host was partitioned"
+    );
+    let current = task_state(operator, tokens, task_id).await?;
+    ensure!(
+        current.state() == TaskState::Running,
+        "the {step} Task did not ride out the partition: {:?} {:?}",
+        current.state(),
+        current.result
+    );
+    ensure!(
+        host.proxy.refused() > refused,
+        "the {step} partition refused no reconnect"
+    );
+    host.proxy.restore();
+    wait_for_marker(&step_marker(base, step, "done"), host).await
+}
+
+/// A child Task's question to its starter (`HarnessWorkSessions.Ask`) and a later parent
+/// Task's answer (`HarnessWorkSessions.Continue`) each start while their Worker Host
+/// cannot reach the Control Plane. Both ride out the partition: the question is published
+/// once and answered by the continuation, the Work Session continues once with one new
+/// child turn, and every Task's adapter runs once.
+async fn exercise_work_session_calls_through_partition(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let channel = services.channel().await?;
+    let mut operator = OperatorClient::new(channel.clone());
+    let mut conversations = ConversationsClient::new(channel.clone());
+    let mut work = WorkSessionsClient::new(channel);
+    let tag = "partition-work";
+    operator_cli(
+        &services,
+        &tokens,
+        &[
+            "tag",
+            "put",
+            tag,
+            "--instructions",
+            "Inspect the requested region",
+        ],
+    )
+    .await?;
+    let started = root.join("work-session.json");
+    let gates = root.join("work-calls");
+    let host = start_host(
+        &mut operator,
+        &tokens,
+        services.address,
+        root,
+        0,
+        tag,
+        &[
+            &format!("--work-session-question-flow={}", started.display()),
+            &format!("--partition-work-calls={}", gates.display()),
+        ],
+    )
+    .await?;
+    std::fs::write(&host.release, "")?;
+    let send = |text: &str, operation: &str| SendMessageRequest {
+        output_policy: None,
+        execution_limits: None,
+        tag_id: tag.into(),
+        conversation: "private".into(),
+        text: text.into(),
+        operation_id: operation.into(),
+    };
+    let first_parent = conversations
+        .send_message(tokens.request(send("Investigate the release region", "first"))?)
+        .await?
+        .into_inner()
+        .task
+        .context("first parent Task")?;
+
+    // The child asks its starter while partitioned.
+    wait_for_marker(&step_marker(&gates, "ask", "ready"), &host).await?;
+    let marker: Value = serde_json::from_slice(&std::fs::read(&started)?)?;
+    let id = marker["work_session_id"]
+        .as_str()
+        .context("Work Session ID")?
+        .to_owned();
+    let child = marker["child_task_id"]
+        .as_str()
+        .context("child Task ID")?
+        .to_owned();
+    partition_work_call(&mut operator, &tokens, &host, &gates, "ask", &child).await?;
+    let asked = wait_for_work_session(&mut work, &tokens, &id, &host, |current| {
+        current.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let question = asked.question.clone().context("published question")?;
+    ensure!(
+        question.task_id == child && question.published_at_ms.is_some(),
+        "the question was not published for the child: {question:?}"
+    );
+    let first_report = asked.report_task_id.clone().context("first report")?;
+
+    // A later parent Task answers by continuing the Work Session while partitioned.
+    let next_parent = conversations
+        .send_message(tokens.request(send("Use us-east-1", "answer"))?)
+        .await?
+        .into_inner()
+        .task
+        .context("answer parent Task")?;
+    partition_work_call(
+        &mut operator,
+        &tokens,
+        &host,
+        &gates,
+        "continue",
+        &next_parent.task_id,
+    )
+    .await?;
+    let finished = wait_for_work_session(&mut work, &tokens, &id, &host, |current| {
+        current.latest_task_id != child
+            && current
+                .report_task_id
+                .as_deref()
+                .is_some_and(|report| report != first_report)
+            && current.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let page = work
+        .list(tokens.request(ListWorkSessionsRequest {
+            parent_tag_id: first_parent.tag_id.clone(),
+            parent_session_id: first_parent.session_id.clone(),
+            starter_task_id: None,
+            limit: 4,
+            cursor: String::new(),
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        page.work_sessions.len() == 1 && page.work_sessions[0].work_session_id == id,
+        "the continuation started another Work Session: {page:?}"
+    );
+    ensure!(
+        finished.starter_task_id == next_parent.task_id,
+        "the continuation was not recorded for the answering Task: {finished:?}"
+    );
+    let history = work
+        .get(tokens.request(GetWorkSessionRequest {
+            work_session_id: id.clone(),
+            report_task_id: Some(first_report),
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        history
+            .question
+            .as_ref()
+            .and_then(|question| question.answer_task_id.as_deref())
+            == Some(finished.latest_task_id.as_str()),
+        "the question was not answered by the continued turn: {history:?}"
+    );
+    // Two parents, two child turns, two reports: one adapter launch each.
+    let tasks = [
+        first_parent.task_id.as_str(),
+        child.as_str(),
+        asked.report_task_id.as_deref().unwrap_or_default(),
+        next_parent.task_id.as_str(),
+        finished.latest_task_id.as_str(),
+        finished.report_task_id.as_deref().unwrap_or_default(),
+    ];
+    for task in tasks {
+        let current = task_state(&mut operator, &tokens, task).await?;
+        ensure!(
+            current.state() == TaskState::Succeeded,
+            "Task {task} ended {:?}: {:?}",
+            current.state(),
+            current.result
+        );
+    }
+    ensure!(
+        host.launches()? == tasks.len(),
+        "an adapter ran more than once: {} launches for {} Tasks",
+        host.launches()?,
+        tasks.len()
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_work_session_continue_and_ask_ride_out_a_control_plane_partition() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_work_session_calls_through_partition(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_work_session_continue_and_ask_ride_out_a_control_plane_partition() -> Result<()> {
+    with_postgres(
+        "partition_work",
+        exercise_work_session_calls_through_partition,
+    )
+    .await
 }
 
 async fn serve_fake(

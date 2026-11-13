@@ -2254,3 +2254,37 @@ pub(crate) fn sees_owner_sql(owner: &str, principal: &str) -> String {
         "({owner}={principal} OR (substr(CAST({principal} AS TEXT),1,9)='operator:' AND ({owner}='' OR substr({owner},1,7)='client:')))"
     )
 }
+
+#[cfg(test)]
+mod durability_tests {
+    use super::Store;
+
+    /// A process kill cannot lose a commit SQLite has written, but power loss can lose one
+    /// that is still in the operating system's cache. With `synchronous = FULL` SQLite
+    /// syncs the journal and the database file before a commit returns. This guards the
+    /// setting (sqlx's default, and SQLite's as TypeScript used it) against a regression;
+    /// it does not observe an `fsync`, and a real power cut is not simulated: see
+    /// "Hard-crash durability" in `rust/docs/rust-port-capability-ledger.md`.
+    #[tokio::test]
+    async fn sqlite_store_opens_with_full_synchronous_commits() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("state.db").display()
+        );
+        let store = Store::open(&url).await.unwrap();
+        let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(synchronous, 2, "SQLite commits must use synchronous = FULL");
+        let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            matches!(journal.as_str(), "delete" | "wal"),
+            "journal mode {journal} does not keep a durable commit"
+        );
+    }
+}

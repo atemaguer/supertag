@@ -314,6 +314,10 @@ async fn main() -> Result<()> {
                 may_ask && !may_continue && !may_start,
                 "child question capabilities differ"
             );
+            let gate = partition_calls::work_calls();
+            if let Some(base) = &gate {
+                partition_calls::step(base, "ask").await?;
+            }
             let asked = work
                 .ask(authenticated_request(
                     question_input.clone(),
@@ -322,6 +326,9 @@ async fn main() -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
+            if let Some(base) = &gate {
+                partition_calls::done(base, "ask")?;
+            }
             ensure!(
                 asked.work_session_id == task.session_id
                     && asked.task_id == task.task_id
@@ -363,6 +370,10 @@ async fn main() -> Result<()> {
                 may_continue && !may_ask,
                 "parent continuation capabilities differ"
             );
+            let gate = partition_calls::work_calls();
+            if let Some(base) = &gate {
+                partition_calls::step(base, "continue").await?;
+            }
             let continued = work
                 .r#continue(authenticated_request(
                     continue_input.clone(),
@@ -371,6 +382,9 @@ async fn main() -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
+            if let Some(base) = &gate {
+                partition_calls::done(base, "continue")?;
+            }
             ensure!(
                 continued.work_session_id == continue_input.work_session_id
                     && continued.parent_tag_id == task.tag_id
@@ -662,6 +676,18 @@ async fn main() -> Result<()> {
             ensure!(Instant::now() < deadline, "release file never appeared");
             sleep(Duration::from_millis(20)).await;
         }
+    }
+    // The Task's side effect: one line per execution, so a test counts executions per Task.
+    if let Some(effects) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--effects-log=")
+            .map(std::path::PathBuf::from)
+    }) {
+        use std::io::Write as _;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(effects)?
+            .write_all(format!("{}\n", task.task_id).as_bytes())?;
     }
     if let Some(base) = std::env::args().find_map(|arg| {
         arg.strip_prefix("--partition-steps=")

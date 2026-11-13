@@ -69,9 +69,13 @@ async fn serve() -> Result<()> {
         process_identity: args.process_uid.zip(args.process_gid),
     })
     .await?;
+    // Pings every Worker Host connection, so one a proxy or NAT dropped silently releases
+    // what it held within a bounded time, as every other SuperTag service does.
     let mut server = Server::builder()
         .concurrency_limit_per_connection(32)
-        .max_concurrent_streams(32);
+        .max_concurrent_streams(32)
+        .http2_keepalive_interval(Some(supertag_transport::KEEPALIVE_INTERVAL))
+        .http2_keepalive_timeout(Some(supertag_transport::KEEPALIVE_TIMEOUT));
     if let Some((cert, key)) = args.tls_cert.zip(args.tls_key) {
         server = server.tls_config(ServerTlsConfig::new().identity(Identity::from_pem(
             tokio::fs::read(cert).await?,

@@ -94,7 +94,10 @@ impl ArtifactPeers {
             );
             let mut endpoint = Endpoint::from_shared(url.to_string())?
                 .connect_timeout(Duration::from_secs(3))
-                .timeout(GRANT_BUDGET);
+                .timeout(GRANT_BUDGET)
+                .http2_keep_alive_interval(supertag_transport::KEEPALIVE_INTERVAL)
+                .keep_alive_timeout(supertag_transport::KEEPALIVE_TIMEOUT)
+                .keep_alive_while_idle(true);
             if url.scheme() == "https" {
                 let tls = match &ca {
                     Some(pem) => ClientTlsConfig::new().ca_certificate(Certificate::from_pem(pem)),
@@ -157,7 +160,10 @@ impl ArtifactSourceConfig {
             SourceStorage::open(&root)
         })
         .await??;
-        let mut server = Server::builder();
+        // Pings every peer connection, as every other SuperTag service does.
+        let mut server = Server::builder()
+            .http2_keepalive_interval(Some(supertag_transport::KEEPALIVE_INTERVAL))
+            .http2_keepalive_timeout(Some(supertag_transport::KEEPALIVE_TIMEOUT));
         if let Some(identity) = self.tls {
             server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
         }

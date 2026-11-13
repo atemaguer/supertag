@@ -9,7 +9,7 @@ use supertag_protocol::{
     negotiation::{ProtocolChannel, connect},
     v2::ServiceRole,
 };
-use supertag_transport::{Target, tunneled_uri};
+use supertag_transport::{KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT, Proxy, Target, tunneled_uri};
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig};
 
 /// A gRPC server builder for a service listening on `listen` and, when set, accepting
@@ -22,7 +22,7 @@ pub async fn server(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result
         if let Some(ca) = client_ca {
             tls = tls.client_ca_root(Certificate::from_pem(ca));
         }
-        return Ok(Server::builder().tls_config(tls)?);
+        return Ok(keepalive(Server::builder()).tls_config(tls)?);
     }
     ensure!(
         client_ca.is_none(),
@@ -32,7 +32,15 @@ pub async fn server(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result
         listen.ip().is_loopback() && websocket.is_none_or(|address| address.ip().is_loopback()),
         "listeners outside loopback require TLS"
     );
-    Ok(Server::builder())
+    Ok(keepalive(Server::builder()))
+}
+
+/// Pings every accepted HTTP/2 connection, so a client that vanished without closing its
+/// connection releases what it held (a Watch stream, an upload) within a bounded time.
+fn keepalive(server: Server) -> Server {
+    server
+        .http2_keepalive_interval(Some(KEEPALIVE_INTERVAL))
+        .http2_keepalive_timeout(Some(KEEPALIVE_TIMEOUT))
 }
 
 /// Connects to a Control Plane as an operator client and negotiates the protocol
@@ -67,20 +75,28 @@ pub async fn operator_endpoint(
     timeout: Duration,
     files: Option<&TlsFiles>,
 ) -> Result<Target> {
-    configured_endpoint(uri, timeout, files).await
+    configured_endpoint(uri, timeout, files, Proxy::from_env()).await
 }
 
 pub async fn endpoint_with_timeout(uri: String, timeout: Duration) -> Result<Target> {
-    configured_endpoint(uri, timeout, None).await
+    configured_endpoint(uri, timeout, None, Proxy::from_env()).await
+}
+
+/// An endpoint reached through `proxy` instead of the one this process's
+/// environment names: a supervisor's Worker Host reads it from `env_file` too.
+pub async fn endpoint_through(uri: String, proxy: Option<Proxy>) -> Result<Target> {
+    configured_endpoint(uri, Duration::from_secs(15), None, proxy).await
 }
 
 /// `https://` and `http://` dial native gRPC. `wss://` and `ws://` carry the same gRPC
 /// connection through a WebSocket tunnel; `wss://` always runs SuperTag's TLS inside it,
-/// and `ws://` is cleartext and loopback-only, like `http://`.
+/// and `ws://` is cleartext and loopback-only, like `http://`. Either goes through the
+/// HTTP proxy `HTTPS_PROXY` names unless `NO_PROXY` lists its host or the host is loopback.
 async fn configured_endpoint(
     uri: String,
     timeout: Duration,
     files: Option<&TlsFiles>,
+    proxy: Option<Proxy>,
 ) -> Result<Target> {
     let tunnel = tunneled_uri(&uri).map_err(|error| anyhow!("invalid endpoint URL: {error}"))?;
     let native = tunnel.clone().unwrap_or_else(|| uri.clone());
@@ -132,13 +148,17 @@ async fn configured_endpoint(
         }
         _ => bail!("endpoint must use https, wss, or a loopback http or ws URL"),
     }
-    if tunnel.is_none() {
-        return Ok(Target::native(endpoint));
-    }
-    // The platform's edge certificate is checked against the system roots and, for a
-    // private platform, the same server CA the inner TLS trusts.
-    Target::tunnel(&uri, endpoint, server_ca.as_deref())
-        .map_err(|error| anyhow!("invalid tunnel endpoint: {error}"))
+    let target = if tunnel.is_none() {
+        Target::native(endpoint)
+    } else {
+        // The platform's edge certificate is checked against the system roots and, for a
+        // private platform, the same server CA the inner TLS trusts.
+        Target::tunnel(&uri, endpoint, server_ca.as_deref())
+            .map_err(|error| anyhow!("invalid tunnel endpoint: {error}"))?
+    };
+    target
+        .proxy(proxy)
+        .map_err(|error| anyhow!("invalid endpoint URL: {error}"))
 }
 
 async fn identity(cert: &str, key: &str) -> Result<Option<Identity>> {

@@ -360,6 +360,30 @@ flight the same way a dropped TCP connection does, and Worker Hosts and Gateways
 retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, rather than the
 5 allowed for native gRPC, so a platform can start a service that scaled to zero.
 
+## Outbound HTTP proxies and dropped connections
+
+A client on a network that allows outbound traffic only through an HTTP proxy names it in
+`HTTPS_PROXY` (or `https_proxy`) as `http://[USER:PASSWORD@]HOST[:PORT]`. Operator commands,
+`host enroll`, `worker-host`, `health`, and the Gateway's Control Plane connection then reach
+`https://` and `wss://` URLs through the proxy's `CONNECT`, so SuperTag's TLS, and the outer TLS
+of a tunnel, run end to end through it. `NO_PROXY` (or `no_proxy`) lists hosts reached directly:
+`*`, an IP address, or a domain, which also covers its subdomains. Loopback addresses never use
+the proxy. A proxy that refuses `CONNECT` fails the connection; nothing falls back to a direct
+connection. Only `http://` proxy URLs are supported; any other proxy URL fails only the
+connections that would use it, so loopback and `NO_PROXY` hosts still connect.
+
+`supertag up` passes these variables to the services it starts, from its own environment and
+then from `env_file`. A service unit (launchd or systemd) does not inherit the shell's
+environment, so put them in `env_file` for a unit-managed installation; `supertag up` warns
+when the shell names a proxy the unit cannot see.
+
+Every SuperTag client and gRPC service that crosses the network sends an HTTP/2 ping every 10
+seconds, idle or not, and drops a connection whose ping goes unanswered for 10 seconds. This
+includes shared execution and direct artifact transfer between Worker Hosts. A connection that a
+proxy or NAT drops without closing it therefore fails within about 20 seconds, and the caller
+reconnects, instead of waiting for a call's deadline. That is within the Control Plane's
+30-second execution lease, so a running Task survives the drop.
+
 ## Rehearsal
 
 [`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)

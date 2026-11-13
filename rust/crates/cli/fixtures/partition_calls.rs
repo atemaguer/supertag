@@ -37,14 +37,28 @@ pub const STEPS: [&str; 9] = [
     "settle",
 ];
 
-async fn step(base: &Path, name: &str) -> Result<()> {
-    let marker = |suffix: &str| {
-        let mut path = OsString::from(base.as_os_str());
-        path.push(format!(".{name}.{suffix}"));
-        std::path::PathBuf::from(path)
-    };
-    std::fs::write(marker("ready"), "")?;
-    let go = marker("go");
+fn marker(base: &Path, name: &str, suffix: &str) -> std::path::PathBuf {
+    let mut path = OsString::from(base.as_os_str());
+    path.push(format!(".{name}.{suffix}"));
+    std::path::PathBuf::from(path)
+}
+
+/// `--partition-work-calls=<base>` gates the Work Session `ask` and `continue` calls
+/// the same way, and writes `<base>.<step>.done` once the call has returned.
+pub fn work_calls() -> Option<std::path::PathBuf> {
+    std::env::args().find_map(|arg| {
+        arg.strip_prefix("--partition-work-calls=")
+            .map(std::path::PathBuf::from)
+    })
+}
+
+pub fn done(base: &Path, name: &str) -> Result<()> {
+    Ok(std::fs::write(marker(base, name, "done"), "")?)
+}
+
+pub async fn step(base: &Path, name: &str) -> Result<()> {
+    std::fs::write(marker(base, name, "ready"), "")?;
+    let go = marker(base, name, "go");
     let deadline = Instant::now() + Duration::from_secs(120);
     while !go.exists() {
         ensure!(Instant::now() < deadline, "step {name} was never released");
