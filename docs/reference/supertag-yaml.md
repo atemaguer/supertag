@@ -784,7 +784,9 @@ above. It differs in these ways:
 - `env_file` supplies interpolation, `environment` secrets such as `auth-key`, harness provider
   credentials, and the Gateway's `SUPERTAG_GITHUB_*` settings. It does not supply other
   `SUPERTAG_*` overrides or the `SUPERTAG_SERVER_CA_FILE`, `SUPERTAG_CLIENT_CERT_FILE`, and
-  `SUPERTAG_CLIENT_KEY_FILE` paths. Set those in the process environment.
+  `SUPERTAG_CLIENT_KEY_FILE` paths, and never `PATH`, `HOME`, `USER`, `LOGNAME`, `TMPDIR`, or the
+  locale variables, which decide where a harness finds its sign-in. Set those in the process
+  environment.
 - For credentials, a blank process value counts as unset, so `env_file` fills it. Interpolation
   still uses a set but empty process value.
 - Error messages name the variable, never its value.
@@ -796,7 +798,7 @@ Each service process starts with an empty environment. It gets `PATH`, `HOME`, `
 | --- | --- |
 | Control Plane | Its database URL and its own service token |
 | Gateway | Its service token and the operator token. It gets `SUPERTAG_GITHUB_*` only when a host serves a Workspace from the Gateway. |
-| Worker Host | The provider credentials for its harness only, such as `CODEX_API_KEY`, `OPENAI_API_KEY`, and `CODEX_HOME` for `codex`, or `CURSOR_API_KEY` for `cursor`. A remote host also gets the TLS file paths. |
+| Worker Host | The provider credentials for its harness only, such as `CODEX_API_KEY`, `OPENAI_API_KEY`, and `CODEX_HOME` for `codex`, or `CURSOR_API_KEY` for `cursor`. Every host also gets the TLS file paths set in the shell. |
 
 A Worker Host never receives a service token or another harness's credential. Its harness
 processes get `PATH`, `LANG`, those provider credentials, and private working paths. The

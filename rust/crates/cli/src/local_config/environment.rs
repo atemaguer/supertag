@@ -15,6 +15,11 @@ use std::{
 };
 
 const MAX_FILES: usize = 16;
+/// Process identity and locale. These decide where a harness finds its credential stores, so they
+/// come only from the supervisor's own environment, never from `env_file`.
+const PROCESS_ONLY: [&str; 8] = [
+    "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+];
 const MAX_VARIABLES: usize = 1024;
 
 /// Variables read from `env_file`. The process environment always wins over them.
@@ -38,6 +43,9 @@ impl Environment {
         process
             .filter(|value| value.to_str().is_none_or(|value| !value.trim().is_empty()))
             .or_else(|| {
+                if PROCESS_ONLY.contains(&name) {
+                    return None;
+                }
                 self.file
                     .get(name)
                     .map(|value| value.trim())
@@ -467,5 +475,19 @@ mod tests {
         assert_eq!(env.lookup("KEY", None), Some("from-file".into()));
         assert_eq!(env.lookup("BLANK", None), None);
         assert_eq!(env.lookup("ABSENT", None), None);
+    }
+
+    #[test]
+    fn env_file_never_supplies_process_identity() {
+        let env = Environment::from_file(BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/elsewhere".to_owned()),
+            ("PATH".to_owned(), "/tmp/bin".to_owned()),
+        ]));
+        assert_eq!(env.lookup("HOME", None), None);
+        assert_eq!(env.lookup("PATH", Some("".into())), None);
+        assert_eq!(
+            env.lookup("HOME", Some("/Users/me".into())),
+            Some("/Users/me".into())
+        );
     }
 }
