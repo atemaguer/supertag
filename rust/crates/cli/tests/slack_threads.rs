@@ -418,6 +418,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         operator
             .put_tag(credentials.operator(PutTagRequest {
                 name: None,
+                expected_revision: None,
                 execution: None,
                 approval_rules: vec![],
                 tag_id: tag.into(),

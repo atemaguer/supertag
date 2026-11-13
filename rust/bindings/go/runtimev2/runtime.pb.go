@@ -8425,9 +8425,11 @@ type PutTagRequest struct {
 	ApprovalRules  []*ApprovalRule          `protobuf:"bytes,6,rep,name=approval_rules,json=approvalRules,proto3" json:"approval_rules,omitempty"`
 	Execution      *PolicyExecutionSettings `protobuf:"bytes,7,opt,name=execution,proto3" json:"execution,omitempty"`
 	// A display name can be reused after retirement. The Tag ID is permanent.
-	Name          *string `protobuf:"bytes,8,opt,name=name,proto3,oneof" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Name *string `protobuf:"bytes,8,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	// Zero requires a new identity; a positive value fences an existing revision.
+	ExpectedRevision *uint64 `protobuf:"varint,9,opt,name=expected_revision,json=expectedRevision,proto3,oneof" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PutTagRequest) Reset() {
@@ -8514,6 +8516,13 @@ func (x *PutTagRequest) GetName() string {
 		return *x.Name
 	}
 	return ""
+}
+
+func (x *PutTagRequest) GetExpectedRevision() uint64 {
+	if x != nil && x.ExpectedRevision != nil {
+		return *x.ExpectedRevision
+	}
+	return 0
 }
 
 type Tag struct {
@@ -18930,7 +18939,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
 	"key_digest\x18\x02 \x01(\fR\tkeyDigest\"<\n" +
 	"\x17AuthenticateHostRequest\x12!\n" +
-	"\ftoken_digest\x18\x01 \x01(\fR\vtokenDigest\"\xb2\x03\n" +
+	"\ftoken_digest\x18\x01 \x01(\fR\vtokenDigest\"\xfa\x03\n" +
 	"\rPutTagRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -18939,8 +18948,10 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\fharness_kind\x18\x05 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12H\n" +
 	"\x0eapproval_rules\x18\x06 \x03(\v2!.supertag.runtime.v2.ApprovalRuleR\rapprovalRules\x12J\n" +
 	"\texecution\x18\a \x01(\v2,.supertag.runtime.v2.PolicyExecutionSettingsR\texecution\x12\x17\n" +
-	"\x04name\x18\b \x01(\tH\x00R\x04name\x88\x01\x01B\a\n" +
-	"\x05_name\"\xf1\x03\n" +
+	"\x04name\x18\b \x01(\tH\x00R\x04name\x88\x01\x01\x120\n" +
+	"\x11expected_revision\x18\t \x01(\x04H\x01R\x10expectedRevision\x88\x01\x01B\a\n" +
+	"\x05_nameB\x14\n" +
+	"\x12_expected_revision\"\xf1\x03\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +

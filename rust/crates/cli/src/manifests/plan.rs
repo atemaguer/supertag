@@ -536,6 +536,7 @@ impl<'a> Catalog<'a> {
                 .as_ref()
                 .map_or_else(Vec::new, |prior| prior.approval_rules.clone()),
             execution: prior.as_ref().and_then(|prior| prior.execution.clone()),
+            expected_revision: Some(prior.as_ref().map_or(0, |tag| tag.revision)),
         };
         ensure!(
             value.instructions.len() <= 65_536,

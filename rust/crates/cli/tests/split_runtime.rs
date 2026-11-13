@@ -408,6 +408,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
     let edited = client
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -767,6 +768,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
     client
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -957,6 +959,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     client
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -991,6 +994,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     client
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -1489,6 +1493,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     operator
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -2056,6 +2061,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     operator
         .put_tag(credentials.request(PutTagRequest {
             name: None,
+            expected_revision: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,

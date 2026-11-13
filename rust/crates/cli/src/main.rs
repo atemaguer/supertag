@@ -1007,6 +1007,7 @@ async fn run(command: Command) -> Result<()> {
                         harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
                             as i32,
                         approval_rules,
+                        expected_revision: None,
                         execution: (!models.is_empty()
                             || !efforts.is_empty()
                             || shared_execution_environment.is_some())

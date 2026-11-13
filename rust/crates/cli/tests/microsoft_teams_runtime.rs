@@ -222,6 +222,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
         .await?
         .put_tag(credentials.operator(PutTagRequest {
             name: None,
+            expected_revision: None,
             execution: None,
             approval_rules: vec![],
             tag_id: "builder".into(),

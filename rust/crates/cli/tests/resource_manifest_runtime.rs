@@ -5,7 +5,7 @@ use serde_json::Value;
 use sqlx::{Connection, Executor};
 use supertag_protocol::{
     authenticated_request,
-    v2::{GetTaskRequest, operator_client::OperatorClient},
+    v2::{GetTagRequest, GetTaskRequest, PutTagRequest, operator_client::OperatorClient},
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -221,6 +221,43 @@ spec: {source: "file:///var/lib/supertag/archive"}
         command(&gateway, &["diff", "-f", path], true).await?.trim(),
         "No changes."
     );
+
+    let mut operator = OperatorClient::connect(gateway.clone()).await?;
+    let before = operator
+        .get_tag(authenticated_request(
+            GetTagRequest {
+                tag_id: "builder".into(),
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let stale = operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: before.tag_id.clone(),
+                instructions: "A stale preview would overwrite these instructions.".into(),
+                expected_revision: Some(before.revision - 1),
+                ..Default::default()
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code(), tonic::Code::AlreadyExists);
+    let after = operator
+        .get_tag(authenticated_request(
+            GetTagRequest {
+                tag_id: before.tag_id.clone(),
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(before, after);
 
     gateway_process.kill().await?;
     plane.kill().await?;

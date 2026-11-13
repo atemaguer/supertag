@@ -310,6 +310,7 @@ impl Store {
             approval_rules: vec![],
             execution: None,
             name: None,
+            expected_revision: None,
         })
         .await
     }
@@ -324,6 +325,7 @@ impl Store {
             approval_rules,
             execution,
             name: display_name,
+            expected_revision,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -363,6 +365,16 @@ impl Store {
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
         let stored_rules = stored_approval_rules(&approval_rules)?;
         let (mut transaction, _) = self.write().await?;
+        if let Some(expected) = expected_revision {
+            let revision: Option<i64> =
+                sqlx::query_scalar("SELECT revision FROM supertag_v2_tags WHERE tag_id=$1")
+                    .bind(tag_id)
+                    .fetch_optional(&mut *transaction)
+                    .await?;
+            if revision.unwrap_or(0) as u64 != expected {
+                return Err(StoreError::Conflict("Tag revision changed".into()));
+            }
+        }
         crate::github_workspaces::validate_tag_in(&mut transaction, workspace.as_ref()).await?;
         let display_name =
             crate::tags::active_name_in(&mut transaction, tag_id, display_name.as_deref()).await?;
