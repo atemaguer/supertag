@@ -1,4 +1,5 @@
 pub mod volumes;
+pub mod workspace_mounts;
 use subtle::ConstantTimeEq;
 use tonic::{Request, Status, metadata::MetadataValue};
 

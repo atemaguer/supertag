@@ -805,6 +805,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
         operation_id: Uuid::new_v4().to_string(),
         harness_kind: HarnessKind::Opencode as i32,
         execution_profile: Some(HarnessExecutionProfile {
+            workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec![FIXTURE_MODEL.into()],
             default_model: Some(FIXTURE_MODEL.into()),

@@ -32,6 +32,7 @@ mod teams;
 mod usage;
 mod watch;
 mod work_sessions;
+mod workspace_mounts;
 mod workspaces;
 
 pub use github_workspaces::validate_manifest_workspace;

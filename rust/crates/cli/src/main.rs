@@ -23,6 +23,7 @@ mod teams;
 mod tui;
 mod volumes;
 mod work_sessions;
+mod workspace_mounts;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -268,6 +269,9 @@ enum Command {
         state_directory: PathBuf,
         #[command(flatten)]
         adapter: Box<AdapterOptions>,
+        /// Owner-controlled JSON mappings for read-only Workspace Volume copies.
+        #[arg(long)]
+        workspace_mount_mappings: Option<PathBuf>,
         /// Listen for authorized artifact reads from other Worker Hosts.
         #[arg(long, requires = "artifact_source_directory")]
         artifact_transfer_listen: Option<SocketAddr>,
@@ -408,6 +412,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Full local Git base commit. Omit for a configured GitHub source.
         #[arg(long, requires = "workspace_id")]
         workspace_base: Option<String>,
+        /// JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts.
+        #[arg(long, requires = "workspace_base")]
+        workspace_mounts: Option<PathBuf>,
         /// Required harness for Tasks accepted from this Tag.
         #[arg(long)]
         harness: Option<Harness>,
@@ -499,6 +506,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         #[command(subcommand)]
         command: volumes::VolumeCommand,
+    },
+    /// Register or inspect a file Volume for read-only Workspace data.
+    WorkspaceVolume {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: workspace_mounts::VolumeCommand,
     },
     /// Inspect or download files captured by a Task.
     Artifact {
@@ -791,6 +805,7 @@ async fn run(command: Command) -> Result<()> {
             attempt_timeout_seconds,
             once,
             wait_for_recovery,
+            workspace_mount_mappings,
             artifact_transfer_listen,
             artifact_source_directory,
             artifact_transfer_tls_cert,
@@ -922,6 +937,12 @@ async fn run(command: Command) -> Result<()> {
             };
             let artifact_peers =
                 supertag_worker_host::ArtifactPeers::configure(artifact_peers, artifact_peer_ca)?;
+            let workspace_mounts = workspace_mount_mappings
+                .as_deref()
+                .map(supertag_worker_host::WorkspaceMounts::load)
+                .transpose()?
+                .unwrap_or_default();
+            execution_profile.workspace_mounts = workspace_mounts.capabilities();
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -944,6 +965,7 @@ async fn run(command: Command) -> Result<()> {
                 mcp_catalog,
                 artifact_source,
                 artifact_peers,
+                workspace_mounts,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -1049,15 +1071,22 @@ async fn run(command: Command) -> Result<()> {
             mailbox_approver,
             workspace_id,
             workspace_base,
+            workspace_mounts,
             harness,
             models,
             efforts,
             shared_execution_environment,
         } => {
+            let mounts = workspace_mounts
+                .as_deref()
+                .map(workspace_mounts::read_declarations)
+                .transpose()?
+                .unwrap_or_default();
             let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
                 workspace_id,
                 base_commit: workspace_base.unwrap_or_default(),
                 github_source: None,
+                mounts,
             });
             let mut approval_rules = Vec::new();
             for (required, action, operator_ids) in [
@@ -1243,6 +1272,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => volumes::run(connection, command).await?,
+        Command::WorkspaceVolume {
+            connection,
+            command,
+        } => workspace_mounts::run(connection, command).await?,
         Command::Artifact {
             connection,
             command,
@@ -1486,6 +1519,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
+        .add_service(supertag_protocol::v2::workspace_volumes_server::WorkspaceVolumesServer::new(plane.clone()))
+        .add_service(supertag_protocol::v2::attempt_workspace_mounts_server::AttemptWorkspaceMountsServer::new(plane.clone()))
         .add_service(
             ArtifactDirectoryServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -1716,6 +1751,8 @@ async fn gateway(
         .add_service(gateway.host_enrollment_service())
         .add_service(transfers.artifact_catalog_service())
         .add_service(transfers.artifact_volumes_service())
+        .add_service(gateway.workspace_volumes_service())
+        .add_service(gateway.attempt_workspace_mounts_service())
         .add_service(transfers.attempt_artifacts_service())
         .add_service(transfers.artifact_transfer_service())
         .add_service(transfers.service())
@@ -2189,6 +2226,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
+        "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
     })
@@ -2204,6 +2242,7 @@ fn print_task(task: &Task) {
             "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+                "mounts": workspace_mounts::describe(&spec.mounts),
                 "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),

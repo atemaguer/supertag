@@ -279,6 +279,7 @@ impl<'a> Runtime<'a> {
                 instructions: "Follow the fixture Task with its admitted tools.".into(),
                 allowed_actions: actions.iter().map(|action| (*action).into()).collect(),
                 workspace: Some(WorkspaceSpec {
+                    mounts: vec![],
                     workspace_id: WORKSPACE.into(),
                     base_commit: fixture.base.clone(),
                     github_source: None,

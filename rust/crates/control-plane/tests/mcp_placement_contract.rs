@@ -30,6 +30,7 @@ async fn contract(url: &str) {
             tag_id: "mcp-tag".into(),
             instructions: "Use the approved tools.".into(),
             workspace: Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: "a".repeat(40),
                 github_source: None,

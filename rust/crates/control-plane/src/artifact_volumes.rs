@@ -223,6 +223,7 @@ impl Store {
         if let Some(result) = prior(&mut tx, principal, &input.operation_id, &digest).await? {
             return Ok(result);
         }
+        crate::workspace_mounts::allow_artifact_registration(&mut tx, &input.source).await?;
         let row = sqlx::query(
             "SELECT source,revision,deleted FROM supertag_v2_artifact_volumes WHERE volume_id=$1",
         )

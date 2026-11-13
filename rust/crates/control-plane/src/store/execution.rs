@@ -10,6 +10,8 @@ pub(super) fn normalize_profile(
     supplied: Option<&HarnessExecutionProfile>,
 ) -> Result<HarnessExecutionProfile> {
     let mut profile = supplied.cloned().unwrap_or_default();
+    supertag_protocol::workspace_mounts::normalize_capabilities(&mut profile.workspace_mounts)
+        .map_err(|error| invalid(error.message()))?;
     if !supertag_protocol::mcp::normalize_capabilities(&mut profile.mcp_servers) {
         return Err(invalid("invalid Worker Host MCP server capabilities"));
     }
@@ -122,6 +124,7 @@ pub(super) fn resolve_attempt(
     if !supertag_protocol::mcp::supports(task, harness, profile)
         || !supertag_protocol::output_policy::supports(task, harness, profile)
         || !supertag_protocol::task_artifact_inputs::supports(task, harness, profile)
+        || !supertag_protocol::workspace_mounts::supports(task, harness, profile)
     {
         return None;
     }

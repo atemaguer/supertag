@@ -659,6 +659,7 @@ impl<'a> Catalog<'a> {
                 );
             }
             value.workspace = Some(WorkspaceSpec {
+                mounts: vec![],
                 workspace_id: workspace.id,
                 base_commit,
                 github_source: None,

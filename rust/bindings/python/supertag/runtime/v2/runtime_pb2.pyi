@@ -1928,7 +1928,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -1937,6 +1937,7 @@ class HarnessExecutionProfile(_message.Message):
     SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     DECLARED_TASK_OUTPUTS_FIELD_NUMBER: _ClassVar[int]
     TASK_ARTIFACT_INPUTS_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_MOUNTS_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -1945,7 +1946,8 @@ class HarnessExecutionProfile(_message.Message):
     shared_execution: SharedExecutionCapability
     declared_task_outputs: bool
     task_artifact_inputs: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ...) -> None: ...
+    workspace_mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceMountCapability]
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")
@@ -2466,14 +2468,48 @@ class CheckpointDownload(_message.Message):
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
-    __slots__ = ("workspace_id", "base_commit", "github_source")
+    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
     GITHUB_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    MOUNTS_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     base_commit: str
     github_source: _github_workspaces_pb2.GithubWorkspace
-    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ...) -> None: ...
+    mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceCopyMount]
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ...) -> None: ...
+
+class WorkspaceCopyMount(_message.Message):
+    __slots__ = ("volume_id", "destination", "max_bytes", "volume")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    MAX_BYTES_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    destination: str
+    max_bytes: int
+    volume: WorkspaceVolume
+    def __init__(self, volume_id: _Optional[str] = ..., destination: _Optional[str] = ..., max_bytes: _Optional[int] = ..., volume: _Optional[_Union[WorkspaceVolume, _Mapping]] = ...) -> None: ...
+
+class WorkspaceMountCapability(_message.Message):
+    __slots__ = ("volume_id", "source", "destination_root")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_ROOT_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    destination_root: str
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., destination_root: _Optional[str] = ...) -> None: ...
+
+class WorkspaceVolume(_message.Message):
+    __slots__ = ("volume_id", "source", "revision")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    revision: int
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., revision: _Optional[int] = ...) -> None: ...
 
 class GithubWorkspaceBundle(_message.Message):
     __slots__ = ("workspace", "bundle")

@@ -326,6 +326,7 @@ pub(super) async fn claim_candidate(
             });
             if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
                 && has_workspace
+                && crate::workspace_mounts::current_in(transaction, &task).await?
                 && task
                     .workspace
                     .as_ref()
