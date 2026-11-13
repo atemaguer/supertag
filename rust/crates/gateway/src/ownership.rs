@@ -148,10 +148,12 @@ impl Owner<'_> {
 
     /// Whether the journal still records a reply this Gateway claimed or sent.
     fn in_flight(&self) -> Result<bool> {
-        Ok(matches!(
-            self.journal.load()?,
-            Some(Entry::Sending { .. } | Entry::Settle { .. })
-        ))
+        Ok(in_flight(self.journal.load()?.as_ref()))
+    }
+
+    /// Whether drain must still advance the journal before releasing ownership.
+    fn draining(&self, owner: bool) -> Result<bool> {
+        Ok(drain_pending(self.journal.load()?.as_ref(), owner))
     }
 
     /// Deliver replies while this Gateway owns the account, then drain.
@@ -201,7 +203,7 @@ impl Owner<'_> {
         }
         // Drain: start no new delivery, but settle any reply already claimed or sent.
         let deadline = Instant::now() + DRAIN_TIMEOUT;
-        while self.in_flight()? && Instant::now() < deadline {
+        while self.draining(held.is_some())? && Instant::now() < deadline {
             let token = held
                 .as_ref()
                 .map(|lease| lease.token.clone())
@@ -218,6 +220,18 @@ impl Owner<'_> {
         }
         Ok(())
     }
+}
+
+fn in_flight(entry: Option<&Entry>) -> bool {
+    matches!(entry, Some(Entry::Sending { .. } | Entry::Settle { .. }))
+}
+
+/// A reply claim whose answer this Gateway never saw may already hold a reply
+/// at the Control Plane. While it still owns the account, drain replays that
+/// idempotent claim and delivers what it returns instead of leaving the reply
+/// to expire as uncertain. Without ownership the claim cannot be replayed.
+fn drain_pending(entry: Option<&Entry>, owner: bool) -> bool {
+    in_flight(entry) || (owner && matches!(entry, Some(Entry::Claim { .. })))
 }
 
 async fn pause(shutdown: &CancellationToken, wait: Duration) {
@@ -243,5 +257,22 @@ async fn transient<T>(call: impl Future<Output = Result<T, tonic::Status>>) -> R
             error.code()
         ),
         Err(_) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_finishes_an_unanswered_claim_only_while_owning_the_account() {
+        let claim = Entry::Claim {
+            operation_id: "op".into(),
+        };
+        assert!(drain_pending(Some(&claim), true));
+        assert!(!drain_pending(Some(&claim), false));
+        assert!(!drain_pending(None, true));
+        // Outside drain an unanswered claim does not stop claiming ownership.
+        assert!(!in_flight(Some(&claim)));
     }
 }
