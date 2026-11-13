@@ -3188,6 +3188,16 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FinishTaskRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.ReclaimAttempt = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReclaimAttempt',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReclaimAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+                _registered_method=True)
+        self.ReportAppliedLimits = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportAppliedLimits',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3283,6 +3293,21 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReclaimAttempt(self, request, context):
+        """The restarted host of an interrupted Attempt proves every process it recorded for the
+        Attempt has stopped. Records a failed Attempt whose outcome stays unknown; never a retry.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReportAppliedLimits(self, request, context):
+        """Limits the Attempt's adapter confirmed it applies, for the Task execution report.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3360,6 +3385,16 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.FinishTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FinishTaskRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'ReclaimAttempt': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReclaimAttempt,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReclaimAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.SerializeToString,
+            ),
+            'ReportAppliedLimits': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportAppliedLimits,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3767,6 +3802,60 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/FinishTask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.FinishTaskRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReclaimAttempt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReclaimAttempt',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReclaimAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportAppliedLimits(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportAppliedLimits',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.FromString,
             options,
             channel_credentials,
             insecure,

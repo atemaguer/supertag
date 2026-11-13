@@ -1969,7 +1969,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection", "applied_execution_limits")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1992,6 +1992,7 @@ class Task(_message.Message):
     OUTPUT_POLICY_FIELD_NUMBER: _ClassVar[int]
     INPUT_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_SELECTION_FIELD_NUMBER: _ClassVar[int]
+    APPLIED_EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -2014,7 +2015,8 @@ class Task(_message.Message):
     output_policy: TaskOutputPolicy
     input_artifacts: _containers.RepeatedCompositeFieldContainer[AcceptedTaskArtifactInput]
     workspace_selection: str
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ...) -> None: ...
+    applied_execution_limits: AppliedExecutionLimits
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ...) -> None: ...
 
 class TaskArtifactInputSelection(_message.Message):
     __slots__ = ("artifact_id", "paths", "require_accepted", "publication_approval_id")
@@ -2355,20 +2357,42 @@ class ResolveAttemptRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., evidence: _Optional[str] = ..., confirmed_stopped: _Optional[bool] = ...) -> None: ...
 
 class AttemptResolution(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "decision", "operator_id", "evidence", "resolved_at_ms")
+    __slots__ = ("task_id", "attempt_id", "decision", "operator_id", "evidence", "resolved_at_ms", "worker_host_id")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     DECISION_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_ID_FIELD_NUMBER: _ClassVar[int]
     EVIDENCE_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    WORKER_HOST_ID_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     decision: AttemptDecision
     operator_id: str
     evidence: str
     resolved_at_ms: int
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., operator_id: _Optional[str] = ..., evidence: _Optional[str] = ..., resolved_at_ms: _Optional[int] = ...) -> None: ...
+    worker_host_id: str
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., decision: _Optional[_Union[AttemptDecision, str]] = ..., operator_id: _Optional[str] = ..., evidence: _Optional[str] = ..., resolved_at_ms: _Optional[int] = ..., worker_host_id: _Optional[str] = ...) -> None: ...
+
+class ReclaimAttemptRequest(_message.Message):
+    __slots__ = ("attempt", "evidence")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    evidence: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., evidence: _Optional[str] = ...) -> None: ...
+
+class ReportAppliedLimitsRequest(_message.Message):
+    __slots__ = ("attempt", "applied")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    APPLIED_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    applied: AppliedExecutionLimits
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., applied: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ...) -> None: ...
+
+class ReportAppliedLimitsResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetAttemptResolutionResponse(_message.Message):
     __slots__ = ("resolution",)

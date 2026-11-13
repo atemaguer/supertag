@@ -565,6 +565,11 @@ impl Journal {
             fs::remove_file(self.shared_access_path())?;
             self.sync_directory()?;
         }
+        match fs::remove_dir_all(self.directory.join(PROCESSES)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         fs::remove_file(self.entry_path())?;
         match fs::remove_file(self.directory.join("checkpoint.bin")) {
             Ok(()) => {}
@@ -578,11 +583,248 @@ impl Journal {
         File::open(&self.directory)?.sync_all()?;
         Ok(())
     }
+
+    /// The record of the processes this host starts for `attempt` while it executes.
+    pub(crate) fn processes(&self, attempt: &Attempt) -> Processes {
+        Processes {
+            directory: self.directory.join(PROCESSES),
+            attempt_id: attempt.attempt_id.clone(),
+        }
+    }
+}
+
+/// Where the host records each process group it starts while an Attempt executes.
+const PROCESSES: &str = "attempt-processes";
+const MAX_PROCESS_RECORDS: usize = 256;
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum ProcessRecord {
+    /// A spawn may have happened, but its process group is unknown.
+    Pending,
+    /// The spawn failed, so nothing ran.
+    None,
+    Recorded {
+        group: i32,
+    },
+}
+
+/// The process groups an executing Attempt started, recorded before each spawn as TypeScript's
+/// `LocalAttemptOwnership` does. A host restarted after it was killed may reclaim the Attempt
+/// only when every record names a process group that is gone. A pending, unreadable, or live
+/// record, or a missing directory, never counts as stopped.
+#[derive(Clone, Debug)]
+pub(crate) struct Processes {
+    directory: PathBuf,
+    attempt_id: String,
+}
+
+pub(crate) struct PendingProcess {
+    path: PathBuf,
+    directory: PathBuf,
+}
+
+impl Processes {
+    /// Start an empty record before the Attempt can start any process.
+    pub(crate) fn begin(&self) -> Result<()> {
+        match fs::remove_dir_all(&self.directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        DirBuilder::new().mode(0o700).create(&self.directory)?;
+        write_private(&self.directory.join("attempt"), self.attempt_id.as_bytes())?;
+        sync(&self.directory)?;
+        sync(self.directory.parent().context("process record parent")?)
+    }
+
+    /// Forget the record, so a restart cannot reclaim the Attempt on its own. Used once the
+    /// host holds an outcome that only the operator may now decide.
+    pub(crate) fn discard(&self) -> Result<()> {
+        match fs::remove_dir_all(&self.directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        }
+        sync(self.directory.parent().context("process record parent")?)
+    }
+
+    /// Persist uncertainty before a spawn; a crash before `record` keeps it.
+    pub(crate) fn prepare(&self) -> Result<PendingProcess> {
+        let entries = fs::read_dir(&self.directory)
+            .context("read the Attempt's process record")?
+            .count();
+        ensure!(
+            entries <= MAX_PROCESS_RECORDS,
+            "an Attempt records at most {MAX_PROCESS_RECORDS} processes"
+        );
+        let pending = PendingProcess {
+            path: self
+                .directory
+                .join(format!("process-{}.json", uuid::Uuid::new_v4().simple())),
+            directory: self.directory.clone(),
+        };
+        pending.write(&ProcessRecord::Pending)?;
+        Ok(pending)
+    }
+
+    /// Whether every process this Attempt recorded is proven gone.
+    pub(crate) fn stopped(&self) -> Result<Option<String>> {
+        let owner = match read_private(&self.directory.join("attempt")) {
+            Ok(owner) => owner,
+            Err(_) => return Ok(None),
+        };
+        if owner != self.attempt_id.as_bytes() {
+            return Ok(None);
+        }
+        let mut groups = Vec::new();
+        for entry in fs::read_dir(&self.directory)? {
+            let name = entry?.file_name();
+            let Some(name) = name.to_str() else {
+                return Ok(None);
+            };
+            if name == "attempt" {
+                continue;
+            }
+            if !name.starts_with("process-") || !name.ends_with(".json") {
+                return Ok(None);
+            }
+            let Ok(bytes) = read_private(&self.directory.join(name)) else {
+                return Ok(None);
+            };
+            match serde_json::from_slice::<ProcessRecord>(&bytes) {
+                Ok(ProcessRecord::None) => {}
+                Ok(ProcessRecord::Recorded { group }) if group > 1 && group_gone(group) => {
+                    groups.push(group);
+                }
+                _ => return Ok(None),
+            }
+        }
+        groups.sort_unstable();
+        Ok(Some(if groups.is_empty() {
+            "The Worker Host restarted and found that this Attempt started no processes.".into()
+        } else {
+            format!(
+                "The Worker Host restarted and found every process group it recorded for this Attempt gone: {}.",
+                groups
+                    .iter()
+                    .map(i32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }))
+    }
+}
+
+impl PendingProcess {
+    /// Record the started process group, or that the spawn failed (`None`).
+    pub(crate) fn record(self, group: Option<u32>) -> Result<()> {
+        let record = match group.map(i32::try_from) {
+            Some(Ok(group)) => ProcessRecord::Recorded { group },
+            Some(Err(_)) => anyhow::bail!("process group out of range"),
+            None => ProcessRecord::None,
+        };
+        self.write(&record)
+    }
+
+    fn write(&self, record: &ProcessRecord) -> Result<()> {
+        let mut staged = NamedTempFile::new_in(&self.directory)?;
+        serde_json::to_writer(staged.as_file_mut(), record)?;
+        staged.as_file().sync_all()?;
+        staged.persist(&self.path)?;
+        sync(&self.directory)
+    }
+}
+
+/// Only `ESRCH` proves a group gone; a reused or inaccessible group counts as running.
+fn group_gone(group: i32) -> bool {
+    // SAFETY: signal 0 only checks whether the process group exists.
+    let result = unsafe { libc::kill(-group, 0) };
+    result != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    let directory = path.parent().context("private file parent")?;
+    let mut staged = NamedTempFile::new_in(directory)?;
+    staged.write_all(bytes)?;
+    staged.as_file().sync_all()?;
+    staged.persist(path)?;
+    Ok(())
+}
+
+fn read_private(path: &Path) -> Result<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file()
+            && metadata.nlink() == 1
+            && metadata.mode() & 0o077 == 0
+            && metadata.uid() == unsafe { libc::geteuid() },
+        "process record must be private"
+    );
+    let mut bytes = Vec::new();
+    file.take(1025).read_to_end(&mut bytes)?;
+    ensure!(bytes.len() <= 1024, "process record exceeds its limit");
+    Ok(bytes)
+}
+
+fn sync(directory: &Path) -> Result<()> {
+    File::open(directory)?.sync_all()?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_recorded_gone_process_groups_prove_an_attempt_stopped() -> Result<()> {
+        use std::os::unix::process::CommandExt;
+        let state = tempfile::tempdir()?;
+        let journal = Journal::open(state.path())?;
+        let attempt = |id: &str| Attempt {
+            task_id: "task".into(),
+            attempt_id: id.into(),
+            lease_token: "lease".into(),
+            execution_selection: None,
+            requires_unsandboxed_commands: false,
+        };
+        let processes = journal.processes(&attempt("attempt"));
+        // No record at all is no evidence.
+        assert!(processes.stopped()?.is_none());
+        processes.begin()?;
+        assert!(
+            processes
+                .stopped()?
+                .unwrap()
+                .contains("started no processes")
+        );
+        // A spawn whose group was never recorded stays uncertain.
+        let pending = processes.prepare()?;
+        assert!(processes.stopped()?.is_none());
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()?;
+        pending.record(Some(child.id()))?;
+        assert!(processes.stopped()?.is_none(), "a live group is running");
+        child.kill()?;
+        child.wait()?;
+        let gone = processes.stopped()?.expect("a reaped group is gone");
+        assert!(gone.contains(&child.id().to_string()));
+        processes.prepare()?.record(None)?;
+        assert!(processes.stopped()?.is_some());
+        // Another Attempt's record and an unknown file are no evidence.
+        assert!(journal.processes(&attempt("other")).stopped()?.is_none());
+        fs::write(state.path().join(PROCESSES).join("stray"), b"")?;
+        assert!(processes.stopped()?.is_none());
+        processes.discard()?;
+        assert!(processes.stopped()?.is_none());
+        Ok(())
+    }
 
     #[test]
     fn lost_allocation_acknowledgement_requires_recovery_before_reuse() -> Result<()> {

@@ -21,6 +21,8 @@ use tokio::{sync::Mutex, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
+use crate::journal::Processes;
+
 pub use catalog::{McpCatalog, McpCatalogEntry};
 pub use oauth::{
     LoginOptions as McpLoginOptions, McpLogin, McpLoginState, McpLoginStore, login_command,
@@ -88,6 +90,7 @@ impl Session {
         (name, server): (&str, &catalog::Server),
         logins: Option<&McpLoginStore>,
         sandbox: Option<&SandboxConnection>,
+        processes: &Processes,
     ) -> Result<Self, Failure> {
         Ok(match &server.transport {
             catalog::Transport::Http(http) => {
@@ -104,7 +107,9 @@ impl Session {
                     &stdio.command,
                 )?)
             }
-            catalog::Transport::Stdio(stdio) => Self::Stdio(stdio::Session::start(stdio)?),
+            catalog::Transport::Stdio(stdio) => {
+                Self::Stdio(stdio::Session::start(stdio, Some(processes))?)
+            }
         })
     }
 
@@ -170,6 +175,7 @@ impl AttemptMcp {
         catalog: &McpCatalog,
         (workspace, sandbox): (Option<&WorkspaceMcp>, Option<&SandboxConnection>),
         task: &Task,
+        processes: &Processes,
         cancel: &CancellationToken,
     ) -> Result<Option<Self>, Status> {
         let names = mcp::grants(task)
@@ -213,14 +219,19 @@ impl AttemptMcp {
                 attempt.close().await;
                 return Err(Failure::Denied.into());
             };
-            let mut session =
-                match Session::open(&client, (name, config), catalog.logins.as_ref(), sandbox) {
-                    Ok(session) => session,
-                    Err(failure) => {
-                        attempt.close().await;
-                        return Err(failure.into());
-                    }
-                };
+            let mut session = match Session::open(
+                &client,
+                (name, config),
+                catalog.logins.as_ref(),
+                sandbox,
+                processes,
+            ) {
+                Ok(session) => session,
+                Err(failure) => {
+                    attempt.close().await;
+                    return Err(failure.into());
+                }
+            };
             let tools = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => Err(Failure::Cancelled),

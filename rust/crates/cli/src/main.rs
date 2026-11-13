@@ -2549,13 +2549,37 @@ fn task_json(task: &Task) -> serde_json::Value {
                 })),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
-            "max_reported_tokens": limits.max_reported_tokens,
-            "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
-                "amount_minor": limit.amount_minor, "currency": limit.currency,
-            })),
-            "max_native_agents": limits.max_native_agents,
+        "execution_limits": task.execution_limits.as_ref().map(limits_json),
+        "applied_execution_limits": task.applied_execution_limits.as_ref().map(|applied| {
+            let method = |value: i32, present: bool| {
+                present.then(|| {
+                    supertag_protocol::v2::ExecutionLimitEnforcement::try_from(value)
+                        .unwrap_or_default()
+                        .as_str_name()
+                        .trim_start_matches("EXECUTION_LIMIT_ENFORCEMENT_")
+                        .to_ascii_lowercase()
+                })
+            };
+            let limits = applied.limits.clone().unwrap_or_default();
+            json!({
+                "limits": limits_json(&limits),
+                "enforcement": {
+                    "max_reported_tokens": method(applied.reported_tokens, limits.max_reported_tokens.is_some()),
+                    "max_reported_cost": method(applied.reported_cost, limits.max_reported_cost.is_some()),
+                    "max_native_agents": method(applied.native_agents, limits.max_native_agents.is_some()),
+                },
+            })
+        }),
+    })
+}
+
+fn limits_json(limits: &supertag_protocol::v2::ExecutionLimits) -> serde_json::Value {
+    json!({
+        "max_reported_tokens": limits.max_reported_tokens,
+        "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
+            "amount_minor": limit.amount_minor, "currency": limit.currency,
         })),
+        "max_native_agents": limits.max_native_agents,
     })
 }
 

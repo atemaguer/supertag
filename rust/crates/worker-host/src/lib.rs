@@ -50,8 +50,8 @@ use supertag_protocol::{
     v2::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
-        HostRecord, InspectAttemptRequest, RecordWorkspaceMcpRequest, RegisterHostRequest,
-        ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState,
+        HostRecord, InspectAttemptRequest, ReclaimAttemptRequest, RecordWorkspaceMcpRequest,
+        RegisterHostRequest, ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState,
         artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
@@ -575,6 +575,13 @@ pub async fn run(
                 ensure_providers_stopped(&options, &journal, &attempt, &registration).await?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
+                    Ok(false) if reclaim(&mut host, &journal, &attempt, &token).await? => {
+                        supertag_protocol::terminal_text::warn(&format!(
+                            "Task {} Attempt {} was interrupted; its processes stopped, so this host recorded it as failed with an unknown outcome",
+                            attempt.task_id, attempt.attempt_id
+                        ));
+                        journal.save(&Entry::Terminal { attempt, prepared })?;
+                    }
                     Ok(false) if options.wait_for_recovery => {
                         if let Some(ready) = ready.take() {
                             ready();
@@ -904,6 +911,8 @@ pub async fn run(
                     Ok(response) if response.get_ref().state() == TaskState::Uncertain => {
                         // Cleanup was observed, but the operator still owns the
                         // recovery decision. Preserve the checkout until its receipt.
+                        // This host holds an outcome, so it never reclaims the Attempt itself.
+                        journal.processes(&attempt).discard()?;
                         if prepared.is_some() {
                             journal.save(&Entry::Executing { attempt, prepared })?;
                             if options.once {
@@ -1040,6 +1049,49 @@ async fn resolved(
             "recovery receipt has mismatched identity",
         )),
         None => Ok(false),
+    }
+}
+
+/// Reclaims an interrupted Attempt when its process record proves every process it started is
+/// gone, as TypeScript's automatic reclaim does. Returns whether the Control Plane recorded it;
+/// without proof, or when the Control Plane refuses, the Attempt waits for an operator.
+async fn reclaim(
+    host: &mut RegisteredHost,
+    journal: &Journal,
+    attempt: &Attempt,
+    token: &str,
+) -> Result<bool> {
+    let Some(evidence) = journal.processes(attempt).stopped()? else {
+        return Ok(false);
+    };
+    let mut request = request(
+        ReclaimAttemptRequest {
+            attempt: Some(attempt.inspect()),
+            evidence,
+        },
+        token,
+    )?;
+    request.set_timeout(Duration::from_secs(5));
+    match host.reclaim_attempt(request).await {
+        Ok(response) => {
+            let resolution = response.into_inner();
+            ensure!(
+                resolution.task_id == attempt.task_id
+                    && resolution.attempt_id == attempt.attempt_id,
+                "recovery receipt has mismatched identity"
+            );
+            Ok(true)
+        }
+        Err(error) if retryable(&error) => Ok(false),
+        Err(error)
+            if matches!(
+                error.code(),
+                tonic::Code::FailedPrecondition | tonic::Code::AlreadyExists | tonic::Code::Aborted
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -1447,6 +1499,8 @@ async fn run_assignment(
             }
         }
     };
+    let processes = journal.processes(&attempt);
+    processes.begin()?;
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
         prepared: workspace
@@ -1606,6 +1660,7 @@ async fn run_assignment(
                 &options.mcp_catalog,
                 (workspace_mcp.as_ref(), sandbox.as_ref()),
                 &task,
+                &processes,
                 &cancel,
             ),
         )
@@ -1757,6 +1812,7 @@ async fn run_assignment(
             resolved_skills,
             remote_workspace,
             mcp: mcp.clone(),
+            processes: processes.clone(),
         },
         (host.clone(), inputs.clone(), coordination.clone()),
         token,

@@ -123,10 +123,10 @@ enum Expect {
     /// The Task fails with this durable event count. Its only reply is the failure text,
     /// delivered once, besides at most one acknowledgement.
     Failed { events: usize },
-    /// The restarted host refuses to claim work: execution is uncertain and needs an
-    /// operator decision. The Task stays running, nothing is rerun, no reply exists, and the
-    /// acknowledgement, if posted, is kept.
-    ExecutionUncertain { launches: usize, events: usize },
+    /// The restarted host proves every process it recorded for the interrupted Attempt is gone
+    /// and reclaims it: the Task fails with an unknown outcome, nothing is rerun, and an
+    /// acknowledgement, if posted, is replaced once by the failure text.
+    Reclaimed { launches: usize, events: usize },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -456,7 +456,6 @@ struct System<'a> {
     public: SocketAddr,
     http: SocketAddr,
     crashed: bool,
-    restarted_host_status: Option<ExitStatus>,
 }
 
 impl<'a> System<'a> {
@@ -499,7 +498,6 @@ impl<'a> System<'a> {
             public: endpoints[0],
             http: endpoints[1],
             crashed: false,
-            restarted_host_status: None,
         })
     }
 
@@ -819,15 +817,16 @@ impl<'a> System<'a> {
                                 .any(|reply| reply.state() == ReplyState::Delivered)
                         }))
             }
-            Expect::ExecutionUncertain { .. } => {
-                if self.crashed
-                    && let Some(status) = exit
-                {
-                    self.restarted_host_status = Some(status);
-                    true
-                } else {
-                    false
-                }
+            Expect::Reclaimed { .. } => {
+                let acknowledged = !self.mock.requests.lock().await.is_empty();
+                exit.is_some()
+                    && task.state() == TaskState::Failed
+                    && self.replies().await.is_ok_and(|replies| {
+                        replies
+                            .iter()
+                            .all(|reply| reply.state() == ReplyState::Delivered)
+                            && (!acknowledged || replies.len() == 1)
+                    })
             }
         })
     }
@@ -839,13 +838,9 @@ impl<'a> System<'a> {
             if self.crashed && self.settled(id).await? {
                 return Ok(());
             }
-            // A host that fails is never a recovered outcome, except the expected
-            // fail-closed restart after its own crash during execution.
-            let tolerated =
-                self.crashed && matches!(self.case.expect, Expect::ExecutionUncertain { .. });
+            // A host that fails is never a recovered outcome.
             let killed = !self.crashed && self.case.target == Target::WorkerHost;
-            if !tolerated
-                && !killed
+            if !killed
                 && let Some(status) = self.host_exit()?
                 && !status.success()
             {
@@ -952,31 +947,35 @@ impl<'a> System<'a> {
                     ensure!(replies.is_empty() && provider_requests == 0);
                 }
             }
-            Expect::ExecutionUncertain {
+            Expect::Reclaimed {
                 launches: expected,
                 events,
             } => {
                 ensure!(launches == expected, "adapter launched {launches} times");
-                let status = self
-                    .restarted_host_status
-                    .context("restarted host status missing")?;
-                ensure!(!status.success(), "uncertain host restart must fail closed");
-                let logs = self.host.as_ref().map(Process::logs).unwrap_or_default();
+                let exit = self.host_exit()?.context("host still running")?;
+                ensure!(exit.success(), "reclaiming host exited with {exit}");
                 ensure!(
-                    logs.contains("needs recovery before this host can claim work"),
-                    "unexpected restart failure: {logs}"
-                );
-                ensure!(
-                    task.state() == TaskState::Running && task.result.is_none(),
-                    "host death invented an outcome: {task:?}"
+                    task.state() == TaskState::Failed
+                        && task
+                            .result
+                            .as_deref()
+                            .is_some_and(|result| result.contains("outcome is unknown")),
+                    "host death was not reclaimed: {task:?}"
                 );
                 ensure!(
                     sequences == (1..=events as u64).collect::<Vec<_>>(),
                     "events {sequences:?}"
                 );
-                ensure!(replies.is_empty() && result_posts == 0);
+                ensure!(result_posts == 0, "reclaimed Task posted a result");
+                ensure!(replies.len() <= 1, "replies {replies:?}");
                 ensure!(
-                    provider_requests <= 1,
+                    replies
+                        .iter()
+                        .all(|reply| reply.state() == ReplyState::Delivered),
+                    "replies {replies:?}"
+                );
+                ensure!(
+                    provider_requests <= 2,
                     "provider received {provider_requests} posts"
                 );
             }
@@ -1017,7 +1016,7 @@ impl<'a> System<'a> {
             (Ingress::Operator, Expect::Succeeded) => {
                 ensure!(replies.is_empty() && provider_requests == 0);
             }
-            (_, Expect::Failed { .. } | Expect::ExecutionUncertain { .. }) => {}
+            (_, Expect::Failed { .. } | Expect::Reclaimed { .. }) => {}
             (ingress, expect) => bail!("invalid case: {ingress:?} with {expect:?}"),
         }
         // A settled reply is never offered again: no claimable reply remains.
@@ -1228,7 +1227,7 @@ crash_matrix! {
         case(WorkerHost, "worker-host.start.answered", Slack, Delivered);
     worker_host_execute_journaled =>
         case(WorkerHost, "worker-host.execute.journaled", Slack,
-            ExecutionUncertain { launches: 0, events: 0 });
+            Reclaimed { launches: 0, events: 0 });
     adapter_attached =>
         case(Adapter, "adapter.attached", Slack, Failed { events: 0 });
 
@@ -1244,7 +1243,7 @@ crash_matrix! {
         case(Gateway, "gateway.append-event.after-forward", Slack, Delivered);
     worker_host_event_answered =>
         case(WorkerHost, "worker-host.append-event.answered", Slack,
-            ExecutionUncertain { launches: 1, events: 1 });
+            Reclaimed { launches: 1, events: 1 });
     adapter_published =>
         case(Adapter, "adapter.published", Slack, Failed { events: 1 });
 

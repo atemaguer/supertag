@@ -1337,6 +1337,23 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
             task["execution_limits"]["max_reported_cost"],
             expected_cost(minor)
         );
+        // The Task execution report keeps what the adapter confirmed it applies, and how.
+        assert_eq!(
+            task["applied_execution_limits"],
+            serde_json::json!({
+                "limits": {
+                    "max_reported_tokens": null,
+                    "max_reported_cost": expected_cost(minor),
+                    "max_native_agents": null,
+                },
+                "enforcement": {
+                    "max_reported_tokens": null,
+                    "max_reported_cost": "provider_budget",
+                    "max_native_agents": null,
+                },
+            }),
+            "{task}"
+        );
         if minor == 1000 && id != start {
             let attempt = task["attempt_id"]
                 .as_str()

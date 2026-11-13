@@ -72,7 +72,12 @@ pub(super) fn base_environment() -> impl Iterator<Item = (&'static str, String)>
 }
 
 impl Session {
-    pub(super) fn start(server: &StdioServer) -> Result<Self, Failure> {
+    /// Starts a host stdio server in its own process group, recorded in `processes` first so a
+    /// restarted host can prove it stopped.
+    pub(super) fn start(
+        server: &StdioServer,
+        processes: Option<&crate::journal::Processes>,
+    ) -> Result<Self, Failure> {
         let mut command = Command::new(&server.command[0]);
         command
             .args(&server.command[1..])
@@ -87,7 +92,17 @@ impl Session {
         if let Some(cwd) = &server.cwd {
             command.current_dir(cwd);
         }
-        let mut child = command.spawn().map_err(|_| Failure::Unavailable)?;
+        let pending = processes
+            .map(crate::journal::Processes::prepare)
+            .transpose()
+            .map_err(|_| Failure::Unavailable)?;
+        let spawned = command.spawn();
+        if let Some(pending) = pending {
+            pending
+                .record(spawned.as_ref().ok().and_then(Child::id))
+                .map_err(|_| Failure::Unavailable)?;
+        }
+        let mut child = spawned.map_err(|_| Failure::Unavailable)?;
         let pid = child.id().and_then(|pid| libc::pid_t::try_from(pid).ok());
         let stdin = child.stdin.take().ok_or(Failure::Unavailable)?;
         let stdout = child.stdout.take().ok_or(Failure::Unavailable)?;
@@ -409,7 +424,7 @@ mod tests {
     async fn launches_with_only_its_env_answers_server_requests_and_stops_on_close() {
         let directory = tempfile::tempdir().unwrap();
         let journal = directory.path().join("calls.jsonl");
-        let mut session = Session::start(&server(&journal, "normal")).unwrap();
+        let mut session = Session::start(&server(&journal, "normal"), None).unwrap();
         session.initialize().await.unwrap();
         let tools = session.rpc("tools/list", json!({})).await.unwrap();
         assert_eq!(tools["tools"].as_array().unwrap().len(), 4);
@@ -462,7 +477,7 @@ mod tests {
     async fn times_out_a_hung_call_once_and_kills_a_server_that_ignores_sigterm() {
         let directory = tempfile::tempdir().unwrap();
         let journal = directory.path().join("calls.jsonl");
-        let mut session = Session::start(&server(&journal, "hung")).unwrap();
+        let mut session = Session::start(&server(&journal, "hung"), None).unwrap();
         session.initialize().await.unwrap();
         let call = json!({"name":"list_docs","arguments":{"owner":"acme","repo":"docs"}});
         assert_eq!(
@@ -493,7 +508,7 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let journal = directory.path().join("calls.jsonl");
             let started = Instant::now();
-            let mut session = Session::start(&server(&journal, mode)).unwrap();
+            let mut session = Session::start(&server(&journal, mode), None).unwrap();
             assert_eq!(session.initialize().await, Err(failure), "{mode}");
             assert!(started.elapsed() < Duration::from_secs(3), "{mode}");
             session.close().await;
@@ -509,7 +524,7 @@ mod tests {
             sandboxed: false,
         };
         assert!(matches!(
-            Session::start(&missing),
+            Session::start(&missing, None),
             Err(Failure::Unavailable)
         ));
     }

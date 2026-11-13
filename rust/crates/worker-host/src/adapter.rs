@@ -38,8 +38,9 @@ use supertag_protocol::{
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
         HarnessRun, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
         HarnessUsageRequest, InspectAttemptRequest, LiveInput, ObjectiveSignal,
-        ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill,
-        SessionCheckpoint, TakeInputResponse, TaskEvent, TaskState,
+        ReportAppliedLimitsRequest, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
+        ReportedCostLimit, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
+        TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -236,6 +237,20 @@ impl Harness for Bridge {
                 return Err(Status::failed_precondition("execution is complete"));
             }
             limits::verify_confirmation(self.harness, self.execution_limits(), &applied)?;
+            // The Task execution report shows what the adapter applied. The Control Plane
+            // accepts a repeated report of the same limits.
+            let report = ReportAppliedLimitsRequest {
+                attempt: Some(InspectAttemptRequest {
+                    task_id: self.task_id().into(),
+                    attempt_id: self.assignment.attempt_id.clone(),
+                    lease_token: self.assignment.lease_token.clone(),
+                }),
+                applied: Some(applied.clone()),
+            };
+            self.retry_upstream(report, |mut host, request| async move {
+                host.report_applied_limits(request).await
+            })
+            .await?;
             state.applied_limits = Some(applied);
         }
         Ok(Response::new(ConfirmExecutionLimitsResponse {}))
@@ -429,6 +444,8 @@ pub(crate) struct ExecutionInputs<'a> {
     pub resolved_skills: Vec<ResolvedSkill>,
     pub remote_workspace: Option<workspace::RemoteWorkspace>,
     pub mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+    /// Where the adapter's process group is recorded before it starts.
+    pub processes: crate::journal::Processes,
 }
 
 pub(crate) async fn execute(
@@ -441,6 +458,7 @@ pub(crate) async fn execute(
         resolved_skills,
         remote_workspace,
         mcp,
+        processes,
     }: ExecutionInputs<'_>,
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
@@ -527,8 +545,8 @@ pub(crate) async fn execute(
         bootstrap,
         valid_until,
         shutdown,
-        workspace,
-        output_directory,
+        (workspace, output_directory),
+        &processes,
     )
     .await;
     bridge.inputs.close();
@@ -555,8 +573,8 @@ async fn supervise(
     bootstrap: AdapterBootstrap,
     valid_until: Instant,
     shutdown: &CancellationToken,
-    workspace: Option<&Path>,
-    output_directory: Option<&Path>,
+    (workspace, output_directory): (Option<&Path>, Option<&Path>),
+    processes: &crate::journal::Processes,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(failed("Worker Host is shutting down"));
@@ -612,7 +630,12 @@ async fn supervise(
             .iter()
             .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
     );
-    let mut child = match command.spawn() {
+    // Record the spawn before it happens, so a host killed at any point leaves either no
+    // adapter or a record a restart can check.
+    let pending = processes.prepare()?;
+    let spawned = command.spawn();
+    pending.record(spawned.as_ref().ok().and_then(Child::id))?;
+    let mut child = match spawned {
         Ok(child) => child,
         Err(_) => return Ok(failed("Harness adapter could not start")),
     };

@@ -856,23 +856,19 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         .into_inner();
     let (adapter, launches) = recording_adapter(directory.path())?;
     let state = directory.path().join("host");
-    let host_command = || {
+    let host_command = |once: bool| {
         let mut command = credentials.command();
         command
-            .args([
-                "worker-host",
-                "--gateway",
-                &services.endpoint,
-                "--once",
-                "--state-directory",
-            ])
+            .args(["worker-host", "--gateway", &services.endpoint])
+            .args(once.then_some("--once"))
+            .arg("--state-directory")
             .arg(&state)
             .arg("--adapter")
             .arg(&adapter)
             .arg("--adapter-arg=--wait-for-cancel");
         command
     };
-    let mut host = Process::spawn(host_command(), directory.path(), "killed-host", false)?;
+    let mut host = Process::spawn(host_command(true), directory.path(), "killed-host", false)?;
     let running = wait_for_state(
         &mut client,
         &credentials,
@@ -936,37 +932,86 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         })?)
         .await?
         .into_inner();
-    let mut restarted = Process::spawn(host_command(), directory.path(), "restarted-host", false)?;
+    // A process the host may have started without recording its group is no proof: the
+    // restart fails closed and waits for an operator.
+    let pending = state
+        .join("attempt-processes")
+        .join("process-unrecorded.json");
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&pending)?;
+        std::io::Write::write_all(&mut file, br#"{"state":"pending"}"#)?;
+    }
+    let mut refused = Process::spawn(host_command(true), directory.path(), "refused-host", false)?;
     assert!(
-        !restarted.exited().await?.success(),
-        "uncertain host restart must fail closed"
+        !refused.exited().await?.success(),
+        "an unproven restart must fail closed"
     );
     assert!(
-        restarted
+        refused
             .logs()
             .contains("needs recovery before this host can claim work")
-    );
-    assert_eq!(
-        std::fs::read_to_string(&launches)?.lines().count(),
-        1,
-        "restart must not launch the adapter again"
     );
     assert_eq!(std::fs::read(&journal_path)?, journal);
     assert_eq!(
         task(&mut client, &credentials, &accepted.task_id).await?,
         running,
-        "host death must not invent a recovered or completed outcome"
+        "an unproven restart must not invent an outcome"
     );
+
+    // With every recorded process group gone, the restarted host reclaims the Attempt as
+    // failed with an unknown outcome, never reruns it, and claims new work.
+    std::fs::remove_file(&pending)?;
+    // Without --once, the restarted host goes on to claim new work.
+    let mut restarted = Process::spawn(
+        host_command(false),
+        directory.path(),
+        "restarted-host",
+        false,
+    )?;
+    let reclaimed = wait_for_state(
+        &mut client,
+        &credentials,
+        &accepted.task_id,
+        TaskState::Failed,
+    )
+    .await?;
+    assert!(
+        reclaimed
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("outcome is unknown")),
+        "{reclaimed:?}"
+    );
+    assert_eq!(reclaimed.attempt_id, running.attempt_id);
     assert_eq!(
         events(&mut client, &credentials, &accepted.task_id, 0).await?,
         recorded
     );
+    wait_for_state(
+        &mut client,
+        &credentials,
+        &queued.task_id,
+        TaskState::Running,
+    )
+    .await?;
+    let deadline = Instant::now() + WAIT;
+    while std::fs::read_to_string(&launches)?.lines().count() < 2 {
+        ensure!(Instant::now() < deadline, "the queued Task never launched");
+        sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(
-        task(&mut client, &credentials, &queued.task_id)
-            .await?
-            .state(),
-        TaskState::Queued
+        std::fs::read_to_string(&launches)?.lines().count(),
+        2,
+        "only the queued Task launches an adapter after the restart"
     );
+    let mut cleanup = DescendantCleanup(self::descendants(restarted.child.id())?);
+    restarted.crash()?;
+    cleanup.wait_and_disarm().await?;
     Ok(())
 }
 
