@@ -664,6 +664,7 @@ async fn scenario(publication: bool, moving: bool, git_outputs: bool) -> Result<
     let local = root.join("local");
     let mut up = command(&[
         "up",
+        "--foreground",
         "--workspace-id",
         "project",
         "--workspace-from-gateway",

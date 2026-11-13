@@ -28,7 +28,7 @@ impl Process {
         let log = state.with_extension(format!("{}.log", Uuid::new_v4().simple()));
         let mut command = Command::new(BIN);
         command
-            .args(["up", "--state-directory"])
+            .args(["up", "--foreground", "--state-directory"])
             .arg(state)
             .env_clear()
             .envs(env.iter().copied())

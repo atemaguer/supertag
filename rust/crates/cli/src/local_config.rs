@@ -114,6 +114,14 @@ pub struct FileSecret {
 }
 
 pub struct Config {
+    /// The file's `name`, which labels its service unit.
+    pub name: String,
+    /// The file this configuration came from.
+    pub path: PathBuf,
+    /// SHA-256 of the file, so `supertag up` can leave an unchanged supervisor alone.
+    pub digest: String,
+    /// Some service sets `restart: unless-stopped`, so `up` installs a per-user service unit.
+    pub service_unit: bool,
     pub plane: Option<Plane>,
     pub hosts: Vec<Host>,
     /// `env_file` values behind the process environment, read only by the supervisor.
@@ -175,7 +183,9 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
         .parent()
         .context("configuration directory missing")?
         .to_owned();
-    let config = parse(&bytes, &base, |name| std::env::var(name).ok())?;
+    let mut config = parse(&bytes, &base, |name| std::env::var(name).ok())?;
+    config.path = path.canonicalize()?;
+    config.digest = crate::lifecycle::hex(&<sha2::Sha256 as sha2::Digest>::digest(&bytes));
     if config
         .plane
         .as_ref()
@@ -188,17 +198,26 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
     }
     Ok(Some(config))
 }
-fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> Result<Config> {
+/// The document after `env_file` loading and interpolation, without `x-` keys.
+fn resolved(
+    bytes: &[u8],
+    base: &Path,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<(serde_json::Value, Environment)> {
     let options = serde_saphyr::options! {budget:serde_saphyr::budget!{max_documents:1,max_depth:24,max_nodes:10000,max_total_scalar_bytes:MAX_BYTES}};
     // Do not echo YAML parse input: a mistaken inline secret must not reach logs.
-    let invalid = || anyhow::anyhow!("invalid or unsupported local service configuration");
-    let mut value: serde_json::Value =
-        serde_saphyr::from_slice_with_options(bytes, options).map_err(|_| invalid())?;
+    let mut value: serde_json::Value = serde_saphyr::from_slice_with_options(bytes, options)
+        .map_err(|_| anyhow::anyhow!("invalid or unsupported local service configuration"))?;
     let environment = environment::resolve(&mut value, base, lookup)?;
     if let Some(object) = value.as_object_mut() {
         // Top-level x-* keys hold YAML anchors and are otherwise ignored.
         object.retain(|key, _| !key.starts_with("x-"));
     }
+    Ok((value, environment))
+}
+fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> Result<Config> {
+    let invalid = || anyhow::anyhow!("invalid or unsupported local service configuration");
+    let (value, environment) = resolved(bytes, base, lookup)?;
     // Interpolated values may be secrets, so deserialization errors stay generic too.
     let document: Document = serde_json::from_value(value).map_err(|_| invalid())?;
     ensure!(
@@ -227,10 +246,9 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 credentials.as_deref().is_none_or(|s| s == "file"),
                 "local supervisor supports file credentials only"
             );
-            ensure!(
-                *restart == Restart::No,
-                "automatic local Control Plane restart is not supported"
-            );
+            // The supervisor stops when its Control Plane exits; `unless-stopped` asks for a
+            // per-user service unit that starts the supervisor again.
+            let _ = restart;
             ensure!(ports.len() <= 1, "configure one public Gateway listener");
             let port = ports
                 .first()
@@ -282,6 +300,19 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             plane_name = Some(name.clone());
         }
     }
+    let service_unit = document.services.values().any(|service| {
+        matches!(
+            service,
+            Service::ControlPlane {
+                restart: Restart::UnlessStopped,
+                ..
+            } | Service::Host {
+                restart: Restart::UnlessStopped,
+                ..
+            }
+        )
+    });
+    let instance = document.name.clone();
     let mut secrets = document.secrets;
     for (name, secret) in &mut secrets {
         identifier(name)?;
@@ -431,10 +462,125 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         "configuration has no runnable services"
     );
     Ok(Config {
+        name: instance,
+        path: PathBuf::new(),
+        digest: String::new(),
+        service_unit,
         plane,
         hosts,
         environment,
     })
+}
+/// `supertag config`: the file `up` would run, validated, with `env_file` values and `${VAR}`
+/// references resolved and defaults filled in. Secrets stay references; `env_file` values that
+/// no field references are never printed.
+pub fn render(file: Option<PathBuf>, state: &Path, services_only: bool) -> Result<String> {
+    let config = load(file, state)?.with_context(|| {
+        format!(
+            "no {} exists; supertag init writes one",
+            state.join("supertag.yaml").display()
+        )
+    })?;
+    let bytes = std::fs::read(&config.path)?;
+    let base = config
+        .path
+        .parent()
+        .context("configuration directory missing")?;
+    let (mut value, _) = resolved(&bytes, base, |name| std::env::var(name).ok())?;
+    let object = value
+        .as_object_mut()
+        .context("local configuration must be a map")?;
+    object.entry("version").or_insert(1.into());
+    object.entry("name").or_insert(instance().into());
+    if let Some(services) = object.get_mut("services").and_then(|s| s.as_object_mut()) {
+        for service in services.values_mut() {
+            let Some(service) = service.as_object_mut() else {
+                continue;
+            };
+            service.entry("restart").or_insert("no".into());
+            if service.get("type").and_then(|t| t.as_str()) == Some("control-plane") {
+                service
+                    .entry("ports")
+                    .or_insert(serde_json::json!(["127.0.0.1:3434"]));
+            }
+        }
+    }
+    if services_only {
+        let names = object
+            .get("services")
+            .and_then(|services| services.as_object())
+            .map(|services| services.keys().map(|name| format!("{name}\n")).collect())
+            .unwrap_or_default();
+        return Ok(names);
+    }
+    Ok(format!("# {}\n{}", config.path.display(), to_yaml(&value)))
+}
+/// Block-style YAML for a JSON value; strings are quoted unless plainly safe.
+pub fn to_yaml(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    yaml(&mut out, value, 0);
+    out
+}
+fn yaml(out: &mut String, value: &serde_json::Value, indent: usize) {
+    use serde_json::Value;
+    let pad = " ".repeat(indent);
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let key = scalar(&Value::String(key.clone()));
+                match value {
+                    Value::Object(inner) if !inner.is_empty() => {
+                        out.push_str(&format!("{pad}{key}:\n"));
+                        yaml(out, value, indent + 2);
+                    }
+                    Value::Array(items) if !items.is_empty() => {
+                        out.push_str(&format!("{pad}{key}:\n"));
+                        yaml(out, value, indent + 2);
+                    }
+                    _ => out.push_str(&format!("{pad}{key}: {}\n", scalar(value))),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                match item {
+                    Value::Object(inner) if !inner.is_empty() => {
+                        let mut nested = String::new();
+                        yaml(&mut nested, item, indent + 2);
+                        out.push_str(&format!("{pad}- {}", &nested[indent + 2..]));
+                    }
+                    Value::Array(inner) if !inner.is_empty() => {
+                        out.push_str(&format!("{pad}-\n"));
+                        yaml(out, item, indent + 2);
+                    }
+                    _ => out.push_str(&format!("{pad}- {}\n", scalar(item))),
+                }
+            }
+        }
+        scalar_value => out.push_str(&format!("{pad}{}\n", scalar(scalar_value))),
+    }
+}
+fn scalar(value: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match value {
+        Value::String(text)
+            if !text.is_empty()
+                && text
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_./:@".contains(&b))
+                && !matches!(
+                    text.as_str(),
+                    "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~"
+                )
+                && text.parse::<f64>().is_err() =>
+        {
+            text.clone()
+        }
+        Value::Object(_) => "{}".into(),
+        Value::Array(_) => "[]".into(),
+        // JSON strings and numbers are valid YAML flow scalars.
+        other => other.to_string(),
+    }
 }
 fn identifier(value: &str) -> Result<()> {
     ensure!(

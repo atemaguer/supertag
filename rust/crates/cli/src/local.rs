@@ -14,12 +14,15 @@ use std::{
     time::Duration,
 };
 
-use crate::local_config::Environment;
+use crate::{
+    lifecycle::{self, ServiceStatus},
+    local_config::Environment,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt as _, AsyncReadExt as _, BufReader},
+    io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader},
     process::{Child, ChildStdin, Command},
     time,
 };
@@ -59,6 +62,32 @@ pub struct LocalOptions {
     pub adapter: crate::AdapterOptions,
     pub skill_catalog: Option<PathBuf>,
     pub gateway_listen: SocketAddr,
+    /// Identifies these settings so a later `supertag up` can leave an unchanged supervisor alone.
+    pub fingerprint: String,
+}
+
+/// The Worker Host ID of the host `supertag up` starts from flags.
+pub const FLAGS_HOST: &str = "local";
+
+/// Where each managed process writes its timestamped log, and whether its lines also reach this
+/// supervisor's terminal, prefixed with the service, as `supertag up --foreground` shows them.
+#[derive(Clone)]
+struct Logs {
+    state: PathBuf,
+    echo: bool,
+}
+
+impl Logs {
+    fn new(state: &Path) -> Result<Self> {
+        DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(state.join("logs").join("hosts"))?;
+        Ok(Self {
+            state: state.to_owned(),
+            echo: lifecycle::SupervisorMode::current() == lifecycle::SupervisorMode::Foreground,
+        })
+    }
 }
 
 pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Result<()> {
@@ -83,14 +112,37 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     let credentials = Credentials::load_or_create(&directory)?;
     let executable = std::env::current_exe()?;
 
-    let mut children = Children::default();
+    let mut children = Children::new(&directory)?;
     tokio::pin!(shutdown);
     let start = tokio::select! {
-        result = children.start(&executable, &options, &directory, &credentials) => result.map(Some),
+        result = async {
+            let endpoint = children.start(&executable, &options, &directory, &credentials).await?;
+            undrain(&directory, &endpoint, &credentials.operator).await?;
+            Ok(endpoint)
+        } => result.map(Some),
         _ = &mut shutdown => Ok(None),
     };
     let result = match start {
-        Ok(Some(endpoint)) => match announce(&directory, &endpoint) {
+        Ok(Some(endpoint)) => match announce(&directory, &endpoint).and_then(|()| {
+            let mut services = children.base_status(&endpoint);
+            if let Some(host) = &children.worker_host {
+                services.push(ServiceStatus {
+                    name: FLAGS_HOST.into(),
+                    kind: lifecycle::HOST.into(),
+                    pid: host.process.id(),
+                    address: Some(endpoint.clone()),
+                    host_id: Some(FLAGS_HOST.into()),
+                    remote: false,
+                });
+            }
+            lifecycle::record(
+                &directory,
+                &options.fingerprint,
+                lifecycle::DEFAULT_INSTANCE,
+                Some(&endpoint),
+                services,
+            )
+        }) {
             Ok(()) => tokio::select! {
                 result = children.wait_for_exit() => result,
                 _ = &mut shutdown => Ok(()),
@@ -100,7 +152,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         Ok(None) => Ok(()),
         Err(error) => Err(error),
     };
-    let removed = remove_endpoint(&directory);
+    let removed = remove_endpoint(&directory).and(lifecycle::forget(&directory));
     let stopped = children.stop().await;
     drop(lock);
     match (result, removed.and(stopped)) {
@@ -132,9 +184,10 @@ pub fn connection(state_directory: &Path) -> Result<(String, String)> {
     Ok((endpoint.to_owned(), Credentials::load(&directory)?.operator))
 }
 
-#[derive(Default)]
 struct Children {
+    logs: Logs,
     control_plane: Option<Service>,
+    control_plane_address: Option<String>,
     gateway: Option<Service>,
     worker_host: Option<Service>,
 }
@@ -147,6 +200,16 @@ struct Service {
 }
 
 impl Children {
+    fn new(directory: &Path) -> Result<Self> {
+        Ok(Self {
+            logs: Logs::new(directory)?,
+            control_plane: None,
+            control_plane_address: None,
+            gateway: None,
+            worker_host: None,
+        })
+    }
+
     async fn start_base(
         &mut self,
         executable: &Path,
@@ -168,8 +231,16 @@ impl Children {
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
         }
-        let address = start_child(&mut self.control_plane, &mut plane, "Control Plane").await?;
+        let address = start_child(
+            &mut self.control_plane,
+            &mut plane,
+            "Control Plane",
+            &self.logs,
+            lifecycle::CONTROL_PLANE,
+        )
+        .await?;
         let control_plane = format!("http://{}", loopback_address(&address)?);
+        self.control_plane_address = Some(control_plane.clone());
 
         let mut gateway = command(executable, "gateway");
         gateway
@@ -198,7 +269,14 @@ impl Children {
                 }
             }
         }
-        let address = start_child(&mut self.gateway, &mut gateway, "Gateway").await?;
+        let address = start_child(
+            &mut self.gateway,
+            &mut gateway,
+            "Gateway",
+            &self.logs,
+            lifecycle::GATEWAY,
+        )
+        .await?;
         let endpoint = format!("http://{}", loopback_address(&address)?);
 
         Ok(endpoint)
@@ -237,9 +315,42 @@ impl Children {
             Environment::default()
                 .selected(options.adapter.provider_environment()?.iter().copied()),
         );
-        let ready = start_child(&mut self.worker_host, &mut host, "Worker Host").await?;
+        let ready = start_child(
+            &mut self.worker_host,
+            &mut host,
+            "Worker Host",
+            &self.logs,
+            FLAGS_HOST,
+        )
+        .await?;
         ensure!(ready == "ready", "invalid Worker Host readiness signal");
         Ok(endpoint)
+    }
+
+    /// The Control Plane and Gateway rows of the supervisor status file.
+    fn base_status(&self, endpoint: &str) -> Vec<ServiceStatus> {
+        let mut services = Vec::new();
+        if let Some(service) = &self.control_plane {
+            services.push(ServiceStatus {
+                name: lifecycle::CONTROL_PLANE.into(),
+                kind: lifecycle::CONTROL_PLANE.into(),
+                pid: service.process.id(),
+                address: self.control_plane_address.clone(),
+                host_id: None,
+                remote: false,
+            });
+        }
+        if let Some(service) = &self.gateway {
+            services.push(ServiceStatus {
+                name: lifecycle::GATEWAY.into(),
+                kind: lifecycle::GATEWAY.into(),
+                pid: service.process.id(),
+                address: Some(endpoint.to_owned()),
+                host_id: None,
+                remote: false,
+            });
+        }
+        services
     }
 
     async fn wait_for_exit(&mut self) -> Result<()> {
@@ -299,7 +410,7 @@ fn command(executable: &Path, mode: &str) -> Command {
         .env(LOCAL_SERVICE_LIFELINE, "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .process_group(0)
         .kill_on_drop(true);
     command
@@ -309,8 +420,25 @@ async fn start_child(
     slot: &mut Option<Service>,
     command: &mut Command,
     name: &str,
+    logs: &Logs,
+    service: &str,
 ) -> Result<String> {
     let mut process = command.spawn().with_context(|| format!("start {name}"))?;
+    if let Some(stderr) = process.stderr.take() {
+        let path = lifecycle::log_path(&logs.state, service);
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+            .with_context(|| format!("open {}", path.display()))?;
+        tokio::spawn(copy_log(
+            stderr,
+            tokio::fs::File::from_std(file),
+            logs.echo.then(|| service.to_owned()),
+        ));
+    }
     let lifeline = process
         .stdin
         .take()
@@ -335,6 +463,41 @@ async fn start_child(
         let _ = tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await;
     });
     Ok(line.trim().to_owned())
+}
+
+/// Copy a child's stderr into its log, one ISO 8601 timestamp per line, and with `echo` also to
+/// this terminal prefixed by the service name.
+async fn copy_log(
+    stderr: tokio::process::ChildStderr,
+    mut file: tokio::fs::File,
+    echo: Option<String>,
+) {
+    let mut reader = BufReader::new(stderr);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match (&mut reader)
+            .take(64 * 1024)
+            .read_until(b'\n', &mut line)
+            .await
+        {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if !line.ends_with(b"\n") {
+            line.push(b'\n');
+        }
+        let mut stamped = lifecycle::timestamp(std::time::SystemTime::now()).into_bytes();
+        stamped.push(b' ');
+        stamped.extend_from_slice(&line);
+        let _ = file.write_all(&stamped).await;
+        if let Some(service) = &echo {
+            let mut prefixed = format!("{service} | ").into_bytes();
+            prefixed.extend_from_slice(&line);
+            let _ = io::stderr().lock().write_all(&prefixed);
+        }
+    }
+    let _ = file.flush().await;
 }
 
 async fn stop_child(child: &mut Child) -> Result<()> {
@@ -379,14 +542,14 @@ fn successful_exit(exit: ExitStatus) -> Result<()> {
     Ok(())
 }
 
-struct Credentials {
+pub(crate) struct Credentials {
     gateway: String,
-    operator: String,
+    pub(crate) operator: String,
     host: String,
 }
 
 impl Credentials {
-    fn load(directory: &Path) -> Result<Self> {
+    pub(crate) fn load(directory: &Path) -> Result<Self> {
         let value = read_private(&directory.join(CREDENTIALS))?;
         // Parsing errors stay generic because this file contains credentials.
         let value: Value = serde_json::from_str(&value)
@@ -456,7 +619,7 @@ fn remove_endpoint(directory: &Path) -> Result<()> {
     }
 }
 
-fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     let temporary = directory.join(format!(".{name}.{}.tmp", Uuid::new_v4().simple()));
     let mut file = OpenOptions::new()
         .write(true)
@@ -475,7 +638,7 @@ fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     written.with_context(|| format!("write local {name}"))
 }
 
-fn read_private(path: &Path) -> Result<String> {
+pub(crate) fn read_private(path: &Path) -> Result<String> {
     let mut value = String::new();
     open_private_file(path, false)?
         .take(4097)
@@ -484,7 +647,7 @@ fn read_private(path: &Path) -> Result<String> {
     Ok(value)
 }
 
-fn open_private_file(path: &Path, create: bool) -> Result<File> {
+pub(crate) fn open_private_file(path: &Path, create: bool) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(create)
@@ -503,7 +666,7 @@ fn open_private_file(path: &Path, create: bool) -> Result<File> {
     Ok(file)
 }
 
-fn private_directory(path: &Path) -> Result<PathBuf> {
+pub(crate) fn private_directory(path: &Path) -> Result<PathBuf> {
     let metadata =
         fs::symlink_metadata(path).with_context(|| format!("read {}", path.display()))?;
     ensure!(
@@ -546,6 +709,7 @@ fn sqlite_url(database: &Path) -> Result<String> {
 }
 
 struct ManagedHost {
+    logs: Logs,
     definition: crate::local_config::Host,
     environment: Arc<Environment>,
     endpoint: String,
@@ -582,6 +746,8 @@ impl ManagedHost {
             &mut self.service,
             &mut host,
             &format!("Worker Host {}", self.definition.name),
+            &self.logs,
+            &self.definition.name,
         )
         .await?;
         ensure!(ready == "ready", "invalid Worker Host readiness signal");
@@ -605,7 +771,11 @@ pub async fn configured(
     remove_endpoint(&directory)?;
     let executable = std::env::current_exe()?;
     let environment = Arc::new(config.environment);
-    let mut base = Children::default();
+    let mut base = Children::new(&directory)?;
+    let logs = base.logs.clone();
+    let fingerprint = config.digest.clone();
+    let instance = config.name.clone();
+    let mut announced: Option<String> = None;
     let mut hosts = Vec::new();
     tokio::pin!(shutdown);
     let startup = async {
@@ -675,6 +845,7 @@ pub async fn configured(
             .await?;
             let index = hosts.len();
             hosts.push(ManagedHost {
+                logs: logs.clone(),
                 definition,
                 environment: environment.clone(),
                 endpoint: target,
@@ -683,8 +854,11 @@ pub async fn configured(
             });
             hosts[index].start(&executable).await?;
         }
-        if let Some(endpoint) = endpoint {
-            announce(&directory, &endpoint)?;
+        if let (Some(endpoint), Some(credentials)) = (&endpoint, &credentials) {
+            undrain(&directory, endpoint, &credentials.operator).await?;
+        }
+        if let Some(endpoint) = &endpoint {
+            announce(&directory, endpoint)?;
         } else {
             // Host-only machines hold no operator credential and cannot use --state-directory
             // to impersonate an operator on the remote Gateway.
@@ -692,12 +866,44 @@ pub async fn configured(
             stdout.write_all(b"ready\n")?;
             stdout.flush()?;
         }
+        announced = endpoint;
         Ok::<_, anyhow::Error>(())
     };
     let started = tokio::select! {result=startup=>result.map(|()|true),_=&mut shutdown=>Ok(false)};
-    let result = match started {
+    let status = |base: &Children, hosts: &[ManagedHost]| {
+        let mut services = announced
+            .as_deref()
+            .map(|endpoint| base.base_status(endpoint))
+            .unwrap_or_default();
+        for host in hosts {
+            services.push(ServiceStatus {
+                name: host.definition.name.clone(),
+                kind: lifecycle::HOST.into(),
+                pid: host
+                    .service
+                    .as_ref()
+                    .and_then(|service| service.process.id()),
+                address: Some(host.endpoint.clone()),
+                host_id: Some(host.definition.name.clone()),
+                remote: host.definition.gateway.is_some(),
+            });
+        }
+        lifecycle::record(
+            &directory,
+            &fingerprint,
+            &instance,
+            announced.as_deref(),
+            services,
+        )
+    };
+    let result = match started.and_then(|started| {
+        if started {
+            status(&base, &hosts)?;
+        }
+        Ok(started)
+    }) {
         Ok(true) => {
-            tokio::select! {result=wait_configured(&mut base,&mut hosts,&executable)=>result,_=&mut shutdown=>Ok(())}
+            tokio::select! {result=wait_configured(&mut base,&mut hosts,&executable,&status)=>result,_=&mut shutdown=>Ok(())}
         }
         Ok(false) => Ok(()),
         Err(error) => Err(error),
@@ -725,7 +931,7 @@ pub async fn configured(
     if let Err(error) = base.stop().await {
         failures.push(format!("{error:#}"));
     }
-    if let Err(error) = remove_endpoint(&directory) {
+    if let Err(error) = remove_endpoint(&directory).and(lifecycle::forget(&directory)) {
         failures.push(format!("{error:#}"));
     }
     drop(lock);
@@ -807,8 +1013,10 @@ async fn wait_configured(
     base: &mut Children,
     hosts: &mut [ManagedHost],
     executable: &Path,
+    status: &impl Fn(&Children, &[ManagedHost]) -> Result<()>,
 ) -> Result<()> {
     loop {
+        let mut restarted = false;
         for (name, service) in [
             ("Control Plane", base.control_plane.as_mut()),
             ("Gateway", base.gateway.as_mut()),
@@ -835,10 +1043,48 @@ async fn wait_configured(
                 host.service.take();
                 time::sleep(Duration::from_secs(1)).await;
                 host.start(executable).await?;
+                restarted = true;
             }
+        }
+        if restarted {
+            status(base, hosts)?;
         }
         time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// Return Worker Hosts that `supertag down` drained to service. An operator's own drain, made
+/// with `supertag host drain`, is not recorded here and survives a restart.
+async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()> {
+    let hosts = lifecycle::drained_hosts(directory)?;
+    if hosts.is_empty() {
+        return Ok(());
+    }
+    use supertag_protocol::v2::{SetHostDrainingRequest, operator_client::OperatorClient};
+    let channel = crate::network::endpoint(endpoint.into(), false)
+        .await?
+        .connect()
+        .await?;
+    let mut client = OperatorClient::new(channel);
+    for host_id in hosts {
+        match client
+            .set_host_draining(crate::request(
+                SetHostDrainingRequest {
+                    host_id: host_id.clone(),
+                    draining: false,
+                },
+                operator,
+            )?)
+            .await
+        {
+            Ok(_) => {}
+            Err(status) if status.code() == tonic::Code::NotFound => {}
+            Err(status) => {
+                return Err(status).with_context(|| format!("resume Worker Host {host_id}"));
+            }
+        }
+    }
+    lifecycle::clear_drained_hosts(directory)
 }
 
 #[cfg(test)]

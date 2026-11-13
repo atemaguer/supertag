@@ -912,7 +912,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         .prefix("tui-v2-")
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
-    let mut up = command(&["up", "--adapter", ADAPTER]);
+    let mut up = command(&["up", "--foreground", "--adapter", ADAPTER]);
     up.arg("--state-directory").arg(&state);
     let (mut runtime, endpoint) = service(up).await?;
     assert_eq!(
@@ -1027,6 +1027,7 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
     let state = directory.path().join("state");
     let mut up = command(&[
         "up",
+        "--foreground",
         "--adapter",
         ADAPTER,
         "--adapter-arg=--work-session-flow",
@@ -1103,7 +1104,7 @@ async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result
         .tempdir_in("/tmp")?;
     let state = directory.path().join("state");
     let marker = directory.path().join("fixture-work.json");
-    let mut up = command(&["up", "--adapter", ADAPTER]);
+    let mut up = command(&["up", "--foreground", "--adapter", ADAPTER]);
     up.arg(format!(
         "--adapter-arg=--work-session-question-flow={}",
         marker.display()
@@ -1436,6 +1437,7 @@ async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
     let state = directory.path().join("state");
     let mut up = command(&[
         "up",
+        "--foreground",
         "--adapter",
         ADAPTER,
         "--adapter-arg=--objective-question",

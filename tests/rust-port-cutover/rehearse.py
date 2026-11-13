@@ -161,7 +161,7 @@ def fresh_runtime(cli, fixture, root, env, old, pg=None):
     state = root / 'state'
     with ExitStack() as stack:
         if pg is None:
-            server = stack.enter_context(Service([cli, 'up', '--adapter', fixture, '--state-directory', state], fresh_env, root / 'up.log'))
+            server = stack.enter_context(Service([cli, 'up', '--foreground', '--adapter', fixture, '--state-directory', state], fresh_env, root / 'up.log'))
             endpoint(server.ready)
             connection = ['--state-directory', state]
         else:
