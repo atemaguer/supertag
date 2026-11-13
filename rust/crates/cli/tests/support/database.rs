@@ -66,6 +66,12 @@ where
     }
 }
 
+/// Opens a direct connection to either backend so a fixture can inspect or adjust persisted state.
+pub async fn connect(url: &str) -> Result<sqlx::AnyConnection> {
+    sqlx::any::install_default_drivers();
+    Ok(sqlx::AnyConnection::connect(url).await?)
+}
+
 /// Declares the cases of a split-process test that runs once per database backend. For each
 /// `async fn NAME(database: String) -> Result<()>` named here, the macro adds `NAME::sqlite` and
 /// `NAME::postgres`. An `#[ignore = "..."]` before the name applies to both cases; otherwise only

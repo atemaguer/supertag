@@ -1,5 +1,11 @@
 //! Signed HTTP Slack ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -14,7 +20,6 @@ use anyhow::{Context, Result, ensure};
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use sqlx::Connection;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -335,7 +340,7 @@ async fn receipt(
 }
 
 async fn task_count(database: &str) -> Result<i64> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
         .fetch_one(&mut connection)
         .await?)
@@ -372,11 +377,11 @@ async fn execute(
         completed.result.as_deref(),
         Some(format!("Original Tag: {} [files:read]", task.prompt).as_str())
     );
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     let deadline = Instant::now() + WAIT;
     loop {
         let state: Option<i64> =
-            sqlx::query_scalar("SELECT state FROM supertag_v2_replies WHERE task_id=?")
+            sqlx::query_scalar("SELECT state FROM supertag_v2_replies WHERE task_id=$1")
                 .bind(&task.task_id)
                 .fetch_optional(&mut connection)
                 .await?;
@@ -391,13 +396,17 @@ async fn execute(
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gateways() -> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    signed_thread_replies_survive_restart_and_deduplicate_across_two_gateways;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    signed_slack_artifact_context_pins_catalog_and_bytes_across_threads;
+}
+
+async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gateways(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("slack.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockSlack::start().await?;
     let mut command = credentials.command(&["control-plane"]);
@@ -563,21 +572,16 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads() -> Result<()> {
+async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
+    database: String,
+) -> Result<()> {
     use sha2::Digest;
     use supertag_protocol::{HOST_GENERATION_HEADER, v2::*};
     let directory = tempfile::tempdir()?;
     let credentials = Credentials::new();
     let mock = MockSlack::start().await?;
     let mut command = credentials.command(&["control-plane"]);
-    command.env(
-        "SUPERTAG_DATABASE_URL",
-        format!(
-            "sqlite://{}?mode=rwc",
-            directory.path().join("contexts.db").display()
-        ),
-    );
+    command.env("SUPERTAG_DATABASE_URL", &database);
     let mut cp = Process::spawn(command, directory.path(), "context-cp")?;
     let private = cp.endpoints(1).await?.remove(0);
     let mut command = credentials.command(&[

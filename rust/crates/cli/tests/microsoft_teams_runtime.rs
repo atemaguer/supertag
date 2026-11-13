@@ -1,5 +1,11 @@
 //! Microsoft-signed Bot Connector activities through real split runtime processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -16,7 +22,6 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use sqlx::Connection;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -196,7 +201,7 @@ impl Drop for Process {
 }
 
 async fn task_count(database: &str) -> Result<i64> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
         .fetch_one(&mut connection)
         .await?)
@@ -264,11 +269,11 @@ async fn execute(
     Ok(())
 }
 async fn settled(database: &str, task: &Task, expected: ReplyState) -> Result<Option<String>> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     let deadline = Instant::now() + WAIT;
     loop {
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=?",
+            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=$1",
         )
         .bind(&task.task_id)
         .fetch_optional(&mut connection)
@@ -302,6 +307,13 @@ async fn saved_stage(directory: &Path, states: &[&str], stage: &str) -> Result<V
         );
         sleep(Duration::from_millis(10)).await;
     }
+}
+
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    microsoft_signed_activity_and_threaded_reply_survive_split_process_restarts;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    microsoft_interrupted_post_is_uncertain_without_duplicate_reply;
 }
 
 async fn read_request(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>)> {
@@ -493,14 +505,10 @@ async fn receipt(private: &str, credentials: &Credentials, id: &str) -> Result<T
         .task
         .context("Microsoft activity missing")
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_restarts() -> Result<()>
-{
+async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_restarts(
+    database: String,
+) -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("teams.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockMicrosoft::start().await?;
     let (mut cp, private) = control(&credentials, dir.path(), &database, None).await?;
@@ -606,13 +614,10 @@ async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_rest
     cp.stop().await?;
     Ok(())
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn microsoft_interrupted_post_is_uncertain_without_duplicate_reply() -> Result<()> {
+async fn microsoft_interrupted_post_is_uncertain_without_duplicate_reply(
+    database: String,
+) -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("teams.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockMicrosoft::start().await?;
     let (mut cp, private) = control(&credentials, dir.path(), &database, None).await?;

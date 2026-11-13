@@ -1,5 +1,11 @@
 //! Signed HTTP Linear ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -230,7 +236,7 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
 }
 
 async fn task_count(database: &str) -> Result<i64> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
         .fetch_one(&mut connection)
         .await?)
@@ -470,11 +476,11 @@ async fn execute(
     Ok(())
 }
 async fn settled(database: &str, task: &Task, expected: ReplyState) -> Result<Option<String>> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     let deadline = Instant::now() + WAIT;
     loop {
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=?",
+            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=$1",
         )
         .bind(&task.task_id)
         .fetch_optional(&mut connection)
@@ -510,14 +516,19 @@ async fn saved_stage(directory: &Path, states: &[&str], stage: &str) -> Result<V
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn concurrent_linear_gateways_deduplicate_and_replay_saved_receipt_after_restart()
--> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    concurrent_linear_gateways_deduplicate_and_replay_saved_receipt_after_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    linear_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    replacement_gateway_exposes_expired_reply_without_reposting_and_accepts_audit;
+}
+
+async fn concurrent_linear_gateways_deduplicate_and_replay_saved_receipt_after_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("linear.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockLinear::start().await?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
@@ -632,14 +643,10 @@ async fn concurrent_linear_gateways_deduplicate_and_replay_saved_receipt_after_r
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn linear_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart()
--> Result<()> {
+async fn linear_post_interrupted_after_provider_acceptance_stays_uncertain_after_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("linear.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockLinear::start().await?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
@@ -674,17 +681,13 @@ async fn linear_post_interrupted_after_provider_acceptance_stays_uncertain_after
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts_audit()
--> Result<()> {
+async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts_audit(
+    database: String,
+) -> Result<()> {
     use supertag_protocol::v2::{
         GetReplyDeliveryRequest, ListReplyDeliveriesRequest, ResolveReplyRequest,
     };
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("replacement.db").display()
-    );
     let credentials = Credentials::new();
     let mock = MockLinear::start().await?;
     let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
@@ -751,8 +754,8 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
     let mut operator = OperatorClient::connect(public.clone()).await?;
     // Advance only this disposable fixture's claim clock boundary. Domain tests
     // independently exercise exact real-clock arithmetic and upgrade behavior.
-    let mut sql = sqlx::SqliteConnection::connect(&database).await?;
-    sqlx::query("UPDATE supertag_v2_replies SET lease_expires_at_ms=0 WHERE reply_id=?")
+    let mut sql = database::connect(&database).await?;
+    sqlx::query("UPDATE supertag_v2_replies SET lease_expires_at_ms=0 WHERE reply_id=$1")
         .bind(&id)
         .execute(&mut sql)
         .await?;

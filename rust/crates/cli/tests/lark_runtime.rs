@@ -1,5 +1,11 @@
 //! Outbound Lark WebSocket through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -12,7 +18,6 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use sqlx::Connection as _;
 use supertag_protocol::{
     authenticated_request,
     v2::{
@@ -213,7 +218,7 @@ use prost::Message;
 use supertag_gateway::lark::wire::{Frame, Header};
 use tokio_tungstenite::{accept_async, tungstenite::Message as WsMessage};
 async fn task_count(database: &str) -> Result<i64> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     Ok(sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
         .fetch_one(&mut connection)
         .await?)
@@ -281,11 +286,11 @@ async fn execute(
     Ok(())
 }
 async fn settled(database: &str, task: &Task, expected: ReplyState) -> Result<Option<String>> {
-    let mut connection = sqlx::SqliteConnection::connect(database).await?;
+    let mut connection = database::connect(database).await?;
     let deadline = Instant::now() + WAIT;
     loop {
         let row: Option<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=?",
+            "SELECT state,provider_receipt FROM supertag_v2_replies WHERE task_id=$1",
         )
         .bind(&task.task_id)
         .fetch_optional(&mut connection)
@@ -319,6 +324,15 @@ async fn saved_stage(directory: &Path, states: &[&str], stage: &str) -> Result<V
         );
         sleep(Duration::from_millis(10)).await;
     }
+}
+
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    lark_websocket_replays_after_failed_admission_and_keeps_activated_thread_across_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    lark_interrupted_reply_remains_uncertain_without_reposting;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    lark_rejects_mismatched_app_bot_before_opening_event_stream;
 }
 
 enum CommandFrame {
@@ -555,11 +569,10 @@ async fn receipt(
         .task
         .context("Task missing")
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lark_websocket_replays_after_failed_admission_and_keeps_activated_thread_across_restart()
--> Result<()> {
+async fn lark_websocket_replays_after_failed_admission_and_keeps_activated_thread_across_restart(
+    database: String,
+) -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let database = format!("sqlite://{}?mode=rwc", dir.path().join("lark.db").display());
     let credentials = Credentials::new();
     let mock = MockLark::start().await?;
     let (mut cp, private) = control(&credentials, dir.path(), &database, None).await?;
@@ -624,10 +637,10 @@ async fn lark_websocket_replays_after_failed_admission_and_keeps_activated_threa
     cp.stop().await?;
     Ok(())
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lark_interrupted_reply_remains_uncertain_without_reposting() -> Result<()> {
+async fn lark_interrupted_reply_remains_uncertain_without_reposting(
+    database: String,
+) -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let database = format!("sqlite://{}?mode=rwc", dir.path().join("lark.db").display());
     let credentials = Credentials::new();
     let mock = MockLark::start().await?;
     let (mut cp, private) = control(&credentials, dir.path(), &database, None).await?;
@@ -656,10 +669,10 @@ async fn lark_interrupted_reply_remains_uncertain_without_reposting() -> Result<
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lark_rejects_mismatched_app_bot_before_opening_event_stream() -> Result<()> {
+async fn lark_rejects_mismatched_app_bot_before_opening_event_stream(
+    database: String,
+) -> Result<()> {
     let dir = tempfile::tempdir()?;
-    let database = format!("sqlite://{}?mode=rwc", dir.path().join("lark.db").display());
     let credentials = Credentials::new();
     let mock = MockLark::with_bot("ou_another_app").await?;
     let (mut cp, private) = control(&credentials, dir.path(), &database, None).await?;
