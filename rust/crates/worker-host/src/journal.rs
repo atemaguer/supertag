@@ -238,6 +238,21 @@ impl Journal {
         }
     }
 
+    /// Start a new incarnation. Registering it replaces the Host's generation, which fences
+    /// every Attempt the previous incarnation held.
+    pub(crate) fn replace_incarnation(&self) -> Result<String> {
+        let value = uuid::Uuid::new_v4().to_string();
+        self.write(&self.directory.join("incarnation"), |file| {
+            Ok(file.write_all(value.as_bytes())?)
+        })?;
+        Ok(value)
+    }
+
+    /// Whether this directory holds an unresolved Attempt record.
+    pub(crate) fn has_attempt(directory: &Path) -> bool {
+        directory.join("attempt.json").exists()
+    }
+
     pub(crate) fn directory(&self) -> &Path {
         &self.directory
     }

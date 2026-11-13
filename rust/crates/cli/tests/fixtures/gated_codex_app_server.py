@@ -56,8 +56,14 @@ for line in sys.stdin:
         reply(request, {"turn": {"id": TURN, "status": "inProgress", "items": []}})
         notify("turn/started", {"threadId": THREAD, "turn": {"id": TURN, "status": "inProgress", "items": []}})
         marker = re.search(r"Task-[a-z0-9]+", prompt).group(0)
-        GATE.joinpath("started", f"codex-{os.getpid()}").write_text(marker)
-        while not GATE.joinpath("release").exists():
+        if marker.startswith("Task-w"):
+            # Workspace Tasks edit their own checkout while sibling Attempts run.
+            Path.cwd().joinpath(f"{marker}.txt").write_text(f"{marker}\n")
+        # Publish the start marker whole: readers may list it as soon as it appears.
+        pending = GATE.joinpath(f"pending-codex-{os.getpid()}")
+        pending.write_text(f"{marker}\n{Path.cwd()}")
+        os.replace(pending, GATE.joinpath("started", f"codex-{os.getpid()}"))
+        while not GATE.joinpath("release").exists() and not GATE.joinpath(f"release-{marker}").exists():
             time.sleep(0.05)
         total = {"inputTokens": 4, "cachedInputTokens": 0, "outputTokens": 3, "reasoningOutputTokens": 0, "totalTokens": 7}
         with Path(os.environ["CODEX_HOME"]).joinpath("sessions/thread.jsonl").open("a") as stream:

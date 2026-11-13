@@ -972,13 +972,20 @@ where
 
 /// A shared Host with a gated Codex lane group and a gated OpenAI Agents lane group.
 struct SharedHost {
-    _temp: tempfile::TempDir,
+    temp: tempfile::TempDir,
     state: PathBuf,
     gate: PathBuf,
     supervisor: Process,
+    control_plane: String,
+    environment: Vec<(&'static str, String)>,
 }
 impl SharedHost {
     async fn start(central: &Central, concurrency: u32) -> Result<Self> {
+        Self::start_with(central, serde_json::json!({ "concurrency": concurrency })).await
+    }
+
+    /// Start with `settings` replacing or adding entries of the Host's service definition.
+    async fn start_with(central: &Central, settings: Value) -> Result<Self> {
         let temp = tempfile::tempdir()?;
         let gate = temp.path().join("gate");
         fs::create_dir_all(gate.join("started"))?;
@@ -1041,33 +1048,57 @@ impl SharedHost {
                 None,
             )?)
             .await?;
-        let file = temp.path().join("supertag.yaml");
-        yaml(
-            &file,
-            &serde_json::json!({"env_file":"services.env","services":{"shared":{
-                "type":"host","control-plane":central.public,"auth-key":"join",
-                "harnesses":["codex","openai-agents"],"concurrency":concurrency,
-                "models":{"codex":["fixture-model"],"openai-agents":"fixture-model"}
-            }},"secrets":{"join":{"environment":"FIXTURE_JOIN_KEY"}}}),
-        )?;
+        // A repository a `workspaces:` setting may map; nothing maps it unless asked.
+        let source = temp.path().join("source");
+        fs::create_dir(&source)?;
+        git(&source, &["init", "--quiet", "--initial-branch=main"])?;
+        fs::write(source.join("README.md"), "base\n")?;
+        git(&source, &["add", "README.md"])?;
+        git(&source, &["commit", "--quiet", "-m", "base"])?;
         let state = temp.path().join("state");
-        let path = format!("{}:/usr/bin:/bin", bin.display());
-        let supervisor = Process::spawn(
+        let environment = vec![
+            ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
+            ("HOME", home.to_str().context("UTF-8 home")?.to_owned()),
+            ("FIXTURE_JOIN_KEY", key),
+        ];
+        let supervisor = launch(
+            temp.path(),
             &state,
-            Some(&file),
-            &[
-                ("PATH", &path),
-                ("HOME", home.to_str().context("UTF-8 home")?),
-                ("FIXTURE_JOIN_KEY", &key),
-            ],
+            &central.public,
+            &settings,
+            &environment,
         )?;
-        assert_eq!(supervisor.ready()?, "ready");
         Ok(Self {
-            _temp: temp,
+            temp,
             state,
             gate,
             supervisor,
+            control_plane: central.public.clone(),
+            environment,
         })
+    }
+
+    /// Start a new supervisor on the same state with other Host settings.
+    fn relaunch(&mut self, settings: &Value) -> Result<()> {
+        self.supervisor = launch(
+            self.temp.path(),
+            &self.state,
+            &self.control_plane,
+            settings,
+            &self.environment,
+        )?;
+        Ok(())
+    }
+
+    fn source(&self) -> PathBuf {
+        self.temp.path().join("source")
+    }
+
+    /// The marker and working directory a gated Codex harness process recorded.
+    fn codex_start(&self, pid: i32) -> Result<(String, PathBuf)> {
+        let text = fs::read_to_string(self.gate.join("started").join(format!("codex-{pid}")))?;
+        let (marker, cwd) = text.split_once('\n').context("Codex start marker")?;
+        Ok((marker.to_owned(), PathBuf::from(cwd)))
     }
 
     /// Start markers written by harness processes that reached the gate.
@@ -1112,6 +1143,58 @@ impl SharedHost {
             .filter(|(_, command)| command.contains("/hosts/shared/lanes/"))
             .collect())
     }
+}
+
+fn launch(
+    directory: &Path,
+    state: &Path,
+    control_plane: &str,
+    settings: &Value,
+    environment: &[(&'static str, String)],
+) -> Result<Process> {
+    let mut host = serde_json::json!({
+        "type":"host","control-plane":control_plane,"auth-key":"join",
+        "harnesses":["codex","openai-agents"],"concurrency":1,
+        "models":{"codex":["fixture-model"],"openai-agents":"fixture-model"}
+    });
+    for (name, value) in settings.as_object().context("Host settings")? {
+        host[name] = value.clone();
+    }
+    let file = directory.join("supertag.yaml");
+    yaml(
+        &file,
+        &serde_json::json!({"env_file":"services.env","services":{"shared":host},
+            "secrets":{"join":{"environment":"FIXTURE_JOIN_KEY"}}}),
+    )?;
+    let environment = environment
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    let supervisor = Process::spawn(state, Some(&file), &environment)?;
+    assert_eq!(supervisor.ready()?, "ready");
+    Ok(supervisor)
+}
+
+fn git(directory: &Path, arguments: &[&str]) -> Result<String> {
+    let output = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(directory)
+        .args([
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.com",
+        ])
+        .args(arguments)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "git {arguments:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
 }
 
 async fn tag(
@@ -1397,9 +1480,10 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
     let central = Central::start(&database)?;
     let token = central.operator.clone();
     let mut operator = client(&central.public).await?;
-    let mut shared = SharedHost::start(&central, 1).await?;
+    // One busy and one idle lane per harness: idle lanes meet the fence in their claim loop.
+    let mut shared = SharedHost::start(&central, 2).await?;
     let ready = host_until(&mut operator, &token, |status| {
-        status.phase() == HostPhase::Ready && status.available_slots == 2
+        status.phase() == HostPhase::Ready && status.available_slots == 4
     })
     .await?;
     tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
@@ -1440,6 +1524,9 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
         )?)
         .await?
         .into_inner();
+    // Let the stale lanes' harnesses finish now, so the lanes try to complete their Attempts
+    // under the replaced generation before anything stops them.
+    fs::write(shared.gate.join("release"), "")?;
     assert!(replaced.generation > ready.generation);
     // Both lanes' Attempts belong to the replaced generation and are fenced together.
     for id in &ids {
@@ -1458,13 +1545,13 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
     .await
     .context("supervisor kept a fenced Host running")??;
     assert!(!status.success());
+    // The supervisor's own presence check names the fenced registration, whichever lane or
+    // report noticed first.
     let log = fs::read_to_string(&shared.supervisor.log)?;
-    assert!(
-        log.contains("no longer current") || log.contains("exited unexpectedly"),
-        "{log}"
-    );
+    assert!(log.contains("is no longer current"), "{log}");
+    assert!(!log.contains("exited unexpectedly"), "{log}");
     gone(&lanes).await?;
-    fs::write(shared.gate.join("release"), "")?;
+    // No stale lane completed or renewed its Attempt under the old generation.
     for id in &ids {
         assert_eq!(
             task(&mut operator, &token, id).await?.state(),
@@ -1472,6 +1559,223 @@ async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> 
         );
     }
     Ok(())
+}
+
+async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let shared = SharedHost::start_with(
+        &central,
+        serde_json::json!({"concurrency": 2, "workspaces": {"repo": "./source"}}),
+    )
+    .await?;
+    let ready = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 4
+    })
+    .await?;
+    assert_eq!(ready.workspace_ids, ["repo"]);
+    let base = git(&shared.source(), &["rev-parse", "HEAD"])?;
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "coder".into(),
+                instructions: "Shared Host Workspace fixture".into(),
+                allowed_actions: vec!["files:read".into(), "files:write".into()],
+                harness_kind: HarnessKind::Codex as i32,
+                workspace: Some(WorkspaceSpec {
+                    workspace_id: "repo".into(),
+                    base_commit: base.clone(),
+                    mounts: vec![],
+                    github_source: None,
+                }),
+                ..Default::default()
+            },
+            &token,
+            None,
+        )?)
+        .await?;
+    let first = submit(&mut operator, &token, "coder", "Task-w1").await?;
+    let second = submit(&mut operator, &token, "coder", "Task-w2").await?;
+    // Both Attempts run at once from the one configured source, each in its own checkout.
+    let started = shared.wait_started(2, 0).await?;
+    let mut checkouts = Vec::new();
+    for (_, pid) in &started {
+        checkouts.push(shared.codex_start(*pid)?);
+    }
+    checkouts.sort();
+    let lanes = shared.state.join("hosts/shared/lanes").canonicalize()?;
+    let mut owners = Vec::new();
+    for (marker, checkout) in &checkouts {
+        let lane = checkout
+            .strip_prefix(&lanes)
+            .with_context(|| format!("{} is not in a lane", checkout.display()))?
+            .components()
+            .next()
+            .context("lane directory")?
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned();
+        assert!(lane.starts_with("codex-"), "{lane}");
+        owners.push(lane);
+        assert_eq!(fs::read_to_string(checkout.join("README.md"))?, "base\n");
+        let others = ["Task-w1", "Task-w2"]
+            .into_iter()
+            .filter(|other| other != marker)
+            .collect::<Vec<_>>();
+        assert!(checkout.join(format!("{marker}.txt")).exists());
+        for other in others {
+            assert!(
+                !checkout.join(format!("{other}.txt")).exists(),
+                "{marker}'s checkout saw {other}'s edit"
+            );
+        }
+    }
+    assert_ne!(owners[0], owners[1], "both Attempts ran in one lane");
+
+    // The first Attempt delivers while its sibling still runs in the same Workspace.
+    fs::write(shared.gate.join("release-Task-w1"), "")?;
+    let done = settled(&mut operator, &token, &first, TaskState::Succeeded).await?;
+    let delivery = done.workspace_delivery.context("first delivery")?;
+    assert_eq!(
+        (
+            delivery.workspace_id.as_str(),
+            delivery.base_commit.as_str()
+        ),
+        ("repo", base.as_str())
+    );
+    assert!(delivery.committed);
+    assert_eq!(delivery.changed_files, 1);
+    assert_eq!(
+        task(&mut operator, &token, &second).await?.state(),
+        TaskState::Running
+    );
+    assert!(checkouts[1].1.join("Task-w2.txt").exists());
+    fs::write(shared.gate.join("release-Task-w2"), "")?;
+    let done = settled(&mut operator, &token, &second, TaskState::Succeeded).await?;
+    let sibling = done.workspace_delivery.context("second delivery")?;
+    assert!(sibling.committed);
+    assert_eq!(sibling.changed_files, 1);
+    assert_eq!(sibling.start_commit, base);
+    assert_ne!(sibling.head_commit, delivery.head_commit);
+    // Delivery leaves the operator's source repository untouched.
+    assert_eq!(git(&shared.source(), &["status", "--porcelain"])?, "");
+    assert_eq!(git(&shared.source(), &["rev-parse", "HEAD"])?, base);
+    let mut shared = shared;
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
+async fn stranded_lane_attempts_are_fenced_on_restart(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let mut shared = SharedHost::start(&central, 1).await?;
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 2
+    })
+    .await?;
+    tag(&mut operator, &token, "coder", HarnessKind::Codex).await?;
+    let id = submit(&mut operator, &token, "coder", "Task-c1").await?;
+    settled(&mut operator, &token, &id, TaskState::Running).await?;
+    let started = shared.wait_started(1, 0).await?;
+    let generation = host(&mut operator, &token, "shared").await?.generation;
+    // The machine stops abruptly: the Codex lane's journal still holds its running Attempt.
+    let mut killed = shared
+        .lanes()?
+        .into_iter()
+        .map(|(pid, _)| pid)
+        .collect::<Vec<_>>();
+    killed.extend(started.iter().map(|(_, pid)| *pid));
+    killed.push(shared.supervisor.child.id() as i32);
+    for pid in &killed {
+        unsafe {
+            libc::kill(*pid, libc::SIGKILL);
+        }
+    }
+    let _ = shared.supervisor.child.wait();
+    gone(&killed).await?;
+    let lane = shared.state.join("hosts/shared/lanes/codex-0");
+    assert!(lane.join("attempt.json").exists());
+    assert_eq!(
+        task(&mut operator, &token, &id).await?.state(),
+        TaskState::Running
+    );
+
+    // The Host comes back without its Codex lane. No process will read that journal, so the
+    // Host registers a new incarnation and its Attempt is fenced now, not at lease expiry.
+    let agents_only = serde_json::json!({
+        "harnesses": ["openai-agents"],
+        "models": {"openai-agents": "fixture-model"},
+    });
+    shared.relaunch(&agents_only)?;
+    let fenced = task(&mut operator, &token, &id).await?;
+    assert_eq!(fenced.state(), TaskState::Uncertain);
+    let replaced = host(&mut operator, &token, "shared").await?;
+    assert!(replaced.generation > generation);
+    // As for any Host whose journal is gone, the fenced Attempt holds a slot until the operator
+    // confirms it stopped.
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Busy && status.active_attempts == 1
+    })
+    .await?;
+    operator
+        .resolve_attempt(authenticated_request(
+            ResolveAttemptRequest {
+                task_id: id.clone(),
+                attempt_id: fenced.attempt_id.clone().context("fenced Attempt")?,
+                operation_id: Uuid::new_v4().to_string(),
+                decision: AttemptDecision::Failed as i32,
+                evidence: "the Codex lane was removed and its processes are gone".into(),
+                confirmed_stopped: true,
+            },
+            &token,
+            None,
+        )?)
+        .await?;
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 1
+    })
+    .await?;
+    assert!(!lane.exists());
+    let retired = fs::read_dir(shared.state.join("hosts/shared/retired"))?
+        .map(|entry| Ok(entry?.path().join("codex-0").join("attempt.json")))
+        .collect::<Result<Vec<_>>>()?;
+    assert_eq!(retired.len(), 1);
+    assert!(retired[0].exists());
+
+    // With nothing stranded, a restart replays the incarnation and keeps the generation.
+    shared.supervisor.stop().await?;
+    shared.relaunch(&agents_only)?;
+    let again = host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 1
+    })
+    .await?;
+    assert_eq!(again.generation, replaced.generation);
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_shared_host_lanes_use_separate_workspace_checkouts() -> Result<()> {
+    with_database(false, shared_host_lanes_use_separate_workspace_checkouts).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_shared_host_lanes_use_separate_workspace_checkouts() -> Result<()> {
+    with_database(true, shared_host_lanes_use_separate_workspace_checkouts).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_stranded_lane_attempts_are_fenced_on_restart() -> Result<()> {
+    with_database(false, stranded_lane_attempts_are_fenced_on_restart).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_stranded_lane_attempts_are_fenced_on_restart() -> Result<()> {
+    with_database(true, stranded_lane_attempts_are_fenced_on_restart).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -27,7 +27,7 @@ pub use mcp::McpCatalog;
 pub use readiness::{LaneObserver, State as LaneState};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
-pub use shared_host::{HarnessSlots, SharedHost, transient as presence_retryable};
+pub use shared_host::{HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable};
 pub use workspace_mounts::WorkspaceMounts;
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 

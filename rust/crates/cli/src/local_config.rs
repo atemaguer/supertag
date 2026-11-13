@@ -135,9 +135,6 @@ pub struct Host {
     pub skills: Option<PathBuf>,
     pub restart: Restart,
 }
-/// The fewest and most Attempts per harness the machine-derived default allows.
-const MIN_MACHINE_CONCURRENCY: u32 = 2;
-const MAX_MACHINE_CONCURRENCY: u32 = 8;
 /// The largest per-harness concurrency a Worker Host may declare.
 const MAX_CONCURRENCY: u32 = 16;
 /// Distinct built-in harnesses one named Host may serve.
@@ -331,7 +328,9 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 );
                 n
             }
-            None => machine_concurrency(),
+            // Each slot is a lane process with its own claim loop, so extra lanes cost Control
+            // Plane polling even when idle. More than one Attempt per harness is opt-in.
+            None => 1,
         };
         let target = gateway
             .as_deref()
@@ -469,45 +468,6 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         hosts,
         environment,
     })
-}
-/// Attempts per harness when the configuration does not say, as the TypeScript CLI derives it:
-/// floor(min(CPU cores, memory GB / 3) / 2), kept from 2 through 8.
-fn machine_concurrency() -> u32 {
-    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
-    let memory_gb = total_memory_bytes() as f64 / 1024_f64.powi(3);
-    let derived = (cpus.min(memory_gb / 3.0) / 2.0).floor() as u32;
-    derived.clamp(MIN_MACHINE_CONCURRENCY, MAX_MACHINE_CONCURRENCY)
-}
-#[cfg(target_os = "macos")]
-fn total_memory_bytes() -> u64 {
-    let mut value = 0_u64;
-    let mut size = std::mem::size_of::<u64>();
-    let mut mib = [libc::CTL_HW, libc::HW_MEMSIZE];
-    // SAFETY: the MIB names a 64-bit value and the buffer is that size.
-    let status = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            2,
-            (&raw mut value).cast(),
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if status == 0 { value } else { 0 }
-}
-#[cfg(not(target_os = "macos"))]
-fn total_memory_bytes() -> u64 {
-    // SAFETY: sysconf only reads system configuration values.
-    let (pages, size) = unsafe {
-        (
-            libc::sysconf(libc::_SC_PHYS_PAGES),
-            libc::sysconf(libc::_SC_PAGESIZE),
-        )
-    };
-    u64::try_from(pages)
-        .unwrap_or(0)
-        .saturating_mul(u64::try_from(size).unwrap_or(0))
 }
 fn identifier(value: &str) -> Result<()> {
     ensure!(
@@ -743,9 +703,9 @@ secrets:
                 .iter()
                 .all(|h| h.worker_args().iter().any(|v| v == "/trusted/./source"))
         );
-        // An unset concurrency is derived from this machine, as the TypeScript CLI does.
+        // An unset concurrency runs one Attempt per harness.
         let default = c.hosts.iter().find(|h| h.name == "default").unwrap();
-        assert!((2..=8).contains(&default.concurrency));
+        assert_eq!(default.concurrency, 1);
         assert_eq!(default.harnesses.len(), 1);
     }
     #[test]

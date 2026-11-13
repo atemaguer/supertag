@@ -570,6 +570,8 @@ struct ManagedLane {
 struct LaneStates {
     states: std::sync::Mutex<Vec<LaneState>>,
     changed: tokio::sync::Notify,
+    /// Presence reports the Control Plane answered, current or transiently unavailable.
+    reports: std::sync::atomic::AtomicU64,
 }
 
 impl LaneStates {
@@ -609,7 +611,7 @@ impl ManagedHost {
         }
         let states = Arc::new(LaneStates {
             states: std::sync::Mutex::new(vec![LaneState::Pending; lanes.len()]),
-            changed: tokio::sync::Notify::new(),
+            ..Default::default()
         });
         Self {
             definition,
@@ -623,16 +625,80 @@ impl ManagedHost {
         }
     }
 
+    /// Attempt journals no configured lane will read: the single-process layout's own journal,
+    /// or a lane removed by lowering `concurrency` or dropping a harness.
+    fn stranded_journals(&self) -> Result<Vec<PathBuf>> {
+        let mut stranded = Vec::new();
+        if supertag_worker_host::holds_attempt(&self.directory) {
+            stranded.push(self.directory.clone());
+        }
+        let configured = self
+            .lanes
+            .iter()
+            .map(|lane| lane.directory.clone())
+            .collect::<std::collections::HashSet<_>>();
+        match std::fs::read_dir(self.directory.join("lanes")) {
+            Ok(entries) => {
+                for entry in entries {
+                    let path = entry?.path();
+                    if !configured.contains(&path) && supertag_worker_host::holds_attempt(&path) {
+                        stranded.push(path);
+                    }
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        stranded.sort();
+        Ok(stranded)
+    }
+
+    /// Keep a stranded journal for inspection where no lane reads it again. Its Attempt was
+    /// fenced when the replacement incarnation registered.
+    fn retire(&self, stranded: &[PathBuf]) -> Result<()> {
+        if stranded.is_empty() {
+            return Ok(());
+        }
+        let retired = self
+            .directory
+            .join("retired")
+            .join(Uuid::new_v4().simple().to_string());
+        DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&retired)?;
+        for path in stranded {
+            if *path == self.directory {
+                // Single-process layout: its Workspace and Session state stays in place.
+                let host = retired.join("host");
+                DirBuilder::new().mode(0o700).create(&host)?;
+                for name in ["attempt.json", "checkpoint.bin"] {
+                    match std::fs::rename(path.join(name), host.join(name)) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+            } else {
+                std::fs::rename(path, retired.join(path.file_name().context("lane name")?))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Register the Host once, report its aggregate presence, then start every lane.
     async fn start(&mut self, executable: &Path) -> Result<()> {
         let gateway = crate::network::endpoint(self.endpoint.clone(), false).await?;
+        let stranded = self.stranded_journals()?;
         let shared = supertag_worker_host::SharedHost::register(
             gateway,
             &self.directory,
+            !stranded.is_empty(),
             &tokio_util::sync::CancellationToken::new(),
         )
         .await?
         .context("Worker Host registration was cancelled")?;
+        self.retire(&stranded)?;
         let incarnation = shared.incarnation_id().to_owned();
         let token = shared.token().to_owned();
         self.authority = Some((incarnation.clone(), token.clone()));
@@ -753,6 +819,39 @@ impl ManagedHost {
         Ok(())
     }
 
+    /// After a lane exits, report presence once more and wait for the answer, so a replaced or
+    /// revoked registration is reported as such instead of as an ordinary lane failure.
+    async fn confirm_registration(&mut self) -> Result<()> {
+        let Some(presence) = &mut self.presence else {
+            bail!("presence reporting stopped");
+        };
+        let before = self
+            .states
+            .reports
+            .load(std::sync::atomic::Ordering::SeqCst);
+        self.states.changed.notify_one();
+        let deadline = time::Instant::now() + Duration::from_secs(10);
+        while !presence.task.is_finished()
+            && self
+                .states
+                .reports
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == before
+            && time::Instant::now() < deadline
+        {
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        if presence.task.is_finished() {
+            let presence = self.presence.take().expect("presence task");
+            return Err(match presence.task.await {
+                Ok(Err(error)) => error,
+                Ok(Ok(())) => anyhow::anyhow!("presence reporting stopped"),
+                Err(error) => anyhow::anyhow!("presence reporting failed: {error}"),
+            });
+        }
+        Ok(())
+    }
+
     async fn restart_lane(&mut self, index: usize, executable: &Path) -> Result<()> {
         let (incarnation, token) = self
             .authority
@@ -837,8 +936,16 @@ fn report_presence(
                 return Ok(());
             }
             match reported {
-                Ok(_) => {}
-                Err(error) if supertag_worker_host::presence_retryable(&error) => {}
+                Ok(_) => {
+                    states
+                        .reports
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                Err(error) if supertag_worker_host::presence_retryable(&error) => {
+                    states
+                        .reports
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
                 Err(error) => {
                     return Err(anyhow::anyhow!(
                         "Worker Host registration generation {} is no longer current: {}",
@@ -1113,6 +1220,11 @@ async fn wait_configured(
                 else {
                     continue;
                 };
+                // A fenced registration stops every lane; report that, not this lane's exit.
+                host.lanes[index].service.take();
+                host.confirm_registration()
+                    .await
+                    .with_context(|| format!("Worker Host {}", host.definition.name))?;
                 // A lane runs one Attempt. Its exit leaves sibling lanes, their Attempts, and
                 // the Host's shared generation in place.
                 ensure!(
@@ -1120,7 +1232,6 @@ async fn wait_configured(
                     "Worker Host {} lane {index} exited unexpectedly with {status}",
                     host.definition.name
                 );
-                host.lanes[index].service.take();
                 time::sleep(Duration::from_secs(1)).await;
                 host.restart_lane(index, executable).await?;
             }

@@ -42,14 +42,23 @@ pub struct SharedHost {
 
 impl SharedHost {
     /// Register the Host's incarnation before any lane starts. Returns `None` on shutdown.
+    ///
+    /// `replace` starts a new incarnation instead of replaying the persisted one, so the
+    /// Control Plane fences every Attempt held under the previous generation. A supervisor
+    /// does this when Attempt journals exist that no configured lane will read.
     pub async fn register(
         gateway: Endpoint,
         state_directory: &Path,
+        replace: bool,
         shutdown: &CancellationToken,
     ) -> Result<Option<Self>> {
         let journal = Journal::open(state_directory)?;
         let token = enrollment::host_token(&journal, &gateway)?;
-        let incarnation_id = journal.incarnation()?;
+        let incarnation_id = if replace {
+            journal.replace_incarnation()?
+        } else {
+            journal.incarnation()?
+        };
         let channel = gateway.connect_lazy();
         let mut registration = WorkerHostClient::new(channel.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -121,6 +130,11 @@ impl SharedHost {
             .map_err(|_| Status::internal("invalid Host presence request"))?;
         Ok(self.client.report_host(request).await?.into_inner())
     }
+}
+
+/// Whether a Host or lane state directory holds an unresolved Attempt record.
+pub fn holds_attempt(directory: &Path) -> bool {
+    Journal::has_attempt(directory)
 }
 
 /// Whether a presence failure only delays the next report.
