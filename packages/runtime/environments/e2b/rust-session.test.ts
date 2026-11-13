@@ -98,7 +98,10 @@ async function fixture() {
             async closeStdin() {},
           };
         }
-        const child = spawn("/bin/sh", ["-c", command], {
+        // Like E2B's `/bin/bash -l -c`, bash execs a single command, so kill() reaches it. Dash,
+        // Linux's /bin/sh, forks instead: kill() would stop only the shell, and the orphan would
+        // hold the output pipes open.
+        const child = spawn("/bin/bash", ["-c", command], {
           cwd: options?.cwd,
           env: { ...process.env, ...options?.envs },
           signal: options?.signal,
