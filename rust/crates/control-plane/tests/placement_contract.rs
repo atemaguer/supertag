@@ -494,6 +494,36 @@ async fn ephemeral_contract(url: &str) {
 }
 
 /// Time the Control Plane is down never counts as a host being offline.
+/// A removed ephemeral host's cancelled Attempt finishes its cleanup without running again, and
+/// its Task records `task.worker-host-removed` with `requeued` false, as
+/// tests/uncertain-attempt.test.ts expects.
+async fn removed_host_cancelled_attempt_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    assert!(store.sweep_ephemeral_hosts().await.unwrap().is_empty());
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+    let ci = key(&store, "ci", &["builder"], &[], true).await;
+    let worker = join(&store, &ci, "worker").await;
+    report(&store, &worker, 1, &[]).await;
+    let task = submit(&store, "builder", "build").await;
+    assert_eq!(start_running(&store, &worker, "worker-1").await, task);
+    store.cancel_task(&task).await.unwrap();
+    clock.store(NOW + 30_000, Ordering::SeqCst);
+    assert_eq!(store.sweep_ephemeral_hosts().await.unwrap(), ["worker"]);
+    assert_eq!(
+        store.get_task(&task).await.unwrap().state,
+        TaskState::Cancelled as i32
+    );
+    let events = store.list_events(&task, 0, 0).await.unwrap();
+    let [event] = events.as_slice() else {
+        panic!("one event expected: {events:?}");
+    };
+    let event: serde_json::Value = serde_json::from_str(&event.text).unwrap();
+    assert_eq!(event["type"], "task.worker-host-removed");
+    assert_eq!(event["workerHostId"], "worker");
+    assert_eq!(event["requeued"], false);
+}
+
 /// A reusable Auth Key that asks for a taken or reserved Worker Host ID enrolls the first free
 /// `NAME-N`, as tests/auth-key-runtime.test.ts "lets reusable keys join hosts under NAME-2"; a
 /// lost response replays the same host, and the same operation with another credential is refused.
@@ -1045,6 +1075,12 @@ async fn sqlite_ephemeral_host_contract() {
 }
 
 #[tokio::test]
+async fn sqlite_removed_host_cancelled_attempt_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    removed_host_cancelled_attempt_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
 async fn sqlite_host_id_suffix_contract() {
     let directory = tempfile::tempdir().unwrap();
     host_id_suffix_contract(&sqlite_url(&directory)).await;
@@ -1142,4 +1178,10 @@ async fn postgres_auth_key_names_and_host_credentials_contract() {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_host_id_suffix_contract() {
     on_postgres(|url| async move { host_id_suffix_contract(&url).await }).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_removed_host_cancelled_attempt_contract() {
+    on_postgres(|url| async move { removed_host_cancelled_attempt_contract(&url).await }).await;
 }
