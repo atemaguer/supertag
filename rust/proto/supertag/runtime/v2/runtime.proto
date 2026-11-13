@@ -67,6 +67,12 @@ message ManifestRelationshipChange {
 
 message ReconcileTagRelationshipsResponse {
   repeated ManifestRelationshipChange changes = 1;
+  repeated ManifestRelationshipConflict conflicts = 2;
+}
+
+message ManifestRelationshipConflict {
+  string path = 1;
+  string manager = 2;
 }
 
 enum WatchKind {

@@ -1453,6 +1453,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(plane.policy_service())
+        .add_service(plane.manifest_relationships_service())
         .add_service(plane.surface_policy_service())
         .add_service(plane.work_sessions_service())
         .add_service(plane.attempt_work_sessions_service())
@@ -1662,6 +1663,7 @@ async fn gateway(
         .add_service(gateway.github_publications_service())
         .add_service(gateway.artifact_publications_service())
         .add_service(gateway.policy_service())
+        .add_service(gateway.manifest_relationships_service())
         .add_service(gateway.surface_policy_service())
         .add_service(gateway.work_sessions_service())
         .add_service(gateway.attempt_work_sessions_service())

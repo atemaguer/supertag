@@ -1033,6 +1033,13 @@ impl Store {
         if assignment.status == RoleAssignmentStatus::Inactive as i32 {
             assignment.status = RoleAssignmentStatus::Active as i32;
             assignment.revision = increment(assignment.revision)?;
+            crate::manifest_relationships::imperative_change(
+                &mut tx,
+                &assignment.tag_id,
+                "roles",
+                &assignment.role_id,
+            )
+            .await?;
         }
         save_assignment(&mut tx, &assignment).await?;
         receipt(&mut tx, principal, &input.operation_id, &hash, &assignment).await?;
@@ -1067,6 +1074,13 @@ impl Store {
             assignment.status = RoleAssignmentStatus::Inactive as i32;
             assignment.revision = increment(assignment.revision)?;
             save_assignment(&mut tx, &assignment).await?;
+            crate::manifest_relationships::imperative_change(
+                &mut tx,
+                &assignment.tag_id,
+                "roles",
+                &assignment.role_id,
+            )
+            .await?;
         }
         receipt(&mut tx, principal, &input.operation_id, &hash, &assignment).await?;
         tx.commit().await?;
@@ -1118,13 +1132,13 @@ impl Store {
         })
     }
 }
-fn increment(revision: u64) -> Result<u64> {
+pub(crate) fn increment(revision: u64) -> Result<u64> {
     revision
         .checked_add(1)
         .filter(|n| *n <= i64::MAX as u64)
         .ok_or_else(|| invalid("policy revision exhausted"))
 }
-fn assignment_row(row: &AnyRow) -> Result<RoleAssignment> {
+pub(crate) fn assignment_row(row: &AnyRow) -> Result<RoleAssignment> {
     Ok(RoleAssignment {
         assignment_id: row.try_get("assignment_id")?,
         role_id: row.try_get("role_id")?,
@@ -1133,7 +1147,10 @@ fn assignment_row(row: &AnyRow) -> Result<RoleAssignment> {
         revision: row.try_get::<i64, _>("revision")? as u64,
     })
 }
-async fn save_assignment(tx: &mut Transaction<'_, Any>, a: &RoleAssignment) -> Result<()> {
+pub(crate) async fn save_assignment(
+    tx: &mut Transaction<'_, Any>,
+    a: &RoleAssignment,
+) -> Result<()> {
     sqlx::query("INSERT INTO supertag_v2_role_assignments (assignment_id,role_id,tag_id,status,revision) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(assignment_id) DO UPDATE SET status=excluded.status,revision=excluded.revision").bind(&a.assignment_id).bind(&a.role_id).bind(&a.tag_id).bind(a.status as i64).bind(a.revision as i64).execute(&mut **tx).await?;
     Ok(())
 }

@@ -143,6 +143,15 @@ impl Store {
                 .bind(&input.sender_tag_id).bind(&input.recipient_tag_id).execute(&mut *tx).await?
         };
         let changed = result.rows_affected() != 0;
+        if changed {
+            crate::manifest_relationships::imperative_change(
+                &mut tx,
+                &input.recipient_tag_id,
+                "acceptsMessagesFrom",
+                &input.sender_tag_id,
+            )
+            .await?;
+        }
         sqlx::query("INSERT INTO supertag_v2_mailbox_grant_operations (principal,operation_id,request_digest,changed) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(i64::from(changed)).execute(&mut *tx).await?;
         tx.commit().await?;

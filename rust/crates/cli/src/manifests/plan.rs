@@ -25,7 +25,9 @@ pub(super) struct Catalog<'a> {
     workspaces: github_workspaces_client::GithubWorkspacesClient<Channel>,
     teams: teams_client::TeamsClient<Channel>,
     objectives: objectives_client::ObjectivesClient<Channel>,
-    mailbox: mailbox_client::MailboxClient<Channel>,
+    relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
+    manager: &'a str,
+    force_conflicts: bool,
 }
 
 enum Write {
@@ -41,19 +43,23 @@ enum Write {
     Location(PutSurfaceLocationRequest),
     Objective(CreateObjectiveRequest),
     ObjectiveLimits(SetObjectiveLimitsRequest),
-    Assignment(AssignRoleRequest),
-    MailboxGrant(ChangeMailboxGrantRequest),
+    Relationships(ReconcileTagRelationshipsRequest),
 }
 
 pub(super) struct Change {
     label: String,
     action: &'static str,
     write: Write,
+    details: Vec<String>,
 }
 
 impl Change {
     pub(super) fn preview(&self) -> String {
-        format!("{} {}", self.action, self.label)
+        if self.details.is_empty() {
+            format!("{} {}", self.action, self.label)
+        } else {
+            self.details.join("\n")
+        }
     }
 }
 
@@ -106,7 +112,12 @@ fn id() -> String {
 }
 
 impl<'a> Catalog<'a> {
-    pub(super) fn new(channel: Channel, token: &'a str) -> Self {
+    pub(super) fn new(
+        channel: Channel,
+        token: &'a str,
+        manager: &'a str,
+        force_conflicts: bool,
+    ) -> Result<Self> {
         macro_rules! client {
             ($module:ident, $client:ident) => {
                 $module::$client::new(channel.clone())
@@ -114,7 +125,17 @@ impl<'a> Catalog<'a> {
                     .max_encoding_message_size(MAX_MESSAGE_BYTES)
             };
         }
-        Self {
+        ensure!(
+            manager.is_empty()
+                || (manager.len() <= 63
+                    && !matches!(manager, "cli" | "apply")
+                    && manager.as_bytes()[0].is_ascii_alphanumeric()
+                    && manager.bytes().all(|byte| byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'-' | b'_'))),
+            "invalid apply set name"
+        );
+        Ok(Self {
             token,
             operator: client!(operator_client, OperatorClient),
             policy: client!(policy_catalog_client, PolicyCatalogClient),
@@ -123,8 +144,10 @@ impl<'a> Catalog<'a> {
             workspaces: client!(github_workspaces_client, GithubWorkspacesClient),
             teams: client!(teams_client, TeamsClient),
             objectives: client!(objectives_client, ObjectivesClient),
-            mailbox: client!(mailbox_client, MailboxClient),
-        }
+            relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
+            manager,
+            force_conflicts,
+        })
     }
 
     pub(super) async fn plan(&mut self, manifests: Vec<Manifest>) -> Result<Vec<Change>> {
@@ -150,6 +173,7 @@ impl<'a> Catalog<'a> {
                     label,
                     action: if exists { "update" } else { "create" },
                     write,
+                    details: vec![],
                 });
             }
         }
@@ -582,6 +606,7 @@ impl<'a> Catalog<'a> {
             "shared execution cannot use a pinned Git Workspace"
         );
         sorted(&mut spec.roles)?;
+        let mut role_ids = BTreeMap::new();
         for reference in spec.roles {
             let role = if let Some(role) = declarations.roles.get(&reference) {
                 role.clone()
@@ -599,42 +624,72 @@ impl<'a> Catalog<'a> {
                 role.status == RoleStatus::Active as i32,
                 "Role/{reference} is retired"
             );
-            if !self.assigned_role(name, &role, prior.is_some()).await? {
-                followups.push(Change {
-                    label: format!("Role/{reference} to Tag/{name}"),
-                    action: "assign",
-                    write: Write::Assignment(AssignRoleRequest {
-                        operation_id: id(),
-                        role: role.role_id,
-                        tag_id: name.into(),
-                    }),
-                });
-            }
+            role_ids.insert(role.role_id, reference);
         }
         sorted(&mut spec.accepts_messages_from)?;
-        let grants = if prior.is_some() && !spec.accepts_messages_from.is_empty() {
-            self.grants(name).await?
-        } else {
-            Default::default()
-        };
-        for sender in spec.accepts_messages_from {
+        ensure!(
+            role_ids.len() + spec.accepts_messages_from.len() <= MAX_REFERENCES,
+            "too many Tag relationships"
+        );
+        for sender in &spec.accepts_messages_from {
             ensure!(
                 sender != name,
                 "a Mailbox grant cannot name its own recipient"
             );
-            self.require_tag(declarations, &sender).await?;
-            if !grants.contains(&sender) {
-                followups.push(Change {
-                    label: format!("Mailbox access from Tag/{sender} to Tag/{name}"),
-                    action: "grant",
-                    write: Write::MailboxGrant(ChangeMailboxGrantRequest {
-                        operation_id: id(),
-                        sender_tag_id: sender,
-                        recipient_tag_id: name.into(),
-                        granted: true,
-                    }),
-                });
-            }
+            self.require_tag(declarations, sender).await?;
+        }
+        let mut reconciliation = ReconcileTagRelationshipsRequest {
+            tag_id: name.into(),
+            manager: self.manager.into(),
+            role_ids: role_ids.keys().cloned().collect(),
+            mailbox_senders: spec.accepts_messages_from,
+            force_conflicts: self.force_conflicts,
+            preview: true,
+        };
+        let details =
+            if prior.is_some() {
+                let response = self
+                    .relationships
+                    .reconcile_tag(request(reconciliation.clone(), self.token)?)
+                    .await?
+                    .into_inner();
+                ensure!(
+                    response.conflicts.is_empty(),
+                    "{}",
+                    response
+                        .conflicts
+                        .iter()
+                        .map(|conflict| {
+                            format!(
+                                "{} is owned by {} (use --force-conflicts)",
+                                conflict.path, conflict.manager
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                response
+                    .changes
+                    .into_iter()
+                    .map(|change| relationship_preview(name, &role_ids, change))
+                    .collect::<Vec<_>>()
+            } else {
+                role_ids
+                    .values()
+                    .map(|role| format!("assign Role/{role} to Tag/{name}"))
+                    .chain(reconciliation.mailbox_senders.iter().map(|sender| {
+                        format!("grant Mailbox access from Tag/{sender} to Tag/{name}")
+                    }))
+                    .collect()
+            };
+        if !details.is_empty() {
+            reconciliation.preview = false;
+            followups.push(Change {
+                label: format!("Tag/{name} relationships"),
+                action: "reconcile",
+                write: Write::Relationships(reconciliation),
+                details,
+            });
         }
         let unchanged = prior.as_ref().is_some_and(|old| {
             old.instructions == value.instructions
@@ -644,56 +699,6 @@ impl<'a> Catalog<'a> {
                 && old.execution == value.execution
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
-    }
-
-    async fn assigned_role(&mut self, tag: &str, role: &Role, tag_exists: bool) -> Result<bool> {
-        if role.revision == 0 || !tag_exists {
-            return Ok(false);
-        }
-        let assignments = self
-            .policy
-            .list_role_assignments(request(
-                ListRoleAssignmentsRequest {
-                    role: role.role_id.clone(),
-                    tag_id: tag.into(),
-                    status: RoleAssignmentStatus::Active.into(),
-                    limit: 1,
-                    cursor: String::new(),
-                },
-                self.token,
-            )?)
-            .await?
-            .into_inner();
-        Ok(!assignments.assignments.is_empty())
-    }
-
-    async fn grants(&mut self, tag: &str) -> Result<BTreeSet<String>> {
-        let mut cursor = String::new();
-        let mut result = BTreeSet::new();
-        loop {
-            let page = self
-                .mailbox
-                .list_grants(request(
-                    ListMailboxGrantsRequest {
-                        tag_id: tag.into(),
-                        limit: 100,
-                        cursor,
-                    },
-                    self.token,
-                )?)
-                .await?
-                .into_inner();
-            result.extend(
-                page.grants
-                    .into_iter()
-                    .filter(|grant| grant.recipient_tag_id == tag)
-                    .map(|grant| grant.sender_tag_id),
-            );
-            cursor = page.next_cursor;
-            if cursor.is_empty() {
-                return Ok(result);
-            }
-        }
     }
 
     async fn plan_team(
@@ -962,14 +967,9 @@ impl<'a> Catalog<'a> {
                 .set_limits(request(input, token)?)
                 .await
                 .map(|_| ()),
-            Write::Assignment(input) => self
-                .policy
-                .assign_role(request(input, token)?)
-                .await
-                .map(|_| ()),
-            Write::MailboxGrant(input) => self
-                .mailbox
-                .change_grant(request(input, token)?)
+            Write::Relationships(input) => self
+                .relationships
+                .reconcile_tag(request(input, token)?)
                 .await
                 .map(|_| ()),
         };
@@ -997,4 +997,38 @@ fn clear_context_ids(value: &mut ContextSet) {
     for item in &mut value.items {
         item.item_id.clear();
     }
+}
+
+fn relationship_preview(
+    tag: &str,
+    roles: &BTreeMap<String, String>,
+    change: ManifestRelationshipChange,
+) -> String {
+    if change.ownership_only {
+        return format!("manage Tag/{tag} {}", change.path);
+    }
+    if let Some(role) = change
+        .path
+        .strip_prefix("spec.roles[")
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        let reference = roles.get(role).map_or(role, String::as_str);
+        return if change.present {
+            format!("assign Role/{reference} to Tag/{tag}")
+        } else {
+            format!("remove Role/{reference} from Tag/{tag}")
+        };
+    }
+    if let Some(sender) = change
+        .path
+        .strip_prefix("spec.acceptsMessagesFrom[")
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        return if change.present {
+            format!("grant Mailbox access from Tag/{sender} to Tag/{tag}")
+        } else {
+            format!("revoke Mailbox access from Tag/{sender} to Tag/{tag}")
+        };
+    }
+    format!("reconcile Tag/{tag} {}", change.path)
 }

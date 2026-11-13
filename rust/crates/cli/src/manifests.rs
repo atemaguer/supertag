@@ -31,6 +31,12 @@ pub struct ManifestArgs {
     /// YAML documents, a JSON array, a directory of manifests, or - for stdin.
     #[arg(short = 'f', long = "file", required = true)]
     files: Vec<PathBuf>,
+    /// Name the manager that owns the manifest's Tag relationships.
+    #[arg(long = "set")]
+    manager: Option<String>,
+    /// Reapply relationships removed by another writer.
+    #[arg(long)]
+    force_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -379,7 +385,12 @@ fn load(paths: Vec<PathBuf>) -> Result<Vec<Manifest>> {
 pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
     let manifests = load(args.files)?;
     let (channel, token) = crate::connect_operator(args.connection).await?;
-    let mut catalog = plan::Catalog::new(channel, &token);
+    let mut catalog = plan::Catalog::new(
+        channel,
+        &token,
+        args.manager.as_deref().unwrap_or_default(),
+        args.force_conflicts,
+    )?;
     let changes = catalog.plan(manifests).await?;
     if changes.is_empty() {
         println!("No changes.");
