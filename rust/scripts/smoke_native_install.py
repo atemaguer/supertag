@@ -15,10 +15,10 @@ from native_archive import ArchiveError, REPO, digest, require
 from release_archive import validate_release
 from smoke_native_archive import smoke
 from smoke_native_release import installed_bridge
-from smoke_shared_provider import smoke_provider
+from smoke_shared_provider import PROTO, smoke_provider
 
 
-def smoke_install(archive, fixture, node, opencode_fixture=None):
+def smoke_install(archive, fixture, node, opencode_fixture=None, provider_proto=PROTO):
     archive, fixture, node = (Path(value).resolve(strict=True) for value in (archive, fixture, node))
     opencode_fixture = opencode_fixture or REPO / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs"
     with tempfile.TemporaryDirectory(prefix="supertag-native-installed-") as temporary:
@@ -39,7 +39,7 @@ def smoke_install(archive, fixture, node, opencode_fixture=None):
         require(again["reused"] and again["installation"] == first["installation"], "reinstall was not idempotent")
         provider_path = Path(first["shared_execution_provider"])
         require(provider_path == package / "supertag-shared-execution", "provider installation path differs")
-        provider = smoke_provider(provider_path, root / "shared-provider")
+        provider = smoke_provider(provider_path, root / "shared-provider", provider_proto)
         runtime = root / "runtime"
         runtime.mkdir(mode=0o700)
         installed_bridge(package, node, opencode_fixture, runtime, cli_override=command)

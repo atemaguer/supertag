@@ -153,6 +153,8 @@ The [behavioral baseline](tests/rust-port-baseline/README.md) exercises selected
 against the TypeScript implementation during the port.
 The [native split-service rehearsal](tests/native-deployment/README.md) checks the
 complete-archive images, TLS, gRPC health, and restart persistence on disposable PostgreSQL.
+The [native release platform checks](tests/native-release/README.md) build and execute
+complete archives and their installed command paths without publishing them.
 
 ## Test your change
 

@@ -163,14 +163,17 @@ class NativeReleaseContracts(unittest.TestCase):
         with patch.object(assembly, "snapshot", return_value=(source, self.source)), \
              patch.object(assembly, "build_binaries", return_value=(self.stage / "supertag", self.stage / "supertag-tui")), \
              patch.object(assembly, "build_shared_provider", return_value=self.stage / "supertag-shared-execution"), \
+             patch.object(assembly, "tool_versions", return_value={}), \
              patch.object(assembly, "check_provider_version"), \
              patch.object(assembly, "check_versions"), \
              patch.object(assembly, "native_platform", return_value="linux-arm64"), \
              patch.object(assembly, "stage_workspace", side_effect=stage_helpers), \
              patch.object(assembly, "smoke_built_release", side_effect=ArchiveError("smoke failed")):
-            with self.assertRaisesRegex(ArchiveError, "smoke failed"):
-                assembly.assemble(source, self.source["commit"], self.root / "failed-build", smoke=True)
-        self.assertEqual(list((self.root / "failed-build").iterdir()), [])
+            for installed in (False, True):
+                output = self.root / f"failed-build-{installed}"
+                with self.assertRaisesRegex(ArchiveError, "smoke failed"):
+                    assembly.assemble(source, self.source["commit"], output, smoke=True, install_smoke=installed)
+                self.assertEqual(list(output.iterdir()), [])
 
     def test_build_environment_excludes_credentials_config_and_flags(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic", "MODAL_TOKEN_SECRET": "synthetic",

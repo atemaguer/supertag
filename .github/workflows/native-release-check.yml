@@ -1,0 +1,107 @@
+name: Verify unpublished native releases
+
+# Verification only. This does not change release-cli.yml, publish.yml, the
+# installer channel, or registry packages. No archive or receipt is uploaded.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full source commit (leave empty for the selected workflow revision)
+        type: string
+      mode:
+        description: Contract checks, or full four-platform package/extract/install verification
+        type: choice
+        options: [contracts, package]
+        default: contracts
+      profile:
+        description: Release optimization, or faster development verification
+        type: choice
+        options: [release, dev]
+        default: release
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+      - run: python -m pip install PyYAML==6.0.3
+      - name: Check archive, installation, and platform boundaries
+        run: python -m unittest discover -s rust/scripts -p 'test_*.py'
+
+  package:
+    if: inputs.mode == 'package'
+    needs: contracts
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-amd64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      SOURCE_COMMIT: ${{ inputs.commit || github.sha }}
+      BUILD_PLATFORM: ${{ matrix.platform }}
+      BUILD_PROFILE: ${{ inputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+      - name: Install verification tools
+        run: python -m pip install PyYAML==6.0.3 grpcio==1.85.1 grpcio-tools==1.85.1 protobuf==7.36.2
+      - uses: actions/setup-node@v4
+        if: runner.os == 'macOS'
+        with:
+          node-version: '22.13.0'
+      - uses: actions/setup-go@v5
+        if: runner.os == 'macOS'
+        with:
+          go-version: '1.26.1'
+          cache: false
+      - name: Prepare native macOS tools
+        if: runner.os == 'macOS'
+        run: |
+          npm install --global --ignore-scripts --no-audit --no-fund pnpm@11.18.0
+          rustup toolchain install 1.93.1 --profile minimal --no-self-update
+          command -v tmux || brew install tmux
+      - name: Build and execute the Linux archive in Debian 12
+        if: runner.os == 'Linux'
+        run: |
+          python rust/scripts/native_release_docker.py --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release"
+      - name: Build and execute the native macOS archive
+        if: runner.os == 'macOS'
+        run: |
+          python rust/scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release" --install-smoke
+      - name: Record verified local output
+        run: |
+          python - "$RUNNER_TEMP/native-release" <<'PY'
+          import json, pathlib, sys
+          for receipt in sorted(pathlib.Path(sys.argv[1]).glob('*.json')):
+              print(receipt.name)
+              print(json.dumps(json.loads(receipt.read_text()), indent=2, sort_keys=True))
+          PY
