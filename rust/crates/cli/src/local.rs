@@ -193,6 +193,8 @@ struct Children {
     control_plane_address: Option<String>,
     gateway: Option<Service>,
     worker_host: Option<Service>,
+    /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
+    notify: (Vec<String>, Vec<(String, String)>),
 }
 
 struct Service {
@@ -210,6 +212,7 @@ impl Children {
             control_plane_address: None,
             gateway: None,
             worker_host: None,
+            notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
         })
     }
 
@@ -222,8 +225,6 @@ impl Children {
         // Present only when a Host serves a Gateway Workspace: the Gateway's GitHub source.
         gateway_workspace: Option<&Environment>,
         bootstrap_host: bool,
-        notify: &crate::local_config::Notifications,
-        environment: &Environment,
     ) -> Result<String> {
         let database = directory.join("runtime.sqlite3");
         open_private_file(&database, true)?;
@@ -259,15 +260,10 @@ impl Children {
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
-        for destination in &notify.destinations {
+        for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
         }
-        for (name, secret) in &notify.secrets {
-            // A missing secret fails only its own destination when it sends.
-            if let Ok(value) = secret.read(environment) {
-                gateway.env(crate::notify_secret_variable(name), value);
-            }
-        }
+        gateway.envs(self.notify.1.iter().map(|(name, value)| (name, value)));
         #[cfg(feature = "test-fixtures")]
         for name in [
             "SUPERTAG_TEST_DESKTOP_NOTIFIER",
@@ -323,8 +319,6 @@ impl Children {
                     .uses_gateway_workspace()
                     .then_some(&Environment::default()),
                 true,
-                &crate::local_config::Notifications::default(),
-                &Environment::default(),
             )
             .await?;
         let mut host = command(executable, "worker-host");
@@ -1192,6 +1186,7 @@ pub async fn configured(
             // An enrolled installation pins its Gateway origin. Reuse an initially selected
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
+            base.notify = plane.notify.resolve(&environment);
             let endpoint = base
                 .start_base(
                     &executable,
@@ -1204,8 +1199,6 @@ pub async fn configured(
                         .any(|h| h.harnesses.iter().any(|a| a.uses_gateway_workspace()))
                         .then_some(&*environment),
                     false,
-                    &plane.notify,
-                    &environment,
                 )
                 .await?;
             write_private(

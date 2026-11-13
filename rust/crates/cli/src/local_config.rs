@@ -150,6 +150,21 @@ pub struct Notifications {
     pub destinations: Vec<String>,
     pub secrets: BTreeMap<String, Secret>,
 }
+impl Notifications {
+    /// The Gateway's `--notify` values and `SUPERTAG_NOTIFY_SECRET_<NAME>` environment. A
+    /// missing secret fails only its own destination when it sends, as TypeScript does.
+    pub fn resolve(&self, environment: &Environment) -> (Vec<String>, Vec<(String, String)>) {
+        let secrets = self
+            .secrets
+            .iter()
+            .filter_map(|(name, secret)| {
+                let value = secret.read(environment).ok()?;
+                Some((crate::notify_secret_variable(name), value))
+            })
+            .collect();
+        (self.destinations.clone(), secrets)
+    }
+}
 impl Default for Notifications {
     /// A local installation tells its operator on the desktop, as TypeScript does.
     fn default() -> Self {
