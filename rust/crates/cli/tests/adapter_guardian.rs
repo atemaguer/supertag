@@ -205,3 +205,108 @@ fn a_stopped_guardian_cannot_launch_after_its_host_pipe_closes() -> Result<()> {
     assert!(!marker.exists());
     Ok(())
 }
+
+/// Starts `sleep 60` in a new session, so it is no longer in the adapter's process group, and
+/// records its PID in the file `$1` only after it has left the group.
+const DETACHED_SLEEP: &str = r#"perl -MPOSIX -e 'POSIX::setsid() >= 0 or die; open(my $f, ">", "$ARGV[0].tmp") or die; print $f "$$\n"; close($f); rename("$ARGV[0].tmp", $ARGV[0]) or die; exec("sleep", "60")' "$1""#;
+
+fn read_pid(path: &Path) -> Result<i32> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(contents) = std::fs::read_to_string(path)
+            && let Ok(pid) = contents.trim().parse()
+        {
+            return Ok(pid);
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the fixture did not record a PID"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Waits until `pid` no longer exists. Its new parent may need a moment to reap it.
+fn assert_gone(pid: i32) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        // Signal 0 checks the PID without changing process state.
+        if unsafe { libc::kill(pid, 0) } == -1
+            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            // Do not leave the fixture running when the assertion fails.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            anyhow::bail!("process {pid} survived the guardian");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_descendant_that_left_the_group_is_stopped_after_the_adapter_succeeds() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("detached-pid");
+    // The adapter outlives several scans, as a harness does that spawns a detached tool.
+    let (mut guardian, mut pipe) = Guardian::launch(
+        &format!("cat >/dev/null; {DETACHED_SLEEP} & sleep 1; exit 0"),
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let pid = read_pid(&pid_file)?;
+    // A process outside the group is not the adapter's failure to clean up.
+    assert!(guardian.wait_for_exit()?.success());
+    assert_gone(pid)
+}
+
+#[test]
+fn a_descendant_that_left_the_group_is_stopped_when_the_host_pipe_closes() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("detached-pid");
+    let (mut guardian, mut pipe) = Guardian::launch(
+        &format!("cat >/dev/null; {DETACHED_SLEEP} & exec sleep 60"),
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let pid = read_pid(&pid_file)?;
+    thread::sleep(Duration::from_millis(300));
+    drop(pipe);
+    assert!(!guardian.wait_for_exit()?.success());
+    assert_gone(pid)
+}
+
+/// A double fork orphans the detached process before any scan can see it. Only a subreaper
+/// adopts it; macOS has none, so this case is Linux-only.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_orphaned_double_fork_is_stopped_after_the_adapter_exits() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("orphan-pid");
+    let (mut guardian, mut pipe) = Guardian::launch(
+        // The middle process waits until the detached one has left the group, then exits.
+        &format!(
+            "cat >/dev/null; ({DETACHED_SLEEP} & while [ ! -s \"$1\" ]; do sleep 0.01; done); exit 0"
+        ),
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let pid = read_pid(&pid_file)?;
+    assert!(guardian.wait_for_exit()?.success());
+    assert_gone(pid)
+}
+
+#[test]
+fn a_group_member_left_running_fails_the_adapter_and_is_stopped() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pid_file = directory.path().join("member-pid");
+    let (mut guardian, mut pipe) = Guardian::launch(
+        "cat >/dev/null; sleep 60 & printf '%s\\n' \"$!\" > \"$1\"; exit 0",
+        &pid_file,
+    )?;
+    write_frame(&mut pipe, u64::MAX)?;
+    let pid = read_pid(&pid_file)?;
+    assert!(!guardian.wait_for_exit()?.success());
+    assert_gone(pid)
+}
