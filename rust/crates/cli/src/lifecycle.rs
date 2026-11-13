@@ -778,6 +778,9 @@ struct Row {
     attempts: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capacity: Option<u32>,
+    /// A laptop power risk to the host's running Task Attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    power_warning: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -849,7 +852,19 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                     draining: host.map(|host| host.draining),
                     attempts: host.map(|host| host.active_attempts),
                     capacity: host.map(|host| host.capacity),
+                    power_warning: None,
                 });
+            }
+            if services
+                .iter()
+                .any(|row| row.kind == HOST && row.attempts.is_some_and(|count| count > 0))
+            {
+                let warning = crate::power::warning(crate::power::read().await);
+                for row in &mut services {
+                    if row.kind == HOST && row.attempts.is_some_and(|count| count > 0) {
+                        row.power_warning.clone_from(&warning);
+                    }
+                }
             }
         }
         Supervisor::Starting | Supervisor::Stopped => {
@@ -891,6 +906,7 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         draining: None,
         attempts: None,
         capacity: None,
+        power_warning: None,
     }
 }
 
@@ -1018,8 +1034,11 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
         )
     };
     out.push_str(&line(header));
-    for row in &rows {
+    for (row, service) in rows.iter().zip(&report.services) {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
+        if let Some(warning) = &service.power_warning {
+            out.push_str(&format!("  {}\n", text(warning)));
+        }
     }
     out
 }
@@ -1196,6 +1215,7 @@ mod tests {
             draining: None,
             attempts: None,
             capacity: None,
+            power_warning: None,
         };
         let report = PsReport {
             state_directory: format!("/tmp/{hostile}"),
@@ -1215,6 +1235,36 @@ mod tests {
         );
         assert!(!text.contains('\x1b'), "{text}");
         assert!(text.contains("x fake line [2J"), "{text}");
+    }
+
+    #[test]
+    fn ps_prints_the_power_warning_under_the_host_row() {
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![Row {
+                service: "laptop".into(),
+                kind: HOST.into(),
+                state: "running",
+                address: None,
+                pid: Some(7),
+                worker_host_id: Some("laptop".into()),
+                connected: Some(true),
+                draining: None,
+                attempts: Some(2),
+                capacity: Some(4),
+                power_warning: Some(
+                    "warning: Task Attempts are running, but closing the lid will sleep it.".into(),
+                ),
+            }],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(
+            text.ends_with(
+                "7  connected, 2/4 Task Attempts\n  warning: Task Attempts are running, but closing the lid will sleep it.\n"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

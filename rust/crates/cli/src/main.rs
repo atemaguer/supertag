@@ -31,6 +31,7 @@ mod operator_access;
 mod output_policy;
 mod placement;
 mod policy;
+mod power;
 mod profiles;
 mod replies;
 mod resources;
