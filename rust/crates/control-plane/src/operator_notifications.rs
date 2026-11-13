@@ -511,7 +511,7 @@ fn command_of(text: &str) -> String {
         .last()
         .and_then(|line| line.strip_prefix('`')?.strip_suffix('`'))
         .filter(|command| command.starts_with("supertag "))
-        .unwrap_or("supertag inbox list")
+        .unwrap_or("supertag get inbox-items")
         .to_owned()
 }
 
@@ -528,13 +528,13 @@ fn headline(kind: InboxItemKind, item: &InboxItem, blocking: bool) -> (String, O
                     summary(&approval.summary),
                     approval.tag_id
                 ),
-                Some(format!("supertag inbox approval {}", approval.approval_id)),
+                Some(format!("supertag get approval {}", approval.approval_id)),
             ),
             None => ("An approval request waits for a decision".into(), None),
         },
         InboxItemKind::Question => (
             format!("Objective {objective} waits on your answer"),
-            Some(format!("supertag inbox question {}", item.task_id)),
+            Some(format!("supertag get question {}", item.task_id)),
         ),
         InboxItemKind::ObjectiveBudget => (
             "The Objective budget is used up".into(),
@@ -662,7 +662,9 @@ fn objective_text(objective: &str, items: &[&Item], more: bool) -> String {
     if items.len() > ITEMS_SHOWN {
         lines.push(format!("- …and {} more", items.len() - ITEMS_SHOWN));
     }
-    lines.push(format!("`supertag inbox list --objective {objective}`"));
+    lines.push(format!(
+        "`supertag get inbox-items --objective {objective}`"
+    ));
     lines.join("\n")
 }
 
@@ -687,12 +689,12 @@ fn desktop_text(items: &[&Item], more: bool) -> String {
     let adjective = if more { "more" } else { "new" };
     if objectives.contains(&None) {
         format!(
-            "SuperTag has {} {adjective} items that need you.\n`supertag inbox list`",
+            "SuperTag has {} {adjective} items that need you.\n`supertag get inbox-items`",
             items.len()
         )
     } else {
         format!(
-            "SuperTag has {} {adjective} items across {} Objectives.\n`supertag inbox list`",
+            "SuperTag has {} {adjective} items across {} Objectives.\n`supertag get inbox-items`",
             items.len(),
             objectives.len()
         )
@@ -770,7 +772,7 @@ mod tests {
             key: key.into(),
             objective_id: objective.map(Into::into),
             headline: headline.into(),
-            command: Some(format!("supertag inbox question {key}")),
+            command: Some(format!("supertag get question {key}")),
             blocking_approval: false,
             carried: false,
         }
@@ -789,20 +791,23 @@ mod tests {
         let refs: Vec<&Item> = many.iter().collect();
         let text = render("obj", &refs, true);
         assert!(text.starts_with(
-            "Objective obj has 7 more items that need you:\n- item 0: `supertag inbox question q0`"
+            "Objective obj has 7 more items that need you:\n- item 0: `supertag get question q0`"
         ));
         assert!(text.contains("\n- …and 2 more\n"));
-        assert!(text.ends_with("\n`supertag inbox list --objective obj`"));
-        assert_eq!(command_of(&text), "supertag inbox list --objective obj");
+        assert!(text.ends_with("\n`supertag get inbox-items --objective obj`"));
+        assert_eq!(
+            command_of(&text),
+            "supertag get inbox-items --objective obj"
+        );
         let other = item("q9", Some("other"), "other item");
         assert_eq!(
             render("*", &[&first, &other], false),
-            "SuperTag has 2 new items across 2 Objectives.\n`supertag inbox list`"
+            "SuperTag has 2 new items across 2 Objectives.\n`supertag get inbox-items`"
         );
         let unscoped = item("a1", None, "Approval a1: merge (requested by Tag t)");
         assert_eq!(
             render("*", &[&unscoped], false),
-            "SuperTag needs you: Approval a1: merge (requested by Tag t)\n`supertag inbox question a1`"
+            "SuperTag needs you: Approval a1: merge (requested by Tag t)\n`supertag get question a1`"
         );
     }
 

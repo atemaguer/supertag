@@ -3,12 +3,13 @@
 //!
 //! The CLI grammar is ACTION RESOURCE for verbs that apply to every resource (`get`, `describe`,
 //! `watch`, `delete`, `apply`, `diff`), and RESOURCE VERB for actions only one resource has
-//! (`tag put`, `task submit`, `host drain`). [`KINDS`] is the one table of resource kinds: every
-//! kind is read with `get` and `describe`, and the table says which kinds `get` lists without an
-//! ID, which `delete` removes, and which `watch` follows. A test checks the command tree against
-//! it.
+//! (`tag put`, `task submit`, `host drain`), named by the same noun `get` takes. [`KINDS`] is the
+//! one table of resource kinds: every kind is read with `get`, and the table says which kinds
+//! `get` and `describe` read by ID, which `get` lists without one, which `delete` removes, and
+//! which `watch` follows. A test checks the command tree against it.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
 use supertag_protocol::v2::GetObjectiveOverviewRequest;
@@ -18,8 +19,8 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel};
 use crate::observe::{Output, describe_text};
 use crate::{
     Connection, artifact_publications, artifacts, auth_keys, connect_operator, github_publications,
-    github_workspaces, host_status, inputs, objectives, operator_access, policy, replies, request,
-    tags, tasks, teams, volumes, work_sessions, workspace_mounts,
+    github_workspaces, host_status, inbox, inputs, mailbox, objectives, operator_access, policy,
+    replies, request, surface_policy, tags, tasks, teams, volumes, work_sessions, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -67,6 +68,24 @@ pub enum Kind {
     Reply,
     #[value(alias = "inputs")]
     Input,
+    #[value(alias = "surface-accounts")]
+    SurfaceAccount,
+    #[value(alias = "surface-locations")]
+    SurfaceLocation,
+    #[value(alias = "role-assignments")]
+    RoleAssignment,
+    #[value(alias = "mailbox-grants")]
+    MailboxGrant,
+    #[value(alias = "messages")]
+    Message,
+    #[value(alias = "workstream-posts")]
+    WorkstreamPost,
+    #[value(alias = "approvals")]
+    Approval,
+    #[value(alias = "questions")]
+    Question,
+    #[value(alias = "inbox-items")]
+    InboxItem,
 }
 
 /// One row of the resource kind table. Outside `describe`'s title, the command tree carries these
@@ -80,6 +99,9 @@ pub(crate) struct KindSpec {
     pub plural: &'static str,
     /// The heading `describe` prints.
     pub title: &'static str,
+    /// `get KIND ID` and `describe KIND ID` read one resource. Without it the kind has no
+    /// operator-visible ID and is only listed.
+    pub read: bool,
     /// `get KIND` without an ID lists the kind.
     pub list: bool,
     /// `delete KIND ID` exists.
@@ -93,28 +115,37 @@ const fn kind(
     name: &'static str,
     plural: &'static str,
     title: &'static str,
-    [list, delete, watch]: [bool; 3],
+    [read, list, delete, watch]: [bool; 4],
 ) -> KindSpec {
     KindSpec {
         kind,
         name,
         plural,
         title,
+        read,
         list,
         delete,
         watch,
     }
 }
 
-const READ: [bool; 3] = [false, false, false];
-const LIST: [bool; 3] = [true, false, false];
-const LIST_DELETE: [bool; 3] = [true, true, false];
-const LIST_WATCH: [bool; 3] = [true, false, true];
+const READ: [bool; 4] = [true, false, false, false];
+const LIST: [bool; 4] = [true, true, false, false];
+const LIST_DELETE: [bool; 4] = [true, true, true, false];
+const LIST_WATCH: [bool; 4] = [true, true, false, true];
+/// Listed only: these resources have no ID of their own to read.
+const LIST_ONLY: [bool; 4] = [false, true, false, false];
 
 /// Every resource kind the CLI reads.
 pub(crate) const KINDS: &[KindSpec] = &[
     kind(Kind::Tag, "tag", "tags", "Tag", LIST_WATCH),
-    kind(Kind::Task, "task", "tasks", "Task", [false, false, true]),
+    kind(
+        Kind::Task,
+        "task",
+        "tasks",
+        "Task",
+        [true, false, false, true],
+    ),
     kind(
         Kind::Objective,
         "objective",
@@ -122,7 +153,13 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "Objective",
         LIST_WATCH,
     ),
-    kind(Kind::Team, "team", "teams", "Team", [true, true, true]),
+    kind(
+        Kind::Team,
+        "team",
+        "teams",
+        "Team",
+        [true, true, true, true],
+    ),
     kind(Kind::Host, "host", "hosts", "Worker Host", LIST),
     kind(Kind::Session, "session", "sessions", "Work Session", LIST),
     kind(Kind::Role, "role", "roles", "Role", LIST),
@@ -194,6 +231,51 @@ pub(crate) const KINDS: &[KindSpec] = &[
     ),
     kind(Kind::Reply, "reply", "replies", "Reply", LIST),
     kind(Kind::Input, "input", "inputs", "Input", READ),
+    kind(
+        Kind::SurfaceAccount,
+        "surface-account",
+        "surface-accounts",
+        "Surface Account",
+        LIST,
+    ),
+    kind(
+        Kind::SurfaceLocation,
+        "surface-location",
+        "surface-locations",
+        "Surface Location",
+        LIST_DELETE,
+    ),
+    kind(
+        Kind::RoleAssignment,
+        "role-assignment",
+        "role-assignments",
+        "Role Assignment",
+        LIST_ONLY,
+    ),
+    kind(
+        Kind::MailboxGrant,
+        "mailbox-grant",
+        "mailbox-grants",
+        "Mailbox Grant",
+        LIST_ONLY,
+    ),
+    kind(Kind::Message, "message", "messages", "Message", LIST_ONLY),
+    kind(
+        Kind::WorkstreamPost,
+        "workstream-post",
+        "workstream-posts",
+        "Workstream Post",
+        [false, true, false, true],
+    ),
+    kind(Kind::Approval, "approval", "approvals", "Approval", LIST),
+    kind(Kind::Question, "question", "questions", "Question", READ),
+    kind(
+        Kind::InboxItem,
+        "inbox-item",
+        "inbox-items",
+        "Inbox Item",
+        LIST_ONLY,
+    ),
 ];
 
 pub(crate) fn spec(kind: Kind) -> &'static KindSpec {
@@ -376,6 +458,67 @@ pub enum GetCommand {
         /// Input ID, as `task input` printed it.
         id: String,
     },
+    /// Read one verified connector account, or list them.
+    #[command(visible_alias = "surface-accounts")]
+    SurfaceAccount {
+        /// Surface Account ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: surface_policy::AccountListArgs,
+    },
+    /// Read one surface location's Tag and policy, or list locations.
+    #[command(visible_alias = "surface-locations")]
+    SurfaceLocation {
+        /// Surface Location ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: surface_policy::LocationListArgs,
+    },
+    /// List Role assignments.
+    #[command(visible_alias = "role-assignments")]
+    RoleAssignment {
+        #[command(flatten)]
+        list: policy::AssignmentListArgs,
+    },
+    /// List the incoming and outgoing direct message grants of a Tag.
+    #[command(visible_alias = "mailbox-grants")]
+    MailboxGrant {
+        #[command(flatten)]
+        list: mailbox::GrantListArgs,
+    },
+    /// List the messages sent to or from a Tag.
+    #[command(visible_alias = "messages")]
+    Message {
+        #[command(flatten)]
+        list: mailbox::MessageListArgs,
+    },
+    /// List a Team's newest Workstream posts, or those after a sequence.
+    #[command(visible_alias = "workstream-posts")]
+    WorkstreamPost {
+        #[command(flatten)]
+        list: teams::PostListArgs,
+    },
+    /// Read the action, resource, and exact arguments an approval requests, or list approval
+    /// history.
+    #[command(visible_alias = "approvals")]
+    Approval {
+        /// Approval ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: inbox::ApprovalListArgs,
+    },
+    /// Read the full question an Objective Task asked.
+    #[command(visible_alias = "questions")]
+    Question {
+        /// The ID of the Task that asked.
+        id: String,
+    },
+    /// List the questions and work waiting for an operator.
+    #[command(visible_alias = "inbox-items")]
+    InboxItem {
+        #[command(flatten)]
+        list: inbox::ItemListArgs,
+    },
 }
 
 /// `supertag delete KIND ID`.
@@ -421,17 +564,43 @@ pub enum DeleteCommand {
         #[command(flatten)]
         args: github_workspaces::DeleteArgs,
     },
+    /// Remove a location's policy and stop new work on its connector alias.
+    #[command(visible_alias = "surface-locations")]
+    SurfaceLocation {
+        /// Surface Location ID.
+        id: String,
+        #[command(flatten)]
+        args: surface_policy::DeleteArgs,
+    },
 }
 
 #[derive(Args)]
 pub struct DescribeArgs {
-    #[arg(value_enum)]
+    /// The kind of resource. Only kinds read by ID can be described.
+    #[arg(value_parser = readable_kind())]
     kind: Kind,
     /// The resource's ID or name.
     id: String,
     /// Print readable text, or JSON for scripts.
     #[arg(long, value_enum, default_value = "text")]
     output: Output,
+}
+
+/// Parses a kind that `get KIND ID` and `describe KIND ID` read, singular or plural.
+fn readable_kind() -> impl TypedValueParser<Value = Kind> {
+    PossibleValuesParser::new(
+        KINDS
+            .iter()
+            .filter(|spec| spec.read)
+            .map(|spec| PossibleValue::new(spec.name).alias(spec.plural)),
+    )
+    .map(|name| {
+        KINDS
+            .iter()
+            .find(|spec| spec.name == name || spec.plural == name)
+            .expect("the parser accepts only names in KINDS")
+            .kind
+    })
 }
 
 pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
@@ -514,6 +683,32 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
             return print(replies::list(connection, list)).await;
         }
         GetCommand::Input { id } => (Kind::Input, id),
+        GetCommand::SurfaceAccount { id: Some(id), .. } => (Kind::SurfaceAccount, id),
+        GetCommand::SurfaceAccount { id: None, list } => {
+            return print(surface_policy::list_accounts(connection, list)).await;
+        }
+        GetCommand::SurfaceLocation { id: Some(id), .. } => (Kind::SurfaceLocation, id),
+        GetCommand::SurfaceLocation { id: None, list } => {
+            return print(surface_policy::list_locations(connection, list)).await;
+        }
+        GetCommand::RoleAssignment { list } => {
+            return print(policy::list_assignments(connection, list)).await;
+        }
+        GetCommand::MailboxGrant { list } => {
+            return print(mailbox::list_grants(connection, list)).await;
+        }
+        GetCommand::Message { list } => {
+            return print(mailbox::list_messages(connection, list)).await;
+        }
+        GetCommand::WorkstreamPost { list } => {
+            return print(teams::list_posts(connection, list)).await;
+        }
+        GetCommand::Approval { id: Some(id), .. } => (Kind::Approval, id),
+        GetCommand::Approval { id: None, list } => {
+            return print(inbox::list_approvals(connection, list)).await;
+        }
+        GetCommand::Question { id } => (Kind::Question, id),
+        GetCommand::InboxItem { list } => return print(inbox::list_items(connection, list)).await,
     };
     let (channel, token) = connect_operator(connection).await?;
     print(fetch(channel, &token, kind, id)).await
@@ -552,6 +747,15 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::GithubPublication => github_publications::fetch(channel, token, id).await,
         Kind::Reply => replies::fetch(channel, token, id).await,
         Kind::Input => inputs::fetch(channel, token, id).await,
+        Kind::SurfaceAccount => surface_policy::fetch_account(channel, token, id).await,
+        Kind::SurfaceLocation => surface_policy::fetch_location(channel, token, id).await,
+        Kind::Approval => inbox::fetch_approval(channel, token, id).await,
+        Kind::Question => inbox::fetch_question(channel, token, id).await,
+        Kind::RoleAssignment
+        | Kind::MailboxGrant
+        | Kind::Message
+        | Kind::WorkstreamPost
+        | Kind::InboxItem => bail!("{} is listed, not read by ID", spec(kind).plural),
     }
 }
 
@@ -599,6 +803,9 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
             DeleteCommand::Volume { id, args } => volumes::delete(connection, id, args).await,
             DeleteCommand::Workspace { id, args } => {
                 github_workspaces::delete(connection, id, args).await
+            }
+            DeleteCommand::SurfaceLocation { id, args } => {
+                surface_policy::delete_location(connection, id, args).await
             }
         }
     })

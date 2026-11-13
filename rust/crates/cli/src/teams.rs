@@ -48,19 +48,6 @@ pub enum TeamCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Read the newest Workstream posts or continue from a sequence.
-    Posts {
-        team: String,
-        /// Continue after this post sequence instead of reading the newest posts.
-        #[arg(long)]
-        after_sequence: Option<u64>,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 16)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
 }
 
 // Options for `supertag get teams`.
@@ -74,6 +61,24 @@ pub struct ListArgs {
     limit: u32,
     /// Continue from the cursor the previous page returned.
     #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+// Options for `supertag get workstream-posts`: the newest posts of one Team's Workstream, or
+// those after a sequence.
+#[derive(Args)]
+pub struct PostListArgs {
+    /// The Team whose Workstream to read, by ID or name.
+    #[arg(long)]
+    team: String,
+    /// Continue after this post sequence instead of reading the newest posts.
+    #[arg(long)]
+    after_sequence: Option<u64>,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 16)]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "")]
     cursor: String,
 }
 
@@ -114,6 +119,25 @@ pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value
 }
 
 /// Deletes a Team and its Workstream after its Objectives close.
+pub(crate) async fn list_posts(connection: Connection, args: PostListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_workstream_posts(request(
+            ListWorkstreamPostsRequest {
+                team: args.team,
+                after_sequence: args.after_sequence,
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({ "posts": page.posts.into_iter().map(post_json).collect::<Vec<_>>(), "next_cursor": page.next_cursor }),
+    )
+}
+
 pub(crate) async fn delete(
     connection: Connection,
     team: String,
@@ -207,24 +231,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                 (outcome, _) => outcome?,
             };
             team_json(updated.into_inner())
-        }
-        TeamCommand::Posts {
-            team,
-            after_sequence,
-            limit,
-            cursor,
-        } => {
-            let input = ListWorkstreamPostsRequest {
-                team,
-                after_sequence,
-                limit,
-                cursor,
-            };
-            let page = client
-                .list_workstream_posts(request(input, &token)?)
-                .await?
-                .into_inner();
-            json!({ "posts": page.posts.into_iter().map(post_json).collect::<Vec<_>>(), "next_cursor": page.next_cursor })
         }
     };
     crate::terminal::print_json(&output)?;

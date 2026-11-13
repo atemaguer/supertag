@@ -4,6 +4,7 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
+/// `supertag artifact-publication VERB`.
 #[derive(Subcommand)]
 pub enum PublicationCommand {
     /// Approve selected completed output for named destination Objectives.
@@ -20,12 +21,6 @@ pub enum PublicationCommand {
         #[arg(long)]
         supersedes: Option<String>,
     },
-    /// Approve consumption by a destination already in the publication audience.
-    Consume {
-        consumption_id: String,
-        publication_id: String,
-        objective_id: String,
-    },
     /// Withdraw a publication at its exact revision, so later Tasks cannot use it.
     Withdraw {
         publication_id: String,
@@ -33,18 +28,28 @@ pub enum PublicationCommand {
         #[arg(long)]
         expected_revision: u64,
     },
+    /// List the recorded events for one publication.
+    Audit { publication_id: String },
+}
+
+/// `supertag artifact-consumption VERB`.
+#[derive(Subcommand)]
+pub enum ConsumptionCommand {
+    /// Approve consumption by a destination already in the publication audience.
+    Approve {
+        consumption_id: String,
+        publication_id: String,
+        objective_id: String,
+    },
     /// Withdraw a consumption approval at its exact revision.
-    WithdrawConsumption {
+    Withdraw {
         consumption_id: String,
         /// The revision you last read. The change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: u64,
     },
-    /// List the recorded events for one publication or consumption approval.
-    Audit {
-        approval_type: String,
-        approval_id: String,
-    },
+    /// List the recorded events for one consumption approval.
+    Audit { consumption_id: String },
 }
 fn files(files: &[ArtifactFile]) -> Value {
     json!(files.iter().map(|f|json!({"path":f.path,"blob":f.blob.as_ref().map(|b|json!({"sha256":b.sha256,"byte_length":b.byte_length}))})).collect::<Vec<_>>())
@@ -137,6 +142,27 @@ pub(crate) async fn list_consumptions(connection: Connection, args: ListArgs) ->
     )
 }
 
+async fn audit(
+    client: &mut artifact_publications_client::ArtifactPublicationsClient<ProtocolChannel>,
+    token: &str,
+    approval_type: &str,
+    approval_id: String,
+) -> Result<Value> {
+    let list = client
+        .list_audit(request(
+            ListArtifactApprovalAuditRequest {
+                approval_type: approval_type.to_owned(),
+                approval_id,
+            },
+            token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"events":list.events.iter().map(|e|json!({"approval_type":e.approval_type,"approval_id":e.approval_id,"objective_id":e.objective_id,"revision":e.revision,"action":e.action,"actor":e.actor,"recorded_at_ms":e.recorded_at_ms})).collect::<Vec<_>>()}),
+    )
+}
+
 pub async fn run(connection: Connection, command: PublicationCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
     let mut client = client(channel);
@@ -162,7 +188,34 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
                 .await?
                 .into_inner(),
         ),
-        PublicationCommand::Consume {
+        PublicationCommand::Withdraw {
+            publication_id,
+            expected_revision,
+        } => publication(
+            &client
+                .withdraw_publication(request(
+                    WithdrawArtifactApprovalRequest {
+                        approval_id: publication_id,
+                        expected_revision,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner(),
+        ),
+        PublicationCommand::Audit { publication_id } => {
+            audit(&mut client, &token, "publication", publication_id).await?
+        }
+    };
+    crate::terminal::print_json(&value)?;
+    Ok(())
+}
+
+pub async fn run_consumption(connection: Connection, command: ConsumptionCommand) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let mut client = client(channel);
+    let value = match command {
+        ConsumptionCommand::Approve {
             consumption_id,
             publication_id,
             objective_id,
@@ -179,22 +232,7 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
                 .await?
                 .into_inner(),
         ),
-        PublicationCommand::Withdraw {
-            publication_id,
-            expected_revision,
-        } => publication(
-            &client
-                .withdraw_publication(request(
-                    WithdrawArtifactApprovalRequest {
-                        approval_id: publication_id,
-                        expected_revision,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner(),
-        ),
-        PublicationCommand::WithdrawConsumption {
+        ConsumptionCommand::Withdraw {
             consumption_id,
             expected_revision,
         } => consumption(
@@ -209,21 +247,8 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
                 .await?
                 .into_inner(),
         ),
-        PublicationCommand::Audit {
-            approval_type,
-            approval_id,
-        } => {
-            let list = client
-                .list_audit(request(
-                    ListArtifactApprovalAuditRequest {
-                        approval_type,
-                        approval_id,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"events":list.events.iter().map(|e|json!({"approval_type":e.approval_type,"approval_id":e.approval_id,"objective_id":e.objective_id,"revision":e.revision,"action":e.action,"actor":e.actor,"recorded_at_ms":e.recorded_at_ms})).collect::<Vec<_>>()})
+        ConsumptionCommand::Audit { consumption_id } => {
+            audit(&mut client, &token, "consumption", consumption_id).await?
         }
     };
     crate::terminal::print_json(&value)?;

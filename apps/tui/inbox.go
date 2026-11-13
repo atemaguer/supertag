@@ -84,7 +84,7 @@ func inboxWaitState(item *operatorv1.InboxItem) string {
 	return ""
 }
 
-// inboxHeadline says what an inbox item waits on in one line, as `supertag list inbox` does.
+// inboxHeadline says what an inbox item waits on in one line, as `supertag get inbox-items` lists it.
 func inboxHeadline(item *operatorv1.InboxItem) string {
 	task := "?"
 	for _, evidence := range item.GetEvidence() {
@@ -185,7 +185,7 @@ func (m model) renderItem() string {
 		if question.GetTruncated() && m.fullQuestion == "" {
 			command := "supertag describe objective " + shellWord(item.GetObjectiveId())
 			if m.client.RuntimeV2() {
-				command = "supertag inbox question " + shellWord(strings.TrimPrefix(item.GetKey(), "question:"))
+				command = "supertag get question " + shellWord(strings.TrimPrefix(item.GetKey(), "question:"))
 			}
 			add("", "The question was cut short. "+command+" shows all of it.")
 		}

@@ -233,8 +233,8 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 	if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_LIMITED {
 		needs = append(needs,
 			"  The Objective reached its budget or deadline limit. Review the limit summary, then raise the budget or move the deadline to resume it.",
-			"    supertag update objective "+id+" --budget-minor AMOUNT",
-			"    supertag update objective "+id+" --deadline ISO_TIME")
+			"    supertag objective set-limits "+id+" --budget-minor AMOUNT",
+			"    supertag objective set-limits "+id+" --deadline ISO_TIME")
 	}
 	for _, item := range inbox {
 		if item.GetObjectiveId() != objective.GetId() || !item.GetOperatorEligible() {

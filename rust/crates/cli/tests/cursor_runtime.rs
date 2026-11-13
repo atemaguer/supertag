@@ -348,10 +348,15 @@ impl<'a> Runtime<'a> {
         )?;
         let set = set.to_str().context("permission set path")?;
         let role = role.to_str().context("role path")?;
-        self.cli(&["policy", "put", "permission-set", set]).await?;
-        self.cli(&["policy", "put", "role", role]).await?;
-        self.cli(&["policy", "assign", &format!("{tag_id}-role"), tag_id])
-            .await?;
+        self.cli(&["permission-set", "put", set]).await?;
+        self.cli(&["role", "put", role]).await?;
+        self.cli(&[
+            "role-assignment",
+            "create",
+            &format!("{tag_id}-role"),
+            tag_id,
+        ])
+        .await?;
         Ok(())
     }
 

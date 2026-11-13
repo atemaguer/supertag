@@ -7,7 +7,7 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use uuid::Uuid;
 
 #[derive(Subcommand)]
-pub enum GithubWorkspaceCommand {
+pub enum WorkspaceCommand {
     /// Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway.
     Put {
         workspace_id: String,
@@ -121,11 +121,11 @@ pub(crate) async fn delete(
     Ok(json!({"workspace_id":workspace_id,"deleted":true,"operation_id":operation_id}))
 }
 
-pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Result<()> {
+pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
     let mut client = client(channel);
     let output = match command {
-        GithubWorkspaceCommand::Put {
+        WorkspaceCommand::Put {
             workspace_id,
             account,
             repository_id,

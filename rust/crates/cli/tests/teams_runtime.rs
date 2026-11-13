@@ -129,7 +129,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     )
     .await?;
     let allow = [
-        "mailbox-grants",
+        "mailbox-grant",
         "--gateway",
         &public,
         "allow",
@@ -155,7 +155,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     assert_eq!(cli(&allow, &operator_token).await?, first);
     cli(
         &[
-            "mailbox-grants",
+            "mailbox-grant",
             "--gateway",
             &public,
             "allow",
@@ -167,10 +167,11 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     .await?;
     let page = cli(
         &[
-            "mailbox-grants",
+            "get",
             "--gateway",
             &public,
-            "list",
+            "mailbox-grants",
+            "--tag",
             "sender",
             "--limit",
             "1",
@@ -183,10 +184,11 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     ensure!(!cursor.is_empty());
     let next = cli(
         &[
-            "mailbox-grants",
+            "get",
             "--gateway",
             &public,
-            "list",
+            "mailbox-grants",
+            "--tag",
             "sender",
             "--limit",
             "1",
@@ -210,7 +212,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     assert_eq!(next["next_cursor"], "");
     let revoked = cli(
         &[
-            "mailbox-grants",
+            "mailbox-grant",
             "--gateway",
             &public,
             "revoke",
@@ -275,7 +277,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         "sender fixture failed: {source}"
     );
     let pending = cli(
-        &["mailbox", "--gateway", &public, "recipient"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "messages",
+            "--mailbox",
+            "recipient",
+        ],
         &operator_token,
     )
     .await?;
@@ -310,7 +319,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let (new_gateway, public) = service(gateway_command()).await?;
     gateway = new_gateway;
     let durable = cli(
-        &["mailbox-grants", "--gateway", &public, "list", "sender"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "mailbox-grants",
+            "--tag",
+            "sender",
+        ],
         &operator_token,
     )
     .await?;
@@ -345,7 +361,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         String::from_utf8_lossy(&output.stderr)
     );
     let handled = cli(
-        &["mailbox", "--gateway", &public, "recipient"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "messages",
+            "--mailbox",
+            "recipient",
+        ],
         &operator_token,
     )
     .await?;
@@ -377,7 +400,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         !result.contains("Edited after acceptance") && !result.contains("via=\"workstream post\"")
     );
     let observed = cli(
-        &["mailbox", "--gateway", &public, "observer"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "messages",
+            "--mailbox",
+            "observer",
+        ],
         &operator_token,
     )
     .await?;
@@ -388,7 +418,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
             .is_empty()
     );
     let workstream = cli(
-        &["team", "--gateway", &public, "posts", "readers"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "workstream-posts",
+            "--team",
+            "readers",
+        ],
         &operator_token,
     )
     .await?;
@@ -402,7 +439,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     // Replaying an old grant receipt after revocation must not grant it again.
     cli(
         &[
-            "mailbox-grants",
+            "mailbox-grant",
             "--gateway",
             &public,
             "revoke",
@@ -414,7 +451,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     .await?;
     let replay = cli(
         &[
-            "mailbox-grants",
+            "mailbox-grant",
             "--gateway",
             &public,
             "allow",
@@ -428,7 +465,14 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     .await?;
     assert_eq!(replay, first);
     let current = cli(
-        &["mailbox-grants", "--gateway", &public, "list", "sender"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "mailbox-grants",
+            "--tag",
+            "sender",
+        ],
         &operator_token,
     )
     .await?;
@@ -507,11 +551,10 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     ] {
         let value = cli(
             &[
-                "policy",
+                kind,
                 "--gateway",
                 &public,
                 "put",
-                kind,
                 file.to_str().context("policy fixture path")?,
             ],
             &operator_token,
@@ -521,10 +564,10 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     }
     let assignment = cli(
         &[
-            "policy",
+            "role-assignment",
             "--gateway",
             &public,
-            "assign",
+            "create",
             "review",
             "engineer",
             "--operation-id",
@@ -581,7 +624,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
         .context("assignment ID")?;
     let inactive = cli(
         &[
-            "policy",
+            "role-assignment",
             "--gateway",
             &public,
             "deactivate",
@@ -712,7 +755,14 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     );
 
     let page = cli(
-        &["inbox", "--gateway", &public, "list", "--kind", "approval"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "inbox-items",
+            "--kind",
+            "approval",
+        ],
         &operator_token,
     )
     .await?;
@@ -732,11 +782,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let approval_id = match item["approval"]["approval_id"].as_str() {
         Some(id) => id,
         None => {
-            let history = cli(
-                &["inbox", "--gateway", &public, "approvals"],
-                &operator_token,
-            )
-            .await?;
+            let history = cli(&["get", "--gateway", &public, "approvals"], &operator_token).await?;
             anyhow::bail!(
                 "missing approval for fixture Task {task}; Inbox {page}; approval history {history}"
             );
@@ -746,7 +792,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     assert_eq!(item["operator_eligible"], true);
     assert_eq!(item["approval"]["resource"], "release");
     let detail = cli(
-        &["inbox", "--gateway", &public, "approval", approval_id],
+        &["get", "--gateway", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
@@ -824,7 +870,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         Code::Unauthenticated
     );
     let decision_args = [
-        "inbox",
+        "approval",
         "--gateway",
         &public,
         "approve",
@@ -882,13 +928,20 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         Code::AlreadyExists
     );
     let used = cli(
-        &["inbox", "--gateway", &public, "approval", approval_id],
+        &["get", "--gateway", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
     assert!(used["consumed_at_ms"].is_i64());
     let page = cli(
-        &["team", "--gateway", &public, "posts", "release"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "workstream-posts",
+            "--team",
+            "release",
+        ],
         &operator_token,
     )
     .await?;
@@ -1087,7 +1140,14 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     assert!(!posted.duplicate && replay.duplicate);
     assert_eq!(posted.post, replay.post);
     let page = cli(
-        &["team", "--gateway", &public, "posts", "Release review"],
+        &[
+            "get",
+            "--gateway",
+            &public,
+            "workstream-posts",
+            "--team",
+            "Release review",
+        ],
         &operator_token,
     )
     .await?;
@@ -1407,7 +1467,11 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
             .published_at_ms
             .is_some()
     );
-    let listed = cli(&["inbox", "--gateway", &public, "list"], &operator_token).await?;
+    let listed = cli(
+        &["get", "--gateway", &public, "inbox-items"],
+        &operator_token,
+    )
+    .await?;
     assert_eq!(listed["items"].as_array().context("Inbox items")?.len(), 1);
     assert_eq!(listed["items"][0]["task_id"], attempt.task_id);
     assert_eq!(
@@ -1430,13 +1494,13 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
     let (restarted, public) = service(gateway_command()).await?;
     gateway = restarted;
     let question = cli(
-        &["inbox", "--gateway", &public, "question", &attempt.task_id],
+        &["get", "--gateway", &public, "question", &attempt.task_id],
         &operator_token,
     )
     .await?;
     assert_eq!(question["text"], "Which release route should I use?");
     let answer_args = [
-        "inbox",
+        "question",
         "--gateway",
         &public,
         "answer",
@@ -1450,7 +1514,11 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
     let replay = cli(&answer_args, &operator_token).await?;
     assert_eq!(replay["task_id"], answer["task_id"]);
     assert!(
-        cli(&["inbox", "--gateway", &public, "list"], &operator_token).await?["items"]
+        cli(
+            &["get", "--gateway", &public, "inbox-items"],
+            &operator_token
+        )
+        .await?["items"]
             .as_array()
             .context("Inbox items")?
             .is_empty()

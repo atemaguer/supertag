@@ -102,6 +102,11 @@ fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Comman
     c.args(args);
     c
 }
+fn consumption(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
+    let mut c = credentials.command(&["artifact-consumption", "--gateway", public]);
+    c.args(args);
+    c
+}
 async fn cross_objective_publication_is_explicit_and_durable(database: String) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
@@ -294,10 +299,10 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     assert_eq!(approved["revision"], 1);
-    let consent = json(publication(
+    let consent = json(consumption(
         &credentials,
         &public,
-        &["consume", "consent", "published", &destination.objective_id],
+        &["approve", "consent", "published", &destination.objective_id],
     ))
     .await?;
     assert_eq!(consent["revision"], 1);
@@ -474,15 +479,10 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         .into_inner();
     assert_eq!(delivered.state(), ArtifactAcquisitionState::Delivered);
     assert!(!root.join("cas").join(&blob.sha256).exists());
-    let withdrawn = json(publication(
+    let withdrawn = json(consumption(
         &credentials,
         &public,
-        &[
-            "withdraw-consumption",
-            "consent",
-            "--expected-revision",
-            "1",
-        ],
+        &["withdraw", "consent", "--expected-revision", "1"],
     ))
     .await?;
     assert_eq!(withdrawn["revision"], 2);
@@ -494,24 +494,14 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     );
     assert_eq!(
         withdrawn,
-        json(publication(
+        json(consumption(
             &credentials,
             &public,
-            &[
-                "withdraw-consumption",
-                "consent",
-                "--expected-revision",
-                "1"
-            ]
+            &["withdraw", "consent", "--expected-revision", "1"]
         ))
         .await?
     );
-    let audit = json(publication(
-        &credentials,
-        &public,
-        &["audit", "consumption", "consent"],
-    ))
-    .await?;
+    let audit = json(consumption(&credentials, &public, &["audit", "consent"])).await?;
     assert_eq!(audit["events"].as_array().unwrap().len(), 2);
     stop(&mut ingress).await?;
     stop(&mut control).await?;

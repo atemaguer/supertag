@@ -20,20 +20,21 @@ Commands:
   diff                  Preview an organization manifest through the Gateway
   apply                 Apply an organization manifest through the Gateway
   github-publication    Stop further provider writes of a GitHub publication
-  github-workspace      Select GitHub Workspace sources pinned to one repository and commit
+  workspace             Select GitHub Workspace sources pinned to one repository and commit
   reply                 Resolve uncertain connector replies from provider evidence
-  policy                Manage reusable Permission Sets, Context Sets, and Roles
-  surface-policy        Bind verified connector accounts and locations to Tag policy
-  update                Change a Tag's surface locations
-  activate              Apply a Permission Set or Context Set to a Tag's work at a surface location
-  deactivate            Stop applying a Permission Set or Context Set at a surface location
+  role                  Define reusable Roles: purpose, instructions, Permission Sets, and Context Sets
+  role-assignment       Assign Roles to Tags and deactivate assignments
+  permission-set        Define reusable Permission Sets and apply them at surface locations
+  context-set           Define reusable Context Sets and apply them at surface locations
+  surface-account       Record verified connector accounts for surface policy
+  surface-location      Bind a connector account's locations to a Tag and its policy
   gateway-credential    Store or delete Gateway collaboration credentials in the configured credential vault
   host                  Enroll, drain, resume, and revoke Worker Hosts, and rotate their credentials
   placement             Choose which labelled Worker Hosts run a Tag, and explain waiting Tasks
-  inbox                 Read and answer work waiting on an operator
+  question              Answer questions Objective Tasks ask the operator
+  approval              Approve or deny actions waiting on an operator
   mcp                   List this host's catalog MCP servers and log in to OAuth servers
-  mailbox               Read the messages sent to or from a Tag
-  mailbox-grants        Manage permission to send direct messages between Tags
+  mailbox-grant         Manage permission to send direct messages between Tags
   operator-token        Issue, rotate, and revoke named Operator Tokens. Admin operator token only
   audit                 List recorded operator changes, newest first, with actor, action, target, and outcome
   team                  Manage Teams and read their Workstream posts
@@ -54,7 +55,8 @@ Commands:
   connect               Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
-  artifact-publication  Approve and withdraw explicit cross-Objective artifact reuse
+  artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
+  artifact-consumption  Approve and withdraw a destination Objective's use of a publication
   volume                Register Volumes and copy immutable artifact files into explicitly mapped storage
   workspace-volume      Register a file Volume for read-only Workspace data
   artifact              Download files captured by a Task
@@ -471,12 +473,12 @@ Options:
           Print help
 ```
 
-## `supertag github-workspace`
+## `supertag workspace`
 
 ```text
 Select GitHub Workspace sources pinned to one repository and commit
 
-Usage: supertag github-workspace [OPTIONS] <COMMAND>
+Usage: supertag workspace [OPTIONS] <COMMAND>
 
 Commands:
   put   Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway
@@ -491,12 +493,12 @@ Options:
           Print help
 ```
 
-## `supertag github-workspace put`
+## `supertag workspace put`
 
 ```text
 Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway
 
-Usage: supertag github-workspace put [OPTIONS] --account <ACCOUNT> --repository-id <REPOSITORY_ID> --repository <REPOSITORY> <WORKSPACE_ID>
+Usage: supertag workspace put [OPTIONS] --account <ACCOUNT> --repository-id <REPOSITORY_ID> --repository <REPOSITORY> <WORKSPACE_ID>
 
 Arguments:
   <WORKSPACE_ID>  
@@ -573,19 +575,16 @@ Options:
           Print help
 ```
 
-## `supertag policy`
+## `supertag role`
 
 ```text
-Manage reusable Permission Sets, Context Sets, and Roles
+Define reusable Roles: purpose, instructions, Permission Sets, and Context Sets
 
-Usage: supertag policy [OPTIONS] <COMMAND>
+Usage: supertag role [OPTIONS] <COMMAND>
 
 Commands:
-  put          Create or replace a catalog resource from a JSON specification
-  assign       Assign an active Role to a Tag
-  assignments  List Role assignments
-  deactivate   Deactivate a Role assignment
-  help         Print this message or the help of the given subcommand(s)
+  put   Create or replace a Role from a JSON specification. Retire one by putting it with status retired
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -596,15 +595,14 @@ Options:
           Print help
 ```
 
-## `supertag policy put`
+## `supertag role put`
 
 ```text
-Create or replace a catalog resource from a JSON specification
+Create or replace a Role from a JSON specification. Retire one by putting it with status retired
 
-Usage: supertag policy put [OPTIONS] <KIND> <FILE>
+Usage: supertag role put [OPTIONS] <FILE>
 
 Arguments:
-  <KIND>  [possible values: permission-set, context-set, role]
   <FILE>  
 
 Options:
@@ -620,12 +618,33 @@ Options:
           Print help
 ```
 
-## `supertag policy assign`
+## `supertag role-assignment`
+
+```text
+Assign Roles to Tags and deactivate assignments
+
+Usage: supertag role-assignment [OPTIONS] <COMMAND>
+
+Commands:
+  create      Assign an active Role to a Tag
+  deactivate  Deactivate a Role assignment
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag role-assignment create`
 
 ```text
 Assign an active Role to a Tag
 
-Usage: supertag policy assign [OPTIONS] <ROLE> <TAG_ID>
+Usage: supertag role-assignment create [OPTIONS] <ROLE> <TAG_ID>
 
 Arguments:
   <ROLE>    
@@ -642,38 +661,12 @@ Options:
           Print help
 ```
 
-## `supertag policy assignments`
-
-```text
-List Role assignments
-
-Usage: supertag policy assignments [OPTIONS]
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --role <ROLE>
-          Only assignments of this Role [default: ""]
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --tag <TAG>
-          Only assignments to this Tag [default: ""]
-      --active
-          Only assignments in effect now
-      --limit <LIMIT>
-          Most entries to return on one page [default: 20]
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
-  -h, --help
-          Print help
-```
-
-## `supertag policy deactivate`
+## `supertag role-assignment deactivate`
 
 ```text
 Deactivate a Role assignment
 
-Usage: supertag policy deactivate [OPTIONS] --expected-revision <EXPECTED_REVISION> <ASSIGNMENT_ID>
+Usage: supertag role-assignment deactivate [OPTIONS] --expected-revision <EXPECTED_REVISION> <ASSIGNMENT_ID>
 
 Arguments:
   <ASSIGNMENT_ID>  
@@ -691,19 +684,18 @@ Options:
           Print help
 ```
 
-## `supertag surface-policy`
+## `supertag permission-set`
 
 ```text
-Bind verified connector accounts and locations to Tag policy
+Define reusable Permission Sets and apply them at surface locations
 
-Usage: supertag surface-policy [OPTIONS] <COMMAND>
+Usage: supertag permission-set [OPTIONS] <COMMAND>
 
 Commands:
-  put              Create or update an account or location from a JSON specification
-  show             Read an account or location by ID
-  list             List accounts or locations
-  delete-location  Remove a location's policy and stop new work on its connector alias
-  help             Print this message or the help of the given subcommand(s)
+  put         Create or replace the set from a JSON specification
+  activate    Apply the set to a Tag's work at a surface location
+  deactivate  Stop applying the set at a surface location
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -712,20 +704,17 @@ Options:
           Use the local services in this state directory instead of a Gateway
   -h, --help
           Print help
-
-A location applies to its exact configured Gateway connector account alias. Other aliases use their own policy. Configure a separate alias for each location. The Gateway owns provider credentials.
 ```
 
-## `supertag surface-policy put`
+## `supertag permission-set put`
 
 ```text
-Create or update an account or location from a JSON specification
+Create or replace the set from a JSON specification
 
-Usage: supertag surface-policy put [OPTIONS] <RESOURCE> <FILE>
+Usage: supertag permission-set put [OPTIONS] <FILE>
 
 Arguments:
-  <RESOURCE>  [possible values: account, location]
-  <FILE>      
+  <FILE>  
 
 Options:
       --expected-revision <EXPECTED_REVISION>
@@ -740,64 +729,115 @@ Options:
           Print help
 ```
 
-## `supertag surface-policy show`
+## `supertag permission-set activate`
 
 ```text
-Read an account or location by ID
+Apply the set to a Tag's work at a surface location
 
-Usage: supertag surface-policy show [OPTIONS] <RESOURCE> <ID>
-
-Arguments:
-  <RESOURCE>  [possible values: account, location]
-  <ID>        
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-  -h, --help
-          Print help
-```
-
-## `supertag surface-policy list`
-
-```text
-List accounts or locations
-
-Usage: supertag surface-policy list [OPTIONS] <RESOURCE>
+Usage: supertag permission-set activate [OPTIONS] --tag <TAG> --provider <PROVIDER> <SET>
 
 Arguments:
-  <RESOURCE>  [possible values: account, location]
+  <SET>  The set's ID or name
 
 Options:
+      --tag <TAG>
+          The Tag whose surface location the set applies to
+      --provider <PROVIDER>
+          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
       --account <ACCOUNT>
-          Restrict locations to one account
+          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
+      --channel-id <CHANNEL_ID>
+          Slack or Teams channel ID
+      --team-id <TEAM_ID>
+          Linear team ID or Microsoft Teams team ID
+      --chat-id <CHAT_ID>
+          Lark chat ID
+      --repo <REPOSITORY>
+          GitHub repository as OWNER/NAME
+      --repo-id <REPOSITORY_ID>
+          GitHub numeric repository ID
       --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --limit <LIMIT>
-          Most entries to return on one page [default: 20]
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
   -h, --help
           Print help
 ```
 
-## `supertag surface-policy delete-location`
+## `supertag permission-set deactivate`
 
 ```text
-Remove a location's policy and stop new work on its connector alias
+Stop applying the set at a surface location
 
-Usage: supertag surface-policy delete-location [OPTIONS] --expected-revision <EXPECTED_REVISION> <ID>
+Usage: supertag permission-set deactivate [OPTIONS] --tag <TAG> --provider <PROVIDER> <SET>
 
 Arguments:
-  <ID>  
+  <SET>  The set's ID or name
+
+Options:
+      --tag <TAG>
+          The Tag whose surface location the set applies to
+      --provider <PROVIDER>
+          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
+      --account <ACCOUNT>
+          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
+      --channel-id <CHANNEL_ID>
+          Slack or Teams channel ID
+      --team-id <TEAM_ID>
+          Linear team ID or Microsoft Teams team ID
+      --chat-id <CHAT_ID>
+          Lark chat ID
+      --repo <REPOSITORY>
+          GitHub repository as OWNER/NAME
+      --repo-id <REPOSITORY_ID>
+          GitHub numeric repository ID
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+  -h, --help
+          Print help
+```
+
+## `supertag context-set`
+
+```text
+Define reusable Context Sets and apply them at surface locations
+
+Usage: supertag context-set [OPTIONS] <COMMAND>
+
+Commands:
+  put         Create or replace the set from a JSON specification
+  activate    Apply the set to a Tag's work at a surface location
+  deactivate  Stop applying the set at a surface location
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag context-set put`
+
+```text
+Create or replace the set from a JSON specification
+
+Usage: supertag context-set put [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  
 
 Options:
       --expected-revision <EXPECTED_REVISION>
-          The revision you last read. The change is refused when the resource has changed since
+          The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
@@ -808,134 +848,164 @@ Options:
           Print help
 ```
 
-## `supertag update`
+## `supertag context-set activate`
 
 ```text
-Change a Tag's surface locations
+Apply the set to a Tag's work at a surface location
 
-Usage: supertag update <COMMAND>
+Usage: supertag context-set activate [OPTIONS] --tag <TAG> --provider <PROVIDER> <SET>
+
+Arguments:
+  <SET>  The set's ID or name
+
+Options:
+      --tag <TAG>
+          The Tag whose surface location the set applies to
+      --provider <PROVIDER>
+          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
+      --account <ACCOUNT>
+          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
+      --channel-id <CHANNEL_ID>
+          Slack or Teams channel ID
+      --team-id <TEAM_ID>
+          Linear team ID or Microsoft Teams team ID
+      --chat-id <CHAT_ID>
+          Lark chat ID
+      --repo <REPOSITORY>
+          GitHub repository as OWNER/NAME
+      --repo-id <REPOSITORY_ID>
+          GitHub numeric repository ID
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+  -h, --help
+          Print help
+```
+
+## `supertag context-set deactivate`
+
+```text
+Stop applying the set at a surface location
+
+Usage: supertag context-set deactivate [OPTIONS] --tag <TAG> --provider <PROVIDER> <SET>
+
+Arguments:
+  <SET>  The set's ID or name
+
+Options:
+      --tag <TAG>
+          The Tag whose surface location the set applies to
+      --provider <PROVIDER>
+          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
+      --account <ACCOUNT>
+          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
+      --channel-id <CHANNEL_ID>
+          Slack or Teams channel ID
+      --team-id <TEAM_ID>
+          Linear team ID or Microsoft Teams team ID
+      --chat-id <CHAT_ID>
+          Lark chat ID
+      --repo <REPOSITORY>
+          GitHub repository as OWNER/NAME
+      --repo-id <REPOSITORY_ID>
+          GitHub numeric repository ID
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+  -h, --help
+          Print help
+```
+
+## `supertag surface-account`
+
+```text
+Record verified connector accounts for surface policy
+
+Usage: supertag surface-account [OPTIONS] <COMMAND>
 
 Commands:
-  tag   Change where a Tag works: add or remove its location on a connected surface
+  put   Create or update a verified connector account from a JSON specification
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
-```
-
-## `supertag update tag`
-
-```text
-Change where a Tag works: add or remove its location on a connected surface
-
-Usage: supertag update tag [OPTIONS] <TAG>
-
-Arguments:
-  <TAG>  
-
-Options:
-      --add-location <PROVIDER>
-          Admit work for the Tag at a location of a connected surface account [possible values: slack, github, linear, lark, teams]
-      --remove-location <PROVIDER>
-          Stop admitting work for the Tag at the location [possible values: slack, github, linear, lark, teams]
-      --account <ACCOUNT>
-          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
-      --channel-id <CHANNEL_ID>
-          Slack or Teams channel ID
-      --team-id <TEAM_ID>
-          Linear team ID or Microsoft Teams team ID
-      --chat-id <CHAT_ID>
-          Lark chat ID
-      --repo <REPOSITORY>
-          GitHub repository as OWNER/NAME
-      --repo-id <REPOSITORY_ID>
-          GitHub numeric repository ID
-      --allowed-user <ALLOWED_USERS>
-          Provider user ID allowed to ask the Tag for work there (numeric on GitHub). Repeat for more users
       --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
-  -h, --help
-          Print help
-
-The local Gateway serves one location per Surface Account and one per provider; remove a location before adding another.
-```
-
-## `supertag activate`
-
-```text
-Apply a Permission Set or Context Set to a Tag's work at a surface location
-
-Usage: supertag activate [OPTIONS] --tag <TAG> --provider <PROVIDER> <KIND> <SET>
-
-Arguments:
-  <KIND>  [possible values: permission-set, context-set]
-  <SET>   Permission Set or Context Set ID or name
-
-Options:
-      --tag <TAG>
-          The Tag whose surface location the set applies to
-      --provider <PROVIDER>
-          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
-      --account <ACCOUNT>
-          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
-      --channel-id <CHANNEL_ID>
-          Slack or Teams channel ID
-      --team-id <TEAM_ID>
-          Linear team ID or Microsoft Teams team ID
-      --chat-id <CHAT_ID>
-          Lark chat ID
-      --repo <REPOSITORY>
-          GitHub repository as OWNER/NAME
-      --repo-id <REPOSITORY_ID>
-          GitHub numeric repository ID
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
-      --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+          Use the local services in this state directory instead of a Gateway
   -h, --help
           Print help
 ```
 
-## `supertag deactivate`
+## `supertag surface-account put`
 
 ```text
-Stop applying a Permission Set or Context Set at a surface location
+Create or update a verified connector account from a JSON specification
 
-Usage: supertag deactivate [OPTIONS] --tag <TAG> --provider <PROVIDER> <KIND> <SET>
+Usage: supertag surface-account put [OPTIONS] <FILE>
 
 Arguments:
-  <KIND>  [possible values: permission-set, context-set]
-  <SET>   Permission Set or Context Set ID or name
+  <FILE>  
 
 Options:
-      --tag <TAG>
-          The Tag whose surface location the set applies to
-      --provider <PROVIDER>
-          The surface the location belongs to [possible values: slack, github, linear, lark, teams]
-      --account <ACCOUNT>
-          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
-      --channel-id <CHANNEL_ID>
-          Slack or Teams channel ID
-      --team-id <TEAM_ID>
-          Linear team ID or Microsoft Teams team ID
-      --chat-id <CHAT_ID>
-          Lark chat ID
-      --repo <REPOSITORY>
-          GitHub repository as OWNER/NAME
-      --repo-id <REPOSITORY_ID>
-          GitHub numeric repository ID
+      --expected-revision <EXPECTED_REVISION>
+          The revision you last read. If given, the change is refused when the resource has changed since
       --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --operation-id <OPERATION_ID>
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
-  -f, --file <FILE>
-          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag surface-location`
+
+```text
+Bind a connector account's locations to a Tag and its policy
+
+Usage: supertag surface-location [OPTIONS] <COMMAND>
+
+Commands:
+  put   Create or update a location's Tag and policy from a JSON specification
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+
+A location applies to its exact configured Gateway connector account alias. Other aliases use their own policy. Configure a separate alias for each location. The Gateway owns provider credentials.
+```
+
+## `supertag surface-location put`
+
+```text
+Create or update a location's Tag and policy from a JSON specification
+
+Usage: supertag surface-location put [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  
+
+Options:
+      --expected-revision <EXPECTED_REVISION>
+          The revision you last read. If given, the change is refused when the resource has changed since
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --operation-id <OPERATION_ID>
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
   -h, --help
           Print help
 ```
@@ -1169,22 +1239,16 @@ Options:
           Print help
 ```
 
-## `supertag inbox`
+## `supertag question`
 
 ```text
-Read and answer work waiting on an operator
+Answer questions Objective Tasks ask the operator
 
-Usage: supertag inbox [OPTIONS] <COMMAND>
+Usage: supertag question [OPTIONS] <COMMAND>
 
 Commands:
-  list       List questions and work waiting for an operator
-  question   Read the full question from an Objective Task
-  answer     Answer an Objective question in the owner's Session
-  approval   Inspect the action, resource, and exact arguments requested
-  approvals  List approval history
-  approve    Approve the exact requested action once or for its Objective
-  deny       Deny a pending approval request
-  help       Print this message or the help of the given subcommand(s)
+  answer  Answer an Objective question in the owner's Session
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -1195,58 +1259,15 @@ Options:
           Print help
 ```
 
-## `supertag inbox list`
-
-```text
-List questions and work waiting for an operator
-
-Usage: supertag inbox list [OPTIONS]
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --objective <OBJECTIVE>
-          Only items for this Objective [default: ""]
-      --kind <KIND>
-          Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --limit <LIMIT>
-          Most entries to return on one page [default: 50]
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
-  -h, --help
-          Print help
-```
-
-## `supertag inbox question`
-
-```text
-Read the full question from an Objective Task
-
-Usage: supertag inbox question [OPTIONS] <TASK_ID>
-
-Arguments:
-  <TASK_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-  -h, --help
-          Print help
-```
-
-## `supertag inbox answer`
+## `supertag question answer`
 
 ```text
 Answer an Objective question in the owner's Session
 
-Usage: supertag inbox answer [OPTIONS] <TASK_ID> <TEXT>
+Usage: supertag question answer [OPTIONS] <TASK_ID> <TEXT>
 
 Arguments:
-  <TASK_ID>  
+  <TASK_ID>  The Task that asked
   <TEXT>     
 
 Options:
@@ -1260,15 +1281,17 @@ Options:
           Print help
 ```
 
-## `supertag inbox approval`
+## `supertag approval`
 
 ```text
-Inspect the action, resource, and exact arguments requested
+Approve or deny actions waiting on an operator
 
-Usage: supertag inbox approval [OPTIONS] <APPROVAL_ID>
+Usage: supertag approval [OPTIONS] <COMMAND>
 
-Arguments:
-  <APPROVAL_ID>  
+Commands:
+  approve  Approve the exact requested action once or for its Objective
+  deny     Deny a pending approval request
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -1279,38 +1302,12 @@ Options:
           Print help
 ```
 
-## `supertag inbox approvals`
-
-```text
-List approval history
-
-Usage: supertag inbox approvals [OPTIONS]
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --objective <OBJECTIVE>
-          Only items for this Objective [default: ""]
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --task <TASK>
-          Only approvals requested by this Task [default: ""]
-      --pending
-          Only requests that still wait for a decision
-      --limit <LIMIT>
-          Most entries to return on one page [default: 20]
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
-  -h, --help
-          Print help
-```
-
-## `supertag inbox approve`
+## `supertag approval approve`
 
 ```text
 Approve the exact requested action once or for its Objective
 
-Usage: supertag inbox approve [OPTIONS] <APPROVAL_ID>
+Usage: supertag approval approve [OPTIONS] <APPROVAL_ID>
 
 Arguments:
   <APPROVAL_ID>  
@@ -1330,12 +1327,12 @@ Options:
           Print help
 ```
 
-## `supertag inbox deny`
+## `supertag approval deny`
 
 ```text
 Deny a pending approval request
 
-Usage: supertag inbox deny [OPTIONS] --reason <REASON> <APPROVAL_ID>
+Usage: supertag approval deny [OPTIONS] --reason <REASON> <APPROVAL_ID>
 
 Arguments:
   <APPROVAL_ID>  
@@ -1402,40 +1399,16 @@ Options:
           Print help
 ```
 
-## `supertag mailbox`
-
-```text
-Read the messages sent to or from a Tag
-
-Usage: supertag mailbox [OPTIONS] <TAG_ID>
-
-Arguments:
-  <TAG_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --limit <LIMIT>
-          Most entries to return on one page [default: 32]
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
-  -h, --help
-          Print help
-```
-
-## `supertag mailbox-grants`
+## `supertag mailbox-grant`
 
 ```text
 Manage permission to send direct messages between Tags
 
-Usage: supertag mailbox-grants [OPTIONS] <COMMAND>
+Usage: supertag mailbox-grant [OPTIONS] <COMMAND>
 
 Commands:
   allow   Allow one Tag to send direct messages to another Tag
   revoke  Remove a directional grant; shared Team membership still permits messages
-  list    List the incoming and outgoing direct message grants for a Tag
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1447,12 +1420,12 @@ Options:
           Print help
 ```
 
-## `supertag mailbox-grants allow`
+## `supertag mailbox-grant allow`
 
 ```text
 Allow one Tag to send direct messages to another Tag
 
-Usage: supertag mailbox-grants allow [OPTIONS] <SENDER_TAG_ID> <RECIPIENT_TAG_ID>
+Usage: supertag mailbox-grant allow [OPTIONS] <SENDER_TAG_ID> <RECIPIENT_TAG_ID>
 
 Arguments:
   <SENDER_TAG_ID>     
@@ -1469,12 +1442,12 @@ Options:
           Print help
 ```
 
-## `supertag mailbox-grants revoke`
+## `supertag mailbox-grant revoke`
 
 ```text
 Remove a directional grant; shared Team membership still permits messages
 
-Usage: supertag mailbox-grants revoke [OPTIONS] <SENDER_TAG_ID> <RECIPIENT_TAG_ID>
+Usage: supertag mailbox-grant revoke [OPTIONS] <SENDER_TAG_ID> <RECIPIENT_TAG_ID>
 
 Arguments:
   <SENDER_TAG_ID>     
@@ -1485,29 +1458,6 @@ Options:
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-  -h, --help
-          Print help
-```
-
-## `supertag mailbox-grants list`
-
-```text
-List the incoming and outgoing direct message grants for a Tag
-
-Usage: supertag mailbox-grants list [OPTIONS] <TAG_ID>
-
-Arguments:
-  <TAG_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --limit <LIMIT>
-          Most entries to return on one page [default: 32]
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
   -h, --help
@@ -1634,7 +1584,6 @@ Usage: supertag team [OPTIONS] <COMMAND>
 Commands:
   create  Create a Team from existing Tags
   update  Replace the selected fields of a Team
-  posts   Read the newest Workstream posts or continue from a sequence
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1700,31 +1649,6 @@ Options:
           The revision you last read. If given, the change is refused when the resource has changed since
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
-  -h, --help
-          Print help
-```
-
-## `supertag team posts`
-
-```text
-Read the newest Workstream posts or continue from a sequence
-
-Usage: supertag team posts [OPTIONS] <TEAM>
-
-Arguments:
-  <TEAM>  
-
-Options:
-      --after-sequence <AFTER_SEQUENCE>
-          Continue after this post sequence instead of reading the newest posts
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --limit <LIMIT>
-          Most entries to return on one page [default: 16]
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-      --cursor <CURSOR>
-          Continue from the cursor the previous page returned [default: ""]
   -h, --help
           Print help
 ```
@@ -2336,6 +2260,7 @@ Usage: supertag tag [OPTIONS] <COMMAND>
 Commands:
   put     Set the instructions and allowed actions for a Tag
   retire  Retire a Tag by ID while preserving its work history
+  update  Change where a Tag works: add or remove its location on a connected surface. Its own --gateway, --state-directory, and --file name the local configuration it edits
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2415,6 +2340,47 @@ Options:
           Use the local services in this state directory instead of a Gateway
   -h, --help
           Print help
+```
+
+## `supertag tag update`
+
+```text
+Change where a Tag works: add or remove its location on a connected surface. Its own --gateway, --state-directory, and --file name the local configuration it edits
+
+Usage: supertag tag update [OPTIONS] <TAG>
+
+Arguments:
+  <TAG>  
+
+Options:
+      --add-location <PROVIDER>
+          Admit work for the Tag at a location of a connected surface account [possible values: slack, github, linear, lark, teams]
+      --remove-location <PROVIDER>
+          Stop admitting work for the Tag at the location [possible values: slack, github, linear, lark, teams]
+      --account <ACCOUNT>
+          Surface Account name from `supertag setup surface`. Needed when several accounts of the provider exist
+      --channel-id <CHANNEL_ID>
+          Slack or Teams channel ID
+      --team-id <TEAM_ID>
+          Linear team ID or Microsoft Teams team ID
+      --chat-id <CHAT_ID>
+          Lark chat ID
+      --repo <REPOSITORY>
+          GitHub repository as OWNER/NAME
+      --repo-id <REPOSITORY_ID>
+          GitHub numeric repository ID
+      --allowed-user <ALLOWED_USERS>
+          Provider user ID allowed to ask the Tag for work there (numeric on GitHub). Repeat for more users
+      --gateway <URL|NAME>
+          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --state-directory <STATE_DIRECTORY>
+          State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
+  -f, --file <FILE>
+          Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
+  -h, --help
+          Print help
+
+The local Gateway serves one location per Surface Account and one per provider; remove a location before adding another.
 ```
 
 ## `supertag task`
@@ -2620,17 +2586,15 @@ Options:
 ## `supertag artifact-publication`
 
 ```text
-Approve and withdraw explicit cross-Objective artifact reuse
+Publish completed artifact files for named destination Objectives, and withdraw them
 
 Usage: supertag artifact-publication [OPTIONS] <COMMAND>
 
 Commands:
-  publish               Approve selected completed output for named destination Objectives
-  consume               Approve consumption by a destination already in the publication audience
-  withdraw              Withdraw a publication at its exact revision, so later Tasks cannot use it
-  withdraw-consumption  Withdraw a consumption approval at its exact revision
-  audit                 List the recorded events for one publication or consumption approval
-  help                  Print this message or the help of the given subcommand(s)
+  publish   Approve selected completed output for named destination Objectives
+  withdraw  Withdraw a publication at its exact revision, so later Tasks cannot use it
+  audit     List the recorded events for one publication
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -2667,27 +2631,6 @@ Options:
           Print help
 ```
 
-## `supertag artifact-publication consume`
-
-```text
-Approve consumption by a destination already in the publication audience
-
-Usage: supertag artifact-publication consume [OPTIONS] <CONSUMPTION_ID> <PUBLICATION_ID> <OBJECTIVE_ID>
-
-Arguments:
-  <CONSUMPTION_ID>  
-  <PUBLICATION_ID>  
-  <OBJECTIVE_ID>    
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
-  -h, --help
-          Print help
-```
-
 ## `supertag artifact-publication withdraw`
 
 ```text
@@ -2709,12 +2652,74 @@ Options:
           Print help
 ```
 
-## `supertag artifact-publication withdraw-consumption`
+## `supertag artifact-publication audit`
+
+```text
+List the recorded events for one publication
+
+Usage: supertag artifact-publication audit [OPTIONS] <PUBLICATION_ID>
+
+Arguments:
+  <PUBLICATION_ID>  
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag artifact-consumption`
+
+```text
+Approve and withdraw a destination Objective's use of a publication
+
+Usage: supertag artifact-consumption [OPTIONS] <COMMAND>
+
+Commands:
+  approve   Approve consumption by a destination already in the publication audience
+  withdraw  Withdraw a consumption approval at its exact revision
+  audit     List the recorded events for one consumption approval
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag artifact-consumption approve`
+
+```text
+Approve consumption by a destination already in the publication audience
+
+Usage: supertag artifact-consumption approve [OPTIONS] <CONSUMPTION_ID> <PUBLICATION_ID> <OBJECTIVE_ID>
+
+Arguments:
+  <CONSUMPTION_ID>  
+  <PUBLICATION_ID>  
+  <OBJECTIVE_ID>    
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag artifact-consumption withdraw`
 
 ```text
 Withdraw a consumption approval at its exact revision
 
-Usage: supertag artifact-publication withdraw-consumption [OPTIONS] --expected-revision <EXPECTED_REVISION> <CONSUMPTION_ID>
+Usage: supertag artifact-consumption withdraw [OPTIONS] --expected-revision <EXPECTED_REVISION> <CONSUMPTION_ID>
 
 Arguments:
   <CONSUMPTION_ID>  
@@ -2730,16 +2735,15 @@ Options:
           Print help
 ```
 
-## `supertag artifact-publication audit`
+## `supertag artifact-consumption audit`
 
 ```text
-List the recorded events for one publication or consumption approval
+List the recorded events for one consumption approval
 
-Usage: supertag artifact-publication audit [OPTIONS] <APPROVAL_TYPE> <APPROVAL_ID>
+Usage: supertag artifact-consumption audit [OPTIONS] <CONSUMPTION_ID>
 
 Arguments:
-  <APPROVAL_TYPE>  
-  <APPROVAL_ID>    
+  <CONSUMPTION_ID>  
 
 Options:
       --gateway <URL|NAME>
@@ -3099,6 +3103,15 @@ Commands:
   github-publication    Read one GitHub publication, or list verified Workspace results and their publication status [alias: github-publications]
   reply                 Read a connector reply, its delivery status, and its audit history, or list replies [alias: replies]
   input                 Read the delivery status and fallback Task of a message sent to a running Task [alias: inputs]
+  surface-account       Read one verified connector account, or list them [alias: surface-accounts]
+  surface-location      Read one surface location's Tag and policy, or list locations [alias: surface-locations]
+  role-assignment       List Role assignments [alias: role-assignments]
+  mailbox-grant         List the incoming and outgoing direct message grants of a Tag [alias: mailbox-grants]
+  message               List the messages sent to or from a Tag [alias: messages]
+  workstream-post       List a Team's newest Workstream posts, or those after a sequence [alias: workstream-posts]
+  approval              Read the action, resource, and exact arguments an approval requests, or list approval history [alias: approvals]
+  question              Read the full question an Objective Task asked [alias: questions]
+  inbox-item            List the questions and work waiting for an operator [alias: inbox-items]
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -3607,6 +3620,220 @@ Options:
           Print help
 ```
 
+## `supertag get surface-account`
+
+```text
+Read one verified connector account, or list them
+
+Usage: supertag get surface-account [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Surface Account ID. Omit to list
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --limit <LIMIT>
+          Most entries to return on one page [default: 20]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag get surface-location`
+
+```text
+Read one surface location's Tag and policy, or list locations
+
+Usage: supertag get surface-location [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Surface Location ID. Omit to list
+
+Options:
+      --account <ACCOUNT>
+          Only locations of this account [default: ""]
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --limit <LIMIT>
+          Most entries to return on one page [default: 20]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get role-assignment`
+
+```text
+List Role assignments
+
+Usage: supertag get role-assignment [OPTIONS]
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --role <ROLE>
+          Only assignments of this Role [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --tag <TAG>
+          Only assignments to this Tag [default: ""]
+      --active
+          Only assignments in effect now
+      --limit <LIMIT>
+          Most entries to return on one page [default: 20]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get mailbox-grant`
+
+```text
+List the incoming and outgoing direct message grants of a Tag
+
+Usage: supertag get mailbox-grant [OPTIONS] --tag <TAG>
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --tag <TAG>
+          The Tag whose incoming and outgoing grants to list
+      --limit <LIMIT>
+          Most entries to return on one page [default: 32]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get message`
+
+```text
+List the messages sent to or from a Tag
+
+Usage: supertag get message [OPTIONS] --mailbox <MAILBOX>
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --mailbox <MAILBOX>
+          The Tag whose sent and received messages to list
+      --limit <LIMIT>
+          Most entries to return on one page [default: 32]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get workstream-post`
+
+```text
+List a Team's newest Workstream posts, or those after a sequence
+
+Usage: supertag get workstream-post [OPTIONS] --team <TEAM>
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --team <TEAM>
+          The Team whose Workstream to read, by ID or name
+      --after-sequence <AFTER_SEQUENCE>
+          Continue after this post sequence instead of reading the newest posts
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --limit <LIMIT>
+          Most entries to return on one page [default: 16]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get approval`
+
+```text
+Read the action, resource, and exact arguments an approval requests, or list approval history
+
+Usage: supertag get approval [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Approval ID. Omit to list
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --objective <OBJECTIVE>
+          Only approvals for this Objective [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --task <TASK>
+          Only approvals requested by this Task [default: ""]
+      --pending
+          Only requests that still wait for a decision
+      --limit <LIMIT>
+          Most entries to return on one page [default: 20]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
+## `supertag get question`
+
+```text
+Read the full question an Objective Task asked
+
+Usage: supertag get question [OPTIONS] <ID>
+
+Arguments:
+  <ID>  The ID of the Task that asked
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag get inbox-item`
+
+```text
+List the questions and work waiting for an operator
+
+Usage: supertag get inbox-item [OPTIONS]
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --objective <OBJECTIVE>
+          Only items for this Objective [default: ""]
+      --kind <KIND>
+          Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+      --limit <LIMIT>
+          Most entries to return on one page [default: 50]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
+```
+
 ## `supertag describe`
 
 ```text
@@ -3615,7 +3842,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  [possible values: tag, task, objective, team, host, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question]
   <ID>    The resource's ID or name
 
 Options:
@@ -3637,12 +3864,13 @@ Delete one resource by kind and ID
 Usage: supertag delete [OPTIONS] <COMMAND>
 
 Commands:
-  team            Delete a Team and its Workstream after its Objectives close [alias: teams]
-  permission-set  Delete an unused Permission Set [alias: permission-sets]
-  context-set     Delete an unused Context Set [alias: context-sets]
-  volume          Remove a Volume's metadata when no reserved or verified copies depend on it [alias: volumes]
-  workspace       Delete a GitHub Workspace source at its exact revision [alias: workspaces]
-  help            Print this message or the help of the given subcommand(s)
+  team              Delete a Team and its Workstream after its Objectives close [alias: teams]
+  permission-set    Delete an unused Permission Set [alias: permission-sets]
+  context-set       Delete an unused Context Set [alias: context-sets]
+  volume            Remove a Volume's metadata when no reserved or verified copies depend on it [alias: volumes]
+  workspace         Delete a GitHub Workspace source at its exact revision [alias: workspaces]
+  surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -3752,6 +3980,29 @@ Usage: supertag delete workspace [OPTIONS] --expected-revision <EXPECTED_REVISIO
 
 Arguments:
   <ID>  Workspace ID
+
+Options:
+      --expected-revision <EXPECTED_REVISION>
+          The revision you last read. The change is refused when the resource has changed since
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --operation-id <OPERATION_ID>
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway
+  -h, --help
+          Print help
+```
+
+## `supertag delete surface-location`
+
+```text
+Remove a location's policy and stop new work on its connector alias
+
+Usage: supertag delete surface-location [OPTIONS] --expected-revision <EXPECTED_REVISION> <ID>
+
+Arguments:
+  <ID>  Surface Location ID
 
 Options:
       --expected-revision <EXPECTED_REVISION>

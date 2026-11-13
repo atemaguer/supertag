@@ -288,11 +288,16 @@ spec: {purpose: Observe releases.}
     command(&gateway, &["apply", "-f", external.to_str().unwrap()], true).await?;
     command(
         &gateway,
-        &["mailbox-grants", "allow", "observer", "builder"],
+        &["mailbox-grant", "allow", "observer", "builder"],
         true,
     )
     .await?;
-    command(&gateway, &["policy", "assign", "Observer", "builder"], true).await?;
+    command(
+        &gateway,
+        &["role-assignment", "create", "Observer", "builder"],
+        true,
+    )
+    .await?;
 
     let empty = root.join("relationships.yaml");
     std::fs::write(
@@ -322,7 +327,7 @@ spec: {purpose: Observe releases.}
     let assignments: Value = serde_json::from_str(
         &command(
             &gateway,
-            &["policy", "assignments", "--tag", "builder", "--active"],
+            &["get", "role-assignments", "--tag", "builder", "--active"],
             true,
         )
         .await?,
@@ -335,7 +340,12 @@ spec: {purpose: Observe releases.}
         observer["role_id"]
     );
     let grants: Value = serde_json::from_str(
-        &command(&gateway, &["mailbox-grants", "list", "builder"], true).await?,
+        &command(
+            &gateway,
+            &["get", "mailbox-grants", "--tag", "builder"],
+            true,
+        )
+        .await?,
     )?;
     assert_eq!(grants["grants"].as_array().unwrap().len(), 1);
     assert_eq!(grants["grants"][0]["sender_tag_id"], "observer");
@@ -361,13 +371,13 @@ spec: {purpose: Observe releases.}
     );
     command(
         &gateway,
-        &["mailbox-grants", "revoke", "reviewer", "builder"],
+        &["mailbox-grant", "revoke", "reviewer", "builder"],
         true,
     )
     .await?;
     command(
         &gateway,
-        &["mailbox-grants", "allow", "reviewer", "builder"],
+        &["mailbox-grant", "allow", "reviewer", "builder"],
         true,
     )
     .await?;
@@ -423,7 +433,12 @@ spec: {purpose: Observe releases.}
         )?)
         .await?;
     let grants: Value = serde_json::from_str(
-        &command(&gateway, &["mailbox-grants", "list", "bootstrap-a"], true).await?,
+        &command(
+            &gateway,
+            &["get", "mailbox-grants", "--tag", "bootstrap-a"],
+            true,
+        )
+        .await?,
     )?;
     assert_eq!(grants["grants"].as_array().unwrap().len(), 2);
 

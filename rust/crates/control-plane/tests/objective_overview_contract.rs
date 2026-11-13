@@ -600,7 +600,7 @@ async fn objective_overview(store: &Store, host: &HostAuthority, clock: &AtomicI
     assert_eq!(
         question.next_actions,
         [format!(
-            "supertag inbox answer {} TEXT",
+            "supertag question answer {} TEXT",
             objective.starting_task_id
         )]
     );

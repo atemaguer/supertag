@@ -320,7 +320,7 @@ impl Store {
             attention.push(ObjectiveAttention {
                 kind: ObjectiveAttentionKind::Question as i32,
                 message: format!("{} asks: \"{owner_question}\"", objective.owner_tag_id),
-                next_actions: vec![format!("supertag inbox answer {owner_latest} TEXT")],
+                next_actions: vec![format!("supertag question answer {owner_latest} TEXT")],
                 task_id: owner_latest.clone(),
                 tag_id: objective.owner_tag_id.clone(),
             });
@@ -384,7 +384,7 @@ impl Store {
                     if pending_approvals == 1 { "" } else { "s" },
                     if pending_approvals == 1 { "s" } else { "" }
                 ),
-                next_actions: vec![format!("supertag inbox list --objective {id}")],
+                next_actions: vec![format!("supertag get inbox-items --objective {id}")],
                 ..Default::default()
             });
         }

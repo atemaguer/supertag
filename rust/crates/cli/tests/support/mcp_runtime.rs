@@ -46,17 +46,16 @@ async fn grant(
     )?;
     services
         .operator(&[
-            "policy",
-            "put",
             "permission-set",
+            "put",
             permissions.to_str().context("permission set path")?,
         ])
         .await?;
     services
-        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .operator(&["role", "put", role.to_str().context("role path")?])
         .await?;
     services
-        .operator(&["policy", "assign", &format!("{tag}-role"), tag])
+        .operator(&["role-assignment", "create", &format!("{tag}-role"), tag])
         .await?;
     Ok(())
 }
@@ -310,17 +309,16 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     }).to_string())?;
     services
         .operator(&[
-            "policy",
-            "put",
             "permission-set",
+            "put",
             permissions.to_str().context("permission set path")?,
         ])
         .await?;
     services
-        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .operator(&["role", "put", role.to_str().context("role path")?])
         .await?;
     services
-        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .operator(&["role-assignment", "create", "mcp-role", "mcp-reader"])
         .await?;
     let configure = |host: &mut Command| {
         host.arg("--claude-path")
@@ -441,7 +439,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let item = loop {
         let inbox = services
-            .operator(&["inbox", "list", "--kind", "mcp-login"])
+            .operator(&["get", "inbox-items", "--kind", "mcp-login"])
             .await?;
         if let Some(item) = inbox["items"]
             .as_array()
@@ -482,7 +480,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     let inbox = services
-        .operator(&["inbox", "list", "--kind", "mcp-login"])
+        .operator(&["get", "inbox-items", "--kind", "mcp-login"])
         .await?;
     assert!(
         inbox["items"].as_array().is_some_and(Vec::is_empty),

@@ -56,7 +56,7 @@ func TestTheTeamsViewShowsMembersLimitAndWorkstream(t *testing.T) {
 	got := screen(m)
 	for _, want := range []string{"Team · billing", "Team billing (team-billing)", "Members: lead, builder, deleted Tag tag-gone",
 		"Turns: at most 2 at once across its Objectives", "Revision: 4", "builder to lead · 2026-11-08T10:00:00Z",
-		"    Fix is on the branch.", "    Tests pass.", "supertag update team billing"} {
+		"    Fix is on the branch.", "    Tests pass.", "supertag team update billing"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the Team view lacks %q:\n%s", want, got)
 		}

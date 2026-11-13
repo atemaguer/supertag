@@ -18,7 +18,7 @@ mod inputs;
 mod lifecycle;
 mod local;
 mod local_config;
-mod mailbox_grants;
+mod mailbox;
 mod manifests;
 mod mcp;
 mod network;
@@ -172,11 +172,11 @@ enum Command {
         command: github_publications::PublicationCommand,
     },
     /// Select GitHub Workspace sources pinned to one repository and commit.
-    GithubWorkspace {
+    Workspace {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
-        command: github_workspaces::GithubWorkspaceCommand,
+        command: github_workspaces::WorkspaceCommand,
     },
     /// Resolve uncertain connector replies from provider evidence.
     Reply {
@@ -185,29 +185,49 @@ enum Command {
         #[command(subcommand)]
         command: replies::ReplyCommand,
     },
-    /// Manage reusable Permission Sets, Context Sets, and Roles.
-    Policy {
+    /// Define reusable Roles: purpose, instructions, Permission Sets, and Context Sets.
+    Role {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
-        command: policy::PolicyCommand,
+        command: policy::RoleCommand,
     },
-    /// Bind verified connector accounts and locations to Tag policy.
-    SurfacePolicy {
+    /// Assign Roles to Tags and deactivate assignments.
+    RoleAssignment {
         #[command(flatten)]
         connection: Connection,
-        #[command(flatten)]
-        args: surface_policy::SurfacePolicyArgs,
-    },
-    /// Change a Tag's surface locations.
-    Update {
         #[command(subcommand)]
-        command: surface_setup::UpdateCommand,
+        command: policy::AssignmentCommand,
     },
-    /// Apply a Permission Set or Context Set to a Tag's work at a surface location.
-    Activate(surface_setup::ActivationArgs),
-    /// Stop applying a Permission Set or Context Set at a surface location.
-    Deactivate(surface_setup::ActivationArgs),
+    /// Define reusable Permission Sets and apply them at surface locations.
+    PermissionSet {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: policy::SetCommand,
+    },
+    /// Define reusable Context Sets and apply them at surface locations.
+    ContextSet {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: policy::SetCommand,
+    },
+    /// Record verified connector accounts for surface policy.
+    SurfaceAccount {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: surface_policy::AccountCommand,
+    },
+    /// Bind a connector account's locations to a Tag and its policy.
+    #[command(after_help = surface_policy::LOCATION_AFTER_HELP)]
+    SurfaceLocation {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: surface_policy::LocationCommand,
+    },
     /// Store or delete Gateway collaboration credentials in the configured credential vault.
     GatewayCredential {
         #[command(subcommand)]
@@ -227,36 +247,31 @@ enum Command {
         #[command(subcommand)]
         command: placement::PlacementCommand,
     },
-    /// Read and answer work waiting on an operator.
-    Inbox {
+    /// Answer questions Objective Tasks ask the operator.
+    Question {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
-        command: inbox::InboxCommand,
+        command: inbox::QuestionCommand,
+    },
+    /// Approve or deny actions waiting on an operator.
+    Approval {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: inbox::ApprovalCommand,
     },
     /// List this host's catalog MCP servers and log in to OAuth servers.
     Mcp {
         #[command(subcommand)]
         command: mcp::McpCommand,
     },
-    /// Read the messages sent to or from a Tag.
-    Mailbox {
-        #[command(flatten)]
-        connection: Connection,
-        tag_id: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 32)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
     /// Manage permission to send direct messages between Tags.
-    MailboxGrants {
+    MailboxGrant {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
-        command: mailbox_grants::MailboxGrantCommand,
+        command: mailbox::GrantCommand,
     },
     /// Issue, rotate, and revoke named Operator Tokens. Admin operator token only.
     OperatorToken {
@@ -560,12 +575,19 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: tasks::TaskCommand,
     },
-    /// Approve and withdraw explicit cross-Objective artifact reuse.
+    /// Publish completed artifact files for named destination Objectives, and withdraw them.
     ArtifactPublication {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: artifact_publications::PublicationCommand,
+    },
+    /// Approve and withdraw a destination Objective's use of a publication.
+    ArtifactConsumption {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: artifact_publications::ConsumptionCommand,
     },
     /// Register Volumes and copy immutable artifact files into explicitly mapped storage.
     Volume {
@@ -785,25 +807,36 @@ async fn run(command: Command) -> Result<()> {
         Command::Watch { connection, args } => observe::watch(connection, args).await?,
         Command::Diff(args) => manifests::run(args, false).await?,
         Command::Apply(args) => manifests::run(args, true).await?,
-        Command::Policy {
+        Command::Role {
+            connection,
+            command: policy::RoleCommand::Put(args),
+        } => policy::put(connection, policy::Kind::Role, args).await?,
+        Command::RoleAssignment {
             connection,
             command,
-        } => policy::run(connection, command).await?,
-        Command::SurfacePolicy { connection, args } => {
-            use supertag_protocol::v2::surface_policy_catalog_client::SurfacePolicyCatalogClient;
-            let (channel, token) = connect_operator(connection).await?;
-            let client = SurfacePolicyCatalogClient::new(channel)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES);
-            surface_policy::run(client, &token, args).await?;
+        } => policy::run_assignment(connection, command).await?,
+        Command::PermissionSet {
+            connection,
+            command,
+        } => {
+            policy::run_set(connection, surface_setup::SetKind::PermissionSet, command).await?;
         }
+        Command::ContextSet {
+            connection,
+            command,
+        } => policy::run_set(connection, surface_setup::SetKind::ContextSet, command).await?,
+        Command::SurfaceAccount {
+            connection,
+            command,
+        } => surface_policy::run_account(connection, command).await?,
+        Command::SurfaceLocation {
+            connection,
+            command,
+        } => surface_policy::run_location(connection, command).await?,
         Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
         Command::Setup {
             command: SetupCommand::Surface(command),
         } => surface_setup::setup(command).await?,
-        Command::Update { command } => surface_setup::update(command).await?,
-        Command::Activate(args) => surface_setup::activation(true, args).await?,
-        Command::Deactivate(args) => surface_setup::activation(false, args).await?,
         Command::Placement {
             connection,
             command,
@@ -816,67 +849,24 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => replies::run(connection, command).await?,
-        Command::Inbox {
+        Command::Question {
             connection,
             command,
-        } => inbox::run(connection, command).await?,
+        } => inbox::run_question(connection, command).await?,
+        Command::Approval {
+            connection,
+            command,
+        } => inbox::run_approval(connection, command).await?,
         Command::Mcp { command } => mcp::run(command).await?,
-        Command::MailboxGrants {
+        Command::MailboxGrant {
             connection,
             command,
-        } => mailbox_grants::run(connection, command).await?,
-        Command::Mailbox {
-            connection,
-            tag_id,
-            limit,
-            cursor,
-        } => {
-            use supertag_protocol::v2::{
-                ListMailboxMessagesRequest, mailbox_client::MailboxClient,
-            };
-            let (channel, token) = connect_operator(connection).await?;
-            let page = MailboxClient::new(channel)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                .list_messages(request(
-                    ListMailboxMessagesRequest {
-                        tag_id,
-                        limit,
-                        cursor,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            let messages = page
-                .messages
-                .into_iter()
-                .map(|message| {
-                    json!({
-                        "message_id": message.message_id,
-                        "sender_tag_id": message.sender_tag_id,
-                        "recipient_tag_id": message.recipient_tag_id,
-                        "source_task_id": message.source_task_id,
-                        "origin": message.origin().as_str_name(),
-                        "workstream_post_id": message.workstream_post_id,
-                        "objective_id": message.objective_id,
-                        "text": message.text,
-                        "hops": message.hops,
-                        "task_id": message.task_id,
-                        "state": message.state().as_str_name(),
-                        "created_at_ms": message.created_at_ms,
-                    })
-                })
-                .collect::<Vec<_>>();
-            crate::terminal::print_json(
-                &json!({ "messages": messages, "next_cursor": page.next_cursor }),
-            )?;
-        }
+        } => mailbox::run(connection, command).await?,
         Command::GithubPublication {
             connection,
             command,
         } => github_publications::run(connection, command).await?,
-        Command::GithubWorkspace {
+        Command::Workspace {
             connection,
             command,
         } => github_workspaces::run(connection, command).await?,
@@ -1262,6 +1252,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => artifact_publications::run(connection, command).await?,
+        Command::ArtifactConsumption {
+            connection,
+            command,
+        } => artifact_publications::run_consumption(connection, command).await?,
         Command::Volume {
             connection,
             command,
@@ -2576,13 +2570,94 @@ mod tests {
     /// Verbs that apply to every resource kind. They come first: `supertag get tag ID`.
     const GENERIC_VERBS: [&str; 6] = ["get", "describe", "delete", "watch", "apply", "diff"];
 
-    /// Verbs that must never start a top-level command name, as in the removed `get-task` or
-    /// `create-auth-key`: a resource-specific action goes after its noun, `supertag task cancel`.
-    const VERBS: [&str; 22] = [
-        "get", "list", "show", "describe", "delete", "watch", "apply", "diff", "put", "create",
-        "update", "set", "remove", "revoke", "retire", "enroll", "rotate", "connect", "resolve",
-        "submit", "cancel", "download",
+    /// Generic verbs, and their synonyms, that a noun group must leave to `get`, `describe`,
+    /// `delete`, and `watch`: no `team list`, `surface-location show`, or `delete-location`.
+    const READ_VERBS: [&str; 6] = ["get", "list", "show", "describe", "delete", "watch"];
+
+    /// Verbs that must never start a top-level command, as in the removed `get-task`,
+    /// `create-auth-key`, `update tag`, or `activate`: a resource-specific action goes after its
+    /// noun, `supertag task cancel`.
+    const VERBS: [&str; 33] = [
+        "get",
+        "list",
+        "show",
+        "describe",
+        "delete",
+        "watch",
+        "apply",
+        "diff",
+        "put",
+        "create",
+        "update",
+        "set",
+        "remove",
+        "revoke",
+        "retire",
+        "enroll",
+        "rotate",
+        "connect",
+        "resolve",
+        "submit",
+        "cancel",
+        "download",
+        "activate",
+        "deactivate",
+        "assign",
+        "approve",
+        "deny",
+        "answer",
+        "consume",
+        "withdraw",
+        "publish",
+        "allow",
+        "grant",
     ];
+
+    /// Top-level groups that are not a resource kind: deployment and surface setup and checks,
+    /// placement rules, this host's MCP catalog, local vault credentials, and test sends. Every
+    /// other group is named after a kind in `resources::KINDS`.
+    const OTHER_GROUPS: [&str; 7] = [
+        "setup",
+        "check",
+        "verify",
+        "placement",
+        "mcp",
+        "gateway-credential",
+        "test",
+    ];
+
+    /// Groups of this machine's local state rather than Control Plane resources, which `get` does
+    /// not read: `mcp list` lists the host's MCP catalog, `gateway-credential delete` removes a
+    /// vault entry.
+    const LOCAL_GROUPS: [&str; 2] = ["mcp", "gateway-credential"];
+
+    /// Top-level commands that act on this machine, a deployment, or a report rather than on one
+    /// resource kind. `connect` is the one verb: it saves a Gateway on this machine.
+    const OPERATIONS: [&str; 19] = [
+        "health",
+        "init",
+        "sign-in",
+        "up",
+        "down",
+        "logs",
+        "ps",
+        "status",
+        "version",
+        "config",
+        "control-plane",
+        "gateway",
+        "tui",
+        "worker-host",
+        "connect",
+        "fetch",
+        "spend",
+        "metrics",
+        "audit",
+    ];
+
+    /// RESOURCE VERB actions named after another kind, because they create it: `task input`
+    /// sends the Input that `get input` reads.
+    const ACTIONS_NAMED_AFTER_KINDS: [[&str; 2]; 1] = [["task", "input"]];
 
     fn names(command: &clap::Command) -> Vec<String> {
         let mut names = vec![command.get_name().to_owned()];
@@ -2618,12 +2693,82 @@ mod tests {
     }
 
     /// The command grammar: ACTION RESOURCE for the generic verbs, which accept exactly the kinds
-    /// in `resources::KINDS`; RESOURCE VERB for every other action. No top-level command is a
-    /// verb-noun pair, and every kind has `get` and `describe`.
+    /// in `resources::KINDS`; RESOURCE VERB for every other action, under a group named after its
+    /// kind. Every top-level command is a generic verb, a kind's group, or one of the listed
+    /// non-resource groups and operations; none starts with a verb; and no group reads, lists,
+    /// deletes, or watches a resource itself.
     #[test]
     fn the_command_tree_follows_the_resource_grammar() {
         let cli = Cli::command();
         cli.clone().debug_assert();
+        check_grammar(&cli);
+    }
+
+    /// The grammar check refuses each shape review found in an earlier command tree, added back to
+    /// the real one: a verb taking its resource as a separate word (`update tag`), a verb-first
+    /// action (`activate`), a group that is not a kind (`surface-policy`, `github-workspace`),
+    /// and reads inside a group, whether named after a kind or not (`surface-location show`,
+    /// `team posts`, `placement approval`, `mailbox-grant list`).
+    #[test]
+    fn the_grammar_check_refuses_the_reviewed_shapes() {
+        let leaf = |name: &'static str| clap::Command::new(name);
+        let group = |name: &'static str, verb: &'static str| {
+            clap::Command::new(name).subcommand(clap::Command::new(verb))
+        };
+        let mutations: Vec<(&str, clap::Command)> = vec![
+            ("update", Cli::command().subcommand(group("update", "tag"))),
+            ("activate", Cli::command().subcommand(leaf("activate"))),
+            (
+                "surface-policy",
+                Cli::command().subcommand(group("surface-policy", "put")),
+            ),
+            (
+                "github-workspace",
+                Cli::command().subcommand(group("github-workspace", "put")),
+            ),
+            (
+                "surface-location show",
+                Cli::command().mut_subcommand("surface-location", |c| c.subcommand(leaf("show"))),
+            ),
+            (
+                "surface-location delete-location",
+                Cli::command().mut_subcommand("surface-location", |c| {
+                    c.subcommand(leaf("delete-location"))
+                }),
+            ),
+            (
+                "team posts",
+                Cli::command().mut_subcommand("team", |c| c.subcommand(leaf("posts"))),
+            ),
+            (
+                "placement approval",
+                Cli::command().mut_subcommand("placement", |c| c.subcommand(leaf("approval"))),
+            ),
+            (
+                "mailbox-grant list",
+                Cli::command().mut_subcommand("mailbox-grant", |c| c.subcommand(leaf("list"))),
+            ),
+            (
+                "role-assignment assignments",
+                Cli::command()
+                    .mut_subcommand("role-assignment", |c| c.subcommand(leaf("assignments"))),
+            ),
+        ];
+        for (shape, cli) in mutations {
+            let refusal =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check_grammar(&cli)))
+                    .expect_err(&format!("the grammar check accepts supertag {shape}"));
+            let message = refusal
+                .downcast_ref::<String>()
+                .expect("the check panics with a formatted message");
+            assert!(
+                message.starts_with(&format!("supertag {shape} ")),
+                "supertag {shape} is refused for itself, not: {message}"
+            );
+        }
+    }
+
+    fn check_grammar(cli: &clap::Command) {
         let kind_names = |filter: fn(&crate::resources::KindSpec) -> bool| {
             sorted(
                 KINDS
@@ -2651,11 +2796,16 @@ mod tests {
                 spec.name,
                 "one row per kind"
             );
+            assert!(
+                spec.read || spec.list,
+                "get reads {} by ID or lists it",
+                spec.name
+            );
         }
 
-        // get: one subcommand per kind, named singular with the plural as an alias. A kind that
-        // lists takes an optional ID; one that does not requires it.
-        let get = subcommand(&cli, "get");
+        // get: one subcommand per kind, named singular with the plural as an alias. A kind read
+        // by ID takes one, optional exactly when the kind lists; a listed-only kind takes none.
+        let get = subcommand(cli, "get");
         let mut get_names = Vec::new();
         for kind in get.get_subcommands() {
             let spec = KINDS
@@ -2665,14 +2815,21 @@ mod tests {
             assert_eq!(names(kind), [spec.name, spec.plural], "get {}", spec.name);
             let id = kind
                 .get_positionals()
-                .find(|argument| argument.get_id() == "id")
-                .unwrap_or_else(|| panic!("get {} takes an ID", spec.name));
+                .find(|argument| argument.get_id() == "id");
             assert_eq!(
-                id.is_required_set(),
-                !spec.list,
-                "get {} lists without an ID exactly when the table says so",
+                id.is_some(),
+                spec.read,
+                "get {} takes an ID exactly when the table reads it by ID",
                 spec.name
             );
+            if let Some(id) = id {
+                assert_eq!(
+                    id.is_required_set(),
+                    !spec.list,
+                    "get {} lists without an ID exactly when the table says so",
+                    spec.name
+                );
+            }
             get_names.extend(names(kind));
         }
         assert_eq!(
@@ -2681,14 +2838,14 @@ mod tests {
             "get reads every kind"
         );
 
-        let describe = subcommand(&cli, "describe");
+        let describe = subcommand(cli, "describe");
         assert_eq!(
             kind_values(describe, "kind"),
-            kind_names(|_| true),
-            "describe reads every kind"
+            kind_names(|spec| spec.read),
+            "describe reads every kind read by ID"
         );
 
-        let delete = subcommand(&cli, "delete");
+        let delete = subcommand(cli, "delete");
         let mut delete_names = Vec::new();
         for kind in delete.get_subcommands() {
             let spec = KINDS
@@ -2717,7 +2874,7 @@ mod tests {
                 .map(|name| (*name).to_owned()),
         );
         assert_eq!(
-            kind_values(subcommand(&cli, "watch"), "kinds"),
+            kind_values(subcommand(cli, "watch"), "kinds"),
             sorted(watched),
             "watch follows the watchable kinds and the event streams"
         );
@@ -2728,21 +2885,42 @@ mod tests {
             );
         }
         for verb in ["apply", "diff"] {
-            subcommand(&cli, verb);
+            subcommand(cli, verb);
         }
 
-        // RESOURCE VERB everywhere else: no top-level command starts with a verb, no top-level
-        // command is a kind followed by an action, and a noun group named after a kind leaves
-        // reading, listing, and deleting to the generic verbs.
-        for command in cli.get_subcommands() {
+        // Names a group's action must not take, because `get` reads them: every kind's singular
+        // and plural, and the last word of each plural (`team posts`, `inbox approvals`).
+        let mut read_names = kind_names(|_| true);
+        read_names.extend(KINDS.iter().filter_map(|spec| {
+            spec.plural
+                .rsplit_once('-')
+                .map(|(_, last)| last.to_owned())
+        }));
+
+        // RESOURCE VERB everywhere else.
+        for command in cli
+            .get_subcommands()
+            .filter(|command| !command.is_hide_set())
+        {
             let name = command.get_name();
             if GENERIC_VERBS.contains(&name) {
                 continue;
             }
+            let kind_group = KINDS.iter().any(|spec| spec.name == name);
+            assert!(
+                kind_group || OTHER_GROUPS.contains(&name) || OPERATIONS.contains(&name),
+                "supertag {name} is neither a generic verb, a resource kind's group, nor a listed \
+                 operation; read with supertag get KIND and act with supertag KIND VERB"
+            );
+            assert_eq!(
+                command.has_subcommands(),
+                !OPERATIONS.contains(&name),
+                "supertag {name} is a group exactly when it is not a listed operation"
+            );
             let first = name.split('-').next().unwrap_or(name);
             assert!(
-                !(VERBS.contains(&first) && name.contains('-')),
-                "supertag {name} is verb-noun; use RESOURCE VERB"
+                !VERBS.contains(&first) || name == "connect",
+                "supertag {name} starts with a verb; use supertag KIND VERB"
             );
             for spec in KINDS {
                 assert!(
@@ -2755,14 +2933,138 @@ mod tests {
                     &name[spec.name.len() + 1..]
                 );
             }
-            if KINDS.iter().any(|spec| spec.name == name) {
-                for verb in command.get_subcommands().map(clap::Command::get_name) {
-                    assert!(
-                        !["get", "list", "show", "describe", "delete", "watch"].contains(&verb),
-                        "supertag {name} {verb} duplicates a generic verb; use supertag {verb} {name}"
-                    );
-                }
+            if LOCAL_GROUPS.contains(&name) {
+                continue;
             }
+            for verb in command.get_subcommands().map(clap::Command::get_name) {
+                let first = verb.split('-').next().unwrap_or(verb);
+                assert!(
+                    !READ_VERBS.contains(&first),
+                    "supertag {name} {verb} duplicates a generic verb; use supertag {first} KIND"
+                );
+                assert!(
+                    !read_names.iter().any(|read| read == verb)
+                        || ACTIONS_NAMED_AFTER_KINDS.contains(&[name, verb]),
+                    "supertag {name} {verb} reads a resource; use supertag get KIND"
+                );
+            }
+        }
+        for name in OTHER_GROUPS.iter().chain(&OPERATIONS) {
+            subcommand(cli, name);
+            assert!(
+                KINDS.iter().all(|spec| spec.name != *name),
+                "{name} is a kind, so its group is not listed separately"
+            );
+        }
+    }
+
+    /// The removed command shapes no longer parse, and their replacements do.
+    #[test]
+    fn the_removed_command_shapes_are_refused_and_their_replacements_parse() {
+        for arguments in [
+            [
+                "supertag",
+                "update",
+                "tag",
+                "builder",
+                "--add-location",
+                "slack",
+            ]
+            .as_slice(),
+            &[
+                "supertag",
+                "activate",
+                "permission-set",
+                "reviewers",
+                "--tag",
+                "t",
+            ],
+            &["supertag", "deactivate", "context-set", "c", "--tag", "t"],
+            &["supertag", "surface-policy", "show", "location", "l"],
+            &["supertag", "surface-policy", "list", "account"],
+            &["supertag", "surface-policy", "delete-location", "l"],
+            &["supertag", "policy", "assignments"],
+            &["supertag", "policy", "put", "role", "role.json"],
+            &["supertag", "mailbox-grants", "list", "builder"],
+            &["supertag", "mailbox", "builder"],
+            &["supertag", "inbox", "list"],
+            &["supertag", "inbox", "approval", "a1"],
+            &["supertag", "inbox", "approvals"],
+            &["supertag", "team", "posts", "release"],
+            &["supertag", "github-workspace", "put", "w"],
+            &["supertag", "artifact-publication", "consume", "c", "p", "o"],
+            &["supertag", "describe", "mailbox-grant", "g"],
+            &["supertag", "get", "workstream-post", "p1", "--team", "t"],
+        ] {
+            assert!(
+                Cli::try_parse_from(arguments).is_err(),
+                "{arguments:?} is refused"
+            );
+        }
+        for arguments in [
+            [
+                "supertag",
+                "tag",
+                "update",
+                "builder",
+                "--add-location",
+                "slack",
+            ]
+            .as_slice(),
+            &[
+                "supertag",
+                "permission-set",
+                "activate",
+                "reviewers",
+                "--tag",
+                "builder",
+                "--provider",
+                "slack",
+                "--gateway",
+                "g",
+            ],
+            &["supertag", "get", "surface-location", "l", "--gateway", "g"],
+            &["supertag", "get", "surface-locations", "--account", "slack"],
+            &[
+                "supertag",
+                "delete",
+                "surface-location",
+                "l",
+                "--expected-revision",
+                "2",
+            ],
+            &["supertag", "get", "role-assignments", "--active"],
+            &["supertag", "get", "mailbox-grants", "--tag", "builder"],
+            &["supertag", "get", "messages", "--mailbox", "builder"],
+            &["supertag", "get", "inbox-items", "--objective", "o"],
+            &["supertag", "get", "approvals", "--pending"],
+            &["supertag", "describe", "approval", "a1"],
+            &["supertag", "get", "question", "task-1"],
+            &["supertag", "get", "workstream-posts", "--team", "release"],
+            &[
+                "supertag",
+                "workspace",
+                "put",
+                "w",
+                "--account",
+                "a",
+                "--repository-id",
+                "1",
+                "--repository",
+                "o/r",
+            ],
+            &["supertag", "artifact-consumption", "approve", "c", "p", "o"],
+            &["supertag", "approval", "deny", "a1", "--reason", "no"],
+            &["supertag", "question", "answer", "task-1", "yes"],
+            &[
+                "supertag",
+                "role-assignment",
+                "create",
+                "reviewer",
+                "builder",
+            ],
+        ] {
+            Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{arguments:?}: {error}"));
         }
     }
 

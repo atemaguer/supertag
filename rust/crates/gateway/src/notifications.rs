@@ -633,7 +633,7 @@ impl OperatorNotificationTest for TestNotifications {
             ));
         }
         let command = if objective.is_empty() {
-            "supertag inbox list".to_owned()
+            "supertag get inbox-items".to_owned()
         } else {
             format!("supertag describe objective {objective}")
         };

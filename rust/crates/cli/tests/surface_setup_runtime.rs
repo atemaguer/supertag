@@ -1,4 +1,4 @@
-//! `supertag setup surface`, `update tag --add-location|--remove-location`, and
+//! `supertag setup surface`, `tag update --add-location|--remove-location`, and
 //! `activate|deactivate permission-set|context-set` through real Control Plane and Gateway
 //! processes. Provider APIs are loopback fixtures; no credential leaves the test.
 #[path = "../../../test-support/prerequisites.rs"]
@@ -680,7 +680,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     ensure!(stderr.contains("--transport must be http"), "{stderr}");
     ensure!(std::fs::read(services.state.join("supertag.yaml"))? == original);
     ensure!(!services.state.join("gateway-credentials.json").exists());
-    let accounts = services.json(&["surface-policy", "list", "account"])?;
+    let accounts = services.json(&["get", "surface-accounts"])?;
     ensure!(accounts["accounts"] == json!([]), "{accounts}");
 
     // Interactive setup: each prompt reads a line of standard input.
@@ -694,7 +694,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         "{stdout}"
     );
     ensure!(services.provider.saw("/auth.test", SLACK_BOT));
-    let account = services.json(&["surface-policy", "show", "account", "acme"])?;
+    let account = services.json(&["get", "surface-account", "acme"])?;
     ensure!(
         account["identity"] == json!({"provider": "slack", "team_id": SLACK_TEAM})
             && account["enabled"] == true,
@@ -739,8 +739,8 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     let listen = free_port()?;
     let stderr = services.fail(
         &[
-            "update",
             "tag",
+            "update",
             "builder",
             "--add-location",
             "github",
@@ -760,8 +760,8 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     );
     let stdout = services.succeed(
         &[
-            "update",
             "tag",
+            "update",
             "builder",
             "--add-location",
             "slack",
@@ -795,7 +795,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
                 == json!({"tag": "builder", "allowed-users": [SLACK_USER], "channel-id": SLACK_CHANNEL}),
         "{entry}"
     );
-    let locations = services.json(&["surface-policy", "list", "location", "--account", "acme"])?;
+    let locations = services.json(&["get", "surface-locations", "--account", "acme"])?;
     let location = locations["locations"][0].clone();
     let location_id = location["location_id"]
         .as_str()
@@ -811,8 +811,8 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     // A second location for the same account is refused: one Gateway connector per account.
     let stderr = services.fail(
         &[
-            "update",
             "tag",
+            "update",
             "builder",
             "--add-location",
             "slack",
@@ -836,7 +836,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         ("activate", "context-set", "runbook"),
     ] {
         let stdout = services.succeed(
-            &[action, kind, set, "--tag", "builder", "--provider", "slack"],
+            &[kind, action, set, "--tag", "builder", "--provider", "slack"],
             &[],
             "",
         )?;
@@ -852,8 +852,8 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     }
     let stderr = services.fail(
         &[
-            "activate",
             "permission-set",
+            "activate",
             "missing-set",
             "--tag",
             "builder",
@@ -864,7 +864,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         "",
     )?;
     ensure!(stderr.to_lowercase().contains("not found"), "{stderr}");
-    let location = services.json(&["surface-policy", "show", "location", &location_id])?;
+    let location = services.json(&["get", "surface-location", &location_id])?;
     ensure!(
         location["permission_set_ids"] == json!(["reviewers"])
             && location["context_set_ids"] == json!(["runbook"]),
@@ -953,7 +953,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         let mode = std::fs::metadata(&services.state)?.permissions().mode();
         std::fs::set_permissions(&services.state, std::fs::Permissions::from_mode(0o500))?;
         let output = services.cli(
-            &["update", "tag", "builder", "--remove-location", "slack"],
+            &["tag", "update", "builder", "--remove-location", "slack"],
             &[],
             "",
         );
@@ -962,7 +962,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         ensure!(!output.status.success(), "{output:?}");
     }
     ensure!(services.surfaces()?["acme"]["location"]["tag"] == "builder");
-    let locations = services.json(&["surface-policy", "list", "location", "--account", "acme"])?;
+    let locations = services.json(&["get", "surface-locations", "--account", "acme"])?;
     ensure!(
         locations["locations"].as_array().map(Vec::len) == Some(1),
         "{locations}"
@@ -970,7 +970,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
 
     // Removing the location stops new work there and clears it from supertag.yaml.
     let stdout = services.succeed(
-        &["update", "tag", "builder", "--remove-location", "slack"],
+        &["tag", "update", "builder", "--remove-location", "slack"],
         &[],
         "",
     )?;
@@ -981,10 +981,10 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         "{stdout}"
     );
     ensure!(services.surfaces()?["acme"].get("location").is_none());
-    let locations = services.json(&["surface-policy", "list", "location", "--account", "acme"])?;
+    let locations = services.json(&["get", "surface-locations", "--account", "acme"])?;
     ensure!(locations["locations"] == json!([]), "{locations}");
     let stderr = services.fail(
-        &["update", "tag", "builder", "--remove-location", "slack"],
+        &["tag", "update", "builder", "--remove-location", "slack"],
         &[],
         "",
     )?;
@@ -1103,7 +1103,7 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
         "{stdout}"
     );
 
-    let accounts = services.json(&["surface-policy", "list", "account"])?;
+    let accounts = services.json(&["get", "surface-accounts"])?;
     let identities: BTreeMap<String, Value> = accounts["accounts"]
         .as_array()
         .context("accounts")?
@@ -1189,8 +1189,8 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
     let before = std::fs::read(services.state.join("supertag.yaml"))?;
     let stderr = services.fail(
         &[
-            "update",
             "tag",
+            "update",
             "builder",
             "--add-location",
             "github",
@@ -1211,7 +1211,7 @@ async fn every_provider_setup_reaches_the_gateway_through_the_vault(
         "{stderr}"
     );
     ensure!(std::fs::read(services.state.join("supertag.yaml"))? == before);
-    let locations = services.json(&["surface-policy", "list", "location", "--account", "gh"])?;
+    let locations = services.json(&["get", "surface-locations", "--account", "gh"])?;
     ensure!(locations["locations"] == json!([]), "{locations}");
 
     // GitHub: the vault's webhook secret authenticates deliveries; its token is used for replies.
@@ -1419,7 +1419,7 @@ async fn setup_without_a_local_control_plane_requires_a_shared_vault(
     ensure!(!services.provider.saw("/auth.test", SLACK_BOT));
     let home_vault = services.directory.path().join(".supertag");
     ensure!(!remote.join("gateway-credentials.json").exists() && !home_vault.exists());
-    let accounts = services.json(&["surface-policy", "list", "account"])?;
+    let accounts = services.json(&["get", "surface-accounts"])?;
     ensure!(accounts["accounts"] == json!([]), "{accounts}");
 
     let output = services.cli_in(
@@ -1453,7 +1453,7 @@ async fn setup_without_a_local_control_plane_requires_a_shared_vault(
             && !remote.join("supertag.yaml").exists()
             && !home_vault.exists()
     );
-    let account = services.json(&["surface-policy", "show", "account", "remote"])?;
+    let account = services.json(&["get", "surface-account", "remote"])?;
     ensure!(
         account["identity"] == json!({"provider": "slack", "team_id": SLACK_TEAM}),
         "{account}"
@@ -1582,8 +1582,8 @@ async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
     };
     cli(&["setup", "surface", "slack", "--listen", &listen])?;
     cli(&[
-        "update",
         "tag",
+        "update",
         "builder",
         "--add-location",
         "slack",

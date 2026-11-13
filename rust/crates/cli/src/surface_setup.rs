@@ -1,5 +1,5 @@
-//! `supertag setup surface`, `supertag update tag --add-location|--remove-location`, and
-//! `supertag activate|deactivate permission-set|context-set`.
+//! `supertag setup surface`, `supertag tag update --add-location|--remove-location`, and
+//! `supertag permission-set|context-set activate|deactivate`.
 //!
 //! Setup matches the TypeScript wizard (`apps/cli/src/setup.ts`): each value comes from its
 //! provider environment variable, or else a prompt (masked for secrets); the provider verifies
@@ -237,15 +237,6 @@ impl ScopeArgs {
     }
 }
 
-#[derive(Subcommand)]
-pub enum UpdateCommand {
-    /// Change where a Tag works: add or remove its location on a connected surface.
-    #[command(
-        after_help = "The local Gateway serves one location per Surface Account and one per provider; remove a location before adding another."
-    )]
-    Tag(UpdateTag),
-}
-
 #[derive(Args)]
 pub struct UpdateTag {
     tag: String,
@@ -270,7 +261,8 @@ pub struct UpdateTag {
     target: Target,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+/// The kind of set `permission-set activate` and `context-set activate` apply.
+#[derive(Clone, Copy)]
 pub enum SetKind {
     PermissionSet,
     ContextSet,
@@ -278,9 +270,7 @@ pub enum SetKind {
 
 #[derive(Args)]
 pub struct ActivationArgs {
-    #[arg(value_enum)]
-    kind: SetKind,
-    /// Permission Set or Context Set ID or name.
+    /// The set's ID or name.
     set: String,
     /// The Tag whose surface location the set applies to.
     #[arg(long)]
@@ -1107,8 +1097,7 @@ async fn location(
     }
 }
 
-pub async fn update(command: UpdateCommand) -> Result<()> {
-    let UpdateCommand::Tag(args) = command;
+pub async fn update_tag(args: UpdateTag) -> Result<()> {
     let context = Local::load(args.target.clone())?;
     let adding = args.add_location.is_some();
     let provider = args
@@ -1143,7 +1132,7 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
         if let Some(prior) = &surface.location {
             ensure!(
                 surface.location_id(&name, prior)? == id,
-                "surface {name} already serves {} at {} {}; remove it first: supertag update tag {} --remove-location {} --account {name}",
+                "surface {name} already serves {} at {} {}; remove it first: supertag tag update {} --remove-location {} --account {name}",
                 prior.tag,
                 provider.name(),
                 prior.describe(provider),
@@ -1229,7 +1218,7 @@ pub async fn update(command: UpdateCommand) -> Result<()> {
     Ok(())
 }
 
-pub async fn activation(activate: bool, args: ActivationArgs) -> Result<()> {
+pub async fn activation(activate: bool, kind: SetKind, args: ActivationArgs) -> Result<()> {
     let context = Local::load(args.target.clone())?;
     let (name, surface) = context.account(args.provider, args.scope.account.as_deref())?;
     let location = if args.scope.given() {
@@ -1241,7 +1230,7 @@ pub async fn activation(activate: bool, args: ActivationArgs) -> Result<()> {
             .filter(|location| location.tag == args.tag)
             .with_context(|| {
                 format!(
-                    "{} has no location on {} account {name}; pass its location flags or add one with supertag update tag {} --add-location {}",
+                    "{} has no location on {} account {name}; pass its location flags or add one with supertag tag update {} --add-location {}",
                     args.tag,
                     args.provider.name(),
                     args.tag,
@@ -1258,7 +1247,7 @@ pub async fn activation(activate: bool, args: ActivationArgs) -> Result<()> {
     let reference = GetPolicyResourceRequest {
         reference: args.set.clone(),
     };
-    let set_id = match args.kind {
+    let set_id = match kind {
         SetKind::PermissionSet => {
             catalog
                 .get_permission_set(request(reference, &token)?)
@@ -1278,14 +1267,14 @@ pub async fn activation(activate: bool, args: ActivationArgs) -> Result<()> {
         .await?
         .with_context(|| {
             format!(
-                "{} is not configured on {} {place}; add it with supertag update tag {} --add-location {}",
+                "{} is not configured on {} {place}; add it with supertag tag update {} --add-location {}",
                 args.tag,
                 args.provider.name(),
                 args.tag,
                 args.provider.name()
             )
         })?;
-    let ids = match args.kind {
+    let ids = match kind {
         SetKind::PermissionSet => &mut current.permission_set_ids,
         SetKind::ContextSet => &mut current.context_set_ids,
     };

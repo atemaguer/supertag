@@ -341,12 +341,15 @@ async fn contract(url: &str) {
     assert_eq!(
         summary.text,
         format!(
-            "Objective first has 1 more item that needs you:\n- Task {task} is uncertain: Attempt {attempt} may have executed, and only an operator on its Worker Host can recover it: `supertag task resolve-attempt {task} {attempt} --decision retry --evidence TEXT --confirmed-stopped`\n`supertag inbox list --objective first`",
+            "Objective first has 1 more item that needs you:\n- Task {task} is uncertain: Attempt {attempt} may have executed, and only an operator on its Worker Host can recover it: `supertag task resolve-attempt {task} {attempt} --decision retry --evidence TEXT --confirmed-stopped`\n`supertag get inbox-items --objective first`",
             task = first.starting_task_id,
             attempt = second.attempt_id
         )
     );
-    assert_eq!(summary.command, "supertag inbox list --objective first");
+    assert_eq!(
+        summary.command,
+        "supertag get inbox-items --objective first"
+    );
 
     // A failed delivery is retried after backoff, with URLs removed from its error.
     let failed = f
@@ -387,7 +390,7 @@ async fn contract(url: &str) {
         assert_eq!(desktop_message.objective_id, "*");
         assert_eq!(
             desktop_message.text,
-            "SuperTag has 2 new items across 2 Objectives.\n`supertag inbox list`"
+            "SuperTag has 2 new items across 2 Objectives.\n`supertag get inbox-items`"
         );
         assert_eq!(desktop_message.max_attempts, 3);
     }

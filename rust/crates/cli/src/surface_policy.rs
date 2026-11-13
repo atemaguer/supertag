@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
@@ -18,61 +18,70 @@ use supertag_protocol::{
 };
 use uuid::Uuid;
 
-use crate::request;
+use crate::{Connection, connect_operator, request};
+
+/// Explains which connector alias a location's policy covers.
+pub const LOCATION_AFTER_HELP: &str = "A location applies to its exact configured Gateway connector account alias. Other aliases use their own policy. Configure a separate alias for each location. The Gateway owns provider credentials.";
+
+/// `supertag surface-account VERB`.
+#[derive(Subcommand)]
+pub enum AccountCommand {
+    /// Create or update a verified connector account from a JSON specification.
+    Put(PutArgs),
+}
+
+/// `supertag surface-location VERB`.
+#[derive(Subcommand)]
+pub enum LocationCommand {
+    /// Create or update a location's Tag and policy from a JSON specification.
+    Put(PutArgs),
+}
 
 #[derive(Args)]
-#[command(
-    after_help = "A location applies to its exact configured Gateway connector account alias. Other aliases use their own policy. Configure a separate alias for each location. The Gateway owns provider credentials."
-)]
-pub struct SurfacePolicyArgs {
-    #[command(subcommand)]
-    command: SurfacePolicyCommand,
+pub struct PutArgs {
+    file: PathBuf,
+    /// The revision you last read. If given, the change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: Option<u64>,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum Resource {
-    Account,
-    Location,
+// Options for `supertag get surface-accounts`.
+#[derive(Args)]
+pub struct AccountListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
 }
 
-#[derive(Subcommand)]
-enum SurfacePolicyCommand {
-    /// Create or update an account or location from a JSON specification.
-    Put {
-        resource: Resource,
-        file: PathBuf,
-        /// The revision you last read. If given, the change is refused when the resource has changed since.
-        #[arg(long)]
-        expected_revision: Option<u64>,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
-    /// Read an account or location by ID.
-    Show { resource: Resource, id: String },
-    /// List accounts or locations.
-    List {
-        resource: Resource,
-        /// Restrict locations to one account.
-        #[arg(long)]
-        account: Option<String>,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Remove a location's policy and stop new work on its connector alias.
-    DeleteLocation {
-        id: String,
-        /// The revision you last read. The change is refused when the resource has changed since.
-        #[arg(long)]
-        expected_revision: u64,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
+// Options for `supertag get surface-locations`.
+#[derive(Args)]
+pub struct LocationListArgs {
+    /// Only locations of this account.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    account: String,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+// Options for `supertag delete surface-location`.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// The revision you last read. The change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: u64,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -271,125 +280,135 @@ fn operation_id(id: Option<String>) -> String {
     id.unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
-pub async fn run(
-    mut client: SurfacePolicyCatalogClient<ProtocolChannel>,
-    token: &str,
-    args: SurfacePolicyArgs,
-) -> Result<()> {
-    let output = match args.command {
-        SurfacePolicyCommand::Put {
-            resource,
-            file,
-            expected_revision,
-            operation_id: id,
-        } => match resource {
-            Resource::Account => account_json(
-                client
-                    .put_surface_account(request(
-                        PutSurfaceAccountRequest {
-                            operation_id: operation_id(id),
-                            expected_revision,
-                            account: Some(read_spec::<AccountSpec>(&file)?.into()),
-                        },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-            Resource::Location => location_json(
-                client
-                    .put_surface_location(request(
-                        PutSurfaceLocationRequest {
-                            operation_id: operation_id(id),
-                            expected_revision,
-                            location: Some(read_spec::<LocationSpec>(&file)?.into()),
-                        },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-        },
-        SurfacePolicyCommand::Show { resource, id } => match resource {
-            Resource::Account => account_json(
-                client
-                    .get_surface_account(request(
-                        GetSurfaceAccountRequest { account_id: id },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-            Resource::Location => location_json(
-                client
-                    .get_surface_location(request(
-                        GetSurfaceLocationRequest { location_id: id },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-        },
-        SurfacePolicyCommand::List {
-            resource,
-            account,
-            limit,
-            cursor,
-        } => match resource {
-            Resource::Account => {
-                if account.is_some() {
-                    bail!("--account filters locations");
-                }
-                let page = client
-                    .list_surface_accounts(request(
-                        ListSurfaceAccountsRequest { limit, cursor },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner();
-                json!({
-                    "accounts": page.accounts.into_iter().map(account_json).collect::<Vec<_>>(),
-                    "next_cursor": page.next_cursor,
-                })
-            }
-            Resource::Location => {
-                let page = client
-                    .list_surface_locations(request(
-                        ListSurfaceLocationsRequest {
-                            account_id: account.unwrap_or_default(),
-                            limit,
-                            cursor,
-                        },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner();
-                json!({
-                    "locations": page.locations.into_iter().map(location_json).collect::<Vec<_>>(),
-                    "next_cursor": page.next_cursor,
-                })
-            }
-        },
-        SurfacePolicyCommand::DeleteLocation {
-            id,
-            expected_revision,
-            operation_id: operation,
-        } => {
-            let deleted = client
-                .delete_surface_location(request(
-                    DeleteSurfaceLocationRequest {
-                        operation_id: operation_id(operation),
-                        location_id: id,
-                        expected_revision,
-                    },
-                    token,
-                )?)
-                .await?
-                .into_inner()
-                .deleted;
-            json!({ "deleted": deleted })
-        }
-    };
-    crate::terminal::print_json(&output)?;
+fn client(channel: ProtocolChannel) -> SurfacePolicyCatalogClient<ProtocolChannel> {
+    SurfacePolicyCatalogClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub async fn run_account(connection: Connection, command: AccountCommand) -> Result<()> {
+    let AccountCommand::Put(args) = command;
+    let (channel, token) = connect_operator(connection).await?;
+    let account = client(channel)
+        .put_surface_account(request(
+            PutSurfaceAccountRequest {
+                operation_id: operation_id(args.operation_id),
+                expected_revision: args.expected_revision,
+                account: Some(read_spec::<AccountSpec>(&args.file)?.into()),
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    crate::terminal::print_json(&account_json(account))?;
     Ok(())
+}
+
+pub async fn run_location(connection: Connection, command: LocationCommand) -> Result<()> {
+    let LocationCommand::Put(args) = command;
+    let (channel, token) = connect_operator(connection).await?;
+    let location = client(channel)
+        .put_surface_location(request(
+            PutSurfaceLocationRequest {
+                operation_id: operation_id(args.operation_id),
+                expected_revision: args.expected_revision,
+                location: Some(read_spec::<LocationSpec>(&args.file)?.into()),
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    crate::terminal::print_json(&location_json(location))?;
+    Ok(())
+}
+
+pub(crate) async fn fetch_account(
+    channel: ProtocolChannel,
+    token: &str,
+    id: String,
+) -> Result<Value> {
+    Ok(account_json(
+        client(channel)
+            .get_surface_account(request(GetSurfaceAccountRequest { account_id: id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn fetch_location(
+    channel: ProtocolChannel,
+    token: &str,
+    id: String,
+) -> Result<Value> {
+    Ok(location_json(
+        client(channel)
+            .get_surface_location(request(
+                GetSurfaceLocationRequest { location_id: id },
+                token,
+            )?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list_accounts(connection: Connection, args: AccountListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_surface_accounts(request(
+            ListSurfaceAccountsRequest {
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "accounts": page.accounts.into_iter().map(account_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))
+}
+
+pub(crate) async fn list_locations(
+    connection: Connection,
+    args: LocationListArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_surface_locations(request(
+            ListSurfaceLocationsRequest {
+                account_id: args.account,
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "locations": page.locations.into_iter().map(location_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))
+}
+
+/// Removes a location's policy and stops new work on its connector alias.
+pub(crate) async fn delete_location(
+    connection: Connection,
+    id: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let deleted = client(channel)
+        .delete_surface_location(request(
+            DeleteSurfaceLocationRequest {
+                operation_id: operation_id(args.operation_id),
+                location_id: id,
+                expected_revision: args.expected_revision,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner()
+        .deleted;
+    Ok(json!({ "deleted": deleted }))
 }

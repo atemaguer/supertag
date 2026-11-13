@@ -1,7 +1,7 @@
 use anyhow::Result;
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
-use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
+use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel, v2::*};
 use uuid::Uuid;
 
 use crate::{Connection, connect_operator, request};
@@ -29,53 +29,60 @@ impl From<Kind> for InboxItemKind {
     }
 }
 
+// Options for `supertag get inbox-items`.
+#[derive(Args)]
+pub struct ItemListArgs {
+    /// Only items for this Objective.
+    #[arg(long, default_value = "")]
+    objective: String,
+    /// Only items of this kind.
+    #[arg(long)]
+    kind: Option<Kind>,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50)]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "")]
+    cursor: String,
+}
+
+// Options for `supertag get approvals`.
+#[derive(Args)]
+pub struct ApprovalListArgs {
+    /// Only approvals for this Objective.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    objective: String,
+    /// Only approvals requested by this Task.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    task: String,
+    /// Only requests that still wait for a decision.
+    #[arg(long, conflicts_with = "id")]
+    pending: bool,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+/// `supertag question VERB`.
 #[derive(Subcommand)]
-pub enum InboxCommand {
-    /// List questions and work waiting for an operator.
-    List {
-        /// Only items for this Objective.
-        #[arg(long, default_value = "")]
-        objective: String,
-        /// Only items of this kind.
-        #[arg(long)]
-        kind: Option<Kind>,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Read the full question from an Objective Task.
-    Question { task_id: String },
+pub enum QuestionCommand {
     /// Answer an Objective question in the owner's Session.
     Answer {
+        /// The Task that asked.
         task_id: String,
         text: String,
         /// Supply the same ID to retry an answer after a lost response.
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Inspect the action, resource, and exact arguments requested.
-    Approval { approval_id: String },
-    /// List approval history.
-    Approvals {
-        /// Only items for this Objective.
-        #[arg(long, default_value = "")]
-        objective: String,
-        /// Only approvals requested by this Task.
-        #[arg(long, default_value = "")]
-        task: String,
-        /// Only requests that still wait for a decision.
-        #[arg(long)]
-        pending: bool,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
+}
+
+/// `supertag approval VERB`.
+#[derive(Subcommand)]
+pub enum ApprovalCommand {
     /// Approve the exact requested action once or for its Objective.
     Approve {
         approval_id: String,
@@ -101,165 +108,172 @@ pub enum InboxCommand {
     },
 }
 
-pub async fn run(connection: Connection, command: InboxCommand) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let mut client = inbox_client::InboxClient::new(channel)
+fn client(channel: ProtocolChannel) -> inbox_client::InboxClient<ProtocolChannel> {
+    inbox_client::InboxClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let output = match command {
-        InboxCommand::List {
-            objective,
-            kind,
-            limit,
-            cursor,
-        } => {
-            let page = client
-                .list_items(request(
-                    ListInboxItemsRequest {
-                        objective_id: objective,
-                        kind: kind.map_or(InboxItemKind::Unspecified, Into::into).into(),
-                        page_size: limit,
-                        cursor,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            let truncated_kinds = page
-                .truncated_kinds
-                .into_iter()
-                .map(|kind| kind_name(InboxItemKind::try_from(kind).unwrap_or_default()))
-                .collect::<Vec<_>>();
-            json!({
-                "as_of_ms": page.as_of_ms,
-                "items": page.items.into_iter().map(item_json).collect::<Vec<_>>(),
-                "next_cursor": page.next_cursor,
-                "truncated_kinds": truncated_kinds,
-            })
-        }
-        InboxCommand::Question { task_id } => {
-            let question = client
-                .get_question(request(GetQuestionRequest { task_id }, &token)?)
-                .await?
-                .into_inner();
-            json!({
-                "task_id": question.task_id,
-                "objective_id": question.objective_id,
-                "attempt_id": question.attempt_id,
-                "text": question.text,
-                "asked_at_ms": question.asked_at_ms,
-                "published_at_ms": question.published_at_ms,
-                "answer_task_id": question.answer_task_id,
-            })
-        }
-        InboxCommand::Answer {
-            task_id,
-            text,
-            operation_id,
-        } => {
-            let operation_id = operation_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-            let task = client
-                .answer_question(request(
-                    AnswerQuestionRequest {
-                        task_id,
-                        text,
-                        operation_id,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({ "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id })
-        }
-        InboxCommand::Approval { approval_id } => {
-            let approval = client
-                .get_approval(request(GetApprovalRequest { approval_id }, &token)?)
-                .await?
-                .into_inner();
-            let arguments: Value = serde_json::from_str(&approval.canonical_arguments_json)?;
-            let mut output = approval_json(approval);
-            output["arguments"] = arguments;
-            output
-        }
-        InboxCommand::Approvals {
-            objective,
-            task,
-            pending,
-            limit,
-            cursor,
-        } => {
-            let state = if pending {
-                ApprovalState::Pending
-            } else {
-                ApprovalState::Unspecified
-            };
-            let page = client
-                .list_approvals(request(
-                    ListApprovalsRequest {
-                        objective_id: objective,
-                        task_id: task,
-                        state: state.into(),
-                        limit,
-                        cursor,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({
-                "approvals": page.approvals.into_iter().map(approval_json).collect::<Vec<_>>(),
-                "next_cursor": page.next_cursor,
-            })
-        }
-        InboxCommand::Approve {
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+/// The questions and work waiting for an operator.
+pub(crate) async fn list_items(connection: Connection, args: ItemListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_items(request(
+            ListInboxItemsRequest {
+                objective_id: args.objective,
+                kind: args
+                    .kind
+                    .map_or(InboxItemKind::Unspecified, Into::into)
+                    .into(),
+                page_size: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    let truncated_kinds = page
+        .truncated_kinds
+        .into_iter()
+        .map(|kind| kind_name(InboxItemKind::try_from(kind).unwrap_or_default()))
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "as_of_ms": page.as_of_ms,
+        "items": page.items.into_iter().map(item_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+        "truncated_kinds": truncated_kinds,
+    }))
+}
+
+/// The full question an Objective Task asked.
+pub(crate) async fn fetch_question(
+    channel: ProtocolChannel,
+    token: &str,
+    task_id: String,
+) -> Result<Value> {
+    let question = client(channel)
+        .get_question(request(GetQuestionRequest { task_id }, token)?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "task_id": question.task_id,
+        "objective_id": question.objective_id,
+        "attempt_id": question.attempt_id,
+        "text": question.text,
+        "asked_at_ms": question.asked_at_ms,
+        "published_at_ms": question.published_at_ms,
+        "answer_task_id": question.answer_task_id,
+    }))
+}
+
+/// The action, resource, and exact arguments an approval request names.
+pub(crate) async fn fetch_approval(
+    channel: ProtocolChannel,
+    token: &str,
+    approval_id: String,
+) -> Result<Value> {
+    let approval = client(channel)
+        .get_approval(request(GetApprovalRequest { approval_id }, token)?)
+        .await?
+        .into_inner();
+    let arguments: Value = serde_json::from_str(&approval.canonical_arguments_json)?;
+    let mut output = approval_json(approval);
+    output["arguments"] = arguments;
+    Ok(output)
+}
+
+/// Approval history, newest first.
+pub(crate) async fn list_approvals(
+    connection: Connection,
+    args: ApprovalListArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let state = if args.pending {
+        ApprovalState::Pending
+    } else {
+        ApprovalState::Unspecified
+    };
+    let page = client(channel)
+        .list_approvals(request(
+            ListApprovalsRequest {
+                objective_id: args.objective,
+                task_id: args.task,
+                state: state.into(),
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "approvals": page.approvals.into_iter().map(approval_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))
+}
+
+pub async fn run_question(connection: Connection, command: QuestionCommand) -> Result<()> {
+    let QuestionCommand::Answer {
+        task_id,
+        text,
+        operation_id,
+    } = command;
+    let (channel, token) = connect_operator(connection).await?;
+    let task = client(channel)
+        .answer_question(request(
+            AnswerQuestionRequest {
+                task_id,
+                text,
+                operation_id: receipt_id(operation_id),
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    crate::terminal::print_json(
+        &json!({ "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id }),
+    )?;
+    Ok(())
+}
+
+pub async fn run_approval(connection: Connection, command: ApprovalCommand) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let decision = match command {
+        ApprovalCommand::Approve {
             approval_id,
             objective_scope,
             valid_until_ms,
             operation_id,
-        } => {
-            let scope = if objective_scope {
+        } => DecideApprovalRequest {
+            approval_id,
+            operation_id: receipt_id(operation_id),
+            approve: true,
+            scope: if objective_scope {
                 ApprovalScope::Objective
             } else {
                 ApprovalScope::Once
-            };
-            let approval = client
-                .decide_approval(request(
-                    DecideApprovalRequest {
-                        approval_id,
-                        operation_id: receipt_id(operation_id),
-                        approve: true,
-                        scope: scope.into(),
-                        valid_until_ms,
-                        reason: String::new(),
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            approval_json(approval)
-        }
-        InboxCommand::Deny {
+            }
+            .into(),
+            valid_until_ms,
+            reason: String::new(),
+        },
+        ApprovalCommand::Deny {
             approval_id,
             reason,
             operation_id,
-        } => {
-            let approval = client
-                .decide_approval(request(
-                    DecideApprovalRequest {
-                        approval_id,
-                        operation_id: receipt_id(operation_id),
-                        approve: false,
-                        reason,
-                        ..Default::default()
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            approval_json(approval)
-        }
+        } => DecideApprovalRequest {
+            approval_id,
+            operation_id: receipt_id(operation_id),
+            approve: false,
+            reason,
+            ..Default::default()
+        },
     };
-    crate::terminal::print_json(&output)?;
+    let approval = client(channel)
+        .decide_approval(request(decision, &token)?)
+        .await?
+        .into_inner();
+    crate::terminal::print_json(&approval_json(approval))?;
     Ok(())
 }
 

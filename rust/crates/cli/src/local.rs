@@ -357,7 +357,7 @@ impl Children {
                     || !surfaces.values().any(|surface| {
                         surface.provider == Provider::Github && surface.location.is_some()
                     }),
-                "a GitHub surface location cannot share the local Gateway with a Gateway Workspace; remove the location with supertag update tag TAG --remove-location github"
+                "a GitHub surface location cannot share the local Gateway with a Gateway Workspace; remove the location with supertag tag update TAG --remove-location github"
             );
             let mut connected = false;
             for (name, surface) in surfaces {

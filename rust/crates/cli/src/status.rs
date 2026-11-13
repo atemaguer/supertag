@@ -364,7 +364,7 @@ fn format_status(view: &StatusView, now_ms: i64) -> String {
         "Operator inbox: empty".into()
     } else {
         format!(
-            "Operator inbox: {}{} {}; see supertag inbox list",
+            "Operator inbox: {}{} {}; see supertag get inbox-items",
             if view.inbox.truncated {
                 "at least "
             } else {
@@ -507,7 +507,7 @@ mod tests {
         assert!(!text.contains('\u{1b}'), "{text}");
         assert!(text.contains("  ship  working; owner lead; 120 of 1000 USD minor units; deadline in 3h 5m; 2 need you\n"), "{text}");
         assert!(
-            text.ends_with("Operator inbox: 2 items; see supertag inbox list\n"),
+            text.ends_with("Operator inbox: 2 items; see supertag get inbox-items\n"),
             "{text}"
         );
     }

@@ -430,17 +430,16 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .await?;
     services
         .operator(&[
-            "policy",
-            "put",
             "permission-set",
+            "put",
             permissions.to_str().context("permission set path")?,
         ])
         .await?;
     services
-        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .operator(&["role", "put", role.to_str().context("role path")?])
         .await?;
     services
-        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .operator(&["role-assignment", "create", "mcp-role", "mcp-reader"])
         .await?;
     let task = services
         .operator(&[
@@ -497,7 +496,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         ]
     );
     let waiting = services
-        .operator(&["inbox", "list", "--kind", "approval"])
+        .operator(&["get", "inbox-items", "--kind", "approval"])
         .await?;
     let approvals = waiting["items"].as_array().context("MCP approvals")?;
     assert_eq!(approvals.len(), 2);
@@ -510,7 +509,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     };
     let missing_id = id_for("")?;
     let exact_id = id_for("repository:acme/docs")?;
-    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    let exact = services.operator(&["get", "approval", exact_id]).await?;
     assert_eq!(
         exact["arguments"],
         serde_json::json!({"owner":"acme","repo":"docs"})
@@ -518,7 +517,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     assert_eq!(exact["action"], "mcp:catalog/publish");
     services
         .operator(&[
-            "inbox",
+            "approval",
             "deny",
             missing_id,
             "--operation-id",
@@ -529,7 +528,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .await?;
     let decision = services
         .operator(&[
-            "inbox",
+            "approval",
             "approve",
             exact_id,
             "--operation-id",
@@ -560,7 +559,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         serde_json::json!({"tool":"publish","arguments":{"owner":"acme","repo":"docs"}})
     );
     assert_eq!(effects[4], serde_json::json!({"closed":true}));
-    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    let exact = services.operator(&["get", "approval", exact_id]).await?;
     assert!(exact["consumed_at_ms"].is_i64());
     provider.kill().await?;
     services.stop().await
@@ -631,17 +630,16 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         .await?;
     services
         .operator(&[
-            "policy",
-            "put",
             "permission-set",
+            "put",
             permissions.to_str().context("permission set path")?,
         ])
         .await?;
     services
-        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .operator(&["role", "put", role.to_str().context("role path")?])
         .await?;
     services
-        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .operator(&["role-assignment", "create", "mcp-role", "mcp-reader"])
         .await?;
     let task = services
         .operator(&[
@@ -691,7 +689,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         ]
     );
     let waiting = services
-        .operator(&["inbox", "list", "--kind", "approval"])
+        .operator(&["get", "inbox-items", "--kind", "approval"])
         .await?;
     let approvals = waiting["items"].as_array().context("MCP approvals")?;
     assert_eq!(approvals.len(), 2);
@@ -706,7 +704,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     let exact_id = id_for("repository:acme/docs")?;
     services
         .operator(&[
-            "inbox",
+            "approval",
             "deny",
             missing_id,
             "--operation-id",
@@ -717,7 +715,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         .await?;
     let decision = services
         .operator(&[
-            "inbox",
+            "approval",
             "approve",
             exact_id,
             "--operation-id",
@@ -752,7 +750,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         serde_json::json!({"tool":"publish","arguments":{"owner":"acme","repo":"docs"}})
     );
     assert_eq!(effects[4], serde_json::json!({"closed":true}));
-    let exact = services.operator(&["inbox", "approval", exact_id]).await?;
+    let exact = services.operator(&["get", "approval", exact_id]).await?;
     assert!(exact["consumed_at_ms"].is_i64());
     // One launch per Attempt, each with only the catalog env and the minimal default, and each
     // stopped when its Attempt ended.
@@ -1380,7 +1378,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         "fixture first turn awaiting Workstream approval"
     );
     let waiting = services
-        .operator(&["inbox", "list", "--kind", "approval"])
+        .operator(&["get", "inbox-items", "--kind", "approval"])
         .await?;
     assert_eq!(
         waiting["items"].as_array().context("approval items")?.len(),
@@ -1394,16 +1392,18 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .as_str()
         .context("approval ID")?;
     assert_eq!(
-        services.operator(&["team", "posts", "release"]).await?["posts"],
+        services
+            .operator(&["get", "workstream-posts", "--team", "release"])
+            .await?["posts"],
         serde_json::json!([])
     );
     assert_eq!(
-        services.operator(&["mailbox", "recipient"]).await?["messages"],
+        services
+            .operator(&["get", "messages", "--mailbox", "recipient"])
+            .await?["messages"],
         serde_json::json!([])
     );
-    let exact = services
-        .operator(&["inbox", "approval", approval_id])
-        .await?;
+    let exact = services.operator(&["get", "approval", approval_id]).await?;
     let body = "The SDK fixture verified the release.";
     assert_eq!(exact["arguments"]["body"], body);
     assert_eq!(
@@ -1412,7 +1412,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     );
 
     let approve = [
-        "inbox",
+        "approval",
         "approve",
         approval_id,
         "--operation-id",
@@ -1430,7 +1430,9 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     assert_eq!(continued["state"], "TASK_STATE_SUCCEEDED", "{continued}");
     assert_eq!(continued["session_id"], first["session_id"]);
     assert_eq!(continued["result"], "fixture resumed and posted one update");
-    let workstream = services.operator(&["team", "posts", "release"]).await?;
+    let workstream = services
+        .operator(&["get", "workstream-posts", "--team", "release"])
+        .await?;
     assert_eq!(
         workstream["posts"]
             .as_array()
@@ -1441,13 +1443,13 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     let post = &workstream["posts"][0];
     assert_eq!(post["source_task_id"], continued_id);
     assert_eq!(post["body"], body);
-    let approval = services
-        .operator(&["inbox", "approval", approval_id])
-        .await?;
+    let approval = services.operator(&["get", "approval", approval_id]).await?;
     assert!(approval["consumed_at_ms"].is_i64());
 
     success(worker("recipient-host")).await?;
-    let mailbox = services.operator(&["mailbox", "recipient"]).await?;
+    let mailbox = services
+        .operator(&["get", "messages", "--mailbox", "recipient"])
+        .await?;
     assert_eq!(
         mailbox["messages"]
             .as_array()

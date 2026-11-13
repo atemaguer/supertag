@@ -618,9 +618,9 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
         "account.json",
         json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
     )?;
-    json(cli(&["surface-policy", "put", "account", &account])).await?;
+    json(cli(&["surface-account", "put", &account])).await?;
     json(cli(&[
-        "github-workspace",
+        "workspace",
         "put",
         "project",
         "--account",
@@ -652,14 +652,14 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
         "grant.json",
         json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"contents:read"}]}),
     )?;
-    json(cli(&["policy", "put", "permission-set", &grant])).await?;
+    json(cli(&["permission-set", "put", &grant])).await?;
     let role = spec(
         root,
         "role.json",
         json!({"role_id":"reader","name":"reader","purpose":"Read source","permission_set_ids":["read-source"]}),
     )?;
-    json(cli(&["policy", "put", "role", &role])).await?;
-    json(cli(&["policy", "assign", "reader", "builder"])).await?;
+    json(cli(&["role", "put", &role])).await?;
+    json(cli(&["role-assignment", "create", "reader", "builder"])).await?;
     // The granted repository is selected, and the acknowledgement names its Workspace.
     mention(
         &ingress,
@@ -689,9 +689,8 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
         json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:124","action":"contents:read"}]}),
     )?;
     json(cli(&[
-        "policy",
-        "put",
         "permission-set",
+        "put",
         &narrowed,
         "--expected-revision",
         "1",

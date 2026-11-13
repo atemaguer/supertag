@@ -522,12 +522,10 @@ pub enum WatchKindArg {
 }
 
 /// Change streams `watch` follows that are not resources `get` reads: messages in a Session's
-/// conversation, and posts to a Team's Workstream. Singular, then plural.
+/// conversation. Singular, then plural.
 #[cfg(test)]
-pub(crate) const WATCH_EVENT_STREAMS: &[[&str; 2]] = &[
-    ["conversation-message", "conversation-messages"],
-    ["workstream-post", "workstream-posts"],
-];
+pub(crate) const WATCH_EVENT_STREAMS: &[[&str; 2]] =
+    &[["conversation-message", "conversation-messages"]];
 
 impl From<WatchKindArg> for WatchKind {
     fn from(value: WatchKindArg) -> Self {

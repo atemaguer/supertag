@@ -535,7 +535,7 @@ mod tests {
         asked.attention.push(ObjectiveAttention {
             kind: ObjectiveAttentionKind::Question as i32,
             message: "planner asks: \"Pick one:\u{1b}[2K\r rm -rf /\nSecond line\"".into(),
-            next_actions: vec!["supertag inbox answer t1 TEXT".into()],
+            next_actions: vec!["supertag question answer t1 TEXT".into()],
             ..Default::default()
         });
         let text = text(&asked);

@@ -1182,7 +1182,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         &services,
         &tokens,
         &[
-            "mailbox-grants",
+            "mailbox-grant",
             "allow",
             tag,
             peer,
@@ -1354,7 +1354,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         "usage was not recorded exactly once: {:?}",
         usage.reports
     );
-    let mailbox = operator_cli(&services, &tokens, &["mailbox", peer]).await?;
+    let mailbox = operator_cli(&services, &tokens, &["get", "messages", "--mailbox", peer]).await?;
     let messages = mailbox["messages"].as_array().context("Mailbox messages")?;
     ensure!(
         messages
@@ -1364,7 +1364,12 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
             == 1,
         "the Mailbox message was not delivered exactly once: {mailbox}"
     );
-    let posts = operator_cli(&services, &tokens, &["team", "posts", "relay"]).await?;
+    let posts = operator_cli(
+        &services,
+        &tokens,
+        &["get", "workstream-posts", "--team", "relay"],
+    )
+    .await?;
     ensure!(
         posts["posts"]
             .as_array()
@@ -1377,7 +1382,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
     );
     // The live input's follower Task is newer in the same Session, so the
     // question is not listed as actionable; it is still published once.
-    let question = operator_cli(&services, &tokens, &["inbox", "question", &task_id]).await?;
+    let question = operator_cli(&services, &tokens, &["get", "question", &task_id]).await?;
     ensure!(
         question["text"] == "Which route survives the partition?",
         "the question was not published: {question}"

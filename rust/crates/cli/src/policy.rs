@@ -1,60 +1,51 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use uuid::Uuid;
 
-use crate::{Connection, connect_operator, request};
+use crate::{Connection, connect_operator, request, surface_setup};
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy)]
 pub enum Kind {
     PermissionSet,
     ContextSet,
     Role,
 }
 
+/// `supertag role VERB`.
 #[derive(Subcommand)]
-pub enum PolicyCommand {
-    /// Create or replace a catalog resource from a JSON specification.
-    Put {
-        kind: Kind,
-        file: PathBuf,
-        /// The revision you last read. If given, the change is refused when the resource has changed since.
-        #[arg(long)]
-        expected_revision: Option<u64>,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
+pub enum RoleCommand {
+    /// Create or replace a Role from a JSON specification. Retire one by putting it with status
+    /// retired.
+    Put(PutArgs),
+}
+
+/// `supertag permission-set VERB` and `supertag context-set VERB`.
+#[derive(Subcommand)]
+pub enum SetCommand {
+    /// Create or replace the set from a JSON specification.
+    Put(PutArgs),
+    /// Apply the set to a Tag's work at a surface location.
+    Activate(surface_setup::ActivationArgs),
+    /// Stop applying the set at a surface location.
+    Deactivate(surface_setup::ActivationArgs),
+}
+
+/// `supertag role-assignment VERB`.
+#[derive(Subcommand)]
+pub enum AssignmentCommand {
     /// Assign an active Role to a Tag.
-    Assign {
+    Create {
         role: String,
         tag_id: String,
         /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
-    },
-    /// List Role assignments.
-    Assignments {
-        /// Only assignments of this Role.
-        #[arg(long, default_value = "")]
-        role: String,
-        /// Only assignments to this Tag.
-        #[arg(long, default_value = "")]
-        tag: String,
-        /// Only assignments in effect now.
-        #[arg(long)]
-        active: bool,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
     },
     /// Deactivate a Role assignment.
     Deactivate {
@@ -66,6 +57,37 @@ pub enum PolicyCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
+}
+
+#[derive(Args)]
+pub struct PutArgs {
+    file: PathBuf,
+    /// The revision you last read. If given, the change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: Option<u64>,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
+}
+
+// Options for `supertag get role-assignments`.
+#[derive(Args)]
+pub struct AssignmentListArgs {
+    /// Only assignments of this Role.
+    #[arg(long, default_value = "")]
+    role: String,
+    /// Only assignments to this Tag.
+    #[arg(long, default_value = "")]
+    tag: String,
+    /// Only assignments in effect now.
+    #[arg(long)]
+    active: bool,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20)]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "")]
+    cursor: String,
 }
 
 #[derive(Deserialize)]
@@ -364,114 +386,46 @@ pub(crate) async fn delete(
     Ok(json!({ "deleted": deleted }))
 }
 
-pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
+/// `supertag role put`, `permission-set put`, and `context-set put`.
+pub async fn put(connection: Connection, kind: Kind, args: PutArgs) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
     let mut client = client(channel);
-    let output = match command {
-        PolicyCommand::Put {
-            kind,
-            file,
-            expected_revision,
-            operation_id: id,
-        } => {
-            let operation_id = operation_id(id);
-            match kind {
-                Kind::PermissionSet => permission_json(
-                    client
-                        .put_permission_set(request(
-                            PutPermissionSetRequest {
-                                operation_id,
-                                expected_revision,
-                                permission_set: Some(spec::<PermissionSpec>(&file)?.into()),
-                            },
-                            &token,
-                        )?)
-                        .await?
-                        .into_inner(),
-                ),
-                Kind::ContextSet => context_json(
-                    client
-                        .put_context_set(request(
-                            PutContextSetRequest {
-                                operation_id,
-                                expected_revision,
-                                context_set: Some(spec::<ContextSpec>(&file)?.into()),
-                            },
-                            &token,
-                        )?)
-                        .await?
-                        .into_inner(),
-                )?,
-                Kind::Role => role_json(
-                    client
-                        .put_role(request(
-                            PutRoleRequest {
-                                operation_id,
-                                expected_revision,
-                                role: Some(spec::<RoleSpec>(&file)?.into()),
-                            },
-                            &token,
-                        )?)
-                        .await?
-                        .into_inner(),
-                ),
-            }
-        }
-        PolicyCommand::Assign {
-            role,
-            tag_id,
-            operation_id: id,
-        } => assignment_json(
+    let operation_id = operation_id(args.operation_id);
+    let expected_revision = args.expected_revision;
+    let output = match kind {
+        Kind::PermissionSet => permission_json(
             client
-                .assign_role(request(
-                    AssignRoleRequest {
-                        role,
-                        tag_id,
-                        operation_id: operation_id(id),
+                .put_permission_set(request(
+                    PutPermissionSetRequest {
+                        operation_id,
+                        expected_revision,
+                        permission_set: Some(spec::<PermissionSpec>(&args.file)?.into()),
                     },
                     &token,
                 )?)
                 .await?
                 .into_inner(),
         ),
-        PolicyCommand::Assignments {
-            role,
-            tag,
-            active,
-            limit,
-            cursor,
-        } => {
-            let status = if active {
-                RoleAssignmentStatus::Active
-            } else {
-                RoleAssignmentStatus::Unspecified
-            };
-            let page = client
-                .list_role_assignments(request(
-                    ListRoleAssignmentsRequest {
-                        role,
-                        tag_id: tag,
-                        status: status.into(),
-                        limit,
-                        cursor,
+        Kind::ContextSet => context_json(
+            client
+                .put_context_set(request(
+                    PutContextSetRequest {
+                        operation_id,
+                        expected_revision,
+                        context_set: Some(spec::<ContextSpec>(&args.file)?.into()),
                     },
                     &token,
                 )?)
                 .await?
-                .into_inner();
-            json!({ "assignments": page.assignments.into_iter().map(assignment_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor })
-        }
-        PolicyCommand::Deactivate {
-            assignment_id,
-            expected_revision,
-            operation_id: id,
-        } => assignment_json(
+                .into_inner(),
+        )?,
+        Kind::Role => role_json(
             client
-                .deactivate_role_assignment(request(
-                    DeactivateRoleAssignmentRequest {
-                        assignment_id,
+                .put_role(request(
+                    PutRoleRequest {
+                        operation_id,
                         expected_revision,
-                        operation_id: operation_id(id),
+                        role: Some(spec::<RoleSpec>(&args.file)?.into()),
                     },
                     &token,
                 )?)
@@ -480,6 +434,91 @@ pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
         ),
     };
     crate::terminal::print_json(&output)?;
+    Ok(())
+}
+
+pub async fn run_set(
+    connection: Connection,
+    kind: surface_setup::SetKind,
+    command: SetCommand,
+) -> Result<()> {
+    match command {
+        SetCommand::Put(args) => {
+            let kind = match kind {
+                surface_setup::SetKind::PermissionSet => Kind::PermissionSet,
+                surface_setup::SetKind::ContextSet => Kind::ContextSet,
+            };
+            put(connection, kind, args).await
+        }
+        SetCommand::Activate(args) => surface_setup::activation(true, kind, args).await,
+        SetCommand::Deactivate(args) => surface_setup::activation(false, kind, args).await,
+    }
+}
+
+pub(crate) async fn list_assignments(
+    connection: Connection,
+    args: AssignmentListArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let status = if args.active {
+        RoleAssignmentStatus::Active
+    } else {
+        RoleAssignmentStatus::Unspecified
+    };
+    let page = client(channel)
+        .list_role_assignments(request(
+            ListRoleAssignmentsRequest {
+                role: args.role,
+                tag_id: args.tag,
+                status: status.into(),
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({ "assignments": page.assignments.into_iter().map(assignment_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor }),
+    )
+}
+
+pub async fn run_assignment(connection: Connection, command: AssignmentCommand) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let mut client = client(channel);
+    let assignment = match command {
+        AssignmentCommand::Create {
+            role,
+            tag_id,
+            operation_id: id,
+        } => client
+            .assign_role(request(
+                AssignRoleRequest {
+                    role,
+                    tag_id,
+                    operation_id: operation_id(id),
+                },
+                &token,
+            )?)
+            .await?
+            .into_inner(),
+        AssignmentCommand::Deactivate {
+            assignment_id,
+            expected_revision,
+            operation_id: id,
+        } => client
+            .deactivate_role_assignment(request(
+                DeactivateRoleAssignmentRequest {
+                    assignment_id,
+                    expected_revision,
+                    operation_id: operation_id(id),
+                },
+                &token,
+            )?)
+            .await?
+            .into_inner(),
+    };
+    crate::terminal::print_json(&assignment_json(assignment))?;
     Ok(())
 }
 

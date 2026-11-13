@@ -291,7 +291,7 @@ func describeTeam(view client.TeamView, posts, runtimeV2 bool) string {
 	if runtimeV2 {
 		add("", "Change it with supertag team update "+shellWord(team.GetId())+" --help.")
 	} else {
-		add("", "Change it with supertag update team "+shellWord(team.GetName())+".")
+		add("", "Change it with supertag team update "+shellWord(team.GetName())+".")
 	}
 	for i, line := range lines {
 		lines[i] = terminalText(line)

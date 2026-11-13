@@ -27,6 +27,12 @@ pub enum TagCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Change where a Tag works: add or remove its location on a connected surface. Its own
+    /// --gateway, --state-directory, and --file name the local configuration it edits.
+    #[command(
+        after_help = "The local Gateway serves one location per Surface Account and one per provider; remove a location before adding another."
+    )]
+    Update(Box<crate::surface_setup::UpdateTag>),
 }
 
 #[derive(Args)]
@@ -101,9 +107,15 @@ fn client(channel: ProtocolChannel) -> OperatorClient<ProtocolChannel> {
 }
 
 pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
+    let command = match command {
+        // tag update edits local configuration first and connects on its own.
+        TagCommand::Update(args) => return crate::surface_setup::update_tag(*args).await,
+        command => command,
+    };
     let (channel, token) = connect_operator(connection).await?;
     let mut operator = client(channel);
     let output = match command {
+        TagCommand::Update(_) => unreachable!("handled above"),
         TagCommand::Put(args) => {
             let PutArgs {
                 tag_id,

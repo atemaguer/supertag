@@ -1996,7 +1996,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
     );
     assert_eq!(
         hooks[0].1["text"],
-        "SuperTag test notification\n`supertag inbox list`"
+        "SuperTag test notification\n`supertag get inbox-items`"
     );
     assert_eq!(hooks[1].1["text"], message);
     assert_eq!(hooks[1].1["kinds"], serde_json::json!(["question"]));

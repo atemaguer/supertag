@@ -1547,7 +1547,7 @@ async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
     })
     .await??;
 
-    let mut read = command(&["inbox", "--state-directory"]);
+    let mut read = command(&["get", "--state-directory"]);
     read.arg(&state).args(["question", &initial_task]);
     let output = timeout(WAIT, read.output()).await??;
     ensure!(

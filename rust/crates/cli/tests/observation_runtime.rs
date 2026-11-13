@@ -946,12 +946,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         ("context-set", &context),
         ("role", &role),
     ] {
-        ok(
-            &home,
-            &["--gateway", "local", "policy", "put", kind, file],
-            None,
-        )
-        .await?;
+        ok(&home, &["--gateway", "local", kind, "put", file], None).await?;
     }
     ok(
         &home,
@@ -1011,14 +1006,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )?;
     ok(
         &home,
-        &[
-            "--gateway",
-            "local",
-            "surface-policy",
-            "put",
-            "account",
-            &account,
-        ],
+        &["--gateway", "local", "surface-account", "put", &account],
         None,
     )
     .await?;
@@ -1027,7 +1015,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         &[
             "--gateway",
             "local",
-            "github-workspace",
+            "workspace",
             "put",
             "project",
             "--account",

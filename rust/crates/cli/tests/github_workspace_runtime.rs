@@ -388,9 +388,9 @@ async fn scenario(
         "account.json",
         json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
     )?;
-    json(cli(&["surface-policy", "put", "account", &account])).await?;
+    json(cli(&["surface-account", "put", &account])).await?;
     let mut create_source = cli(&[
-        "github-workspace",
+        "workspace",
         "put",
         "project",
         "--account",
@@ -462,13 +462,13 @@ async fn scenario(
         "grant.json",
         json!({"set_id":"read-source","name":"read-source","permissions":permissions}),
     )?;
-    json(cli(&["policy", "put", "permission-set", &grant])).await?;
+    json(cli(&["permission-set", "put", &grant])).await?;
     let role = spec(
         "role.json",
         json!({"role_id":"reader","name":"reader","purpose":"Read source","permission_set_ids":["read-source"]}),
     )?;
-    json(cli(&["policy", "put", "role", &role])).await?;
-    json(cli(&["policy", "assign", "reader", "builder"])).await?;
+    json(cli(&["role", "put", &role])).await?;
+    json(cli(&["role-assignment", "create", "reader", "builder"])).await?;
     if git_outputs {
         let policy = spec(
             "output-policy.json",
@@ -544,7 +544,7 @@ async fn scenario(
         );
         assert_eq!(creates.load(Ordering::SeqCst), 0);
         let approval = field(&value, "approval_id")?;
-        let inbox = json(cli(&["inbox", "list", "--kind", "approval"])).await?;
+        let inbox = json(cli(&["get", "inbox-items", "--kind", "approval"])).await?;
         assert!(
             inbox["items"]
                 .as_array()
@@ -553,7 +553,7 @@ async fn scenario(
                 .any(|item| item["task_id"] == first_id)
         );
         json(cli(&[
-            "inbox",
+            "approval",
             "approve",
             approval,
             "--operation-id",
@@ -730,9 +730,9 @@ async fn scenario(
         c.arg(&local).args(&args[1..]);
         c
     };
-    json(local_cli(&["surface-policy", "put", "account", &account])).await?;
+    json(local_cli(&["surface-account", "put", &account])).await?;
     json(local_cli(&[
-        "github-workspace",
+        "workspace",
         "put",
         "project",
         "--account",
@@ -761,9 +761,15 @@ async fn scenario(
         &commit,
     ]))
     .await?;
-    json(local_cli(&["policy", "put", "permission-set", &grant])).await?;
-    json(local_cli(&["policy", "put", "role", &role])).await?;
-    json(local_cli(&["policy", "assign", "reader", "builder"])).await?;
+    json(local_cli(&["permission-set", "put", &grant])).await?;
+    json(local_cli(&["role", "put", &role])).await?;
+    json(local_cli(&[
+        "role-assignment",
+        "create",
+        "reader",
+        "builder",
+    ]))
+    .await?;
     let task = json(local_cli(&[
         "task",
         "submit",
@@ -829,7 +835,7 @@ async fn verify_github_output(
         commit,
     ]))
     .await?;
-    json(cli(&["policy", "assign", "reader", "git-output"])).await?;
+    json(cli(&["role-assignment", "create", "reader", "git-output"])).await?;
     let task = json(cli(&[
         "task",
         "submit",
