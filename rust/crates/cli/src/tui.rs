@@ -10,7 +10,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::json;
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
-use crate::{Connection, network, operator_target};
+use crate::{Connection, ROOT_GATEWAY, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -39,7 +39,9 @@ pub async fn launch(
     binary: Option<PathBuf>,
     workspace: Option<String>,
 ) -> Result<()> {
-    let implicit = connection.gateway.is_none() && connection.state_directory.is_none();
+    let implicit = connection.gateway.is_none()
+        && ROOT_GATEWAY.get().is_none()
+        && connection.state_directory.is_none();
     let connection = if implicit {
         default_connection()?
     } else {
@@ -49,7 +51,7 @@ pub async fn launch(
         && connection.gateway.is_none()
         && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
         && workspace.is_none();
-    let target = match operator_target(connection) {
+    let target = match resolve_target(connection) {
         Ok(target) => Some(target),
         Err(_) if allow_saved_only => None,
         Err(error) => return Err(error),
@@ -64,7 +66,7 @@ pub async fn launch(
     };
     check_version(&binary).await?;
 
-    let Some((url, token)) = target else {
+    let Some(target) = target else {
         let status = terminal_command(&binary)
             .status()
             .await
@@ -72,15 +74,27 @@ pub async fn launch(
         ensure!(status.success(), "supertag-tui exited with {status}");
         return Ok(());
     };
-    let endpoint = network::endpoint(url.clone(), false).await?;
+    let endpoint = target.endpoint(Duration::from_secs(15)).await?;
     let tls = endpoint.uri().scheme_str() == Some("https");
-    let certificate = |name| {
-        if tls {
-            certificate_path(name)
-        } else {
-            Ok(None)
+    let saved = target.tls.clone();
+    let certificate = |name: &str| {
+        if !tls {
+            return Ok(None);
+        }
+        match &saved {
+            Some(files) => match name {
+                "SUPERTAG_SERVER_CA_FILE" => files.server_ca.as_ref(),
+                "SUPERTAG_CLIENT_CERT_FILE" => files.client_cert.as_ref(),
+                _ => files.client_key.as_ref(),
+            }
+            .map(|path| {
+                std::fs::canonicalize(path).with_context(|| format!("resolve {}", path.display()))
+            })
+            .transpose(),
+            None => certificate_path(name),
         }
     };
+    let (url, token) = (target.url, target.token);
     let payload = serde_json::to_vec(&json!({
         "protocol": "runtime.v2",
         "current": 0,

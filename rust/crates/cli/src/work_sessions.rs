@@ -86,7 +86,7 @@ pub async fn run(connection: Connection, command: WorkSessionCommand) -> Result<
     Ok(())
 }
 
-fn view(session: &WorkSession) -> Value {
+pub(crate) fn view(session: &WorkSession) -> Value {
     json!({
         "work_session_id": session.work_session_id,
         "title": session.title,

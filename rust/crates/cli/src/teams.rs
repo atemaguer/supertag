@@ -219,7 +219,7 @@ fn operation(value: Option<String>) -> String {
     value.unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
-fn team_json(team: Team) -> Value {
+pub(crate) fn team_json(team: Team) -> Value {
     json!({
         "team_id": team.team_id,
         "name": team.name,

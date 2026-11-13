@@ -132,7 +132,7 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
     Ok(())
 }
 
-fn describe(value: GithubWorkspace) -> Value {
+pub(crate) fn describe(value: GithubWorkspace) -> Value {
     json!({"workspace_id": value.workspace_id, "revision": value.revision, "pull_request": value.pull_request.map(|delivery| json!({"base_branch":delivery.base_branch})), "source": value.source.map(|source|
         json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})
 }
