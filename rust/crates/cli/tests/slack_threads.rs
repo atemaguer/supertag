@@ -263,6 +263,33 @@ async fn mock_request(stream: &mut TcpStream) -> Result<(String, Value)> {
     Ok((path, serde_json::from_slice(&bytes[end..end + length])?))
 }
 
+const ACKNOWLEDGEMENT: &str = "Got it. I’m looking into this now.";
+
+/// Waits until the fixture Slack received `count` final replies; returns the last one's index.
+async fn delivered_final(mock: &MockSlack, count: usize) -> Result<usize> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let finals: Vec<usize> = mock
+            .requests
+            .lock()
+            .await
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, body))| body["text"] != ACKNOWLEDGEMENT)
+            .map(|(index, _)| index)
+            .collect();
+        if finals.len() >= count {
+            ensure!(finals.len() == count, "unexpected extra final reply");
+            return Ok(finals[count - 1]);
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "final reply {count} was not delivered"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn gateway(
     credentials: &Credentials,
     cp: &str,
@@ -468,6 +495,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let one = delivered_final(&mock, 1).await?;
     first.stop().await?;
     let (mut restarted, public, http) = gateway(
         &credentials,
@@ -539,6 +567,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let two = delivered_final(&mock, 2).await?;
     let next = payload("EvMENTION2", "1794470002.100000", true, "Verify the result");
     assert_eq!(signed(&http, &next).await?, reqwest::StatusCode::OK);
     let next = receipt(&mut connector, &credentials, &next).await?;
@@ -552,49 +581,51 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
         &database,
     )
     .await?;
+    let three = delivered_final(&mock, 3).await?;
     assert_eq!(signed(&second_http, &reply).await?, reqwest::StatusCode::OK);
     assert_eq!(task_count(&database).await?, 3);
     restarted.stop().await?;
     second.stop().await?;
     cp.stop().await?;
     let requests = mock.requests.lock().await;
-    // Each accepted logical message may first show one acknowledgement. Whether it does is
-    // a race with the fixture Task finishing; the final answer is exactly one per message,
-    // in the thread or in place of that acknowledgement.
-    let acknowledgements: Vec<String> = requests
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, body))| body["text"] == "Got it. I’m looking into this now.")
-        .map(|(index, (path, body))| {
-            assert_eq!(path, "/chat.postMessage");
-            assert_eq!(body["thread_ts"], THREAD);
-            format!("1794470100.{:06}", index + 1)
-        })
-        .collect();
-    assert!(acknowledgements.len() <= 3);
-    let finals: Vec<_> = requests
-        .iter()
-        .filter(|(_, body)| body["text"] != "Got it. I’m looking into this now.")
-        .collect();
     assert_eq!(
-        finals.len(),
-        3,
-        "one provider response per accepted logical message"
+        requests.len(),
+        three + 1,
+        "nothing is sent after the last final reply"
     );
-    for (path, request) in finals {
+    // Each logical message is one segment: at most one acknowledgement, even when both
+    // Gateways received it, then exactly one final answer. Whether the acknowledgement is
+    // sent races the fixture Task finishing; when it is, the final replaces it in place.
+    for (start, end) in [(0, one), (one + 1, two), (two + 1, three)] {
+        let acknowledgements: Vec<_> = (start..end)
+            .filter(|index| requests[*index].1["text"] == ACKNOWLEDGEMENT)
+            .collect();
+        assert_eq!(
+            end - start,
+            acknowledgements.len(),
+            "only acknowledgements precede a final reply"
+        );
+        assert!(acknowledgements.len() <= 1, "duplicate acknowledgement");
+        let (path, request) = &requests[end];
         assert_eq!(request["channel"], CHANNEL);
-        match path.as_str() {
-            "/chat.update" => {
-                assert!(acknowledgements.contains(&request["ts"].as_str().unwrap().to_owned()))
-            }
-            _ => assert_eq!(request["thread_ts"], THREAD),
-        }
         assert!(
             request["text"]
                 .as_str()
                 .unwrap()
                 .starts_with("Original Tag:")
         );
+        match acknowledgements.first() {
+            Some(index) => {
+                assert_eq!(requests[*index].0, "/chat.postMessage");
+                assert_eq!(requests[*index].1["thread_ts"], THREAD);
+                assert_eq!(path, "/chat.update");
+                assert_eq!(request["ts"], format!("1794470100.{:06}", index + 1));
+            }
+            None => {
+                assert_eq!(path, "/chat.postMessage");
+                assert_eq!(request["thread_ts"], THREAD);
+            }
+        }
     }
     Ok(())
 }
