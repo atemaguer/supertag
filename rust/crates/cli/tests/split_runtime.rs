@@ -649,7 +649,7 @@ async fn local_up(
 ) -> Result<(Process, OperatorClient<Channel>)> {
     let mut command = local_command();
     command
-        .arg("up")
+        .args(["up", "--foreground"])
         .arg("--state-directory")
         .arg(state)
         .arg("--adapter")
@@ -1118,7 +1118,14 @@ async fn local_up_runs_work_and_reaps_its_services() -> Result<()> {
     let state = directory.path().join("local state ?");
     let state_arg = state.to_str().context("temporary directory is not UTF-8")?;
     let mut command = local_command();
-    command.args(["up", "--state-directory", state_arg, "--adapter", ADAPTER]);
+    command.args([
+        "up",
+        "--foreground",
+        "--state-directory",
+        state_arg,
+        "--adapter",
+        ADAPTER,
+    ]);
     let mut supervisor = Process::spawn(command, directory.path(), "up", true)?;
     let endpoint = supervisor.endpoint().await?;
     assert_eq!(
@@ -1736,7 +1743,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     let start = || {
         let mut command = local_command();
         command
-            .args(["up", "--state-directory"])
+            .args(["up", "--foreground", "--state-directory"])
             .arg(&state)
             .args(["--harness", "codex", "--codex-path"])
             .arg(&fake)

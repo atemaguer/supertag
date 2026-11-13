@@ -156,3 +156,8 @@ required-features = ["test-fixtures"]
 name = "transport_runtime"
 path = "tests/transport_runtime.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "lifecycle_runtime"
+path = "tests/lifecycle_runtime.rs"
+required-features = ["test-fixtures"]

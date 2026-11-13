@@ -37,9 +37,12 @@ async fn cli(state: &Path, arguments: &[&str]) -> Result<Value> {
 }
 
 async fn up(state: &Path, adapter_flag: &str) -> Result<Child> {
-    let mut child = command(state, &["up", "--adapter", ADAPTER, adapter_flag])
-        .stdout(Stdio::piped())
-        .spawn()?;
+    let mut child = command(
+        state,
+        &["up", "--foreground", "--adapter", ADAPTER, adapter_flag],
+    )
+    .stdout(Stdio::piped())
+    .spawn()?;
     let mut stdout = BufReader::new(child.stdout.take().context("supervisor stdout")?);
     let mut endpoint = String::new();
     timeout(WAIT, stdout.read_line(&mut endpoint)).await??;

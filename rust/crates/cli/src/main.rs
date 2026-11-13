@@ -6,7 +6,9 @@ mod harness;
 mod health;
 mod host_status;
 mod inbox;
+mod init;
 mod inputs;
+mod lifecycle;
 mod local;
 mod local_config;
 mod mailbox_grants;
@@ -17,6 +19,8 @@ mod objectives;
 mod output_policy;
 mod policy;
 mod replies;
+mod service_manager;
+mod status;
 mod surface_policy;
 mod task_artifact_inputs;
 mod teams;
@@ -191,13 +195,25 @@ enum Command {
         #[command(subcommand)]
         command: teams::TeamCommand,
     },
-    /// Supervise local services or configured Worker Hosts connected to a Gateway.
+    /// Set up SuperTag on this machine for the git repository in the current directory.
+    Init(init::InitArgs),
+    /// Start local services or configured Worker Hosts in the background and return when ready.
+    ///
+    /// With --foreground, supervise them in this terminal until interrupted. A service with
+    /// restart: unless-stopped makes up install a per-user service unit (launchd on macOS,
+    /// systemd on Linux) that runs the supervisor and starts it again after a failure or login.
     Up {
         /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(long)]
         state_directory: Option<PathBuf>,
+        /// Run in this terminal with each service's logs here until interrupted.
+        #[arg(long)]
+        foreground: bool,
+        /// When restarting changed services, do not wait for running Task Attempts.
+        #[arg(long, conflicts_with = "foreground")]
+        force: bool,
         #[command(flatten)]
         adapter: AdapterOptions,
         /// Private host allowlist of Skill packages.
@@ -205,6 +221,26 @@ enum Command {
         skill_catalog: Option<PathBuf>,
         #[arg(long, default_value = "127.0.0.1:0")]
         gateway_listen: SocketAddr,
+    },
+    /// Stop this machine's SuperTag services, draining local Worker Hosts first.
+    Down(lifecycle::DownArgs),
+    /// Print this machine's service logs.
+    Logs(lifecycle::LogsArgs),
+    /// List this machine's SuperTag services.
+    Ps(lifecycle::PsArgs),
+    /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
+    Status(status::StatusArgs),
+    /// Print this CLI's version and the version of the running local services.
+    Version(status::VersionArgs),
+    /// Print the resolved supertag.yaml that supertag up runs.
+    Config {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
+        /// List the service names only.
+        #[arg(long)]
+        services: bool,
     },
     /// Run the private service that stores work and schedules execution.
     ControlPlane {
@@ -709,15 +745,50 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => teams::run(connection, command).await?,
+        Command::Init(args) => init::init(args).await?,
+        Command::Down(args) => lifecycle::down(args).await?,
+        Command::Logs(args) => lifecycle::logs(args).await?,
+        Command::Ps(args) => lifecycle::ps(args).await?,
+        Command::Status(args) => status::status(args).await?,
+        Command::Version(args) => status::version(args)?,
+        Command::Config {
+            file,
+            state_directory,
+            services,
+        } => {
+            let state_directory = local_config::state_directory(state_directory)?;
+            print!(
+                "{}",
+                local_config::render(file, &state_directory, services)?
+            );
+        }
         Command::Up {
             file,
             state_directory,
+            foreground,
+            force,
             adapter,
             skill_catalog,
             gateway_listen,
         } => {
             let state_directory = local_config::state_directory(state_directory)?;
-            if let Some(config) = local_config::load(file, &state_directory)? {
+            let config = local_config::load(file, &state_directory)?;
+            let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+            if config.is_none() {
+                ensure!(
+                    adapter.is_selected(),
+                    "select a harness, an adapter, or a local services file; supertag init writes one"
+                );
+            }
+            if !foreground {
+                lifecycle::up(lifecycle::Background {
+                    state: state_directory,
+                    config,
+                    args,
+                    force,
+                })
+                .await?;
+            } else if let Some(config) = config {
                 ensure!(
                     !adapter.has_options()
                         && skill_catalog.is_none()
@@ -732,6 +803,7 @@ async fn run(command: Command) -> Result<()> {
                         adapter,
                         skill_catalog,
                         gateway_listen,
+                        fingerprint: lifecycle::flags_fingerprint(&args),
                     },
                     termination_signal(),
                 )

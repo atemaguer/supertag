@@ -691,6 +691,7 @@ async fn scenario(
     let local = root.join("local");
     let mut up = command(&[
         "up",
+        "--foreground",
         "--workspace-id",
         "project",
         "--workspace-from-gateway",

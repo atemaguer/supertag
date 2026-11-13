@@ -60,7 +60,7 @@ def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor
         tmux_prefix = [tmux, "-f", "/dev/null", "-S", str(socket)]
         terminal_started = False
         with (root / "service.log").open("w") as error_log:
-            service = subprocess.Popen([str(cli), "up", "--adapter", str(fixture), "--state-directory", str(state)],
+            service = subprocess.Popen([str(cli), "up", "--foreground", "--adapter", str(fixture), "--state-directory", str(state)],
                 env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_log, start_new_session=True)
             try:
                 def ready():

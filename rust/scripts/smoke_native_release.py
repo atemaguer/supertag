@@ -32,7 +32,7 @@ def installed_bridge(package, node, fixture_source, scratch, *, cli_override=Non
     cli, state = cli_override or tools / "supertag", scratch / "state"
     env = {"PATH": f"{tools}:{os.defpath}", "HOME": str(home), "LANG": "C.UTF-8"}
     with (scratch / "up.log").open("w+") as log:
-        service = subprocess.Popen([cli, "up", "--state-directory", state, "--harness", "opencode",
+        service = subprocess.Popen([cli, "up", "--foreground", "--state-directory", state, "--harness", "opencode",
                                     "--harness-model", "openai/fixture-model", "--opencode-path", native],
                                    cwd=home, env={**env, "OPENAI_API_KEY": "synthetic-opencode-provider-key"},
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
