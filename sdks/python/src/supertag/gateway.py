@@ -127,6 +127,15 @@ def _refusal(error: grpc.RpcError) -> Exception:
     return error
 
 
+def _protocol_refusal(code: grpc.StatusCode | None, details: str | None) -> bool:
+    """A Gateway replaced by another release refuses the version this client holds."""
+    details = details or ""
+    return code == grpc.StatusCode.FAILED_PRECONDITION and (
+        details.startswith("incompatible SuperTag protocol")
+        or "did not negotiate a protocol version" in details
+    )
+
+
 def _selected(answer: negotiation_pb2.NegotiateProtocolResponse) -> int:
     if answer.role != negotiation_pb2.SERVICE_ROLE_GATEWAY:
         raise GatewayProtocolError(
@@ -188,17 +197,27 @@ class _SyncNegotiation(
             getattr(details, "compression", None),
         )
 
+    def _forget(self, call) -> None:
+        if _protocol_refusal(call.code(), call.details()):
+            with self._lock:
+                self._version = None
+
+    def _watched(self, call):
+        # The next call negotiates again after a protocol refusal.
+        call.add_done_callback(self._forget)
+        return call
+
     def intercept_unary_unary(self, continuation, details, request):
-        return continuation(self._details(details), request)
+        return self._watched(continuation(self._details(details), request))
 
     def intercept_unary_stream(self, continuation, details, request):
-        return continuation(self._details(details), request)
+        return self._watched(continuation(self._details(details), request))
 
     def intercept_stream_unary(self, continuation, details, requests):
-        return continuation(self._details(details), requests)
+        return self._watched(continuation(self._details(details), requests))
 
     def intercept_stream_stream(self, continuation, details, requests):
-        return continuation(self._details(details), requests)
+        return self._watched(continuation(self._details(details), requests))
 
 
 class _AsyncNegotiation:
@@ -227,6 +246,32 @@ class _AsyncNegotiation:
                 self._version = _selected(answer)
             return self._version
 
+    def forget(self) -> None:
+        self._version = None
+
+    async def settled(self, call):
+        """Awaits a unary response so a protocol refusal is seen before the caller retries."""
+        try:
+            await call
+        except grpc.aio.AioRpcError as error:
+            if _protocol_refusal(error.code(), error.details()):
+                self.forget()
+        return call
+
+    def watched(self, call):
+        """Forgets the held version once a streaming call ends in a protocol refusal."""
+
+        def done(finished) -> None:
+            async def check() -> None:
+                if _protocol_refusal(await finished.code(), await finished.details()):
+                    self.forget()
+
+            if not finished.cancelled():
+                asyncio.ensure_future(check())
+
+        call.add_done_callback(done)
+        return call
+
     async def details(self, details):
         metadata = grpc.aio.Metadata(*(details.metadata or ()))
         metadata.add(_PROTOCOL_HEADER, str(await self._negotiated()))
@@ -244,7 +289,8 @@ class _AsyncUnaryUnary(grpc.aio.UnaryUnaryClientInterceptor):
         self._negotiation = negotiation
 
     async def intercept_unary_unary(self, continuation, details, request):
-        return await continuation(await self._negotiation.details(details), request)
+        call = await continuation(await self._negotiation.details(details), request)
+        return await self._negotiation.settled(call)
 
 
 class _AsyncUnaryStream(grpc.aio.UnaryStreamClientInterceptor):
@@ -252,7 +298,8 @@ class _AsyncUnaryStream(grpc.aio.UnaryStreamClientInterceptor):
         self._negotiation = negotiation
 
     async def intercept_unary_stream(self, continuation, details, request):
-        return await continuation(await self._negotiation.details(details), request)
+        call = await continuation(await self._negotiation.details(details), request)
+        return self._negotiation.watched(call)
 
 
 class _AsyncStreamUnary(grpc.aio.StreamUnaryClientInterceptor):
@@ -260,7 +307,8 @@ class _AsyncStreamUnary(grpc.aio.StreamUnaryClientInterceptor):
         self._negotiation = negotiation
 
     async def intercept_stream_unary(self, continuation, details, requests):
-        return await continuation(await self._negotiation.details(details), requests)
+        call = await continuation(await self._negotiation.details(details), requests)
+        return self._negotiation.watched(call)
 
 
 class _AsyncStreamStream(grpc.aio.StreamStreamClientInterceptor):
@@ -268,7 +316,8 @@ class _AsyncStreamStream(grpc.aio.StreamStreamClientInterceptor):
         self._negotiation = negotiation
 
     async def intercept_stream_stream(self, continuation, details, requests):
-        return await continuation(await self._negotiation.details(details), requests)
+        call = await continuation(await self._negotiation.details(details), requests)
+        return self._negotiation.watched(call)
 
 
 class _Services:
