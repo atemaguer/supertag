@@ -397,18 +397,34 @@ async fn denied_and_changed_provider(store: &Store, host: &HostAuthority) {
 
 async fn contract(url: &str) {
     let (store, host) = fixture(url).await;
-    // The setup pre-dates any MCP dispatch. Recreate the previous schema by
-    // removing only the new table, keeping the existing Host and policy rows.
+    // The setup pre-dates any MCP dispatch. Recreate schema 46 by removing
+    // every later object, keeping the existing Host and policy rows.
     store.close().await;
     let mut previous = AnyConnection::connect(url).await.unwrap();
-    previous
-        .execute("DROP TABLE supertag_v2_mcp_effects")
-        .await
-        .unwrap();
-    previous
-        .execute("UPDATE supertag_v2_schema SET version=46 WHERE version=47")
-        .await
-        .unwrap();
+    for statement in [
+        "DROP TABLE supertag_v2_workspace_volumes",
+        "ALTER TABLE supertag_v2_tags DROP COLUMN workspace_mounts",
+        "ALTER TABLE supertag_v2_tasks DROP COLUMN workspace_mounts",
+        "DROP TABLE supertag_v2_artifact_transfer_grants",
+        "DROP TABLE supertag_v2_artifact_host_copies",
+        "DROP TABLE supertag_v2_artifact_sources",
+        "DROP TABLE supertag_v2_manifest_relationships",
+        "DROP TABLE supertag_v2_artifact_context_grants",
+        "ALTER TABLE supertag_v2_tasks DROP COLUMN completed_at_ms",
+        "DROP TABLE supertag_v2_artifact_review_evidence",
+        "DROP TABLE supertag_v2_artifact_approval_audit",
+        "DROP TABLE supertag_v2_artifact_consumptions",
+        "DROP TABLE supertag_v2_artifact_publication_audience",
+        "DROP TABLE supertag_v2_artifact_publications",
+        "ALTER TABLE supertag_v2_tasks DROP COLUMN input_artifacts",
+        "DROP TABLE supertag_v2_artifact_volume_copies",
+        "DROP TABLE supertag_v2_artifact_volume_operations",
+        "DROP TABLE supertag_v2_artifact_volumes",
+        "DROP TABLE supertag_v2_mcp_effects",
+        "UPDATE supertag_v2_schema SET version=46",
+    ] {
+        previous.execute(statement).await.unwrap();
+    }
     previous.close().await.unwrap();
     let store = Store::open(url).await.unwrap();
     Box::pin(approved_effect(&store, &host)).await;
