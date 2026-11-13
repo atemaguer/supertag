@@ -1,9 +1,10 @@
 //! Several Control Plane replicas on one PostgreSQL database.
 //!
 //! Three shipped `supertag control-plane` processes start together on one empty PostgreSQL
-//! database, each behind its own Gateway. Operators submit Tasks and create Objectives through
-//! every replica, a Worker Host executes through one of them, every Gateway delivers operator
-//! notifications from the shared outbox, and a Watch stream follows each replica. Replicas are
+//! database and share one transfer directory, each with its own Gateway delivering operator
+//! notifications. Operators submit Tasks and create Objectives through every replica, a Worker
+//! Host executes through one of them, every Gateway delivers operator notifications from the
+//! shared outbox, and a Watch stream follows each replica. Replicas are
 //! killed mid-operation and restarted. The lane asserts that no work is lost or repeated: each
 //! Task runs exactly once, each operator notification is delivered once, and every Watch stream
 //! sees the same gap-free positions, resuming on another replica after its own is killed. With
@@ -71,9 +72,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -82,7 +83,8 @@ impl Credentials {
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -200,7 +202,7 @@ impl Drop for Process {
     }
 }
 
-/// One Control Plane replica and the Gateway in front of it.
+/// One Control Plane replica and the Gateway that delivers notifications through it.
 struct Replica {
     control_plane: Process,
     /// Kept alive for the replica's lifetime.
@@ -217,8 +219,10 @@ fn control_plane(
     listen: &str,
 ) -> Result<Process> {
     let mut command = credentials.command();
+    // Replicas share one transfer directory, as they would share a volume.
     command
-        .args(["control-plane", "--listen", listen])
+        .args(["control-plane", "--listen", listen, "--transfer-directory"])
+        .arg(directory.join("transfers"))
         .env("SUPERTAG_DATABASE_URL", database);
     Process::spawn(command, directory, "control-plane", true)
 }
@@ -565,20 +569,20 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     let mut replicas = Vec::new();
     for mut plane in planes.drain(..) {
-        let private = plane.endpoint().await?;
+        let endpoint = plane.endpoint().await?;
         let mut command = credentials.command();
         command
-            .args(["gateway", "--control-plane", &private])
+            .args(["gateway", "--control-plane", &endpoint])
             .arg("--notify")
             .arg(format!("webhook:{}#hook-token", webhook.url))
             .env("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1")
             .env("SUPERTAG_NOTIFY_SECRET_HOOK_TOKEN", "synthetic-hook-secret");
         let mut gateway = Process::spawn(command, directory, "gateway", true)?;
-        let endpoint = gateway.endpoint().await?;
+        gateway.endpoint().await?;
         replicas.push(Replica {
             control_plane: plane,
             _gateway: gateway,
-            listen: private.trim_start_matches("http://").to_owned(),
+            listen: endpoint.trim_start_matches("http://").to_owned(),
             endpoint,
         });
     }
@@ -613,7 +617,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     for (replica, objective) in [(1, "release"), (2, "hotfix")] {
         let mut command = credentials.command();
         command
-            .args(["objective", "--gateway", &endpoints[replica]])
+            .args(["objective", "--control-plane", &endpoints[replica]])
             .args(["create", objective, "--owner", TAG, QUESTION]);
         cli(command, directory).await?;
     }
@@ -628,7 +632,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     let release = directory.join("release");
     let (adapter, launches) = recording_adapter(directory)?;
     let mut host = credentials.command();
-    host.args(["worker-host", "--gateway", &endpoints[1], "--adapter"])
+    host.args(["worker-host", "--control-plane", &endpoints[1], "--adapter"])
         .arg(&adapter)
         .arg("--adapter-arg=--objective-question")
         .arg(format!(
@@ -799,7 +803,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     let never = directory.join("never");
     let mut stranding = credentials.command();
     stranding
-        .args(["worker-host", "--gateway", &endpoints[0], "--adapter"])
+        .args(["worker-host", "--control-plane", &endpoints[0], "--adapter"])
         .arg(&adapter)
         .arg(format!("--adapter-arg=--wait-for-file={}", never.display()))
         .arg("--state-directory")

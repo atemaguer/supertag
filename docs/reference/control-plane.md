@@ -19,7 +19,8 @@ The API Server is the Control Plane's public endpoint: the authenticated managem
 Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state
 apart from transfer files, and the API Server and the controllers run as one process. Running API
 Server replicas apart from the controllers is not supported yet: every Control Plane process also
-runs its own controllers, so run exactly one per database. The Gateway connects collaboration
+runs its own controllers. Several Control Plane processes can share one PostgreSQL database and one
+transfer directory; a SQLite database serves one process. The Gateway connects collaboration
 surfaces to the Control Plane. It runs as a separate, optional process and is an ordinary client
 of the API Server. These boundaries keep resource semantics and admission separate from
 collaboration transport and from reconciliation.

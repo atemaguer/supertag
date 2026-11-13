@@ -18,9 +18,10 @@ through the [WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) instea
 
 Inside, the Control Plane is a stateless API tier in front of the state owner and its
 controllers, in one process. The API tier keeps only transfer files (Session checkpoints,
-workspace bundles, and GitHub publication blobs) in `--transfer-directory`. Run exactly one
-Control Plane per database: every process also runs the controllers, and API replicas without
-them are not supported yet. Artifact bytes are never stored in the database: they stay on Worker
+workspace bundles, and GitHub publication blobs) in `--transfer-directory`. Every Control Plane
+process also runs the controllers; API replicas without them are not supported yet. Several
+processes can share one PostgreSQL database (see [Control Plane replicas](#control-plane-replicas));
+a SQLite database serves one process. Artifact bytes are never stored in the database: they stay on Worker
 Hosts and shared Volumes.
 
 The Gateway runs collaboration surfaces: Slack, GitHub, Linear, Lark, and Microsoft Teams
@@ -191,8 +192,10 @@ each periodic maintenance pass. Keep replica clocks synchronized, run the same r
 replica, and stop all of them before an upgrade that changes the schema. A replica that freezes or
 loses its network during a write stalls every write for up to 15 seconds, until PostgreSQL ends its
 session; connect replicas to PostgreSQL directly or through a session-mode pooler, because a
-transaction-mode pooler drops those session limits. A Gateway connects to one Control Plane
-address, so put the replicas behind a TCP load balancer or private DNS name. A SQLite
+transaction-mode pooler drops those session limits. Operators, Worker Hosts, and Gateways connect
+to one Control Plane address, so put the replicas behind a TCP load balancer or private DNS name.
+Give every replica the same `--transfer-directory` on a shared volume: a checkpoint or bundle
+uploaded through one replica is downloaded through another. A SQLite
 database serves one Control Plane process; a second one on the same file refuses to start. See
 [Control Plane replicas](../../rust/docs/control-plane-replicas.md) for the concurrency audit.
 

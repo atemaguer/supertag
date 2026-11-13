@@ -53,9 +53,13 @@ Audited 2026-11-13 against `rust/crates/control-plane`. "Fixed" rows changed in 
 - A frozen or disconnected replica stalls every write for up to 15 seconds, until PostgreSQL ends
   its session. A connection pooler in transaction mode drops the session settings; connect
   replicas to PostgreSQL directly or through a session-mode pooler.
-- A Gateway connects to one Control Plane address. Put replicas behind a TCP load balancer or a
-  private DNS name. Gateway replicas are not covered here: a Gateway keeps checkpoints and its
-  file credential vault on its own volume.
+- Operators, Worker Hosts, and Gateways connect to one Control Plane address. Put replicas behind
+  a TCP load balancer or a private DNS name.
+- Every replica serves transfers (Session checkpoints, workspace bundles, GitHub publication
+  blobs) from its `--transfer-directory`. Give all replicas the same directory on a shared volume;
+  blobs are content-addressed and published without overwriting, so replicas can write it at once.
+- Gateway replicas are not covered here: a Gateway keeps its file credential vault on its own
+  volume.
 
 ## Tests
 
@@ -67,17 +71,18 @@ Audited 2026-11-13 against `rust/crates/control-plane`. "Fixed" rows changed in 
 - `control-plane/src/store/replica_tests.rs`: `postgres_frozen_replica_releases_the_write_lock`
   holds a write open and silent on one Store and checks that another Store's write proceeds
   after the idle-in-transaction limit.
-- `cli/tests/replicas_runtime.rs`: `replicas_share_one_postgresql_database_and_survive_killed_replicas`
-  runs three Control Plane processes on one PostgreSQL database, each behind a Gateway, submits
-  Tasks and creates Objectives through every replica, kills one replica while its Worker Host
-  holds a running Attempt and another while Attempts finish and notifications are claimed, and
-  asserts one adapter launch per Task, gap-free events, one delivery per operator notification,
-  and identical gap-free Watch positions on every stream, each resuming on another replica after
-  its own was killed. It then kills a Worker Host during an Attempt and two of the three replicas;
-  only the periodic maintenance pass expires that Attempt, so the survivor must run it.
-  `sqlite_refuses_a_second_control_plane_process` covers SQLite.
+- `cli/tests/replicas_runtime.rs`:
+  `replicas_share_one_postgresql_database_and_survive_killed_replicas` runs three Control Plane
+  processes on one PostgreSQL database and one transfer directory, each with a Gateway delivering
+  operator notifications, submits Tasks and creates Objectives through every replica, kills one
+  replica while its Worker Host holds a running Attempt and another while Attempts finish and
+  notifications are claimed, and asserts one adapter launch per Task, gap-free events, one
+  delivery per operator notification, and identical gap-free Watch positions on every stream, each
+  resuming on another replica after its own was killed. It then kills a Worker Host during an
+  Attempt and two of the three replicas; only the periodic maintenance pass expires that Attempt,
+  so the survivor must run it. `sqlite_refuses_a_second_control_plane_process` covers SQLite.
 
 Not covered: exactly one maintenance pass per tick across processes (the Store contract checks
 the claim), a real process frozen with `SIGSTOP` or partitioned from PostgreSQL, several Gateways
-sharing state, and Slack or provider reply delivery through Gateways in front of different
+sharing state, and Slack or provider reply delivery through Gateways connected to different
 replicas.
