@@ -1,5 +1,6 @@
 //! Bounded local process configuration. Credentials are references, never rendered values.
 mod environment;
+pub mod surfaces;
 
 use crate::harness::AdapterOptions;
 use anyhow::{Context, Result, bail, ensure};
@@ -36,6 +37,8 @@ struct Document {
     services: BTreeMap<String, Service>,
     #[serde(default)]
     secrets: BTreeMap<String, Secret>,
+    #[serde(default)]
+    surfaces: BTreeMap<String, surfaces::Surface>,
 }
 fn version() -> u32 {
     1
@@ -129,6 +132,8 @@ pub struct Config {
     pub environment: Environment,
     /// `${VAR}` references this shell's environment resolved.
     pub shell_variables: BTreeSet<String>,
+    /// Surface Accounts the local Gateway connects; see `supertag setup surface`.
+    pub surfaces: BTreeMap<String, surfaces::Surface>,
 }
 pub struct Plane {
     pub listen: SocketAddr,
@@ -330,6 +335,11 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             }
         )
     });
+    surfaces::validate(&document.surfaces)?;
+    ensure!(
+        plane.is_some() || document.surfaces.is_empty(),
+        "surfaces require a control-plane service"
+    );
     let instance = document.name.clone();
     let mut secrets = document.secrets;
     for (name, secret) in &mut secrets {
@@ -524,7 +534,31 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         hosts,
         environment,
         shell_variables: BTreeSet::new(),
+        surfaces: document.surfaces,
     })
+}
+
+/// Checks a rewritten services file before it replaces `before`: it must load, and differ only
+/// in its `surfaces` section. Returns the new surfaces.
+pub fn check_surface_edit(
+    before: &[u8],
+    after: &[u8],
+    base: &Path,
+) -> Result<BTreeMap<String, surfaces::Surface>> {
+    let lookup = |name: &str| std::env::var(name).ok();
+    let config = parse(after, base, lookup)?;
+    let strip = |bytes| -> Result<serde_json::Value> {
+        let (mut value, _) = resolved(bytes, base, lookup)?;
+        if let Some(object) = value.as_object_mut() {
+            object.remove("surfaces");
+        }
+        Ok(value)
+    };
+    ensure!(
+        strip(before)? == strip(after)?,
+        "the surfaces section could not be edited without changing the rest of the file; edit it by hand"
+    );
+    Ok(config.surfaces)
 }
 
 /// Check that a per-user service unit, which sees only `unit` and `env_file`, can run this

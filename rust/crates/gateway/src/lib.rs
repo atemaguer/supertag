@@ -25,6 +25,7 @@ mod readiness_tests;
 pub mod slack;
 mod spend;
 mod surface_policy;
+pub mod surface_setup;
 mod teams;
 pub mod transfers;
 mod watch;

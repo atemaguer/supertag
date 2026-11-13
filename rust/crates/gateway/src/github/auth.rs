@@ -95,24 +95,7 @@ impl Authentication {
                     valid_id(app.app_id) && valid_id(app.installation_id),
                     "invalid GitHub App or installation ID"
                 );
-                ensure!(
-                    app.private_key_pem.len() <= 32 * 1024,
-                    "GitHub App private key is too large"
-                );
-                let key = match PrivateKeyDer::from_pem_slice(app.private_key_pem.as_bytes())
-                    .map_err(|_| anyhow!("invalid GitHub App private key PEM"))?
-                {
-                    PrivateKeyDer::Pkcs1(key) => RsaKeyPair::from_der(key.secret_pkcs1_der()),
-                    PrivateKeyDer::Pkcs8(key) => RsaKeyPair::from_pkcs8(key.secret_pkcs8_der()),
-                    _ => return Err(anyhow!("GitHub App requires an RSA private key")),
-                }
-                .map_err(|_| {
-                    anyhow!("GitHub App requires a valid RSA private key of at least 2048 bits")
-                })?;
-                ensure!(
-                    key.public().modulus_len() <= 1024,
-                    "GitHub App RSA private key is too large"
-                );
+                let key = rsa_key(&app.private_key_pem)?;
                 Credential::App {
                     app_id: app.app_id,
                     installation_id: app.installation_id,
@@ -242,6 +225,32 @@ impl Authentication {
     pub(super) async fn invalidate(&self) {
         *self.cached.lock().await = None;
     }
+}
+
+fn rsa_key(pem: &str) -> Result<RsaKeyPair> {
+    ensure!(
+        pem.len() <= 32 * 1024,
+        "GitHub App private key is too large"
+    );
+    let key = match PrivateKeyDer::from_pem_slice(pem.as_bytes())
+        .map_err(|_| anyhow!("invalid GitHub App private key PEM"))?
+    {
+        PrivateKeyDer::Pkcs1(key) => RsaKeyPair::from_der(key.secret_pkcs1_der()),
+        PrivateKeyDer::Pkcs8(key) => RsaKeyPair::from_pkcs8(key.secret_pkcs8_der()),
+        _ => return Err(anyhow!("GitHub App requires an RSA private key")),
+    }
+    .map_err(|_| anyhow!("GitHub App requires a valid RSA private key of at least 2048 bits"))?;
+    ensure!(
+        key.public().modulus_len() <= 1024,
+        "GitHub App RSA private key is too large"
+    );
+    Ok(key)
+}
+
+/// A short-lived App JWT for verifying an installation during `supertag setup surface github`.
+pub(crate) fn setup_app_jwt(private_key_pem: &str, app_id: u64) -> Result<String> {
+    ensure!(valid_id(app_id), "invalid GitHub App ID");
+    app_jwt(&rsa_key(private_key_pem)?, app_id, now()?)
 }
 
 fn app_jwt(key: &RsaKeyPair, app_id: u64, now: i64) -> Result<String> {
