@@ -46,6 +46,8 @@ def edit(prompt):
         path.joinpath("reports").mkdir()
         path.joinpath("reports", "new.txt").write_text("created")
         path.joinpath("nested", "notes.txt").unlink()
+        if "with a hard link" in prompt:
+            os.link(path.joinpath("rows.csv"), path.joinpath("alias.csv"))
         lines.append(f"edited {path.name}")
     return "\n".join(lines)
 

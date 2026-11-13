@@ -52,7 +52,8 @@ use supertag_protocol::{
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
         HostRecord, InspectAttemptRequest, RecordWorkspaceMcpRequest,
         RecordWorkspaceMountWritesRequest, RegisterHostRequest, ResolvedSkill, ServiceRole,
-        StartTaskRequest, Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        StartTaskRequest, Task, TaskState, WorkspaceMountWriteStatus,
+        artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
         attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
@@ -679,8 +680,11 @@ pub async fn run(
                             Status::failed_precondition("Workspace Volume write-back failed")
                         })?;
                         if writes.is_empty() {
-                            return Ok(());
+                            return Ok(true);
                         }
+                        let complete = writes
+                            .iter()
+                            .all(|write| write.status == WorkspaceMountWriteStatus::Complete as i32);
                         let report = RecordWorkspaceMountWritesRequest {
                             task_id: attempt.task_id.clone(),
                             attempt_id: attempt.attempt_id.clone(),
@@ -690,11 +694,17 @@ pub async fn run(
                         client
                             .record_writes(request(report, &token).map_err(|_| Status::internal("Workspace Volume write-back failed"))?)
                             .await
-                            .map(|_| ())
+                            .map(|_| complete)
                     })
                     .await;
                     match reported {
-                        Ok(_) => {}
+                        Ok((true, _)) => {}
+                        // A partial or refused write-back fails the Task; its
+                        // summary is recorded for `describe task`.
+                        Ok((false, _)) => {
+                            save_finish(&journal, attempt, adapter::failed("Workspace Volume write-back was partial or refused"))?;
+                            continue;
+                        }
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
                         Err(error) if retryable(&error) => {
                             wait_for_work(&shutdown).await;

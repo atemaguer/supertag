@@ -378,6 +378,41 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     std::fs::write(source.join("rows.csv"), "id,value\n1,42\n")?;
     std::fs::remove_dir_all(source.join("reports"))?;
 
+    // A refused write-back writes nothing and fails the Task, which still
+    // records the summary.
+    let refused = json_output(credentials.operator(
+        &[
+            "task",
+            "submit",
+            "--tag",
+            "editor",
+            "--session",
+            "refused",
+            "Edit the data with a hard link",
+        ],
+        &public,
+    ))
+    .await?;
+    let refused_id = refused["task_id"].as_str().context("missing Task ID")?;
+    let ran = output(worker()).await?;
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    ensure!(ran.status.success(), "Worker Host failed: {stderr}");
+    let refused = json_output(credentials.operator(&["get", "task", refused_id], &public)).await?;
+    assert_eq!(refused["state"], "TASK_STATE_FAILED", "{refused} {stderr}");
+    assert_eq!(
+        refused["result"],
+        "Workspace Volume write-back was partial or refused"
+    );
+    let write = &refused["workspace_mount_writes"][0]["writes"][0];
+    assert_eq!(write["status"], "refused", "{refused}");
+    assert_eq!(write["error"]["key"], "alias.csv", "{write}");
+    assert_eq!(
+        std::fs::read_to_string(source.join("rows.csv"))?,
+        "id,value\n1,42\n"
+    );
+    assert!(!source.join("reports").exists() && !source.join("alias.csv").exists());
+    assert_eq!(std::fs::read_dir(&root)?.count(), 0);
+
     // Cancellation and a Host crash during execution both end with the copy removed.
     for case in ["cancel", "crash"] {
         let held = json_output(credentials.operator(
