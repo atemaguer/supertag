@@ -121,7 +121,7 @@ const MCP_STOP_MS = 5_000;
  * or outlive it. The same happens when the server exits by itself. Stopping a server never stops
  * the sandbox: on Modal a process's terminate is the sandbox's.
  */
-const MCP_SUPERVISOR = `import os, signal, sys, threading
+const MCP_SUPERVISOR = `import os, select, signal, sys, threading
 command = sys.argv[1:]
 environment = {"PATH": "${MCP_PATH}", "LANG": "C.UTF-8"}
 reader, writer = os.pipe()
@@ -142,9 +142,7 @@ try:
     os.setpgid(pid, pid)
 except OSError:
     pass
-changed = threading.Event()
 exited = threading.Event()
-ended = threading.Event()
 status = [1]
 def group(number):
     try:
@@ -160,27 +158,37 @@ def reap():
     code = os.waitpid(pid, 0)[1]
     status[0] = os.WEXITSTATUS(code) if os.WIFEXITED(code) else 128 + os.WTERMSIG(code)
     exited.set()
-    changed.set()
-def forward():
-    open_ = True
-    while True:
+threading.Thread(target=reap, daemon=True).start()
+# One loop reads input and writes it on without blocking, so the end of input is seen even
+# while a busy server leaves its stdin pipe full. Input it has not taken is dropped at stop.
+os.set_blocking(writer, False)
+pending = bytearray()
+open_ = True
+while not exited.is_set():
+    try:
+        readable, writable = select.select([0], [writer] if open_ and pending else [], [], 0.1)[:2]
+    except InterruptedError:
+        continue
+    if writable:
+        try:
+            del pending[:os.write(writer, pending)]
+        except BlockingIOError:
+            pass
+        except OSError:
+            open_ = False
+            pending.clear()
+    if readable:
         try:
             data = os.read(0, 65536)
         except OSError:
             data = b""
         if not data:
             break
-        while open_ and data:
-            try:
-                data = data[os.write(writer, data):]
-            except OSError:
-                open_ = False
-    ended.set()
-    changed.set()
-threading.Thread(target=reap, daemon=True).start()
-threading.Thread(target=forward, daemon=True).start()
-while not changed.wait(0.1):
-    pass
+        if open_:
+            pending += data
+            # A server this far behind its input is stuck: stop it as if its input ended.
+            if len(pending) > 16777216:
+                break
 if not exited.is_set():
     try:
         os.close(writer)

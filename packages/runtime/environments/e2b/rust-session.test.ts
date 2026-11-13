@@ -723,6 +723,25 @@ it("stops a Workspace MCP server's process group before capture, even children i
   await expect(process_.wait()).resolves.toBeDefined();
 }, 20_000);
 
+it("stops a Workspace MCP server that is not reading its input before capture", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const server = await session.startMcpServer({
+    name: "tools",
+    command: "sh",
+    args: ["-c", "exec sleep 60"],
+  });
+  // More input than a pipe holds, which a server busy elsewhere never takes.
+  await server.write?.(new Uint8Array(256 * 1024));
+  const started = Date.now();
+  const captured = await session.capture();
+  expect(Date.now() - started).toBeLessThan(4_500);
+  expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  await expect(server.wait()).resolves.toBeDefined();
+}, 20_000);
+
 it("refuses capture rather than wait for an MCP server descendant that left its group", async () => {
   const { session } = await fixture();
   const { header, bytes } = await bundle();

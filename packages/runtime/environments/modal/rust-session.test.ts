@@ -312,6 +312,27 @@ it("stops a Workspace MCP server's process group before capture without ending t
   expect(f.inventory.terminate).not.toHaveBeenCalled();
 }, 20_000);
 
+it("stops a Workspace MCP server that is not reading its input before capture", async () => {
+  const f = await fixture();
+  const session = f.session;
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const server = await session.startMcpServer({
+    name: "tools",
+    command: "sh",
+    args: ["-c", "exec sleep 60"],
+  });
+  // More input than a pipe holds, which a server busy elsewhere never takes.
+  await server.write?.(new Uint8Array(256 * 1024));
+  const started = Date.now();
+  const captured = await session.capture();
+  expect(Date.now() - started).toBeLessThan(4_500);
+  expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  await expect(server.wait()).resolves.toBeDefined();
+  expect(f.terminate).not.toHaveBeenCalled();
+}, 20_000);
+
 it("allocates once with create-time ownership and a bounded whole-second lifetime, without sandbox credentials", async () => {
   vi.stubEnv("MODAL_TOKEN_ID", "synthetic-modal-id");
   vi.stubEnv("MODAL_TOKEN_SECRET", "synthetic-modal-secret");
