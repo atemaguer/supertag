@@ -219,13 +219,20 @@ async function fixture(directory: string, databaseUrl: string) {
       return gateway.url;
     },
     records,
-    /** Hard-stop both services, then reopen the same durable SQL state on new ports. */
-    async restart() {
+    /** Hard-stop both services; their durable SQL state stays in place. */
+    async stop() {
       client.close();
       await crash(gateway);
       await crash(plane);
+    },
+    start,
+    /** Hard-stop both services, then reopen the same durable SQL state on new ports. */
+    async restart() {
+      await this.stop();
       await start();
     },
+    /** A Worker Host's private state directory, which holds its Attempt journal. */
+    hostState: (name: string) => join(directory, "hosts", name),
     host(name: string, mode: string, extra: string[] = []) {
       return launch(directory, `worker-host-${name}`, [
         "worker-host",
@@ -257,12 +264,23 @@ async function fixture(directory: string, databaseUrl: string) {
         `Task ${taskId} to reach ${taskStatus(state)}`,
       );
     },
-    async close() {
+    close() {
       client?.close();
-      for (const child of children) child.kill("SIGKILL");
-      await Promise.all([...children].map((child) => once(child, "exit").catch(() => undefined)));
     },
   };
+}
+
+/** Kill every process this driver spawned, including services from a partial startup. */
+async function killChildren() {
+  const running = [...children];
+  for (const child of running) child.kill("SIGKILL");
+  await Promise.all(
+    running.map((child) =>
+      child.exitCode === null && child.signalCode === null
+        ? once(child, "exit").catch(() => undefined)
+        : undefined,
+    ),
+  );
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -478,7 +496,13 @@ async function objective(fixture: Fixture) {
   };
 }
 
-async function replay(fixture: Fixture) {
+/**
+ * Stops the Worker Host after its adapter has finished but before its outcome reaches the
+ * Control Plane. Only the host's Attempt journal then knows the outcome. Restarting the host on
+ * the same state directory must report that outcome without running the adapter again; a host
+ * with an empty state directory has nothing to report and the Task never completes.
+ */
+async function replay(fixture: Fixture, directory: string) {
   // The client is replaced when the services restart.
   const operator = () => fixture.client.operator;
   await operator().putTag({ tagId: TAG, instructions: "Replay baseline work", allowedActions: [] });
@@ -489,18 +513,38 @@ async function replay(fixture: Fixture) {
     prompt: PROMPT,
   };
   const receipt = await operator().submitTask(request);
+  const gate = join(directory, "replay-gate");
+  const first = await fixture.host("replay", "complete", [`--adapter-arg=--gate=${gate}`]);
+  const listEvents = async (afterSequence: bigint) =>
+    (await operator().listEvents({ taskId: receipt.taskId, afterSequence, limit: 100 })).events;
+  const events = await until(
+    () => listEvents(0n),
+    (value) => value.length === 3,
+    "the adapter's three events",
+  );
+  // Take the services away, then let the adapter finish. The host records the outcome in its
+  // journal and keeps retrying a report that cannot arrive.
+  await fixture.stop();
+  await writeFile(gate, "");
+  const journal = join(fixture.hostState("replay"), "attempt.json");
+  const recorded = await until(
+    async () =>
+      existsSync(journal)
+        ? (JSON.parse(await readFile(journal, "utf8")) as { stage?: string; task_id?: string })
+        : {},
+    (entry) => entry.stage === "finish",
+    "the Worker Host to journal the finished outcome",
+  );
+  if (recorded.task_id !== receipt.taskId) throw new Error("The journal names another Task");
+  await crash(first);
+  await fixture.start();
+  if (taskStatus((await fixture.task(receipt.taskId)).state) !== "running")
+    throw new Error("The outcome reached the Control Plane before the Worker Host stopped");
+  // Reopen the same Worker Host journal; accepted work must not run again.
   await succeeded(await fixture.host("replay", "complete"));
   const completed = await fixture.state(receipt.taskId, TaskState.succeeded);
-  const events = (
-    await operator().listEvents({ taskId: receipt.taskId, afterSequence: 0n, limit: 100 })
-  ).events;
-  // Reopen the services and the same Worker Host journal; accepted work must not run again.
-  await fixture.restart();
-  await succeeded(await fixture.host("replay", "complete"));
   const recovered = await operator().submitTask(request);
-  const tail = (
-    await operator().listEvents({ taskId: receipt.taskId, afterSequence: 1n, limit: 100 })
-  ).events;
+  const tail = await listEvents(1n);
   let conflictingRetryRejected = false;
   try {
     await operator().submitTask({ ...request, prompt: "A different intent" });
@@ -673,7 +717,7 @@ try {
       facts = await objective(services);
       break;
     case "durable-event-replay":
-      facts = await replay(services);
+      facts = await replay(services, directory);
       break;
     case "workspace-verification":
       facts = await workspace(services, directory);
@@ -686,7 +730,8 @@ try {
   process.stderr.write(`Rust baseline driver failed; logs: ${join(directory, "logs")}\n`);
   throw error;
 } finally {
-  await services?.close();
+  services?.close();
+  await killChildren();
   await sql.cleanup();
 }
 process.stdout.write(
