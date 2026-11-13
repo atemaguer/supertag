@@ -19,6 +19,7 @@ mod node_bridges;
 mod objectives;
 mod operator_access;
 mod output_policy;
+mod placement;
 mod policy;
 mod replies;
 mod service_manager;
@@ -164,6 +165,13 @@ enum Command {
         connection: Connection,
         #[command(subcommand)]
         command: host_status::HostCommand,
+    },
+    /// Choose which labelled Worker Hosts run a Tag, and explain waiting Tasks.
+    Placement {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: placement::PlacementCommand,
     },
     /// Read and answer work waiting on an operator.
     Inbox {
@@ -321,6 +329,9 @@ enum Command {
         gateway: String,
         #[arg(long)]
         state_directory: PathBuf,
+        /// Placement label for this host, such as gpu. Repeat for more labels.
+        #[arg(long = "label")]
+        labels: Vec<String>,
         #[command(flatten)]
         adapter: Box<AdapterOptions>,
         /// Owner-controlled JSON mappings for read-only Workspace Volume copies.
@@ -394,13 +405,25 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long)]
         wait_for_recovery: bool,
     },
-    /// Create a one-time, scoped Auth Key for a Worker Host.
+    /// Create a scoped Auth Key: one-time for a named Worker Host, or reusable.
     CreateAuthKey {
         #[command(flatten)]
         connection: Connection,
-        host_id: String,
-        #[arg(long, default_value_t = 600)]
-        expires_in_seconds: u64,
+        /// Worker Host ID for a one-time key. Omit with --reusable.
+        #[arg(required_unless_present = "reusable", conflicts_with = "reusable")]
+        host_id: Option<String>,
+        /// Enroll any number of Worker Hosts, each choosing its own ID.
+        #[arg(long)]
+        reusable: bool,
+        /// Remove hosts that join with this key once they go offline.
+        #[arg(long)]
+        ephemeral: bool,
+        /// Label granted to every host that joins. Repeat for more labels.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable.
+        #[arg(long)]
+        expires_in_seconds: Option<u64>,
         #[arg(
             long,
             conflicts_with = "all_tags",
@@ -409,6 +432,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         tag: Vec<String>,
         #[arg(long)]
         all_tags: bool,
+    },
+    /// Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled.
+    RevokeAuthKey {
+        #[command(flatten)]
+        connection: Connection,
+        /// The key_id that create-auth-key printed.
+        key_id: String,
     },
     /// Enroll this installation with a one-time Auth Key.
     EnrollHost {
@@ -683,6 +713,10 @@ async fn run(command: Command) -> Result<()> {
             surface_policy::run(client, &token, args).await?;
         }
         Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
+        Command::Placement {
+            connection,
+            command,
+        } => placement::run(connection, command).await?,
         Command::Host {
             connection,
             command,
@@ -887,6 +921,7 @@ async fn run(command: Command) -> Result<()> {
         Command::WorkerHost {
             gateway,
             state_directory,
+            labels,
             adapter,
             e2b_workspace_provider,
             e2b_workspace_provider_arg,
@@ -1075,6 +1110,7 @@ async fn run(command: Command) -> Result<()> {
                 workspace_mounts,
                 disk_space,
                 keep_awake,
+                labels,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -1089,6 +1125,9 @@ async fn run(command: Command) -> Result<()> {
         Command::CreateAuthKey {
             connection,
             host_id,
+            reusable,
+            ephemeral,
+            labels,
             expires_in_seconds,
             tag,
             all_tags,
@@ -1098,11 +1137,16 @@ async fn run(command: Command) -> Result<()> {
             let key = operator
                 .create_auth_key(request(
                     CreateAuthKeyRequest {
-                        host_id,
+                        host_id: host_id.unwrap_or_default(),
+                        reusable,
+                        ephemeral,
+                        labels,
                         operation_id: Uuid::new_v4().to_string(),
                         key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
                         expires_in_ms: expires_in_seconds
-                            .checked_mul(1000)
+                            .map_or(Some(0), |seconds| {
+                                seconds.checked_mul(1000).filter(|ms| *ms > 0)
+                            })
                             .context("invalid Auth Key lifetime")?,
                         allowed_tag_ids: tag,
                         all_tags,
@@ -1115,12 +1159,19 @@ async fn run(command: Command) -> Result<()> {
                 "{}",
                 json!({
                     "auth_key": secret,
+                    "key_id": key.key_id,
                     "host_id": key.host_id,
                     "expires_at_ms": key.expires_at_ms,
                     "allowed_tag_ids": key.allowed_tag_ids,
                     "all_tags": key.all_tags,
+                    "reusable": key.reusable,
+                    "ephemeral": key.ephemeral,
+                    "labels": key.labels,
                 })
             );
+        }
+        Command::RevokeAuthKey { connection, key_id } => {
+            placement::revoke_auth_key(connection, key_id).await?;
         }
         Command::EnrollHost {
             gateway,
@@ -1638,6 +1689,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(supertag_protocol::v2::workspace_volumes_server::WorkspaceVolumesServer::new(plane.clone()))
+        .add_service(supertag_protocol::v2::placement_server::PlacementServer::new(plane.clone()))
+        .add_service(supertag_protocol::v2::auth_keys_server::AuthKeysServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::attempt_workspace_mounts_server::AttemptWorkspaceMountsServer::new(plane.clone()))
         .add_service(
             ArtifactDirectoryServer::new(plane.clone())
@@ -1882,6 +1935,8 @@ async fn gateway(
         .add_service(transfers.artifact_catalog_service())
         .add_service(transfers.artifact_volumes_service())
         .add_service(gateway.workspace_volumes_service())
+        .add_service(gateway.placement_service())
+        .add_service(gateway.auth_keys_service())
         .add_service(gateway.attempt_workspace_mounts_service())
         .add_service(transfers.attempt_artifacts_service())
         .add_service(transfers.artifact_transfer_service())
@@ -2424,6 +2479,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
+        "runs_on": tag.runs_on,
     })
 }
 

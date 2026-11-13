@@ -26,6 +26,7 @@ pub(super) struct Catalog<'a> {
     teams: teams_client::TeamsClient<Channel>,
     objectives: objectives_client::ObjectivesClient<Channel>,
     relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
+    placement: placement_client::PlacementClient<Channel>,
     manager: &'a str,
     create_only: bool,
     /// The revision the current resource was planned against, if it exists.
@@ -62,6 +63,7 @@ enum Write {
     Objective(CreateObjectiveRequest),
     ObjectiveLimits(SetObjectiveLimitsRequest),
     Relationships(ReconcileTagRelationshipsRequest),
+    RunsOn(SetTagRunsOnRequest),
 }
 
 pub(super) struct Change {
@@ -165,6 +167,7 @@ impl<'a> Catalog<'a> {
             teams: client!(teams_client, TeamsClient),
             objectives: client!(objectives_client, ObjectivesClient),
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
+            placement: client!(placement_client, PlacementClient),
             manager,
             create_only,
             observed: None,
@@ -753,6 +756,29 @@ impl<'a> Catalog<'a> {
             );
             self.require_tag(declarations, sender).await?;
         }
+        if let Some(runs_on) = spec.runs_on.take() {
+            let mut runs_on: Vec<String> = runs_on
+                .iter()
+                .map(|label| label.trim().to_ascii_lowercase())
+                .collect();
+            runs_on.sort_unstable();
+            runs_on.dedup();
+            if prior
+                .as_ref()
+                .map_or(!runs_on.is_empty(), |prior| prior.runs_on != runs_on)
+            {
+                followups.push(Change {
+                    key: None,
+                    label: format!("Tag/{name} runsOn"),
+                    action: "set",
+                    details: vec![format!("set Tag/{name} runsOn to [{}]", runs_on.join(", "))],
+                    write: Write::RunsOn(SetTagRunsOnRequest {
+                        tag_id: name.into(),
+                        runs_on,
+                    }),
+                });
+            }
+        }
         let mut reconciliation = ReconcileTagRelationshipsRequest {
             tag_id: name.into(),
             manager: self.manager.into(),
@@ -1108,6 +1134,11 @@ impl<'a> Catalog<'a> {
             Write::Relationships(input) => self
                 .relationships
                 .reconcile_tag(request(input, token)?)
+                .await
+                .map(|_| None),
+            Write::RunsOn(input) => self
+                .placement
+                .set_tag_runs_on(request(input, token)?)
                 .await
                 .map(|_| None),
         };

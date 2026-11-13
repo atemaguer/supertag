@@ -334,6 +334,7 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
                     expires_in_ms: 600000,
                     all_tags: true,
                     allowed_tag_ids: vec![],
+                    ..Default::default()
                 },
                 &credential,
                 None,

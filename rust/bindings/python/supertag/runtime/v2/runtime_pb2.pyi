@@ -1107,7 +1107,7 @@ class ReadMailboxRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class ReportHostRequest(_message.Message):
-    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space")
+    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     CAPACITY_FIELD_NUMBER: _ClassVar[int]
     AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
@@ -1117,6 +1117,7 @@ class ReportHostRequest(_message.Message):
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     DISK_SPACE_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     capacity: int
     available_slots: int
@@ -1126,7 +1127,8 @@ class ReportHostRequest(_message.Message):
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
     execution_profile: HarnessExecutionProfile
     disk_space: HostDiskSpace
-    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ...) -> None: ...
+    labels: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HostDiskSpace(_message.Message):
     __slots__ = ("free_bytes", "total_bytes")
@@ -1137,7 +1139,7 @@ class HostDiskSpace(_message.Message):
     def __init__(self, free_bytes: _Optional[int] = ..., total_bytes: _Optional[int] = ...) -> None: ...
 
 class WorkerHostStatus(_message.Message):
-    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space")
+    __slots__ = ("host_id", "generation", "phase", "draining", "capacity", "available_slots", "active_attempts", "reason", "harness_kind", "workspace_ids", "enrolled_at_ms", "last_seen_at_ms", "presence_expires_at_ms", "revoked_at_ms", "execution_profile", "disk_space", "labels", "granted_labels", "ephemeral", "removed_at_ms")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     GENERATION_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
@@ -1154,6 +1156,10 @@ class WorkerHostStatus(_message.Message):
     REVOKED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     DISK_SPACE_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    GRANTED_LABELS_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
+    REMOVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     generation: int
     phase: HostPhase
@@ -1170,7 +1176,11 @@ class WorkerHostStatus(_message.Message):
     revoked_at_ms: int
     execution_profile: HarnessExecutionProfile
     disk_space: HostDiskSpace
-    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ...) -> None: ...
+    labels: _containers.RepeatedScalarFieldContainer[str]
+    granted_labels: _containers.RepeatedScalarFieldContainer[str]
+    ephemeral: bool
+    removed_at_ms: int
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., phase: _Optional[_Union[HostPhase, str]] = ..., draining: _Optional[bool] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., active_attempts: _Optional[int] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., enrolled_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ..., presence_expires_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., granted_labels: _Optional[_Iterable[str]] = ..., ephemeral: _Optional[bool] = ..., removed_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListHostsRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -1567,32 +1577,48 @@ class SettleInputRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., input_id: _Optional[str] = ..., receipt: _Optional[_Union[LiveInputReceipt, str]] = ...) -> None: ...
 
 class CreateAuthKeyRequest(_message.Message):
-    __slots__ = ("host_id", "operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags")
+    __slots__ = ("host_id", "operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     KEY_DIGEST_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_IN_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
     ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
+    REUSABLE_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     operation_id: str
     key_digest: bytes
     expires_in_ms: int
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     all_tags: bool
-    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ...) -> None: ...
+    reusable: bool
+    ephemeral: bool
+    labels: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AuthKey(_message.Message):
-    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags")
+    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "key_id", "revoked")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
     ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
+    REUSABLE_FIELD_NUMBER: _ClassVar[int]
+    EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    KEY_ID_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     expires_at_ms: int
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     all_tags: bool
-    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ...) -> None: ...
+    reusable: bool
+    ephemeral: bool
+    labels: _containers.RepeatedScalarFieldContainer[str]
+    key_id: str
+    revoked: bool
+    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., key_id: _Optional[str] = ..., revoked: _Optional[bool] = ...) -> None: ...
 
 class RevokeHostRequest(_message.Message):
     __slots__ = ("host_id",)
@@ -1663,7 +1689,7 @@ class PutTagRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -1674,6 +1700,7 @@ class Tag(_message.Message):
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     RETIRED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    RUNS_ON_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -1684,7 +1711,8 @@ class Tag(_message.Message):
     execution: _policy_pb2.PolicyExecutionSettings
     name: str
     retired_at_ms: int
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ...) -> None: ...
+    runs_on: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
     __slots__ = ("limit", "cursor", "include_retired")

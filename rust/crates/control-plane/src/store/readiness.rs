@@ -73,6 +73,10 @@ impl Store {
         workspaces.sort_unstable();
         workspaces.dedup();
         let workspaces = serde_json::to_string(&workspaces)?;
+        let labels = serde_json::to_string(&crate::placement::parse_labels(
+            &input.labels,
+            crate::placement::LabelField::Reported,
+        )?)?;
         let execution_profile = input
             .execution_profile
             .as_ref()
@@ -88,9 +92,9 @@ impl Store {
             &workspaces,
         );
         let digest_input = match (&execution_profile, disk) {
-            (Some(profile), None) => serde_json::to_vec(&(observed, profile))?,
-            (None, None) => serde_json::to_vec(&observed)?,
-            (profile, Some(disk)) => serde_json::to_vec(&(observed, profile, disk))?,
+            (Some(profile), None) => serde_json::to_vec(&(observed, profile, &labels))?,
+            (None, None) => serde_json::to_vec(&(observed, &labels))?,
+            (profile, Some(disk)) => serde_json::to_vec(&(observed, profile, disk, &labels))?,
         };
         let digest = format!("{:x}", Sha256::digest(digest_input));
         let (mut transaction, _) = self.write().await?;
@@ -122,11 +126,11 @@ impl Store {
         let expires = now
             .checked_add(PRESENCE_MS)
             .ok_or_else(|| invalid("presence expiry is out of range"))?;
-        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile,disk_free_bytes,disk_total_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile,disk_free_bytes=excluded.disk_free_bytes,disk_total_bytes=excluded.disk_total_bytes")
+        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile,disk_free_bytes,disk_total_bytes,labels) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile,disk_free_bytes=excluded.disk_free_bytes,disk_total_bytes=excluded.disk_total_bytes,labels=excluded.labels")
             .bind(host.id()).bind(host.generation).bind(sequence).bind(digest)
             .bind(i64::from(input.capacity)).bind(i64::from(input.available_slots)).bind(i64::from(input.readiness))
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
-            .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1))
+            .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1)).bind(labels)
             .execute(&mut *transaction).await?;
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;
@@ -151,7 +155,7 @@ impl Store {
         let limit = if input.limit == 0 { 100 } else { input.limit } as usize;
         let mut transaction = self.pool.begin().await?;
         let mut ids: Vec<String> = sqlx::query_scalar(
-            "SELECT host_id FROM supertag_v2_hosts WHERE host_id>$1 ORDER BY host_id LIMIT $2",
+            "SELECT host_id FROM supertag_v2_hosts WHERE host_id>$1 AND removed_at_ms IS NULL ORDER BY host_id LIMIT $2",
         )
         .bind(&input.cursor)
         .bind((limit + 1) as i64)
@@ -201,12 +205,12 @@ pub(super) async fn accepting_in(transaction: &mut Transaction<'_, Any>, id: &st
     Ok(draining == 0)
 }
 
-async fn status_in(
+pub(crate) async fn status_in(
     transaction: &mut Transaction<'_, Any>,
     id: &str,
     now: i64,
 ) -> Result<WorkerHostStatus> {
-    let host = sqlx::query("SELECT generation,draining,enrolled_at_ms,revoked_at_ms FROM supertag_v2_hosts WHERE host_id=$1")
+    let host = sqlx::query("SELECT generation,draining,enrolled_at_ms,revoked_at_ms,ephemeral,granted_labels,removed_at_ms FROM supertag_v2_hosts WHERE host_id=$1")
         .bind(id).fetch_optional(&mut **transaction).await?.ok_or_else(|| StoreError::NotFound("Worker Host was not found".into()))?;
     let generation: i64 = host.try_get("generation")?;
     let draining = host.try_get::<i64, _>("draining")? != 0;
@@ -229,8 +233,13 @@ async fn status_in(
         active_attempts: u32::try_from(occupied).unwrap_or(u32::MAX),
         enrolled_at_ms: host.try_get("enrolled_at_ms")?,
         revoked_at_ms,
+        ephemeral: host.try_get::<i64, _>("ephemeral")? != 0,
+        granted_labels: serde_json::from_str(&host.try_get::<String, _>("granted_labels")?)?,
+        removed_at_ms: host.try_get("removed_at_ms")?,
         ..Default::default()
     };
+    let mut labels: std::collections::BTreeSet<String> =
+        view.granted_labels.iter().cloned().collect();
     let mut phase = HostPhase::Pending;
     if let Some(row) = row {
         view.capacity = row.try_get::<i64, _>("capacity")? as u32;
@@ -250,6 +259,14 @@ async fn status_in(
             }),
             _ => None,
         };
+        labels.extend(crate::placement::derived_labels(
+            view.harness_kind(),
+            &view.workspace_ids,
+            view.execution_profile.as_ref(),
+        ));
+        labels.extend(serde_json::from_str::<Vec<String>>(
+            &row.try_get::<String, _>("labels")?,
+        )?);
         view.last_seen_at_ms = Some(row.try_get("last_seen_at_ms")?);
         let expires: i64 = row.try_get("presence_expires_at_ms")?;
         view.presence_expires_at_ms = Some(expires);
@@ -275,5 +292,6 @@ async fn status_in(
         view.available_slots = 0;
     }
     view.phase = phase as i32;
+    view.labels = labels.into_iter().collect();
     Ok(view)
 }

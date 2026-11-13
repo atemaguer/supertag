@@ -85,6 +85,9 @@ pub struct HostOptions {
     pub disk_space: environment::DiskSpaceSource,
     /// The OS command that keeps the machine awake while an Attempt runs, if any.
     pub keep_awake: Option<environment::KeepAwakeCommand>,
+    /// Operator-declared placement labels. The host adds its operating system
+    /// and architecture; the Control Plane derives harness and Workspace labels.
+    pub labels: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -208,6 +211,7 @@ pub async fn run(
         "MCP tools require a local Claude Code Worker Host with the matching catalog"
     );
     provider_environment_for(options.harness, options.provider_model.as_deref())?;
+    let labels = readiness::host_labels(&options.labels)?;
     ensure!(
         options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
             && (options.remote_provider.is_none()
@@ -417,7 +421,7 @@ pub async fn run(
             .into_iter()
             .chain(workspaces.gateway_ids())
             .collect(),
-        options.execution_profile.clone(),
+        (options.execution_profile.clone(), labels),
         shutdown.clone(),
     );
     let outcome = async {
@@ -459,6 +463,7 @@ pub async fn run(
                     continue;
                 }
                 supertag_protocol::crash_point("worker-host.claim", "journaled");
+                presence.first_report(Duration::from_secs(5)).await;
                 let response = host
                     .claim_task(request(claim, &token)?)
                     .await;

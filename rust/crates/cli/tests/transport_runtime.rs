@@ -495,6 +495,9 @@ async fn start_host(
             expires_in_ms: 600_000,
             allowed_tag_ids: vec![tag.into()],
             all_tags: false,
+            reusable: false,
+            ephemeral: false,
+            labels: vec![],
         })?)
         .await?;
     let state = directory.join(&id);

@@ -111,6 +111,8 @@ struct TagSpec {
     roles: Vec<String>,
     #[serde(default)]
     accepts_messages_from: Vec<String>,
+    /// Labels a bound Worker Host must carry. Omitted keeps the current labels.
+    runs_on: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]

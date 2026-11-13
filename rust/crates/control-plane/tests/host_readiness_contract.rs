@@ -45,6 +45,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             free_bytes: 40 << 30,
             total_bytes: 500 << 30,
         }),
+        ..Default::default()
     }
 }
 

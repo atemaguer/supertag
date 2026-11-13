@@ -69,6 +69,11 @@ path = "tests/enrolled_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "placement_runtime"
+path = "tests/placement_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "slack_threads"
 path = "tests/slack_threads.rs"
 required-features = ["test-fixtures"]
