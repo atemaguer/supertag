@@ -75,7 +75,25 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async allocate(request, context) {
         if (!request.owner)
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
-        return session.allocate({ ...request, owner: request.owner }, context.signal);
+        const { owner, timeoutMs, allowedActions, environment } = request;
+        return session.allocate(
+          {
+            owner,
+            timeoutMs,
+            allowedActions,
+            ...(environment === undefined
+              ? {}
+              : {
+                  environment: {
+                    ...(environment.image === undefined ? {} : { image: environment.image }),
+                    dockerfileCommands: environment.dockerfileCommands,
+                    ...(environment.user === undefined ? {} : { user: environment.user }),
+                    setupCommands: environment.setupCommands,
+                  },
+                }),
+          },
+          context.signal,
+        );
       },
       async stage(stream, context) {
         if (stageInFlight)

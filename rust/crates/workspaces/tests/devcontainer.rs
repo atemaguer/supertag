@@ -611,3 +611,117 @@ fn materializes_only_tracked_regular_blobs_and_refuses_symlinks() {
         .contains("unsafe path")
     );
 }
+
+/// Runs translated setup lines as a remote provider does: `"$1"` is the checkout.
+fn run_setup(commands: &[String], checkout: &Path) -> String {
+    let script = ["set -e", "cd -- \"$1\""]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(commands.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let output = Command::new("/bin/sh")
+        .args(["-c", &script, "setup"])
+        .arg(checkout)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn translates_a_trusted_dockerfile_for_a_remote_workspace_owned_by_its_last_user() {
+    let repository = repository_with(&[
+        (
+            ".devcontainer/devcontainer.json",
+            r#"{"build": {"dockerfile": "Dockerfile"},
+                "containerEnv": {"TOOL_HOME": "${workspaceFolder}/it's"},
+                "onCreateCommand": "echo \"create $TOOL_HOME\"",
+                "updateContentCommand": ["echo", "update"],
+                "postCreateCommand": "echo post"}"#,
+        ),
+        (
+            ".devcontainer/Dockerfile",
+            "FROM python:3.13-slim\nUSER root\nUSER nobody\n",
+        ),
+    ]);
+    let head = git(repository.path(), &["rev-parse", "HEAD"]);
+    let subset = read_trusted_devcontainer(repository.path(), &head)
+        .unwrap()
+        .unwrap();
+    let remote = remote_devcontainer(&subset).unwrap();
+    assert_eq!(remote.image.as_deref(), Some("python:3.13-slim"));
+    assert_eq!(remote.user.as_deref(), Some("nobody"));
+    assert_eq!(
+        remote.dockerfile_commands[..3],
+        ["USER root", "USER nobody", "USER root"]
+    );
+    assert!(
+        remote.dockerfile_commands[3].contains("git")
+            && remote.dockerfile_commands[3].contains("python3")
+    );
+    assert_eq!(remote.dockerfile_commands[4..], ["USER nobody"]);
+    // `${workspaceFolder}` names the checkout the provider chose, at run time, with quoting kept.
+    let checkout = tempfile::tempdir().unwrap();
+    let physical = checkout.path().canonicalize().unwrap();
+    assert_eq!(
+        run_setup(&remote.setup_commands, &physical),
+        format!("create {}/it's\nupdate\npost\n", physical.display())
+    );
+}
+
+#[test]
+fn a_remote_workspace_sets_a_declared_user_on_the_operator_image_and_builds_nothing_else() {
+    let plain = parse_devcontainer_subset(r#"{"updateContentCommand": "true"}"#).unwrap();
+    assert_eq!(
+        remote_devcontainer(&plain).unwrap(),
+        RemoteDevcontainer {
+            setup_commands: vec!["sh -c 'true'".into()],
+            ..Default::default()
+        }
+    );
+    let user = parse_devcontainer_subset(r#"{"remoteUser": "node"}"#).unwrap();
+    assert_eq!(
+        remote_devcontainer(&user).unwrap(),
+        RemoteDevcontainer {
+            dockerfile_commands: vec!["USER node".into()],
+            user: Some("node".into()),
+            ..Default::default()
+        }
+    );
+    // A registry image without a user still installs the staging tools.
+    let image = parse_devcontainer_subset(r#"{"image": "node:22"}"#).unwrap();
+    let image = remote_devcontainer(&image).unwrap();
+    assert_eq!(image.image.as_deref(), Some("node:22"));
+    assert_eq!(image.dockerfile_commands.len(), 1);
+    assert_eq!(image.user, None);
+}
+
+#[test]
+fn a_remote_workspace_refuses_a_nonliteral_user_and_a_fixed_workspace_folder() {
+    for json in [
+        r#"{"build": {"dockerfile": "Dockerfile"}}"#,
+        // remoteUser does not excuse a nonliteral Dockerfile USER.
+        r#"{"remoteUser": "nobody", "build": {"dockerfile": "Dockerfile"}}"#,
+    ] {
+        let repository = repository_with(&[
+            (".devcontainer/devcontainer.json", json),
+            (
+                ".devcontainer/Dockerfile",
+                "FROM python:3.13-slim\nARG NAME=nobody\nUSER $NAME\n",
+            ),
+        ]);
+        let head = git(repository.path(), &["rev-parse", "HEAD"]);
+        let subset = read_trusted_devcontainer(repository.path(), &head)
+            .unwrap()
+            .unwrap();
+        assert!(
+            error(remote_devcontainer(&subset)).contains("USER must name a literal user"),
+            "{json}"
+        );
+    }
+    let folder = parse_devcontainer_subset(r#"{"workspaceFolder": "/work/app"}"#).unwrap();
+    assert!(error(remote_devcontainer(&folder)).contains("workspaceFolder is not supported"));
+}

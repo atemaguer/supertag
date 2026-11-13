@@ -1504,16 +1504,27 @@ async fn run_assignment(
             shutdown,
             &cancel,
             async {
+                // The base commit's devcontainer subset is read and refused here, before any
+                // provider call. A refusal names the property; nothing else reaches the Task.
+                let environment = workspaces
+                    .remote_environment(workspace, &cancel)
+                    .await
+                    .map_err(|error| {
+                        Status::invalid_argument(format!("{DEVCONTAINER_REFUSAL}{error:#}"))
+                    })?;
                 remote::prepare(
                     options,
                     journal,
                     workspaces,
                     (&attempt, workspace, &task),
-                    // Only a sandboxed stdio server needs the trusted copy beside the checkout.
-                    workspace_mcp
-                        .as_ref()
-                        .filter(|resolved| resolved.sandboxed())
-                        .map(|_| workspace.checkout.base_commit.as_str()),
+                    (
+                        // Only a sandboxed stdio server needs the trusted copy beside the checkout.
+                        workspace_mcp
+                            .as_ref()
+                            .filter(|resolved| resolved.sandboxed())
+                            .map(|_| workspace.checkout.base_commit.as_str()),
+                        environment,
+                    ),
                     (registration, coordination, token),
                     &cancel,
                 )
@@ -1530,7 +1541,7 @@ async fn run_assignment(
                 valid_until = expires;
                 Some(provider)
             }
-            Err(_) => {
+            Err(error) => {
                 with_cleanup_authority(
                     host,
                     &attempt,
@@ -1539,11 +1550,12 @@ async fn run_assignment(
                     remote::ensure_stopped(options, journal, &attempt, registration),
                 )
                 .await?;
-                return save_finish(
-                    journal,
-                    attempt,
-                    adapter::failed("Remote Workspace could not be prepared"),
-                );
+                let message = if error.message().starts_with(DEVCONTAINER_REFUSAL) {
+                    error.message()
+                } else {
+                    "Remote Workspace could not be prepared"
+                };
+                return save_finish(journal, attempt, adapter::failed(message));
             }
         }
     } else {
@@ -2008,6 +2020,8 @@ async fn with_cleanup_authority(
 
 /// Keep the execution lease alive during repository preparation and transfer.
 /// The operation must observe `cancel` so native Git is reaped before returning.
+const DEVCONTAINER_REFUSAL: &str = "Remote Workspace devcontainer: ";
+
 async fn with_authority<T>(
     host: &mut RegisteredHost,
     attempt: &Attempt,

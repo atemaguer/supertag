@@ -8,6 +8,8 @@ export const MAX_TRANSFER = 256 * 1024 * 1024;
 const API_TIMEOUT_MS = 15_000;
 const ALLOCATE_TIMEOUT_MS = 60_000;
 const TRANSFER_TIMEOUT_MS = 120_000;
+/** A devcontainer image build before allocation, or its setup commands after staging. */
+export const BUILD_TIMEOUT_MS = 20 * 60_000;
 
 export interface SandboxOwner {
   readonly hostId: string;
@@ -36,10 +38,53 @@ export interface SandboxWorkspace {
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
 }
 
+/**
+ * The Worker Host's translation of the trusted commit's devcontainer subset. The provider builds
+ * `dockerfileCommands` on `image` (or on its configured template or image when absent) before the
+ * sandbox starts. The image ends as `user`, so every process the session starts, staging
+ * included, runs as that user and it owns the checkout and the trusted MCP copy.
+ */
+export interface SandboxEnvironment {
+  readonly image?: string;
+  readonly dockerfileCommands: readonly string[];
+  readonly user?: string;
+  /** Shell lines run in order in the checkout after staging; `"$1"` is the checkout path. */
+  readonly setupCommands: readonly string[];
+}
+
+export function validSandboxEnvironment(environment: SandboxEnvironment): boolean {
+  const line = (value: string) =>
+    value.length > 0 && value.length <= 65_536 && !/[\0\r\n]/u.test(value);
+  return (
+    (environment.image === undefined ||
+      (environment.image.length <= 512 && /^[^\s\p{Cc}]+$/u.test(environment.image))) &&
+    (environment.user === undefined ||
+      /^[A-Za-z0-9_][A-Za-z0-9._:-]{0,63}$/u.test(environment.user)) &&
+    environment.dockerfileCommands.length <= 256 &&
+    environment.dockerfileCommands.every(line) &&
+    // A user is set by the image, so the image is built whenever one is named.
+    (environment.user === undefined ||
+      environment.dockerfileCommands.at(-1) === `USER ${environment.user}`) &&
+    // Without a devcontainer image, the build only sets the user on the operator's base.
+    (environment.image === undefined
+      ? environment.dockerfileCommands.length <= 1
+      : environment.dockerfileCommands.length > 0) &&
+    environment.setupCommands.length <= 256 &&
+    environment.setupCommands.every(
+      (command) => command.length > 0 && command.length <= 65_536 && !command.includes("\0"),
+    )
+  );
+}
+
 export interface SandboxWorkspaceProvider {
   readonly label: string;
   validateOwner(owner: SandboxOwner): void;
-  allocate(owner: SandboxOwner, timeoutMs: number, signal: AbortSignal): Promise<SandboxWorkspace>;
+  allocate(
+    owner: SandboxOwner,
+    timeoutMs: number,
+    signal: AbortSignal,
+    environment?: SandboxEnvironment,
+  ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
 }
 
@@ -186,6 +231,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let sandboxId: string | undefined;
   let root: string | undefined;
   let allowedActions: readonly string[] = [];
+  let setupCommands: readonly string[] = [];
   let stagedInputRoot = "";
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
@@ -247,7 +293,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
 
   return {
     async allocate(
-      request: { owner: SandboxOwner; timeoutMs: number; allowedActions: readonly string[] },
+      request: {
+        owner: SandboxOwner;
+        timeoutMs: number;
+        allowedActions: readonly string[];
+        environment?: SandboxEnvironment;
+      },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
       if (phase !== "new") throw workspaceError("allocation already attempted");
@@ -256,14 +307,19 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("sandbox lifetime is invalid");
       if (request.allowedActions.includes("commands:execute"))
         throw workspaceError("does not support commands:execute");
-      const signal = signalFor(caller, ALLOCATE_TIMEOUT_MS);
+      const { environment } = request;
+      if (environment !== undefined && !validSandboxEnvironment(environment))
+        throw workspaceError("devcontainer environment is invalid");
+      const build = (environment?.dockerfileCommands.length ?? 0) > 0;
+      const signal = signalFor(caller, build ? BUILD_TIMEOUT_MS : ALLOCATE_TIMEOUT_MS);
       signal.throwIfAborted();
       phase = "allocating";
       allocationStarted = true;
       owner = { ...request.owner };
       allowedActions = [...request.allowedActions];
+      setupCommands = [...(environment?.setupCommands ?? [])];
       try {
-        sandbox = await provider.allocate(owner, request.timeoutMs, signal);
+        sandbox = await provider.allocate(owner, request.timeoutMs, signal, environment);
         signal.throwIfAborted();
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
@@ -372,6 +428,24 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         if (result.exitCode !== 0 || result.stdout.trim() !== "staged")
           throw new Error("Pinned bundle could not be materialized");
         signal.throwIfAborted();
+        if (setupCommands.length > 0) {
+          // The devcontainer's lifecycle commands, from the trusted commit, run in the checkout
+          // as the image's user with the image's environment: never a Worker Host variable.
+          const setupSignal = signalFor(caller, BUILD_TIMEOUT_MS);
+          const setup = await sandbox.run(
+            [
+              "/bin/sh",
+              "-c",
+              ["set -e", 'cd -- "$1"', ...setupCommands].join("\n"),
+              "devcontainer-setup",
+              `${root}/checkout`,
+            ],
+            BUILD_TIMEOUT_MS,
+            setupSignal,
+          );
+          if (setup.exitCode !== 0) throw new Error("devcontainer setup failed");
+          signal.throwIfAborted();
+        }
         stagedInputRoot = expectedRoot;
         mcpStaged = header.mcpCommit !== undefined;
         const environment = sandbox.environment(root);

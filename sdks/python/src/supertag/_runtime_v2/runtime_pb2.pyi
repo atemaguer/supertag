@@ -1351,14 +1351,28 @@ class RemoteWorkspaceOwner(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceAllocateRequest(_message.Message):
-    __slots__ = ("owner", "timeout_ms", "allowed_actions")
+    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment")
     OWNER_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
     owner: RemoteWorkspaceOwner
     timeout_ms: int
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ...) -> None: ...
+    environment: RemoteWorkspaceEnvironment
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ...) -> None: ...
+
+class RemoteWorkspaceEnvironment(_message.Message):
+    __slots__ = ("image", "dockerfile_commands", "user", "setup_commands")
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    DOCKERFILE_COMMANDS_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    SETUP_COMMANDS_FIELD_NUMBER: _ClassVar[int]
+    image: str
+    dockerfile_commands: _containers.RepeatedScalarFieldContainer[str]
+    user: str
+    setup_commands: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, image: _Optional[str] = ..., dockerfile_commands: _Optional[_Iterable[str]] = ..., user: _Optional[str] = ..., setup_commands: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RemoteWorkspaceAllocation(_message.Message):
     __slots__ = ("sandbox_id",)

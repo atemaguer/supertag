@@ -443,3 +443,45 @@ it("refuses escaping symlinks in the pinned source before exposing file tools", 
   await expect(f.session.execute({ kind: "read", path: "a.txt" })).rejects.toThrow(/staged/);
   await expect(f.session.capture()).rejects.toThrow(/staged/);
 }, 15_000);
+
+it("builds the devcontainer's layers into the sandbox image and runs its setup in the checkout", async () => {
+  const f = await fixture();
+  const { header, bytes } = await bundle();
+  const environment = {
+    image: "python:3.13-slim",
+    dockerfileCommands: ["USER root", "RUN install-tools", "USER nobody"],
+    user: "nobody",
+    setupCommands: [`export TOOL_HOME="$1"'/.tool'`, `sh -c 'echo "$TOOL_HOME" > .setup-out'`],
+  };
+  await f.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read"],
+    environment,
+  });
+  // The image ends as the devcontainer's user, so staging, setup, and MCP servers run as it.
+  expect(f.create).toHaveBeenCalledExactlyOnceWith({
+    name: sandboxOwnershipName(owner),
+    tags: sandboxOwnershipMetadata(owner),
+    timeoutMs: 60_000,
+    blockNetwork: true,
+    image: { image: "python:3.13-slim", dockerfileCommands: environment.dockerfileCommands },
+  });
+  await f.session.stage(header, bytes);
+  const out = unpack((await f.session.capture()).bytes).find(
+    (entry) => entry.path === ".setup-out",
+  );
+  expect(out?.body).toMatch(/\/supertag-workspace-[^/]+\/checkout\/\.tool\n$/u);
+  await f.session.stop({ owner });
+
+  // Setup alone needs no image build.
+  const plain = await fixture();
+  await plain.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    environment: { dockerfileCommands: [], setupCommands: ["true"] },
+  });
+  expect(plain.create.mock.calls[0]?.[0]).not.toHaveProperty("image");
+  await plain.session.stop({ owner });
+}, 15_000);

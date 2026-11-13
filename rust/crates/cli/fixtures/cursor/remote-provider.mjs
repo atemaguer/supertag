@@ -74,6 +74,7 @@ const serializable = (owner) => ({ ...owner, hostGeneration: String(owner.hostGe
 let allocation;
 let directory;
 let actions = [];
+let environment;
 let staged = false;
 let mcpStaged = false;
 const mcpServers = new Set();
@@ -115,7 +116,7 @@ async function git(cwd, ...args) {
 
 const implementation = {
   provider: {
-    async allocate({ owner, allowedActions, timeoutMs }) {
+    async allocate({ owner, allowedActions, timeoutMs, environment: requested }) {
       assert.equal(allocation, undefined);
       assert.ok(owner && owner.hostGeneration > 0n && timeoutMs > 0);
       assert.match(owner.allocationId, /^[\w-]+$/u);
@@ -128,6 +129,14 @@ const implementation = {
         stopped: false,
       };
       actions = allowedActions;
+      // The Worker Host's devcontainer translation: the fixture records it and runs its setup.
+      environment = requested && {
+        image: requested.image,
+        dockerfileCommands: [...requested.dockerfileCommands],
+        user: requested.user,
+        setupCommands: [...requested.setupCommands],
+      };
+      if (environment) await trace({ type: "environment", provider, environment });
       await persist(allocation);
       await trace({
         type: "allocate",
@@ -196,6 +205,19 @@ const implementation = {
         await promisify(execFile)("/usr/bin/tar", ["-xf", archive, "-C", join(directory, "mcp")]);
         await rm(archive);
         mcpStaged = true;
+      }
+      if (environment?.setupCommands.length) {
+        const { stdout } = await promisify(execFile)(
+          "/bin/sh",
+          [
+            "-c",
+            ["set -e", 'cd -- "$1"', ...environment.setupCommands].join("\n"),
+            "devcontainer-setup",
+            checkout,
+          ],
+          { env: { PATH: "/usr/bin:/bin", HOME: directory }, timeout: 10_000 },
+        );
+        await trace({ type: "setup", checkout, stdout });
       }
       staged = true;
       await trace({

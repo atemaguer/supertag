@@ -605,6 +605,12 @@ database_tests! {
     cursor_modal_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy;
     #[tokio::test]
     cursor_remote_workspace_refuses_a_stdio_mcp_credential_before_any_provider_call;
+    #[tokio::test]
+    cursor_e2b_workspace_builds_and_sets_up_the_trusted_devcontainer;
+    #[tokio::test]
+    cursor_modal_workspace_builds_and_sets_up_the_trusted_devcontainer;
+    #[tokio::test]
+    cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call;
 }
 
 async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
@@ -1020,6 +1026,181 @@ async fn cursor_remote_workspace_refuses_a_stdio_mcp_credential_before_any_provi
         "{result}"
     );
     assert!(!result.contains("db-canary-token"), "{result}");
+    // Neither the provider helper nor the harness started.
+    assert!(fixture.provider_trace()?.is_empty());
+    assert!(fixture.trace()?.is_empty());
+    runtime.stop().await
+}
+
+/// Commits a devcontainer subset on top of the fixture base; `.setup-*` files are ignored.
+async fn commit_devcontainer(fixture: &mut Fixture, json: &Value, dockerfile: &str) -> Result<()> {
+    std::fs::create_dir_all(fixture.source.join(".devcontainer"))?;
+    std::fs::write(
+        fixture.source.join(".devcontainer/devcontainer.json"),
+        json.to_string(),
+    )?;
+    std::fs::write(fixture.source.join(".devcontainer/Dockerfile"), dockerfile)?;
+    std::fs::write(fixture.source.join(".gitignore"), ".setup-*\n")?;
+    git(&fixture.source, &["add", ".devcontainer", ".gitignore"]).await?;
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Add a devcontainer"],
+    )
+    .await?;
+    fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]).await?;
+    Ok(())
+}
+
+async fn cursor_e2b_workspace_builds_and_sets_up_the_trusted_devcontainer(
+    database: String,
+) -> Result<()> {
+    remote_devcontainer(RemoteWorkspace::E2b, &database).await
+}
+
+async fn cursor_modal_workspace_builds_and_sets_up_the_trusted_devcontainer(
+    database: String,
+) -> Result<()> {
+    remote_devcontainer(RemoteWorkspace::Modal, &database).await
+}
+
+/// The base commit's devcontainer becomes the sandbox: its Dockerfile on the registry image, the
+/// Dockerfile's last USER as the image's user (so it owns the checkout and the trusted MCP copy),
+/// and all three lifecycle commands in the checkout after staging, with `${workspaceFolder}`
+/// naming the provider's checkout. Setup output the repository ignores is never delivered.
+async fn remote_devcontainer(provider: RemoteWorkspace, database: &str) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_devcontainer(
+        &mut fixture,
+        &json!({
+            "build": {"dockerfile": "Dockerfile", "args": {"PY": "3.13"}},
+            "containerEnv": {"TOOL_HOME": "${workspaceFolder}/.tool"},
+            "remoteEnv": {"GREETING": "it's ${containerEnv:TOOL_HOME}"},
+            "onCreateCommand": "echo created >> .setup-log",
+            "updateContentCommand": ["sh", "-c", "printf '%s|%s\\n' \"$TOOL_HOME\" \"$GREETING\" > .setup-env"],
+            "postCreateCommand": {"b": "echo post-b >> .setup-log", "a": "echo post-a >> .setup-log"},
+            "forwardPorts": [3000]
+        }),
+        "ARG PY=3.12\nFROM python:${PY}-slim\nRUN true\nUSER root\nUSER nobody\n",
+    )
+    .await?;
+    std::fs::write(
+        fixture.root.join("provider-kind"),
+        match provider {
+            RemoteWorkspace::E2b => "e2b",
+            RemoteWorkspace::Modal => "modal",
+        },
+    )?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-first").await?;
+    let worker = runtime.worker_with_remote(&fixture, "remote-first", false, Some(provider))?;
+    runtime
+        .wait_stream(&fixture, &task.task_id, "remote-first")
+        .await?;
+    let runner = pid(&fixture.started("remote-first")?, "pid")?;
+    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+    worker_finished(worker, &fixture).await?;
+    let task = runtime
+        .assert_success(&task.task_id, "remote-first")
+        .await?;
+    // Only the Task's own edit is delivered; the ignored setup output stays in the sandbox.
+    let delivery = task
+        .workspace_delivery
+        .as_ref()
+        .context("remote delivery missing")?;
+    ensure!(
+        delivery.committed && delivery.changed_files == 1,
+        "{delivery:?}"
+    );
+
+    let trace = fixture.provider_trace()?;
+    let environment = &trace
+        .iter()
+        .find(|entry| entry["type"] == "environment")
+        .with_context(|| format!("no devcontainer environment reached the provider: {trace:?}"))?["environment"];
+    assert_eq!(environment["image"], "python:3.13-slim");
+    assert_eq!(environment["user"], "nobody");
+    let commands: Vec<&str> = environment["dockerfileCommands"]
+        .as_array()
+        .context("Dockerfile commands")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(commands[..3], ["RUN true", "USER root", "USER nobody"]);
+    // Tools for staging install as root, then the image ends as the devcontainer's user.
+    assert_eq!(commands[3], "USER root");
+    assert!(commands[4].contains("python3"), "{commands:?}");
+    assert_eq!(commands[5..], ["USER nobody"]);
+    let order = |kind: &str| trace.iter().position(|entry| entry["type"] == kind);
+    // The image is built before the sandbox exists; setup runs only once it is staged.
+    assert!(order("environment") < order("allocate"));
+    assert!(order("allocate") < order("setup"));
+    let setup = trace
+        .iter()
+        .find(|entry| entry["type"] == "setup")
+        .context("setup never ran")?;
+    let checkout = PathBuf::from(setup["checkout"].as_str().context("checkout")?);
+    assert_eq!(
+        std::fs::read_to_string(checkout.join(".setup-log"))?,
+        "created\npost-a\npost-b\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(checkout.join(".setup-env"))?,
+        format!("{0}/.tool|it's {0}/.tool\n", checkout.display())
+    );
+    // Nothing from the Worker Host's environment reached the provider.
+    let serialized = serde_json::to_string(&trace)?;
+    assert!(!serialized.contains(&fixture.source.display().to_string()));
+    runtime.stop().await
+}
+
+/// A Dockerfile USER that is not a literal name is refused before any provider call, even when
+/// remoteUser would override it, and the refusal names the rule.
+async fn cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_devcontainer(
+        &mut fixture,
+        &json!({"remoteUser": "nobody", "build": {"dockerfile": "Dockerfile"}}),
+        "FROM python:3.13-slim\nARG NAME=nobody\nUSER $NAME\n",
+    )
+    .await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-first").await?;
+    worker_finished(
+        runtime.worker_with_remote(&fixture, "refused", false, Some(RemoteWorkspace::E2b))?,
+        &fixture,
+    )
+    .await?;
+    let task = runtime.task(&task.task_id).await?;
+    assert_eq!(task.state(), TaskState::Failed, "{task:?}");
+    let result = task.result.clone().unwrap_or_default();
+    assert!(
+        result.contains(
+            "Remote Workspace devcontainer: devcontainer build.dockerfile USER must name a literal user or user:group"
+        ),
+        "{result}"
+    );
     // Neither the provider helper nor the harness started.
     assert!(fixture.provider_trace()?.is_empty());
     assert!(fixture.trace()?.is_empty());

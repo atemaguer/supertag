@@ -38,6 +38,8 @@ use tonic::{
 
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const ALLOCATE_TIMEOUT: Duration = Duration::from_secs(60);
+/// A devcontainer image build, or the devcontainer's setup commands after staging.
+const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -275,6 +277,7 @@ impl RemoteProvider {
         owner: &RemoteWorkspaceOwner,
         lifetime: Duration,
         allowed_actions: &[String],
+        environment: Option<RemoteWorkspaceEnvironment>,
         cancel: &CancellationToken,
     ) -> Result<String> {
         validate_owner(owner)?;
@@ -288,7 +291,16 @@ impl RemoteProvider {
                     .all(|action| matches!(action.as_str(), "files:read" | "files:write")),
             "remote provider supports only file actions"
         );
-        bounded(ALLOCATE_TIMEOUT, cancel, async {
+        // A devcontainer image is built before the sandbox starts.
+        let deadline = if environment
+            .as_ref()
+            .is_some_and(|environment| !environment.dockerfile_commands.is_empty())
+        {
+            BUILD_TIMEOUT
+        } else {
+            ALLOCATE_TIMEOUT
+        };
+        bounded(deadline, cancel, async {
             let response = self
                 .client()
                 .allocate(self.request(
@@ -296,8 +308,9 @@ impl RemoteProvider {
                         owner: Some(owner.clone()),
                         timeout_ms,
                         allowed_actions: allowed_actions.to_vec(),
+                        environment,
                     },
-                    ALLOCATE_TIMEOUT,
+                    deadline,
                 )?)
                 .await?
                 .into_inner();
@@ -313,6 +326,7 @@ impl RemoteProvider {
         start_commit: &str,
         inputs: &[(ArtifactInputFile, Vec<u8>)],
         mcp_commit: Option<&str>,
+        setup: bool,
         cancel: &CancellationToken,
     ) -> Result<()> {
         ensure!(
@@ -341,11 +355,17 @@ impl RemoteProvider {
             "Workspace stage exceeds the transfer limit"
         );
         let manifest: Vec<_> = inputs.iter().map(|(file, _)| file.clone()).collect();
-        bounded(TRANSFER_TIMEOUT, cancel, async {
+        // The devcontainer's setup commands run as the last step of staging.
+        let deadline = if setup {
+            BUILD_TIMEOUT
+        } else {
+            TRANSFER_TIMEOUT
+        };
+        bounded(deadline, cancel, async {
             let mut file = open_artifact(bundle).await?;
             let (sender, receiver) = mpsc::channel(2);
             let mut client = self.client();
-            let request = self.request(ReceiverStream::new(receiver), TRANSFER_TIMEOUT)?;
+            let request = self.request(ReceiverStream::new(receiver), deadline)?;
             let send = async {
                 sender
                     .send(RemoteWorkspaceStageChunk {
@@ -807,6 +827,7 @@ mod tests {
         mode: Arc<AtomicU8>,
         staged: Arc<Mutex<Vec<u8>>>,
         mcp_commit: Arc<Mutex<Option<String>>>,
+        environment: Arc<Mutex<Option<RemoteWorkspaceEnvironment>>>,
         /// Each sandbox MCP start record, and whether its input ended.
         mcp: Arc<Mutex<Vec<(RemoteMcpServerStart, bool)>>>,
     }
@@ -833,6 +854,7 @@ mod tests {
                 request.get_ref().owner.as_ref().unwrap().allocation_id,
                 "allocation"
             );
+            *self.environment.lock().unwrap() = request.get_ref().environment.clone();
             Ok(Response::new(RemoteWorkspaceAllocation {
                 sandbox_id: "sandbox-fixture".into(),
             }))
@@ -1043,6 +1065,7 @@ mod tests {
             mode: Arc::new(AtomicU8::new(0)),
             staged: Arc::new(Mutex::new(Vec::new())),
             mcp_commit: Arc::default(),
+            environment: Arc::default(),
             mcp: Arc::default(),
         };
         let shutdown = CancellationToken::new();
@@ -1090,18 +1113,27 @@ mod tests {
             );
         }
         assert!(env.contains("E2B_API_KEY=synthetic-e2b-key"));
+        let environment = RemoteWorkspaceEnvironment {
+            image: Some("python:3.13-slim".into()),
+            dockerfile_commands: vec!["USER nobody".into()],
+            user: Some("nobody".into()),
+            setup_commands: vec!["sh -c 'true'".into()],
+        };
         assert_eq!(
             provider
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
                     &["files:read".into(), "files:write".into()],
+                    Some(environment.clone()),
                     &CancellationToken::new()
                 )
                 .await
                 .unwrap(),
             "sandbox-fixture"
         );
+        // The devcontainer translation reaches the provider only over the private channel.
+        assert_eq!(*mock.environment.lock().unwrap(), Some(environment));
         let bytes = vec![b'x'; CHECKPOINT_CHUNK_BYTES * 2 + 7];
         let bundle = TransferArtifact {
             path: directory.join("source.bundle"),
@@ -1117,6 +1149,7 @@ mod tests {
                     &"a".repeat(40),
                     &[],
                     Some(&"b".repeat(64)),
+                    false,
                     &CancellationToken::new()
                 )
                 .await
@@ -1128,6 +1161,7 @@ mod tests {
                 &"a".repeat(40),
                 &[],
                 Some(&"b".repeat(40)),
+                true,
                 &CancellationToken::new(),
             )
             .await
@@ -1254,6 +1288,7 @@ mod tests {
                     &owner(),
                     Duration::from_secs(60),
                     &["commands:execute".into()],
+                    None,
                     &CancellationToken::new()
                 )
                 .await
@@ -1355,6 +1390,7 @@ mod tests {
                     &"a".repeat(40),
                     &[],
                     None,
+                    false,
                     &CancellationToken::new()
                 )
                 .await
@@ -1372,6 +1408,7 @@ mod tests {
                     &"a".repeat(40),
                     &[],
                     None,
+                    false,
                     &CancellationToken::new()
                 )
                 .await

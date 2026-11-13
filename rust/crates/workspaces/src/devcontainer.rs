@@ -1061,6 +1061,12 @@ pub fn devcontainer_commands(
         .into_iter()
         .map(|(name, value)| format!("export {name}={}", shell_quote(&value)))
         .collect();
+    out.extend(lifecycle_lines(devcontainer, warm));
+    Ok(out)
+}
+
+fn lifecycle_lines(devcontainer: &DevcontainerSubset, warm: bool) -> Vec<String> {
+    let mut out = Vec::new();
     let mut add = |command: Option<&DevcontainerCommand>| {
         let entries: Vec<CommandEntry> = match command {
             None => vec![],
@@ -1086,5 +1092,76 @@ pub fn devcontainer_commands(
     if !warm {
         add(devcontainer.post_create_command.as_ref());
     }
-    Ok(out)
+    out
+}
+
+/// Makes sure a sandbox built from a devcontainer image can stage the checkout.
+const REMOTE_TOOLS: &str = r#"RUN ["/bin/sh", "-c", "command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends git python3 ca-certificates && rm -rf /var/lib/apt/lists/*)"]"#;
+
+/// A remote Workspace sandbox translated from the trusted commit's devcontainer subset.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteDevcontainer {
+    /// Registry image the build starts from; `None` keeps the operator's template or image.
+    pub image: Option<String>,
+    /// Dockerfile instructions after the base, ending as `user` when one is set.
+    pub dockerfile_commands: Vec<String>,
+    /// The user the image ends as, so every sandbox process (staging included) runs as it.
+    pub user: Option<String>,
+    /// Shell lines run in the checkout after staging. `"$1"` is the checkout path.
+    pub setup_commands: Vec<String>,
+}
+
+/// Translates the subset for a remote Workspace whose provider chooses the checkout path.
+/// A fresh sandbox per Attempt is a cold preparation: all three lifecycle commands run.
+/// `${workspaceFolder}` resolves, at run time, to that checkout path.
+pub fn remote_devcontainer(devcontainer: &DevcontainerSubset) -> Result<RemoteDevcontainer> {
+    ensure!(
+        devcontainer.workspace_folder.is_none(),
+        "devcontainer property workspaceFolder is not supported in remote Workspaces: the provider chooses the checkout path, which ${{workspaceFolder}} names"
+    );
+    // Validates every Dockerfile USER, even one remoteUser overrides.
+    let user = devcontainer_image_user(Some(devcontainer))?;
+    let (image, mut dockerfile_commands) =
+        if devcontainer.image.is_some() || devcontainer.build.is_some() {
+            let base = devcontainer_base(Some(devcontainer), "")?;
+            ensure!(
+                !base.image.trim().is_empty()
+                    && !base
+                        .image
+                        .chars()
+                        .any(|c| c.is_control() || c.is_whitespace()),
+                "devcontainer image must be a registry image reference"
+            );
+            let mut commands = base.commands;
+            // Tools install as root; the image then ends as the devcontainer's user.
+            if user.is_some() {
+                commands.push("USER root".into());
+            }
+            commands.push(REMOTE_TOOLS.into());
+            (Some(base.image), commands)
+        } else {
+            (None, Vec::new())
+        };
+    if let Some(user) = &user {
+        dockerfile_commands.push(format!("USER {user}"));
+    }
+    // NUL never appears in a parsed value, so it marks where the checkout path goes.
+    let mut setup_commands: Vec<String> = resolved_devcontainer_env(Some(devcontainer), "\0")?
+        .into_iter()
+        .map(|(name, value)| {
+            let value = value
+                .split('\0')
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join("\"$1\"");
+            format!("export {name}={value}")
+        })
+        .collect();
+    setup_commands.extend(lifecycle_lines(devcontainer, false));
+    Ok(RemoteDevcontainer {
+        image,
+        dockerfile_commands,
+        user,
+        setup_commands,
+    })
 }
