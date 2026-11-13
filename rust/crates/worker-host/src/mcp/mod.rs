@@ -76,15 +76,33 @@ enum Session {
     Stdio(stdio::Session),
 }
 
+/// The Worker Host's private provider connection to a remote Workspace's staged sandbox.
+pub(crate) struct SandboxConnection {
+    pub(crate) channel: tonic::transport::Channel,
+    pub(crate) token: String,
+}
+
 impl Session {
     fn open(
         client: &reqwest::Client,
-        server: &catalog::Server,
+        (name, server): (&str, &catalog::Server),
         logins: Option<&McpLoginStore>,
+        sandbox: Option<&SandboxConnection>,
     ) -> Result<Self, Failure> {
         Ok(match &server.transport {
             catalog::Transport::Http(http) => {
                 Self::Http(http::Session::new(client.clone(), http.clone(), logins))
+            }
+            catalog::Transport::Stdio(stdio) if stdio.sandboxed => {
+                // A sandboxed server never receives a Worker Host variable.
+                if !stdio.env.is_empty() || stdio.cwd.is_some() {
+                    return Err(Failure::Denied);
+                }
+                Self::Stdio(stdio::Session::start_sandbox(
+                    sandbox.ok_or(Failure::Unavailable)?,
+                    name,
+                    &stdio.command,
+                )?)
             }
             catalog::Transport::Stdio(stdio) => Self::Stdio(stdio::Session::start(stdio)?),
         })
@@ -150,7 +168,7 @@ impl AttemptMcp {
     /// already recorded with the Control Plane, and any other from the host catalog.
     pub(crate) async fn prepare(
         catalog: &McpCatalog,
-        workspace: Option<&WorkspaceMcp>,
+        (workspace, sandbox): (Option<&WorkspaceMcp>, Option<&SandboxConnection>),
         task: &Task,
         cancel: &CancellationToken,
     ) -> Result<Option<Self>, Status> {
@@ -195,13 +213,14 @@ impl AttemptMcp {
                 attempt.close().await;
                 return Err(Failure::Denied.into());
             };
-            let mut session = match Session::open(&client, config, catalog.logins.as_ref()) {
-                Ok(session) => session,
-                Err(failure) => {
-                    attempt.close().await;
-                    return Err(failure.into());
-                }
-            };
+            let mut session =
+                match Session::open(&client, (name, config), catalog.logins.as_ref(), sandbox) {
+                    Ok(session) => session,
+                    Err(failure) => {
+                        attempt.close().await;
+                        return Err(failure.into());
+                    }
+                };
             let tools = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => Err(Failure::Cancelled),
@@ -466,6 +485,31 @@ fn has_secret(value: &Value, secrets: &[String]) -> bool {
 
 /// A raw loopback HTTP server for tests: answers each request with the next canned response
 /// and reports every request as `METHOD PATH`, its headers, and its body.
+/// Starts one sandboxed stdio server, lists its tools, calls the first, and closes it.
+#[cfg(test)]
+pub(crate) async fn sandbox_round_trip(
+    connection: &SandboxConnection,
+    name: &str,
+    command: &[String],
+) -> Result<Vec<String>, Status> {
+    let mut session = stdio::Session::start_sandbox(connection, name, command)?;
+    session.initialize().await?;
+    let listed = session.rpc("tools/list", json!({})).await?;
+    let tool = listed["tools"][0]["name"]
+        .as_str()
+        .ok_or(Failure::InvalidResponse)?
+        .to_owned();
+    let called = session
+        .rpc("tools/call", json!({"name": tool, "arguments": {}}))
+        .await?;
+    let text = called["content"][0]["text"]
+        .as_str()
+        .ok_or(Failure::InvalidResponse)?
+        .to_owned();
+    session.close().await;
+    Ok(vec![tool, text])
+}
+
 #[cfg(test)]
 pub(super) mod test_http {
     use std::net::SocketAddr;

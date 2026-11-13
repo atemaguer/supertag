@@ -897,6 +897,10 @@ service RemoteWorkspaceProvider {
   rpc Stage(stream RemoteWorkspaceStageChunk) returns (RemoteWorkspaceStageResponse);
   rpc Capture(RemoteWorkspaceCaptureRequest) returns (stream RemoteWorkspaceCaptureChunk);
   rpc Stop(RemoteWorkspaceStopRequest) returns (RemoteWorkspaceStopResponse);
+  // One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
+  // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
+  // Ending or cancelling the call stops the server process, never the sandbox.
+  rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
 }
 
 message RemoteWorkspaceProviderBootstrap {
@@ -926,6 +930,9 @@ message RemoteWorkspaceStageHeader {
   BlobReference bundle = 2;
   // Bodies follow the bundle bytes, in this exact manifest order.
   repeated ArtifactInputFile input_files = 3;
+  // When set, the provider also materializes this commit from the bundle as the trusted copy
+  // its Workspace stdio MCP servers run in, outside the checkout the Harness can change.
+  optional string mcp_commit = 3400;
 }
 
 message RemoteWorkspaceStageChunk {
@@ -957,6 +964,24 @@ message RemoteWorkspaceStopRequest {
 // A sandbox ID is present only after a definitive provider absence check.
 message RemoteWorkspaceStopResponse {
   optional string stopped_sandbox_id = 1;
+}
+
+// The server runs with no Worker Host variable: only a fixed PATH and LANG.
+message RemoteMcpServerStart {
+  string name = 1;
+  string command = 2;
+  repeated string args = 3;
+}
+
+message RemoteMcpServerInput {
+  oneof part {
+    RemoteMcpServerStart start = 1;
+    bytes stdin = 2;
+  }
+}
+
+message RemoteMcpServerOutput {
+  bytes stdout = 1;
 }
 
 // The supervising Worker Host supplies the Attempt identity for this call.

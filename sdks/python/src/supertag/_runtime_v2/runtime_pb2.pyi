@@ -1367,14 +1367,16 @@ class RemoteWorkspaceAllocation(_message.Message):
     def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceStageHeader(_message.Message):
-    __slots__ = ("start_commit", "bundle", "input_files")
+    __slots__ = ("start_commit", "bundle", "input_files", "mcp_commit")
     START_COMMIT_FIELD_NUMBER: _ClassVar[int]
     BUNDLE_FIELD_NUMBER: _ClassVar[int]
     INPUT_FILES_FIELD_NUMBER: _ClassVar[int]
+    MCP_COMMIT_FIELD_NUMBER: _ClassVar[int]
     start_commit: str
     bundle: BlobReference
     input_files: _containers.RepeatedCompositeFieldContainer[ArtifactInputFile]
-    def __init__(self, start_commit: _Optional[str] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., input_files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
+    mcp_commit: str
+    def __init__(self, start_commit: _Optional[str] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., input_files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ..., mcp_commit: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceStageChunk(_message.Message):
     __slots__ = ("header", "payload")
@@ -1415,6 +1417,30 @@ class RemoteWorkspaceStopResponse(_message.Message):
     STOPPED_SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     stopped_sandbox_id: str
     def __init__(self, stopped_sandbox_id: _Optional[str] = ...) -> None: ...
+
+class RemoteMcpServerStart(_message.Message):
+    __slots__ = ("name", "command", "args")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    ARGS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    command: str
+    args: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, name: _Optional[str] = ..., command: _Optional[str] = ..., args: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class RemoteMcpServerInput(_message.Message):
+    __slots__ = ("start", "stdin")
+    START_FIELD_NUMBER: _ClassVar[int]
+    STDIN_FIELD_NUMBER: _ClassVar[int]
+    start: RemoteMcpServerStart
+    stdin: bytes
+    def __init__(self, start: _Optional[_Union[RemoteMcpServerStart, _Mapping]] = ..., stdin: _Optional[bytes] = ...) -> None: ...
+
+class RemoteMcpServerOutput(_message.Message):
+    __slots__ = ("stdout",)
+    STDOUT_FIELD_NUMBER: _ClassVar[int]
+    stdout: bytes
+    def __init__(self, stdout: _Optional[bytes] = ...) -> None: ...
 
 class HarnessAskQuestionRequest(_message.Message):
     __slots__ = ("operation_id", "text")

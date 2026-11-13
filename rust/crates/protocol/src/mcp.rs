@@ -2,8 +2,8 @@ use prost::Message;
 use serde_json::Value;
 
 use crate::v2::{
-    HarnessExecutionProfile, HarnessKind, McpResourceRule, McpServerCapability, PermissionSet,
-    PolicyPermission, PolicyPermissionTarget, Task,
+    AttemptExecutionSelection, HarnessExecutionProfile, HarnessKind, McpResourceRule,
+    McpServerCapability, PermissionSet, PolicyPermission, PolicyPermissionTarget, Task,
 };
 
 pub const MAX_SERVERS: usize = 16;
@@ -142,15 +142,32 @@ pub fn normalize_workspace_servers(names: &mut Vec<String>) -> bool {
     names.len() <= MAX_SERVERS && names.iter().all(|name| server_name(name))
 }
 
+/// Whether an Attempt's selected execution may use Task MCP tools: a local Claude Code host, or
+/// a Cursor host whose remote Workspace runs the Workspace's stdio servers in its sandbox.
+pub fn execution_serves_mcp(execution: &AttemptExecutionSelection) -> bool {
+    match execution.harness_kind() {
+        HarnessKind::ClaudeCode => !execution.remote_file_workspace,
+        HarnessKind::Cursor => execution.remote_file_workspace,
+        _ => false,
+    }
+}
+
+/// Whether a host can serve each of a Task's MCP grants. A local Claude Code host serves its
+/// catalog and the Workspace's servers. A Cursor host with a remote Workspace serves only the
+/// Workspace's servers: its stdio servers run inside the Task's sandbox.
 pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionProfile) -> bool {
     let workspace = workspace_servers(task);
+    let sandboxed = harness == HarnessKind::Cursor && profile.remote_file_workspace;
     grants(task).all(|(_, grant)| {
-        if harness != HarnessKind::ClaudeCode || profile.remote_file_workspace {
+        if !sandboxed && (harness != HarnessKind::ClaudeCode || profile.remote_file_workspace) {
             return false;
         }
         let Some((server, pattern)) = parse_action(&grant.action) else {
             return false;
         };
+        if sandboxed {
+            return workspace.contains(server);
+        }
         // The Workspace's own server runs on whichever host serves the Workspace. A grant scoped
         // to a resource matches no tool there: `.mcp.json` declares no resource mapping.
         workspace.contains(server)
@@ -188,7 +205,7 @@ pub fn valid_resource_rule(rule: &McpResourceRule) -> bool {
     let ascii =
         |value: &str, max| value.len() <= max && value.bytes().all(|c| (33..=126).contains(&c));
     ascii(&rule.prefix, 64)
-        && ascii(&rule.separator, 8)
+        && ascii(&rule.separator, 16)
         && !rule.components.is_empty()
         && rule.components.len() <= 8
         && rule.components.iter().all(|component| {

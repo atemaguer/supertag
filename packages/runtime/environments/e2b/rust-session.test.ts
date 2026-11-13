@@ -8,6 +8,7 @@ import { Code, createClient } from "@connectrpc/connect";
 import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import {
   HarnessWorkspace,
+  RemoteMcpServerInputSchema,
   RemoteWorkspaceProvider,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -95,6 +96,11 @@ async function fixture() {
           signal: options?.signal,
           stdio: ["pipe", "pipe", "pipe"],
         });
+        if (options?.background) {
+          // Like the E2B SDK, deliver a background command's output as it arrives.
+          child.stdout?.setEncoding("utf8").on("data", (text) => options.onStdout?.(text));
+          child.stderr?.setEncoding("utf8").on("data", (text) => options.onStderr?.(text));
+        }
         const finished = wait(child);
         if (!options?.stdin) child.stdin?.end();
         if (options?.background) {
@@ -537,4 +543,109 @@ it("wires generated gRPC through production handlers, seals queued edits and pro
     sessionManager.abort();
     await server.close();
   }
+}, 15_000);
+
+it("runs a Workspace stdio MCP server in the trusted copy beside the checkout, with no host variable", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  const token = "workspace-provider-fixture-token";
+  const auth = { headers: { authorization: `Bearer ${token}` } };
+  const server = await startRemoteWorkspaceTransport({
+    ...createWorkspaceHandlers(session),
+    token,
+  });
+  const sessionManager = new Http2SessionManager(server.endpoint);
+  const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager });
+  const provider = createClient(RemoteWorkspaceProvider, transport);
+  const canary = "host-canary-value";
+  vi.stubEnv("SUPERTAG_MCP_CANARY", canary);
+  const start = (args: string[]) =>
+    create(RemoteMcpServerInputSchema, {
+      part: { case: "start", value: { name: "tools", command: "sh", args } },
+    });
+  const stdin = (text: string) =>
+    create(RemoteMcpServerInputSchema, {
+      part: { case: "stdin", value: new TextEncoder().encode(text) },
+    });
+  try {
+    await provider.allocate(
+      { owner, timeoutMs: 60_000, allowedActions: ["files:read", "files:write"] },
+      auth,
+    );
+    await provider.stage(
+      (async function* () {
+        yield create(RemoteWorkspaceStageChunkSchema, {
+          part: { case: "header", value: { ...header, mcpCommit: header.startCommit } },
+        });
+        yield create(RemoteWorkspaceStageChunkSchema, { part: { case: "payload", value: bytes } });
+      })(),
+      auth,
+    );
+    // The server sees its trusted copy, a fixed PATH and LANG, and its own input lines.
+    const inputs = (async function* () {
+      yield start(["-c", 'pwd; env | sort; while read line; do echo "got:$line"; done']);
+      yield stdin("hello\n");
+    })();
+    let output = "";
+    for await (const part of provider.runMcpServer(inputs, auth)) {
+      output += new TextDecoder().decode(part.stdout);
+    }
+    const [directory, ...lines] = output.trim().split("\n");
+    expect(directory).toMatch(/^\/.*\/supertag-workspace-[^/]+\/mcp$/u);
+    expect(lines).toContain("got:hello");
+    expect(lines).toContain("PATH=/usr/local/bin:/usr/bin:/bin");
+    expect(lines).toContain("LANG=C.UTF-8");
+    expect(output).not.toContain(canary);
+    expect(
+      lines
+        .filter((line) => !line.startsWith("got:"))
+        .map((line) => line.split("=")[0])
+        .filter((name) => !["PATH", "LANG", "PWD", "SHLVL", "_"].includes(name ?? "")),
+    ).toEqual([]);
+    // The trusted copy holds the commit's files, outside the checkout the file tools reach.
+    expect(await readFile(join(directory ?? "", "a.txt"), "utf8")).toBe("original\n");
+    await expect(session.execute({ kind: "read", path: "../mcp/a.txt" })).rejects.toThrow();
+    // A running server is stopped before capture, so it cannot change the returned tree.
+    const held = provider.runMcpServer(
+      (async function* () {
+        yield start(["-c", "echo ready; exec sleep 30"]);
+        await new Promise(() => undefined);
+      })(),
+      auth,
+    );
+    const iterator = held[Symbol.asyncIterator]();
+    expect(new TextDecoder().decode((await iterator.next()).value?.stdout)).toBe("ready\n");
+    const captured = [];
+    for await (const part of provider.capture({}, auth)) captured.push(part);
+    expect(captured[0]?.part.case).toBe("tree");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    // No server starts once capture sealed the sandbox.
+    await expect(
+      (async () => {
+        for await (const _ of provider.runMcpServer(
+          (async function* () {
+            yield start(["-c", "echo late"]);
+          })(),
+          auth,
+        ));
+      })(),
+    ).rejects.toMatchObject({ code: Code.Internal });
+  } finally {
+    vi.unstubAllEnvs();
+    sessionManager.abort();
+    await server.close();
+  }
+}, 20_000);
+
+it("refuses a Workspace MCP server without a trusted copy", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await expect(session.stage({ ...header, mcpCommit: "0".repeat(64) }, bytes)).rejects.toThrow(
+    /trusted MCP commit/u,
+  );
+  await session.stage(header, bytes);
+  await expect(session.startMcpServer({ name: "tools", command: "sh", args: [] })).rejects.toThrow(
+    /no trusted MCP copy/u,
+  );
 }, 15_000);

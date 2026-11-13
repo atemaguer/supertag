@@ -1437,7 +1437,10 @@ async fn run_assignment(
             &cancel,
             workspace_mcp(
                 workspaces,
-                workspace.as_ref(),
+                (
+                    workspace.as_ref(),
+                    options.remote_provider.as_ref().map(ProviderConfig::label),
+                ),
                 &task,
                 (&coordination.mcp_effects, &attempt, token),
                 &cancel,
@@ -1463,46 +1466,6 @@ async fn run_assignment(
                 return save_finish(journal, attempt, adapter::failed(&message));
             }
         }
-    };
-    let mcp = if supertag_protocol::mcp::grants(&task).next().is_some() {
-        let cancel = shutdown.child_token();
-        match with_authority(
-            host,
-            &attempt,
-            token,
-            shutdown,
-            &cancel,
-            mcp::AttemptMcp::prepare(&options.mcp_catalog, workspace_mcp.as_ref(), &task, &cancel),
-        )
-        .await
-        {
-            Ok((mcp, expires)) => {
-                valid_until = expires;
-                mcp.map(Arc::new)
-            }
-            Err(_) => {
-                if let Some(prepared) = workspace.as_ref().filter(|_| workspace_mcp.is_some()) {
-                    workspaces.remove_mcp_snapshot(prepared);
-                }
-                // A login that lapsed since this host claimed the Task names its command.
-                let lapsed = options.mcp_catalog.lapsed_logins();
-                let message = supertag_protocol::mcp::grants(&task)
-                    .filter_map(|(_, grant)| supertag_protocol::mcp::parse_action(&grant.action))
-                    .find(|(server, _)| lapsed.iter().any(|name| name == server))
-                    .map_or_else(
-                        || "Task MCP tools could not be resolved safely".to_owned(),
-                        |(server, _)| {
-                            format!(
-                                "MCP server {server}: its login lapsed on this Worker Host; run {} there to log in again",
-                                mcp::login_command(server)
-                            )
-                        },
-                    );
-                return save_finish(journal, attempt, adapter::failed(&message));
-            }
-        }
-    } else {
-        None
     };
     let pending_outputs = if let Some(workspace) = workspace
         .as_ref()
@@ -1546,6 +1509,11 @@ async fn run_assignment(
                     journal,
                     workspaces,
                     (&attempt, workspace, &task),
+                    // Only a sandboxed stdio server needs the trusted copy beside the checkout.
+                    workspace_mcp
+                        .as_ref()
+                        .filter(|resolved| resolved.sandboxed())
+                        .map(|_| workspace.checkout.base_commit.as_str()),
                     (registration, coordination, token),
                     &cancel,
                 )
@@ -1576,6 +1544,63 @@ async fn run_assignment(
                     attempt,
                     adapter::failed("Remote Workspace could not be prepared"),
                 );
+            }
+        }
+    } else {
+        None
+    };
+    // A remote Workspace's stdio servers run in its staged sandbox, so they start after it.
+    let sandbox = provider
+        .as_ref()
+        .map(remote_provider::RemoteProvider::mcp_connection);
+    let mcp = if supertag_protocol::mcp::grants(&task).next().is_some() {
+        let cancel = shutdown.child_token();
+        match with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            mcp::AttemptMcp::prepare(
+                &options.mcp_catalog,
+                (workspace_mcp.as_ref(), sandbox.as_ref()),
+                &task,
+                &cancel,
+            ),
+        )
+        .await
+        {
+            Ok((mcp, expires)) => {
+                valid_until = expires;
+                mcp.map(Arc::new)
+            }
+            Err(_) => {
+                if let Some(prepared) = workspace.as_ref().filter(|_| workspace_mcp.is_some()) {
+                    workspaces.remove_mcp_snapshot(prepared);
+                }
+                if let Some(provider) = provider.as_mut() {
+                    with_cleanup_authority(host, &attempt, token, shutdown, async {
+                        let closed = provider.shutdown().await;
+                        remote::ensure_stopped(options, journal, &attempt, registration).await?;
+                        closed
+                    })
+                    .await?;
+                }
+                // A login that lapsed since this host claimed the Task names its command.
+                let lapsed = options.mcp_catalog.lapsed_logins();
+                let message = supertag_protocol::mcp::grants(&task)
+                    .filter_map(|(_, grant)| supertag_protocol::mcp::parse_action(&grant.action))
+                    .find(|(server, _)| lapsed.iter().any(|name| name == server))
+                    .map_or_else(
+                        || "Task MCP tools could not be resolved safely".to_owned(),
+                        |(server, _)| {
+                            format!(
+                                "MCP server {server}: its login lapsed on this Worker Host; run {} there to log in again",
+                                mcp::login_command(server)
+                            )
+                        },
+                    );
+                return save_finish(journal, attempt, adapter::failed(&message));
             }
         }
     } else {
@@ -1786,7 +1811,7 @@ async fn run_assignment(
 /// Task's first Attempt recorded is refused, so nothing starts.
 async fn workspace_mcp(
     workspaces: &workspaces::Workspaces,
-    prepared: Option<&workspaces::PreparedWorkspace>,
+    (prepared, sandbox): (Option<&workspaces::PreparedWorkspace>, Option<&str>),
     task: &Task,
     (client, attempt, token): (
         &AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
@@ -1803,8 +1828,9 @@ async fn workspace_mcp(
         .await
         .map_err(|_| Status::internal("Workspace MCP snapshot failed"))?;
     let names = supertag_protocol::mcp::workspace_servers(task);
-    let resolved = mcp::WorkspaceMcp::resolve(&snapshot, &names, mcp::workspace_mcp_variable)
-        .map_err(|error| Status::invalid_argument(format!("{error:#}")))?;
+    let resolved =
+        mcp::WorkspaceMcp::resolve(&snapshot, &names, mcp::workspace_mcp_variable, sandbox)
+            .map_err(|error| Status::invalid_argument(format!("{error:#}")))?;
     client
         .clone()
         .record_workspace_mcp(

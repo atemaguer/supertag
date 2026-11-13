@@ -15,3 +15,4 @@ export * from "./gen/supertag/runtime/v2/mcp_pb.js";
 export * from "./gen/supertag/runtime/v2/policy_pb.js";
 export * from "./gen/supertag/runtime/v2/runtime_pb.js";
 export { redact } from "./redact.js";
+export { startTaskMcpHttp, type TaskMcpHttpServer } from "./task-mcp-http.js";

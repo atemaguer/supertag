@@ -28,6 +28,7 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
+    mcp_commit: Option<&str>,
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
 ) -> Result<(RemoteProvider, Option<String>)> {
@@ -76,6 +77,7 @@ pub(crate) async fn prepare(
             &export.bundle,
             &export.checkout.start_commit,
             &inputs.files,
+            mcp_commit,
             cancel,
         )
         .await?;

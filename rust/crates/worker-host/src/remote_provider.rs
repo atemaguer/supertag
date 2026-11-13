@@ -70,6 +70,14 @@ pub enum ProviderAuthority {
 }
 
 impl ProviderConfig {
+    /// The provider's name in operator-facing messages.
+    pub(crate) fn label(&self) -> &'static str {
+        match self.authority {
+            ProviderAuthority::E2b { .. } => "E2B",
+            ProviderAuthority::Modal { .. } => "Modal",
+        }
+    }
+
     /// A missing sandbox ID is meaningful only in the authority that allocated it.
     /// Bind that authority without retaining the provider credential in state.
     pub(crate) fn authority_fingerprint(&self) -> String {
@@ -304,13 +312,14 @@ impl RemoteProvider {
         bundle: &TransferArtifact,
         start_commit: &str,
         inputs: &[(ArtifactInputFile, Vec<u8>)],
+        mcp_commit: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<()> {
         ensure!(
-            matches!(start_commit.len(), 40 | 64)
-                && start_commit
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            valid_commit(start_commit)
+                && mcp_commit.is_none_or(|commit| {
+                    valid_commit(commit) && commit.len() == start_commit.len()
+                }),
             "invalid prepared commit"
         );
         validate_blob(bundle.byte_length, &bundle.sha256)?;
@@ -348,6 +357,7 @@ impl RemoteProvider {
                                     byte_length: bundle.byte_length,
                                 }),
                                 input_files: manifest.clone(),
+                                mcp_commit: mcp_commit.map(str::to_owned),
                             },
                         )),
                     })
@@ -511,6 +521,14 @@ impl RemoteProvider {
         (self.channel.clone(), self.token.clone())
     }
 
+    /// The Host's private connection for Workspace stdio MCP servers in the staged sandbox.
+    pub(crate) fn mcp_connection(&self) -> crate::mcp::SandboxConnection {
+        crate::mcp::SandboxConnection {
+            channel: self.channel.clone(),
+            token: self.token.clone(),
+        }
+    }
+
     /// Reaping the helper is not proof that any remote sandbox has stopped.
     pub async fn shutdown(&mut self) -> Result<()> {
         if let Some(mut child) = self.child.take() {
@@ -570,6 +588,13 @@ fn parse_endpoint(bytes: &[u8]) -> Result<String> {
         "provider endpoint must be a literal loopback address"
     );
     Ok(endpoint.to_owned())
+}
+
+fn valid_commit(commit: &str) -> bool {
+    matches!(commit.len(), 40 | 64)
+        && commit
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_owner(owner: &RemoteWorkspaceOwner) -> Result<()> {
@@ -781,6 +806,9 @@ mod tests {
         bootstrap: PathBuf,
         mode: Arc<AtomicU8>,
         staged: Arc<Mutex<Vec<u8>>>,
+        mcp_commit: Arc<Mutex<Option<String>>>,
+        /// Each sandbox MCP start record, and whether its input ended.
+        mcp: Arc<Mutex<Vec<(RemoteMcpServerStart, bool)>>>,
     }
     impl Mock {
         fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -821,6 +849,7 @@ mod tests {
                 return Err(Status::invalid_argument("missing header"));
             };
             let reference = header.bundle.unwrap();
+            *self.mcp_commit.lock().unwrap() = header.mcp_commit;
             let mut bytes = Vec::new();
             while let Some(message) = stream.message().await? {
                 let Some(remote_workspace_stage_chunk::Part::Payload(chunk)) = message.part else {
@@ -901,6 +930,74 @@ mod tests {
                 })),
             }
         }
+        type RunMcpServerStream = ReceiverStream<Result<RemoteMcpServerOutput, Status>>;
+        /// A line-oriented MCP server that answers from inside the fixture "sandbox".
+        async fn run_mcp_server(
+            &self,
+            request: Request<Streaming<RemoteMcpServerInput>>,
+        ) -> Result<Response<Self::RunMcpServerStream>, Status> {
+            self.authorize(&request)?;
+            let mut input = request.into_inner();
+            let Some(remote_mcp_server_input::Part::Start(start)) =
+                input.message().await?.and_then(|message| message.part)
+            else {
+                return Err(Status::invalid_argument("missing start"));
+            };
+            let index = {
+                let mut started = self.mcp.lock().unwrap();
+                started.push((start.clone(), false));
+                started.len() - 1
+            };
+            let record = self.mcp.clone();
+            let (sender, receiver) = tokio::sync::mpsc::channel(4);
+            tokio::spawn(async move {
+                let mut pending = Vec::new();
+                while let Ok(Some(message)) = input.message().await {
+                    let Some(remote_mcp_server_input::Part::Stdin(bytes)) = message.part else {
+                        return;
+                    };
+                    pending.extend(bytes);
+                    while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                        let line: Vec<u8> = pending.drain(..=end).collect();
+                        let message: serde_json::Value = serde_json::from_slice(&line).unwrap();
+                        let Some(id) = message.get("id").cloned() else {
+                            continue;
+                        };
+                        let result = match message["method"].as_str().unwrap() {
+                            "initialize" => serde_json::json!({
+                                "protocolVersion": "2025-06-18",
+                                "capabilities": {"tools": {}},
+                                "serverInfo": {"name": "sandbox", "version": "1"}
+                            }),
+                            "tools/list" => serde_json::json!({"tools": [
+                                {"name": "read_marker", "inputSchema": {"type": "object"}}
+                            ]}),
+                            _ => serde_json::json!({"content": [
+                                {"type": "text", "text": format!("sandbox:{}", start.command)}
+                            ]}),
+                        };
+                        let mut reply = serde_json::to_vec(
+                            &serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                        )
+                        .unwrap();
+                        reply.push(b'\n');
+                        // Split one reply across two frames, as a process pipe may.
+                        let tail = reply.split_off(reply.len() / 2);
+                        for stdout in [reply, tail] {
+                            if sender
+                                .send(Ok(RemoteMcpServerOutput { stdout }))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                }
+                record.lock().unwrap()[index].1 = true;
+            });
+            Ok(Response::new(ReceiverStream::new(receiver)))
+        }
     }
     #[tonic::async_trait]
     impl HarnessWorkspace for Mock {
@@ -945,6 +1042,8 @@ mod tests {
             bootstrap: directory.join("bootstrap"),
             mode: Arc::new(AtomicU8::new(0)),
             staged: Arc::new(Mutex::new(Vec::new())),
+            mcp_commit: Arc::default(),
+            mcp: Arc::default(),
         };
         let shutdown = CancellationToken::new();
         let stopped = shutdown.clone();
@@ -1010,11 +1109,49 @@ mod tests {
             byte_length: bytes.len() as u64,
         };
         std::fs::write(&bundle.path, &bytes).unwrap();
+        // A trusted copy commit must have the start commit's object format.
+        assert!(
+            provider
+                .stage(
+                    &bundle,
+                    &"a".repeat(40),
+                    &[],
+                    Some(&"b".repeat(64)),
+                    &CancellationToken::new()
+                )
+                .await
+                .is_err()
+        );
         provider
-            .stage(&bundle, &"a".repeat(40), &[], &CancellationToken::new())
+            .stage(
+                &bundle,
+                &"a".repeat(40),
+                &[],
+                Some(&"b".repeat(40)),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(*mock.staged.lock().unwrap(), bytes);
+        assert_eq!(
+            mock.mcp_commit.lock().unwrap().as_deref(),
+            Some("b".repeat(40).as_str())
+        );
+        // A Workspace stdio server runs over the same private channel, framed by lines.
+        let replies = crate::mcp::sandbox_round_trip(
+            &provider.mcp_connection(),
+            "tools",
+            &["node".into(), "mcp-server.js".into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(replies, ["read_marker", "sandbox:node"]);
+        let started = mock.mcp.lock().unwrap().clone();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].0.name, "tools");
+        assert_eq!(started[0].0.command, "node");
+        assert_eq!(started[0].0.args, ["mcp-server.js"]);
+        assert!(started[0].1, "closing the session ends the server's input");
         let captured = provider
             .capture(&directory, &CancellationToken::new())
             .await
@@ -1213,7 +1350,13 @@ mod tests {
         std::fs::write(&artifact.path, "fixture").unwrap();
         assert!(
             provider
-                .stage(&artifact, &"a".repeat(40), &[], &CancellationToken::new())
+                .stage(
+                    &artifact,
+                    &"a".repeat(40),
+                    &[],
+                    None,
+                    &CancellationToken::new()
+                )
                 .await
                 .is_err()
         );
@@ -1224,7 +1367,13 @@ mod tests {
         artifact.path = link;
         assert!(
             provider
-                .stage(&artifact, &"a".repeat(40), &[], &CancellationToken::new())
+                .stage(
+                    &artifact,
+                    &"a".repeat(40),
+                    &[],
+                    None,
+                    &CancellationToken::new()
+                )
                 .await
                 .is_err()
         );

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -75,6 +75,8 @@ let allocation;
 let directory;
 let actions = [];
 let staged = false;
+let mcpStaged = false;
+const mcpServers = new Set();
 const inputPaths = [];
 const enabled = (name) =>
   access(join(root, name)).then(
@@ -86,6 +88,20 @@ async function persist(value) {
   const target = join(directory, "allocation.json");
   await writeFile(`${target}.tmp`, `${JSON.stringify(value)}\n`, { mode: 0o600 });
   await rename(`${target}.tmp`, target);
+}
+
+async function stopMcpServers() {
+  const running = [...mcpServers];
+  mcpServers.clear();
+  await Promise.all(
+    running.map(async (child) => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((resolve) => child.once("exit", resolve));
+        child.kill("SIGKILL");
+        await exited;
+      }
+    }),
+  );
 }
 
 async function git(cwd, ...args) {
@@ -170,6 +186,17 @@ const implementation = {
         inputPaths.push(path);
       }
       assert.equal(offset, body.length);
+      if (header.mcpCommit !== undefined) {
+        // The trusted copy is the base commit, beside the checkout the Harness can change.
+        assert.match(header.mcpCommit, /^[0-9a-f]{40}$/u);
+        await git(checkout, "merge-base", "--is-ancestor", header.mcpCommit, header.startCommit);
+        const archive = join(directory, "mcp.tar");
+        await git(checkout, "archive", "--format=tar", "-o", archive, header.mcpCommit);
+        await mkdir(join(directory, "mcp"), { mode: 0o700 });
+        await promisify(execFile)("/usr/bin/tar", ["-xf", archive, "-C", join(directory, "mcp")]);
+        await rm(archive);
+        mcpStaged = true;
+      }
       staged = true;
       await trace({
         type: "stage",
@@ -177,6 +204,7 @@ const implementation = {
         startCommit: header.startCommit,
         before: await readFile(join(checkout, "workspace.txt"), "utf8"),
         inputPaths,
+        mcpCommit: header.mcpCommit,
       });
       if (inputPaths.length && (await enabled("hold-input-stage"))) {
         await trace({ type: "input-stage-wait", owner: allocation.owner, inputPaths });
@@ -189,6 +217,7 @@ const implementation = {
     },
     async *capture() {
       assert.ok(staged && !allocation.stopped);
+      await stopMcpServers();
       const checkout = join(directory, "checkout");
       if (
         await access(join(root, "omit-tracked-output")).then(
@@ -240,8 +269,49 @@ const implementation = {
       };
       yield { part: { case: "payload", value: tree } };
     },
+    async *runMcpServer(stream, context) {
+      assert.ok(staged && mcpStaged && !allocation.stopped);
+      const inputs = stream[Symbol.asyncIterator]();
+      const first = await inputs.next();
+      assert.equal(first.value?.part.case, "start");
+      const { name, command, args } = first.value.part.value;
+      const cwd = join(directory, "mcp");
+      // The fixture sandbox image has Node.js on PATH, and nothing of the Worker Host.
+      const child = spawn(
+        "/usr/bin/env",
+        ["-i", `PATH=${dirname(process.execPath)}:/usr/bin:/bin`, "LANG=C.UTF-8", command, ...args],
+        {
+          cwd,
+          stdio: ["pipe", "pipe", "ignore"],
+          signal: context.signal,
+        },
+      );
+      child.on("error", () => undefined);
+      mcpServers.add(child);
+      await trace({ type: "mcp-start", name, command, args, cwd, pid: child.pid });
+      const forwarded = (async () => {
+        for (;;) {
+          const next = await inputs.next();
+          if (next.done) break;
+          assert.equal(next.value.part.case, "stdin");
+          child.stdin.write(next.value.part.value);
+        }
+        child.stdin.end();
+        await trace({ type: "mcp-input-ended", name });
+      })();
+      forwarded.catch(() => child.kill("SIGKILL"));
+      try {
+        for await (const chunk of child.stdout) yield { stdout: new Uint8Array(chunk) };
+      } finally {
+        child.kill("SIGKILL");
+        mcpServers.delete(child);
+        await forwarded.catch(() => undefined);
+        await trace({ type: "mcp-stop", name });
+      }
+    },
     async stop({ owner, sandboxId }, context) {
       assert.ok(owner);
+      await stopMcpServers();
       directory ??= join(root, "remote-allocations", owner.allocationId);
       allocation ??= JSON.parse(await readFile(join(directory, "allocation.json"), "utf8"));
       assert.deepEqual(serializable(owner), allocation.owner);
@@ -268,7 +338,7 @@ const implementation = {
       assert.ok(staged && !allocation.stopped);
       const requested = operation.value?.path ?? "";
       if (
-        requested !== "workspace.txt" &&
+        !["workspace.txt", "marker.txt", "mcp-server.js", ".mcp.json"].includes(requested) &&
         !inputPaths.includes(requested) &&
         !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
           requested,

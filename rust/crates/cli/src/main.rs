@@ -398,6 +398,8 @@ A stdio server has a command instead of a url, such as {"name":"db","command":["
 
 The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
+A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain.
+
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
         mcp_catalog: Option<PathBuf>,

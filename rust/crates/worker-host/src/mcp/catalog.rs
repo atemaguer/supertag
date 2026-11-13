@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 
 use super::oauth::McpLoginStore;
 use prost::Message;
@@ -63,6 +63,9 @@ pub(super) struct StdioServer {
     pub(super) env: BTreeMap<String, String>,
     /// A Workspace server runs in the Worker-owned snapshot of its Task's base commit.
     pub(super) cwd: Option<std::path::PathBuf>,
+    /// A Workspace server of a remote Workspace runs inside the Task's sandbox, in the
+    /// provider's trusted copy of the base commit, with no `env` and no `cwd` of the host.
+    pub(super) sandboxed: bool,
 }
 
 #[derive(Deserialize)]
@@ -74,14 +77,139 @@ pub(super) struct Config {
 
 /// Parses only the catalog's shape, resolving nothing, for `supertag mcp list` and login.
 pub(super) fn read_config(path: &Path) -> Result<Config> {
-    let bytes = read_private(path)?;
-    let config: Config = serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow::anyhow!("invalid MCP catalog format"))?;
+    decode(&read_private(path)?)
+}
+
+/// Decodes a catalog and expands each server's `preset` to its official URL and mapping.
+fn decode(bytes: &[u8]) -> Result<Config> {
+    let mut config: Config =
+        serde_json::from_slice(bytes).map_err(|_| anyhow::anyhow!("invalid MCP catalog format"))?;
     ensure!(
         config.version == 1 && config.servers.len() <= mcp::MAX_SERVERS,
         "unsupported MCP catalog version or size"
     );
+    for server in &mut config.servers {
+        apply_preset(server)?;
+    }
     Ok(config)
+}
+
+/// The official HTTP servers SuperTag knows, as in the TypeScript host service. A preset fixes
+/// the URL its resource mapping was written for, so Permission Set grants on its tools can name
+/// a `resource`. The Teams server's URL names the Microsoft tenant.
+fn apply_preset(server: &mut ServerConfig) -> Result<()> {
+    let Some(preset) = server.preset.as_deref() else {
+        ensure!(
+            server.tenant_id.is_none(),
+            "MCP server {}: tenantId belongs only with preset teams",
+            server.name
+        );
+        return Ok(());
+    };
+    ensure!(
+        server.url.is_none() && server.command.is_none(),
+        "MCP server {}: url must not be set with a preset; the {preset} preset uses its official URL and resource mapping. For another server, drop preset and give url",
+        server.name
+    );
+    ensure!(
+        server.resources.tools.is_empty(),
+        "MCP server {}: the {preset} preset supplies its own resource mapping",
+        server.name
+    );
+    let rule = |prefix: &str, separator: &str, components: &[&[&str]]| ResourceRule {
+        prefix: prefix.into(),
+        separator: separator.into(),
+        components: components
+            .iter()
+            .map(|arguments| Component {
+                arguments: arguments
+                    .iter()
+                    .map(|argument| (*argument).into())
+                    .collect(),
+            })
+            .collect(),
+        when: None,
+    };
+    let (url, tools, rule) = match preset {
+        "github" => (
+            "https://api.githubcopilot.com/mcp/".to_owned(),
+            &[
+                "get_file_contents",
+                "issue_read",
+                "add_issue_comment",
+                "pull_request_read",
+                "create_branch",
+                "create_pull_request",
+                "merge_pull_request",
+            ][..],
+            rule("repository:", "/", &[&["owner"], &["repo", "repository"]]),
+        ),
+        "slack" => (
+            "https://mcp.slack.com/mcp".to_owned(),
+            &[
+                "slack_read_channel",
+                "slack_read_thread",
+                "slack_send_message",
+            ][..],
+            rule("channel:", "", &[&["channel_id", "channelId", "channel"]]),
+        ),
+        "linear" => (
+            "https://mcp.linear.app/mcp".to_owned(),
+            &["list_issues", "create_issue"][..],
+            rule("team:", "", &[&["team_id", "teamId", "team"]]),
+        ),
+        "teams" => {
+            let tenant = server
+                .tenant_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|tenant| {
+                    !tenant.is_empty()
+                        && tenant.len() <= 253
+                        && tenant
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || b".-".contains(&byte))
+                })
+                .with_context(|| {
+                    format!(
+                        "MCP server {}: tenantId is required for the teams preset: the Microsoft Entra tenant ID or domain",
+                        server.name
+                    )
+                })?;
+            (
+                format!(
+                    "https://agent365.svc.cloud.microsoft/agents/tenants/{tenant}/servers/mcp_TeamsServer"
+                ),
+                &[
+                    "mcp_graph_teams_listChannelMessages",
+                    "mcp_graph_teams_postChannelMessage",
+                    "mcp_graph_teams_replyToChannelMessage",
+                ][..],
+                rule(
+                    "team:",
+                    "/channel:",
+                    &[&["team_id", "teamId"], &["channel_id", "channelId"]],
+                ),
+            )
+        }
+        _ => anyhow::bail!(
+            "MCP server {}: preset must be github, slack, linear, or teams",
+            server.name
+        ),
+    };
+    if preset != "teams" {
+        ensure!(
+            server.tenant_id.is_none(),
+            "MCP server {}: tenantId belongs only with preset teams",
+            server.name
+        );
+    }
+    server.url = Some(url);
+    server.resources.tools = tools
+        .iter()
+        .map(|tool| ((*tool).to_owned(), vec![rule.clone()]))
+        .collect();
+    Ok(())
 }
 
 fn read_private(path: &Path) -> Result<Vec<u8>> {
@@ -115,6 +243,10 @@ fn read_private(path: &Path) -> Result<Vec<u8>> {
 pub(super) struct ServerConfig {
     pub(super) name: String,
     pub(super) url: Option<String>,
+    /// An official HTTP server SuperTag knows: `github`, `slack`, `linear`, or `teams`.
+    pub(super) preset: Option<String>,
+    /// The Microsoft Entra tenant, for the `teams` preset only.
+    pub(super) tenant_id: Option<String>,
     #[serde(default)]
     pub(super) header_env: BTreeMap<String, String>,
     #[serde(default)]
@@ -290,12 +422,7 @@ impl McpCatalog {
         bytes: &[u8],
         environment: impl Fn(&str) -> Option<String>,
     ) -> Result<Self> {
-        let config: Config = serde_json::from_slice(bytes)
-            .map_err(|_| anyhow::anyhow!("invalid MCP catalog format"))?;
-        ensure!(
-            config.version == 1 && config.servers.len() <= mcp::MAX_SERVERS,
-            "unsupported MCP catalog version or size"
-        );
+        let config = decode(bytes)?;
         let mut catalog = Self::default();
         let mut secrets = BTreeSet::new();
         for server in config.servers {
@@ -536,6 +663,7 @@ fn stdio_server(
         command: command.to_vec(),
         env,
         cwd: None,
+        sandboxed: false,
     })
 }
 
@@ -732,6 +860,133 @@ mod tests {
         ] {
             let config = json!({"version":1,"servers":[invalid]});
             assert!(parse(&config).is_err(), "{config}");
+        }
+    }
+
+    #[test]
+    fn presets_use_the_official_url_and_resource_mapping() {
+        let environment =
+            |name: &str| (name == "GITHUB_MCP_AUTH").then(|| "Bearer preset-secret-value".into());
+        let catalog = McpCatalog::parse(
+            json!({"version":1,"servers":[
+                {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}},
+                {"name":"slack","preset":"slack"},
+                {"name":"linear","preset":"linear"},
+                {"name":"teams","preset":"teams","tenantId":"contoso.onmicrosoft.com"},
+                {"name":"custom","url":"https://mcp.example.com/mcp"}
+            ]})
+            .to_string()
+            .as_bytes(),
+            environment,
+        )
+        .unwrap();
+        let url = |name: &str| {
+            let Transport::Http(server) = &catalog.servers[name].transport else {
+                panic!("HTTP server expected");
+            };
+            server.endpoint.to_string()
+        };
+        assert_eq!(url("github"), "https://api.githubcopilot.com/mcp/");
+        assert_eq!(url("slack"), "https://mcp.slack.com/mcp");
+        assert_eq!(url("linear"), "https://mcp.linear.app/mcp");
+        assert_eq!(
+            url("teams"),
+            "https://agent365.svc.cloud.microsoft/agents/tenants/contoso.onmicrosoft.com/servers/mcp_TeamsServer"
+        );
+        let tools = |name: &str| {
+            catalog.servers[name]
+                .resources
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tools("github"),
+            [
+                "add_issue_comment",
+                "create_branch",
+                "create_pull_request",
+                "get_file_contents",
+                "issue_read",
+                "merge_pull_request",
+                "pull_request_read"
+            ]
+        );
+        assert_eq!(
+            tools("slack"),
+            [
+                "slack_read_channel",
+                "slack_read_thread",
+                "slack_send_message"
+            ]
+        );
+        assert_eq!(tools("linear"), ["create_issue", "list_issues"]);
+        assert_eq!(tools("teams").len(), 3);
+        let rule = &catalog.servers["github"].resources["create_pull_request"][0];
+        assert_eq!(
+            (rule.prefix.as_str(), rule.separator.as_str()),
+            ("repository:", "/")
+        );
+        assert_eq!(
+            rule.components
+                .iter()
+                .map(|component| component.arguments.clone())
+                .collect::<Vec<_>>(),
+            [
+                vec!["owner".to_owned()],
+                vec!["repo".into(), "repository".into()]
+            ]
+        );
+        let rule = &catalog.servers["teams"].resources["mcp_graph_teams_postChannelMessage"][0];
+        assert_eq!(
+            (rule.prefix.as_str(), rule.separator.as_str()),
+            ("team:", "/channel:")
+        );
+        // Preset tools name resources, so the capability advertises them.
+        let github = catalog
+            .capabilities()
+            .into_iter()
+            .find(|server| server.name == "github")
+            .unwrap();
+        assert_eq!(github.mapped_tools.len(), 7);
+        assert!(catalog.servers["custom"].resources.is_empty());
+        for (server, message) in [
+            (
+                json!({"name":"github","preset":"github","url":"https://example.com/mcp"}),
+                "must not be set with a preset",
+            ),
+            (
+                json!({"name":"github","preset":"github","resources":{"tools":{"x":[{"components":[{"arguments":["a"]}]}]}}}),
+                "supplies its own resource mapping",
+            ),
+            (
+                json!({"name":"teams","preset":"teams"}),
+                "tenantId is required",
+            ),
+            (
+                json!({"name":"teams","preset":"teams","tenantId":"bad/tenant"}),
+                "tenantId is required",
+            ),
+            (
+                json!({"name":"slack","preset":"slack","tenantId":"contoso"}),
+                "belongs only with preset teams",
+            ),
+            (
+                json!({"name":"x","url":"https://example.com/mcp","tenantId":"contoso"}),
+                "belongs only with preset teams",
+            ),
+            (json!({"name":"x","preset":"jira"}), "preset must be github"),
+        ] {
+            let error = McpCatalog::parse(
+                json!({"version":1,"servers":[server]})
+                    .to_string()
+                    .as_bytes(),
+                |_| None,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(error.contains(message), "{server}: {error}");
         }
     }
 

@@ -11,6 +11,7 @@ import {
   redact,
   SharedExecutionTool,
   startCoordinationHttp,
+  startTaskMcpHttp,
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { CURSOR_WORKER_POLICY, cursorToolsForSplit, runCursor } from "../index.js";
@@ -222,8 +223,16 @@ export async function runAdapter(
         },
         "cursor",
       );
+      let taskMcp: Awaited<ReturnType<typeof startTaskMcpHttp>> | undefined;
       try {
         secrets.push(...coordination.secrets);
+        phase = "MCP setup";
+        taskMcp = await startTaskMcpHttp(bridge, task, {
+          secrets,
+          signal: cancellation,
+          active: () => active,
+        });
+        secrets.push(...taskMcp.secrets);
         const prompt = [
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
@@ -274,7 +283,10 @@ export async function runAdapter(
             agentId: freshAgentId,
             ...(restored ? { resumeAgentId: restored.agentId } : {}),
             model,
-            mcpServers: coordination.server ? { [COORDINATION_SERVER]: coordination.server } : {},
+            mcpServers: {
+              ...taskMcp.servers,
+              ...(coordination.server ? { [COORDINATION_SERVER]: coordination.server } : {}),
+            },
             ...toolPolicy,
             toolInputs: [],
             splitTools: executor.tools,
@@ -324,10 +336,14 @@ export async function runAdapter(
           succeeded: true,
           result,
           ...(checkpoint ? { checkpoint } : {}),
-          waitingApprovalIds: await coordination.waitingApprovalIds(),
+          waitingApprovalIds: [
+            ...(await coordination.waitingApprovalIds()),
+            ...(await taskMcp.waitingApprovalIds()),
+          ].sort(),
         };
       } finally {
         active = false;
+        await taskMcp?.close();
         await coordination.close();
       }
     } finally {

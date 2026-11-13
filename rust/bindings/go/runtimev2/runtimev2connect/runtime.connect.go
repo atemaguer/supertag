@@ -410,6 +410,9 @@ const (
 	// RemoteWorkspaceProviderStopProcedure is the fully-qualified name of the RemoteWorkspaceProvider's
 	// Stop RPC.
 	RemoteWorkspaceProviderStopProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Stop"
+	// RemoteWorkspaceProviderRunMcpServerProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's RunMcpServer RPC.
+	RemoteWorkspaceProviderRunMcpServerProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer"
 	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
 	// AskQuestion RPC.
 	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
@@ -4649,6 +4652,10 @@ type RemoteWorkspaceProviderClient interface {
 	Stage(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
 	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCaptureChunk], error)
 	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
+	// One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
+	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
+	// Ending or cancelling the call stops the server process, never the sandbox.
+	RunMcpServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
 }
 
 // NewRemoteWorkspaceProviderClient constructs a client for the
@@ -4687,15 +4694,22 @@ func NewRemoteWorkspaceProviderClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
 			connect.WithClientOptions(opts...),
 		),
+		runMcpServer: connect.NewClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderRunMcpServerProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // remoteWorkspaceProviderClient implements RemoteWorkspaceProviderClient.
 type remoteWorkspaceProviderClient struct {
-	allocate *connect.Client[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation]
-	stage    *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
-	capture  *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
-	stop     *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
+	allocate     *connect.Client[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation]
+	stage        *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
+	capture      *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
+	stop         *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
+	runMcpServer *connect.Client[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
 }
 
 // Allocate calls supertag.runtime.v2.RemoteWorkspaceProvider.Allocate.
@@ -4718,6 +4732,11 @@ func (c *remoteWorkspaceProviderClient) Stop(ctx context.Context, req *connect.R
 	return c.stop.CallUnary(ctx, req)
 }
 
+// RunMcpServer calls supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer.
+func (c *remoteWorkspaceProviderClient) RunMcpServer(ctx context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput] {
+	return c.runMcpServer.CallBidiStream(ctx)
+}
+
 // RemoteWorkspaceProviderHandler is an implementation of the
 // supertag.runtime.v2.RemoteWorkspaceProvider service.
 type RemoteWorkspaceProviderHandler interface {
@@ -4725,6 +4744,10 @@ type RemoteWorkspaceProviderHandler interface {
 	Stage(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceStageChunk]) (*connect.Response[runtimev2.RemoteWorkspaceStageResponse], error)
 	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCaptureChunk]) error
 	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
+	// One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
+	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
+	// Ending or cancelling the call stops the server process, never the sandbox.
+	RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error
 }
 
 // NewRemoteWorkspaceProviderHandler builds an HTTP handler from the service implementation. It
@@ -4758,6 +4781,12 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remoteWorkspaceProviderRunMcpServerHandler := connect.NewBidiStreamHandler(
+		RemoteWorkspaceProviderRunMcpServerProcedure,
+		svc.RunMcpServer,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.RemoteWorkspaceProvider/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemoteWorkspaceProviderAllocateProcedure:
@@ -4768,6 +4797,8 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 			remoteWorkspaceProviderCaptureHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderStopProcedure:
 			remoteWorkspaceProviderStopHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderRunMcpServerProcedure:
+			remoteWorkspaceProviderRunMcpServerHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -4791,6 +4822,10 @@ func (UnimplementedRemoteWorkspaceProviderHandler) Capture(context.Context, *con
 
 func (UnimplementedRemoteWorkspaceProviderHandler) Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Stop is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer is not implemented"))
 }
 
 // HarnessQuestionsClient is a client for the supertag.runtime.v2.HarnessQuestions service.
