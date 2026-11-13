@@ -279,7 +279,8 @@ Priority reflects risk to accepted work and to the cutover, not effort.
    not simulate power loss.
 3. **Unported coordination and safety features**: overlap warnings between Work Sessions (area
    4); Worker-managed effect receipts and in-doubt effects for custom Workers (area 8); startup
-   model and harness CLI checks (area 8); message-selected GitHub repository Workspaces (area 9).
+   model and harness CLI checks (area 8); message-selected GitHub repository Workspaces (area 9);
+   coordination metrics, TypeScript's `OrganizationService.GetMetrics` snapshot (area 2).
    Decide whether each is ported or dropped, and record the decision.
 4. **Workspace mounts** (area 9): finish and verify `codex/rust-workspace-volume-mounts`.
 5. **Operator identity and access**: done (Operator Token
