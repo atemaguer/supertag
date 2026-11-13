@@ -123,7 +123,7 @@ pub enum ReviewDecision {
     RequestChanges,
 }
 
-fn deadline(input: &str) -> Result<i64> {
+pub(crate) fn deadline(input: &str) -> Result<i64> {
     Ok(Timestamp::parse(input)
         .context("use an RFC 3339 deadline with a time zone")?
         .as_millis())

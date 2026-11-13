@@ -32,7 +32,14 @@ mod watch;
 mod work_sessions;
 mod workspaces;
 
+pub use github_workspaces::validate_manifest_workspace;
+pub use objectives::validate_manifest_objective;
+pub use policy::{
+    normalize_manifest_context, normalize_manifest_permission, normalize_manifest_role,
+    normalize_tag_execution,
+};
 pub use store::{HostAuthority, Store, StoreError};
+pub use surface_policy::{validate_manifest_account, validate_manifest_location};
 pub use watch::OperatorWatch;
 
 use std::sync::Arc;

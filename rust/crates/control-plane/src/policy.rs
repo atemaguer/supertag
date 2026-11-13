@@ -121,6 +121,20 @@ trait Resource: Message + Default + Clone {
     fn set_identity(&mut self, id: String, revision: u64);
     fn normalize(&mut self, prior: Option<&Self>) -> Result<()>;
 }
+
+// The CLI previews these declarations with the same canonicalization used on write.
+macro_rules! manifest_normalizer {
+    ($function:ident, $resource:ty) => {
+        pub fn $function(value: &mut $resource, prior: Option<&$resource>) -> Result<()> {
+            value.normalize(prior)?;
+            size(value, RESOURCE_BYTES)
+        }
+    };
+}
+
+manifest_normalizer!(normalize_manifest_context, ContextSet);
+manifest_normalizer!(normalize_manifest_permission, PermissionSet);
+manifest_normalizer!(normalize_manifest_role, Role);
 macro_rules! resource_fields {
     ($ty:ty,$table:literal,$key:ident,$kind:literal) => {
         const TABLE: &'static str = $table;
@@ -510,7 +524,7 @@ pub(crate) fn normalize_execution(
     }
 }
 
-pub(crate) fn normalize_tag_execution(
+pub fn normalize_tag_execution(
     harness: HarnessKind,
     input: Option<PolicyExecutionSettings>,
 ) -> Result<(HarnessKind, Option<PolicyExecutionSettings>)> {

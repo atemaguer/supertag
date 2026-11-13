@@ -25,6 +25,7 @@ libc.workspace = true
 prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde-saphyr = { version = "2.1.1", default-features = false, features = ["deserialize"] }
 sha2.workspace = true
 supertag-control-plane.workspace = true
 supertag-codex-adapter.workspace = true
@@ -49,6 +50,7 @@ reqwest.workspace = true
 sqlx.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
 tokio-tungstenite = "0.28"
+url = "2"
 
 [[test]]
 name = "split_runtime"

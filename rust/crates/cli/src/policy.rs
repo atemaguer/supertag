@@ -78,10 +78,11 @@ pub enum PolicyCommand {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PermissionSpec {
+pub(crate) struct PermissionSpec {
     #[serde(default)]
     set_id: String,
-    name: String,
+    #[serde(default)]
+    pub(crate) name: String,
     #[serde(default)]
     approvers: Vec<String>,
     #[serde(default)]
@@ -145,10 +146,11 @@ impl From<PermissionSpec> for PermissionSet {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ContextSpec {
+pub(crate) struct ContextSpec {
     #[serde(default)]
     set_id: String,
-    name: String,
+    #[serde(default)]
+    pub(crate) name: String,
     #[serde(default)]
     items: Vec<ContextItemSpec>,
 }
@@ -156,6 +158,7 @@ struct ContextSpec {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContextItemSpec {
+    #[serde(alias = "itemKey")]
     item_key: String,
     #[serde(rename = "type")]
     kind: String,
@@ -198,16 +201,17 @@ enum RoleState {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RoleSpec {
+pub(crate) struct RoleSpec {
     #[serde(default)]
     role_id: String,
-    name: String,
+    #[serde(default)]
+    pub(crate) name: String,
     purpose: String,
     #[serde(default)]
     instructions: String,
-    #[serde(default)]
+    #[serde(default, alias = "permissionSets")]
     permission_set_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "contextSets")]
     context_set_ids: Vec<String>,
     #[serde(default)]
     status: RoleState,
@@ -216,13 +220,25 @@ struct RoleSpec {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ExecutionSpec {
+pub(crate) struct ExecutionSpec {
     harness: Option<String>,
+    #[serde(alias = "sharedExecutionEnvironmentId")]
     shared_execution_environment_id: Option<String>,
     #[serde(default)]
     models: Vec<String>,
     #[serde(default)]
     efforts: Vec<String>,
+}
+
+impl From<ExecutionSpec> for PolicyExecutionSettings {
+    fn from(execution: ExecutionSpec) -> Self {
+        Self {
+            harness: execution.harness,
+            models: execution.models,
+            efforts: execution.efforts,
+            shared_execution_environment_id: execution.shared_execution_environment_id,
+        }
+    }
 }
 
 impl From<RoleSpec> for Role {
@@ -239,12 +255,7 @@ impl From<RoleSpec> for Role {
                 RoleState::Retired => RoleStatus::Retired,
             }
             .into(),
-            execution: spec.execution.map(|execution| PolicyExecutionSettings {
-                harness: execution.harness,
-                models: execution.models,
-                efforts: execution.efforts,
-                shared_execution_environment_id: execution.shared_execution_environment_id,
-            }),
+            execution: spec.execution.map(Into::into),
             ..Default::default()
         }
     }

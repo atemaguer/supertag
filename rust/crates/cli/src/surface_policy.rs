@@ -71,8 +71,9 @@ enum SurfacePolicyCommand {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AccountSpec {
-    account_id: String,
+pub(crate) struct AccountSpec {
+    #[serde(default)]
+    pub(crate) account_id: String,
     identity: IdentitySpec,
     enabled: bool,
 }
@@ -139,8 +140,9 @@ impl From<AccountSpec> for SurfaceAccount {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LocationSpec {
-    location_id: String,
+pub(crate) struct LocationSpec {
+    #[serde(default)]
+    pub(crate) location_id: String,
     account_id: String,
     connector_account_id: String,
     tag_id: String,

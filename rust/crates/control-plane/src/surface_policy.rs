@@ -203,6 +203,24 @@ pub(crate) async fn reject_generic_in(tx: &mut Transaction<'_, Any>, account: &s
     Ok(())
 }
 
+pub fn validate_manifest_account(account: &SurfaceAccount) -> Result<()> {
+    provider_identity(account)?;
+    Ok(())
+}
+
+pub fn validate_manifest_location(
+    location: &SurfaceLocation,
+    account: &SurfaceAccount,
+) -> Result<()> {
+    let (provider, _) = location_scope(location)?;
+    if provider != provider_identity(account)?.0 {
+        return Err(invalid(
+            "Surface Account and location use different providers",
+        ));
+    }
+    verify_alias(provider, &location.connector_account_id)
+}
+
 fn provider_identity(account: &SurfaceAccount) -> Result<(&'static str, String)> {
     let identity = account
         .identity

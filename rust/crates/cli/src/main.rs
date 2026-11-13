@@ -9,6 +9,7 @@ mod inbox;
 mod inputs;
 mod local;
 mod mailbox_grants;
+mod manifests;
 mod network;
 mod node_bridges;
 mod objectives;
@@ -104,6 +105,10 @@ enum RecoveryDecision {
 enum Command {
     /// Check a public or private gRPC service using the configured TLS trust.
     Health(health::HealthArgs),
+    /// Preview an organization manifest through the Gateway.
+    Diff(manifests::ManifestArgs),
+    /// Apply an organization manifest through the Gateway.
+    Apply(manifests::ManifestArgs),
     /// Manage GitHub Workspace sources pinned to one repository and commit.
     GithubPublication {
         #[command(flatten)]
@@ -572,6 +577,8 @@ fn main() -> Result<()> {
 async fn run(command: Command) -> Result<()> {
     match command {
         Command::Health(args) => health::run(args).await?,
+        Command::Diff(args) => manifests::run(args, false).await?,
+        Command::Apply(args) => manifests::run(args, true).await?,
         Command::Policy {
             connection,
             command,

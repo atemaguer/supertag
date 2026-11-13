@@ -117,6 +117,18 @@ the [CLI operator guide](cli.md) for a complete local run.
 
 ## Apply configuration
 
+On a Rust deployment, the CLI reads the same manifest envelope and connects through the
+Gateway. Use the `--gateway` option for a remote Gateway and supply the operator token through
+`SUPERTAG_OPERATOR_TOKEN`. Use `--state-directory` for a local deployment started by the Rust CLI.
+Preview shows the planned resource and relationship changes before writing. The Rust CLI
+supports files, directories, and standard input.
+
+The Rust resource catalog accepts `SurfaceAccount`, `Volume`, `Workspace`, `ContextSet`,
+`PermissionSet`, `Role`, `Tag`, `Team`, `SurfaceLocation`, and `Objective`. A Surface Account
+identifies the connected service. A `SurfaceLocation` binds an exact channel, repository, or
+team to a Tag. A Workspace declaration uses a `github` source, and a Volume uses a file URL
+or an S3 bucket and prefix. Provider credentials stay in Gateway configuration.
+
 1. Save a Tag, Role, Permission Set, or Context Set as YAML or JSON. For example, a Tag selects its
    enduring responsibilities by name:
 

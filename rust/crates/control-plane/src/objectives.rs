@@ -307,6 +307,28 @@ async fn cancel_open_in(
     Ok(())
 }
 
+pub fn validate_manifest_objective(input: &CreateObjectiveRequest) -> Result<()> {
+    name("Objective ID", &input.objective_id)?;
+    name("owner Tag ID", &input.owner_tag_id)?;
+    text("outcome", &input.outcome, 65_536)?;
+    if input.outcome.trim().is_empty() {
+        return Err(invalid("outcome is required"));
+    }
+    if let Some(deadline) = input.deadline_ms {
+        timestamp(deadline)?;
+    }
+    if let Some(limit) = input.budget_limit_minor {
+        amount(limit)?;
+    }
+    if let Some(unit) = &input.budget_currency {
+        currency(unit)?;
+        if input.budget_limit_minor.is_none() {
+            return Err(invalid("budget currency requires a limit"));
+        }
+    }
+    Ok(())
+}
+
 impl Store {
     pub async fn create_objective(
         &self,
@@ -315,24 +337,7 @@ impl Store {
     ) -> Result<Objective> {
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
-        name("Objective ID", &input.objective_id)?;
-        name("owner Tag ID", &input.owner_tag_id)?;
-        text("outcome", &input.outcome, 65_536)?;
-        if input.outcome.trim().is_empty() {
-            return Err(invalid("outcome is required"));
-        }
-        if let Some(deadline) = input.deadline_ms {
-            timestamp(deadline)?;
-        }
-        if let Some(limit) = input.budget_limit_minor {
-            amount(limit)?;
-        }
-        if let Some(unit) = &input.budget_currency {
-            currency(unit)?;
-            if input.budget_limit_minor.is_none() {
-                return Err(invalid("budget currency requires a limit"));
-            }
-        }
+        validate_manifest_objective(input)?;
         let fingerprint = digest("create", input);
         let (mut tx, order) = self.write().await?;
         let now_ms = self.execution_now_ms();

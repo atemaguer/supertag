@@ -23,7 +23,7 @@ async fn catalog_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<Gi
     bytes.as_deref().map(policy::decode).transpose()
 }
 
-fn validate(value: &mut GithubWorkspace) -> Result<()> {
+pub fn validate_manifest_workspace(value: &mut GithubWorkspace) -> Result<()> {
     if !valid_workspace_id(&value.workspace_id) {
         return Err(invalid("valid Workspace ID required"));
     }
@@ -234,7 +234,7 @@ impl Store {
             .workspace
             .clone()
             .ok_or_else(|| invalid("GitHub Workspace required"))?;
-        validate(&mut value)?;
+        validate_manifest_workspace(&mut value)?;
         let prior = catalog_in(&mut tx, &value.workspace_id).await?;
         if input.expected_revision != prior.as_ref().map(|value| value.revision) {
             return Err(StoreError::Conflict(
