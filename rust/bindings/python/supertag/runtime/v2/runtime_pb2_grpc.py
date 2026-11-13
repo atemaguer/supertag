@@ -1177,6 +1177,11 @@ class ManifestRelationshipsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.FromString,
                 _registered_method=True)
+        self.ReconcileApplySet = channel.unary_unary(
+                '/supertag.runtime.v2.ManifestRelationships/ReconcileApplySet',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.FromString,
+                _registered_method=True)
 
 
 class ManifestRelationshipsServicer:
@@ -1195,6 +1200,14 @@ class ManifestRelationshipsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReconcileApplySet(self, request, context):
+        """Records an apply set's members and, with prune, removes the members its
+        input no longer declares, all in one serialized Control Plane write.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ManifestRelationshipsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1207,6 +1220,11 @@ def add_ManifestRelationshipsServicer_to_server(servicer, server):
                     servicer.ProvisionTags,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.SerializeToString,
+            ),
+            'ReconcileApplySet': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReconcileApplySet,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1264,6 +1282,33 @@ class ManifestRelationships:
             '/supertag.runtime.v2.ManifestRelationships/ProvisionTags',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ProvisionTagsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReconcileApplySet(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ManifestRelationships/ReconcileApplySet',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReconcileApplySetResponse.FromString,
             options,
             channel_credentials,
             insecure,

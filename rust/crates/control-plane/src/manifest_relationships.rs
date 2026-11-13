@@ -53,7 +53,7 @@ struct Relationship {
     present: bool,
 }
 
-fn manager(value: &str) -> Result<&str> {
+pub(crate) fn manager(value: &str) -> Result<&str> {
     if value.is_empty() {
         return Ok("apply");
     }
@@ -392,5 +392,17 @@ impl manifest_relationships_server::ManifestRelationships for ControlPlane {
             .provision_tags(&principal, request.into_inner())
             .await?;
         Ok(Response::new(ProvisionTagsResponse {}))
+    }
+
+    async fn reconcile_apply_set(
+        &self,
+        request: Request<ReconcileApplySetRequest>,
+    ) -> std::result::Result<Response<ReconcileApplySetResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .reconcile_apply_set(&principal, request.get_ref())
+                .await?,
+        ))
     }
 }

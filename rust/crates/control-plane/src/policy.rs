@@ -115,6 +115,7 @@ trait Resource: Message + Default + Clone {
     const TABLE: &'static str;
     const KEY: &'static str;
     const KIND: &'static str;
+    const APPLY_KIND: &'static str;
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn revision(&self) -> u64;
@@ -140,6 +141,7 @@ macro_rules! resource_fields {
         const TABLE: &'static str = $table;
         const KEY: &'static str = stringify!($key);
         const KIND: &'static str = $kind;
+        const APPLY_KIND: &'static str = stringify!($ty);
         fn id(&self) -> &str {
             &self.$key
         }
@@ -571,6 +573,141 @@ async fn optional_resource<M: Resource>(
         .map(|r| decode(&r.try_get::<Vec<u8>, _>("payload")?))
         .transpose()
 }
+async fn delete_policy_in<M: Resource>(
+    tx: &mut Transaction<'_, Any>,
+    reference: &str,
+    expected_revision: u64,
+    references: &str,
+    locations: &str,
+) -> Result<()> {
+    let value = resource::<M>(tx, reference).await?;
+    if expected_revision != value.revision() {
+        return Err(StoreError::Conflict("policy revision changed".into()));
+    }
+    let reference: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT role_id FROM {references} WHERE set_id=$1 LIMIT 1"
+    ))
+    .bind(value.id())
+    .fetch_optional(&mut **tx)
+    .await?;
+    if reference.is_some() {
+        return Err(StoreError::FailedPrecondition(
+            "policy Set is still referenced by a Role".into(),
+        ));
+    }
+    let location: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT location_id FROM {locations} WHERE set_id=$1 LIMIT 1"
+    ))
+    .bind(value.id())
+    .fetch_optional(&mut **tx)
+    .await?;
+    if location.is_some() {
+        return Err(StoreError::FailedPrecondition(
+            "policy Set is still referenced by a Surface location".into(),
+        ));
+    }
+    sqlx::query(&format!("DELETE FROM {} WHERE {}=$1", M::TABLE, M::KEY))
+        .bind(value.id())
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, M::APPLY_KIND, value.name()).await
+}
+
+pub(crate) async fn delete_permission_set_in(
+    tx: &mut Transaction<'_, Any>,
+    reference: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    delete_policy_in::<PermissionSet>(
+        tx,
+        reference,
+        expected_revision,
+        "supertag_v2_role_permission_sets",
+        "supertag_v2_surface_location_permission_sets",
+    )
+    .await
+}
+
+pub(crate) async fn delete_context_set_in(
+    tx: &mut Transaction<'_, Any>,
+    reference: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    delete_policy_in::<ContextSet>(
+        tx,
+        reference,
+        expected_revision,
+        "supertag_v2_role_context_sets",
+        "supertag_v2_surface_location_context_sets",
+    )
+    .await
+}
+
+/// The current revision of a live policy resource; a retired Role has none.
+pub(crate) async fn policy_revision_in(
+    tx: &mut Transaction<'_, Any>,
+    kind: &str,
+    reference: &str,
+) -> Result<Option<u64>> {
+    Ok(match kind {
+        "PermissionSet" => optional_resource::<PermissionSet>(tx, reference)
+            .await?
+            .map(|value| value.revision),
+        "ContextSet" => optional_resource::<ContextSet>(tx, reference)
+            .await?
+            .map(|value| value.revision),
+        "Role" => optional_resource::<Role>(tx, reference)
+            .await?
+            .filter(|value| value.status == RoleStatus::Active as i32)
+            .map(|value| value.revision),
+        _ => return Err(invalid("unknown policy kind")),
+    })
+}
+
+/// Retires an active Role that no Tag holds. Retired Roles keep their history.
+pub(crate) async fn retire_role_in(
+    tx: &mut Transaction<'_, Any>,
+    reference: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    let mut value = resource::<Role>(tx, reference).await?;
+    if expected_revision != value.revision {
+        return Err(StoreError::Conflict("policy revision changed".into()));
+    }
+    let holder: Option<String> = sqlx::query_scalar(
+        "SELECT tag_id FROM supertag_v2_role_assignments WHERE role_id=$1 AND status=$2 ORDER BY tag_id LIMIT 1",
+    )
+    .bind(&value.role_id)
+    .bind(RoleAssignmentStatus::Active as i64)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(holder) = holder {
+        return Err(StoreError::FailedPrecondition(format!(
+            "Role is still assigned to Tag {holder}"
+        )));
+    }
+    value.status = RoleStatus::Retired as i32;
+    value.revision = increment(value.revision)?;
+    // A retired Role no longer holds its Sets; its payload keeps the history.
+    for table in [
+        "supertag_v2_role_permission_sets",
+        "supertag_v2_role_context_sets",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE role_id=$1"))
+            .bind(&value.role_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    sqlx::query("UPDATE supertag_v2_roles SET revision=$1,status=$2,payload=$3 WHERE role_id=$4")
+        .bind(value.revision as i64)
+        .bind(value.status as i64)
+        .bind(value.encode_to_vec())
+        .bind(&value.role_id)
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, "Role", &value.name).await
+}
+
 async fn resource<M: Resource>(tx: &mut Transaction<'_, Any>, reference: &str) -> Result<M> {
     optional_resource(tx, reference)
         .await?
@@ -956,36 +1093,14 @@ impl Store {
         if let Some(value) = replay(&mut tx, principal, &input.operation_id, &hash).await? {
             return Ok(value);
         }
-        let value = resource::<M>(&mut tx, &input.reference).await?;
-        if input.expected_revision != value.revision() {
-            return Err(StoreError::Conflict("policy revision changed".into()));
-        }
-        let reference: Option<String> = sqlx::query_scalar(&format!(
-            "SELECT role_id FROM {references} WHERE set_id=$1 LIMIT 1"
-        ))
-        .bind(value.id())
-        .fetch_optional(&mut *tx)
+        delete_policy_in::<M>(
+            &mut tx,
+            &input.reference,
+            input.expected_revision,
+            references,
+            locations,
+        )
         .await?;
-        if reference.is_some() {
-            return Err(StoreError::FailedPrecondition(
-                "policy Set is still referenced by a Role".into(),
-            ));
-        }
-        let location: Option<String> = sqlx::query_scalar(&format!(
-            "SELECT location_id FROM {locations} WHERE set_id=$1 LIMIT 1"
-        ))
-        .bind(value.id())
-        .fetch_optional(&mut *tx)
-        .await?;
-        if location.is_some() {
-            return Err(StoreError::FailedPrecondition(
-                "policy Set is still referenced by a Surface location".into(),
-            ));
-        }
-        sqlx::query(&format!("DELETE FROM {} WHERE {}=$1", M::TABLE, M::KEY))
-            .bind(value.id())
-            .execute(&mut *tx)
-            .await?;
         let response = DeletePolicyResourceResponse { deleted: true };
         receipt(&mut tx, principal, &input.operation_id, &hash, &response).await?;
         tx.commit().await?;

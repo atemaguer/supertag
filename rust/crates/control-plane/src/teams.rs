@@ -248,21 +248,7 @@ impl Store {
             return Ok(prior);
         }
         let team = team_by_reference_in(&mut tx, &input.team).await?;
-        let open: Option<String> = sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE team_id=$1 AND status NOT IN ($2,$3) ORDER BY created_at_ms,objective_id LIMIT 1")
-            .bind(&team.team_id).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64)
-            .fetch_optional(&mut *tx).await?;
-        if let Some(open) = open {
-            return Err(StoreError::FailedPrecondition(format!(
-                "Team {} cannot be deleted while Objective {open} names it",
-                team.name
-            )));
-        }
-        // The Team's closed Objectives remain readable. Its Workstream and
-        // membership cascade with the definition, while receipts stay audited.
-        sqlx::query("DELETE FROM supertag_v2_teams WHERE team_id=$1")
-            .bind(&team.team_id)
-            .execute(&mut *tx)
-            .await?;
+        delete_team_in(&mut tx, &team, None).await?;
         receipt(
             &mut tx,
             principal,
@@ -276,6 +262,34 @@ impl Store {
         tx.commit().await?;
         Ok(team)
     }
+}
+
+/// Deletes a Team no open Objective names. With `expected_revision`, refuses a
+/// Team another writer changed.
+pub(crate) async fn delete_team_in(
+    tx: &mut Transaction<'_, Any>,
+    team: &Team,
+    expected_revision: Option<u64>,
+) -> Result<()> {
+    if expected_revision.is_some_and(|revision| revision != team.revision) {
+        return Err(StoreError::Conflict("Team revision changed".into()));
+    }
+    let open: Option<String> = sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE team_id=$1 AND status NOT IN ($2,$3) ORDER BY created_at_ms,objective_id LIMIT 1")
+        .bind(&team.team_id).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64)
+        .fetch_optional(&mut **tx).await?;
+    if let Some(open) = open {
+        return Err(StoreError::FailedPrecondition(format!(
+            "Team {} cannot be deleted while Objective {open} names it",
+            team.name
+        )));
+    }
+    // The Team's closed Objectives remain readable. Its Workstream and
+    // membership cascade with the definition, while receipts stay audited.
+    sqlx::query("DELETE FROM supertag_v2_teams WHERE team_id=$1")
+        .bind(&team.team_id)
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, "Team", &team.team_id).await
 }
 
 pub(crate) async fn team_by_reference_in(

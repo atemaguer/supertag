@@ -152,6 +152,9 @@ const (
 	// ManifestRelationshipsProvisionTagsProcedure is the fully-qualified name of the
 	// ManifestRelationships's ProvisionTags RPC.
 	ManifestRelationshipsProvisionTagsProcedure = "/supertag.runtime.v2.ManifestRelationships/ProvisionTags"
+	// ManifestRelationshipsReconcileApplySetProcedure is the fully-qualified name of the
+	// ManifestRelationships's ReconcileApplySet RPC.
+	ManifestRelationshipsReconcileApplySetProcedure = "/supertag.runtime.v2.ManifestRelationships/ReconcileApplySet"
 	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
 	// CreateObjective RPC.
 	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
@@ -1190,6 +1193,9 @@ func (UnimplementedOperatorEventsHandler) Watch(context.Context, *connect.Reques
 type ManifestRelationshipsClient interface {
 	ReconcileTag(context.Context, *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error)
 	ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error)
+	// Records an apply set's members and, with prune, removes the members its
+	// input no longer declares, all in one serialized Control Plane write.
+	ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error)
 }
 
 // NewManifestRelationshipsClient constructs a client for the
@@ -1215,13 +1221,20 @@ func NewManifestRelationshipsClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(manifestRelationshipsMethods.ByName("ProvisionTags")),
 			connect.WithClientOptions(opts...),
 		),
+		reconcileApplySet: connect.NewClient[runtimev2.ReconcileApplySetRequest, runtimev2.ReconcileApplySetResponse](
+			httpClient,
+			baseURL+ManifestRelationshipsReconcileApplySetProcedure,
+			connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileApplySet")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // manifestRelationshipsClient implements ManifestRelationshipsClient.
 type manifestRelationshipsClient struct {
-	reconcileTag  *connect.Client[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse]
-	provisionTags *connect.Client[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse]
+	reconcileTag      *connect.Client[runtimev2.ReconcileTagRelationshipsRequest, runtimev2.ReconcileTagRelationshipsResponse]
+	provisionTags     *connect.Client[runtimev2.ProvisionTagsRequest, runtimev2.ProvisionTagsResponse]
+	reconcileApplySet *connect.Client[runtimev2.ReconcileApplySetRequest, runtimev2.ReconcileApplySetResponse]
 }
 
 // ReconcileTag calls supertag.runtime.v2.ManifestRelationships.ReconcileTag.
@@ -1234,11 +1247,19 @@ func (c *manifestRelationshipsClient) ProvisionTags(ctx context.Context, req *co
 	return c.provisionTags.CallUnary(ctx, req)
 }
 
+// ReconcileApplySet calls supertag.runtime.v2.ManifestRelationships.ReconcileApplySet.
+func (c *manifestRelationshipsClient) ReconcileApplySet(ctx context.Context, req *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error) {
+	return c.reconcileApplySet.CallUnary(ctx, req)
+}
+
 // ManifestRelationshipsHandler is an implementation of the
 // supertag.runtime.v2.ManifestRelationships service.
 type ManifestRelationshipsHandler interface {
 	ReconcileTag(context.Context, *connect.Request[runtimev2.ReconcileTagRelationshipsRequest]) (*connect.Response[runtimev2.ReconcileTagRelationshipsResponse], error)
 	ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error)
+	// Records an apply set's members and, with prune, removes the members its
+	// input no longer declares, all in one serialized Control Plane write.
+	ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error)
 }
 
 // NewManifestRelationshipsHandler builds an HTTP handler from the service implementation. It
@@ -1260,12 +1281,20 @@ func NewManifestRelationshipsHandler(svc ManifestRelationshipsHandler, opts ...c
 		connect.WithSchema(manifestRelationshipsMethods.ByName("ProvisionTags")),
 		connect.WithHandlerOptions(opts...),
 	)
+	manifestRelationshipsReconcileApplySetHandler := connect.NewUnaryHandler(
+		ManifestRelationshipsReconcileApplySetProcedure,
+		svc.ReconcileApplySet,
+		connect.WithSchema(manifestRelationshipsMethods.ByName("ReconcileApplySet")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.ManifestRelationships/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ManifestRelationshipsReconcileTagProcedure:
 			manifestRelationshipsReconcileTagHandler.ServeHTTP(w, r)
 		case ManifestRelationshipsProvisionTagsProcedure:
 			manifestRelationshipsProvisionTagsHandler.ServeHTTP(w, r)
+		case ManifestRelationshipsReconcileApplySetProcedure:
+			manifestRelationshipsReconcileApplySetHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1281,6 +1310,10 @@ func (UnimplementedManifestRelationshipsHandler) ReconcileTag(context.Context, *
 
 func (UnimplementedManifestRelationshipsHandler) ProvisionTags(context.Context, *connect.Request[runtimev2.ProvisionTagsRequest]) (*connect.Response[runtimev2.ProvisionTagsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ProvisionTags is not implemented"))
+}
+
+func (UnimplementedManifestRelationshipsHandler) ReconcileApplySet(context.Context, *connect.Request[runtimev2.ReconcileApplySetRequest]) (*connect.Response[runtimev2.ReconcileApplySetResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ManifestRelationships.ReconcileApplySet is not implemented"))
 }
 
 // ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
