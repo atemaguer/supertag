@@ -621,3 +621,244 @@ async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -
     }
     Ok(())
 }
+
+/// The exact environment of a process this test owns.
+fn process_environment(pid: i32) -> Result<std::collections::BTreeMap<String, String>> {
+    #[cfg(target_os = "linux")]
+    let bytes = fs::read(format!("/proc/{pid}/environ"))?;
+    #[cfg(target_os = "macos")]
+    let bytes = {
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        let mut size = 0_usize;
+        // SAFETY: the MIB is valid and a null buffer asks only for the size.
+        ensure!(
+            unsafe {
+                libc::sysctl(
+                    mib.as_mut_ptr(),
+                    3,
+                    std::ptr::null_mut(),
+                    &mut size,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            } == 0,
+            "size process arguments"
+        );
+        let mut buffer = vec![0_u8; size];
+        // SAFETY: the buffer holds `size` writable bytes.
+        ensure!(
+            unsafe {
+                libc::sysctl(
+                    mib.as_mut_ptr(),
+                    3,
+                    buffer.as_mut_ptr().cast(),
+                    &mut size,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            } == 0,
+            "read process arguments"
+        );
+        buffer.truncate(size);
+        // Layout: argc, executable path, NUL padding, argc arguments, then the environment.
+        let argc = i32::from_ne_bytes(buffer.get(..4).context("argc")?.try_into()?) as usize;
+        let mut rest = &buffer[4..];
+        let path = rest.iter().position(|b| *b == 0).context("path")?;
+        rest = &rest[path..];
+        let start = rest.iter().position(|b| *b != 0).context("arguments")?;
+        rest = &rest[start..];
+        for _ in 0..argc {
+            let end = rest.iter().position(|b| *b == 0).context("argument")?;
+            rest = &rest[end + 1..];
+        }
+        let end = rest
+            .windows(2)
+            .position(|pair| pair == [0, 0])
+            .map_or(rest.len(), |end| end + 1);
+        rest[..end].to_vec()
+    };
+    Ok(bytes
+        .split(|b| *b == 0)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            let entry = String::from_utf8_lossy(entry);
+            let (name, value) = entry.split_once('=')?;
+            Some((name.to_owned(), value.to_owned()))
+        })
+        .collect())
+}
+
+fn names(environment: &std::collections::BTreeMap<String, String>) -> Vec<&str> {
+    environment.keys().map(String::as_str).collect()
+}
+
+#[tokio::test]
+async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_them() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("state");
+    let home = temp.path().join("home");
+    fs::create_dir(&home)?;
+    let env_file = temp.path().join("services.env");
+    fs::write(
+        &env_file,
+        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_TOKEN=file-gateway-token\n",
+    )?;
+    fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
+    let file = temp.path().join("supertag.yaml");
+    yaml(
+        &file,
+        &serde_json::json!({"env_file":"services.env","services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:${FIXTURE_PORT}"]},
+            "codex-host":{"type":"host","harnesses":["codex"]},
+            "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"]}
+        }}),
+    )?;
+    let path = std::env::var("PATH")?;
+    let home_value = home.to_str().context("UTF-8 home")?;
+    let mut supervisor = Process::spawn(
+        &state,
+        Some(&file),
+        &[
+            ("PATH", &path),
+            ("HOME", home_value),
+            ("CODEX_API_KEY", "shell-codex"),
+            ("ANTHROPIC_API_KEY", "shell-anthropic"),
+            ("SUPERTAG_GITHUB_TOKEN", "shell-github"),
+            ("FIXTURE_UNRELATED", "shell-unrelated"),
+        ],
+    )?;
+    let endpoint = supervisor.ready()?;
+    let credential = token(&state)?;
+    let mut roles = std::collections::BTreeMap::new();
+    for (pid, command) in children(supervisor.child.id())? {
+        let role = if command.contains("/hosts/codex-host") {
+            "codex-host"
+        } else if command.contains("/hosts/reporter") {
+            "reporter"
+        } else if command.contains(" gateway ") {
+            "gateway"
+        } else if command.contains(" control-plane ") {
+            "control-plane"
+        } else {
+            anyhow::bail!("unexpected supervised child: {command}");
+        };
+        roles.insert(role, process_environment(pid)?);
+    }
+    let base = ["HOME", "PATH", "SUPERTAG_LOCAL_SERVICE_LIFELINE"];
+    let expected = |extra: &[&'static str]| {
+        let mut names = base.iter().chain(extra).copied().collect::<Vec<_>>();
+        names.sort_unstable();
+        names
+    };
+    assert_eq!(
+        names(&roles["control-plane"]),
+        expected(&["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"])
+    );
+    assert_eq!(
+        names(&roles["gateway"]),
+        expected(&["SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_OPERATOR_TOKEN"])
+    );
+    // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
+    let codex = &roles["codex-host"];
+    assert_eq!(names(codex), expected(&["CODEX_API_KEY", "OPENAI_API_KEY"]));
+    assert_eq!(codex["CODEX_API_KEY"], "shell-codex");
+    assert_eq!(codex["OPENAI_API_KEY"], "file-openai");
+    assert_eq!(names(&roles["reporter"]), expected(&[]));
+    for environment in roles.values() {
+        assert_eq!(environment["HOME"], home_value);
+        assert!(
+            environment
+                .values()
+                .all(|value| value != "file-gateway-token")
+        );
+    }
+    // A harness child of the reporter sees no supervisor, service or provider credential.
+    let mut operator = client(&endpoint).await?;
+    operator
+        .set_host_draining(authenticated_request(
+            SetHostDrainingRequest {
+                host_id: "codex-host".into(),
+                draining: true,
+            },
+            &credential,
+            None,
+        )?)
+        .await?;
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "engineer".into(),
+                instructions: "Local fixture".into(),
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?;
+    let task = operator
+        .submit_task(authenticated_request(
+            SubmitTaskRequest {
+                tag_id: "engineer".into(),
+                session_id: "environment".into(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: "Report environment".into(),
+                ..Default::default()
+            },
+            &credential,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let result = timeout(WAIT, async {
+        loop {
+            let current = operator
+                .get_task(authenticated_request(
+                    GetTaskRequest {
+                        task_id: task.task_id.clone(),
+                    },
+                    &credential,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if current.state() == TaskState::Succeeded {
+                break Ok::<_, anyhow::Error>(current.result.unwrap_or_default());
+            }
+            ensure!(
+                current.state() != TaskState::Failed,
+                "reporter Task failed: {:?}",
+                current.result
+            );
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+    // macOS CoreFoundation adds its text encoding variable inside the reporting process.
+    let reported = result
+        .strip_prefix("environment: ")
+        .context("reporter result missing")?
+        .split(',')
+        .filter(|name| *name != "__CF_USER_TEXT_ENCODING")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reported,
+        [
+            "PATH",
+            "SUPERTAG_ADAPTER_STATE_DIRECTORY",
+            "SUPERTAG_WORKSPACE_DIRECTORY",
+            "TMPDIR"
+        ]
+    );
+    let log = fs::read_to_string(&supervisor.log)?;
+    for value in [
+        "file-openai",
+        "file-codex",
+        "file-cursor",
+        "shell-codex",
+        "file-gateway-token",
+    ] {
+        assert!(!log.contains(value));
+    }
+    supervisor.stop().await?;
+    Ok(())
+}

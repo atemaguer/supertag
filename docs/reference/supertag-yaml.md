@@ -773,6 +773,35 @@ Values come from the process environment first, then `env_file`. Unlike Compose,
 `${VAR}` without a default is an error, so an empty database URL fails at once instead of later.
 Keys that start with `x-` are not interpolated.
 
+### On a Rust deployment
+
+The Rust CLI's `supertag up -f supertag.yaml` reads `env_file` and interpolates values as described
+above. It differs in these ways:
+
+- Each `env_file` must be a regular file owned by you and not writable by group or others. A
+  symbolic link is an error, including the default `.env`. Together the files may hold at most
+  1 MiB and 1,024 variables.
+- `env_file` supplies interpolation, `environment` secrets such as `auth-key`, harness provider
+  credentials, and the Gateway's `SUPERTAG_GITHUB_*` settings. It does not supply other
+  `SUPERTAG_*` overrides or the `SUPERTAG_SERVER_CA_FILE`, `SUPERTAG_CLIENT_CERT_FILE`, and
+  `SUPERTAG_CLIENT_KEY_FILE` paths. Set those in the process environment.
+- For credentials, a blank process value counts as unset, so `env_file` fills it. Interpolation
+  still uses a set but empty process value.
+- Error messages name the variable, never its value.
+
+Each service process starts with an empty environment. It gets `PATH`, `HOME`, `USER`, `LOGNAME`,
+`TMPDIR`, `LANG`, `LC_ALL`, and `LC_CTYPE` from the shell, plus what its role needs:
+
+| Process | Also receives |
+| --- | --- |
+| Control Plane | Its database URL and its own service token |
+| Gateway | Its service token and the operator token. It gets `SUPERTAG_GITHUB_*` only when a host serves a Workspace from the Gateway. |
+| Worker Host | The provider credentials for its harness only, such as `CODEX_API_KEY`, `OPENAI_API_KEY`, and `CODEX_HOME` for `codex`, or `CURSOR_API_KEY` for `cursor`. A remote host also gets the TLS file paths. |
+
+A Worker Host never receives a service token or another harness's credential. Its harness
+processes get `PATH`, `LANG`, those provider credentials, and private working paths. The
+Control Plane and Gateway never receive provider credentials.
+
 ### Several files
 
 `-f PATH` names a file, or a directory that holds `supertag.yaml`. Repeat it to merge files in
