@@ -182,6 +182,23 @@ flight the same way a dropped TCP connection does, and Worker Hosts and the Gate
 retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, rather than the
 5 allowed for native gRPC, so a platform can start a service that scaled to zero.
 
+## Outbound HTTP proxies and dropped connections
+
+A client on a network that allows outbound traffic only through an HTTP proxy names it in
+`HTTPS_PROXY` (or `https_proxy`) as `http://[USER:PASSWORD@]HOST[:PORT]`. Operator commands,
+`host enroll`, `worker-host`, `health`, and the Gateway's Control Plane connection then reach
+`https://` and `wss://` URLs through the proxy's `CONNECT`, so SuperTag's TLS, and the outer TLS
+of a tunnel, run end to end through it. `NO_PROXY` (or `no_proxy`) lists hosts reached directly:
+`*`, an IP address, or a domain, which also covers its subdomains. Loopback addresses never use
+the proxy. A proxy that refuses `CONNECT` fails the connection; nothing falls back to a direct
+connection. Only `http://` proxy URLs are supported. `supertag up` passes these variables to the
+services it starts.
+
+Every client and service sends an HTTP/2 ping every 20 seconds, idle or not, and drops a
+connection whose ping goes unanswered for 20 seconds. A connection that a proxy or NAT drops
+without closing it therefore fails within about 40 seconds, and the caller reconnects, instead of
+waiting for a call's deadline.
+
 ## Platforms behind an HTTP proxy
 
 The tunnel carries the services' traffic on these platforms; definitions and live runs are still
