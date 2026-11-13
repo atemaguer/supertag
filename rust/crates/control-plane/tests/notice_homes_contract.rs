@@ -226,6 +226,68 @@ async fn budget_status(store: &Store, id: &str) -> Vec<(InboxNotificationStatus,
         .collect()
 }
 
+/// Claims and settles every operator Slack notification due now, and returns whether any told
+/// the operator about this Objective's budget or limits (TS `objectiveThreadCarries`).
+async fn slack_heard(store: &Store, id: &str) -> bool {
+    let mut heard = false;
+    loop {
+        let claim = store
+            .claim_operator_notification(
+                OPERATOR,
+                &ClaimOperatorNotificationRequest {
+                    destinations: vec![NotificationDestination {
+                        key: "slack:C0OPERATOR".into(),
+                        provider: NotificationProvider::Slack as i32,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let Some(notification) = claim.notification else {
+            return heard;
+        };
+        heard |= notification.item_keys.iter().any(|key| {
+            key.starts_with(&format!("objective_budget:{id}:"))
+                || key.starts_with(&format!("objective_limit:{id}:"))
+        });
+        store
+            .settle_operator_notification(
+                OPERATOR,
+                &SettleOperatorNotificationRequest {
+                    notification_id: notification.notification_id,
+                    lease_token: claim.lease_token,
+                    delivered: true,
+                    external_message_id: Some("slack-receipt".into()),
+                    error: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+}
+
+/// A person's mention of tag `helper` in an existing thread.
+async fn say(store: &Store, thread: &str, message: &str, text: &str) -> Option<Task> {
+    store
+        .accept_slack_event(
+            CONNECTOR,
+            &AcceptSlackEventRequest {
+                account_id: "slack-notices".into(),
+                event_id: format!("Ev{message}"),
+                team_id: "TTEAM1".into(),
+                channel_id: "CNOTICES".into(),
+                message_ts: message.into(),
+                thread_ts: thread.into(),
+                prompt: text.into(),
+                mention_tag_id: Some("helper".into()),
+                actor_id: "UALICE1".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .task
+}
+
 /// The operator chose a thread: notices post there, a moved limit withdraws a queued notice,
 /// and a home that no longer verifies (its Tag retired) withdraws one too.
 async fn chosen_thread(store: &Store, url: &str, host: &HostAuthority, clock: &AtomicI64) {
@@ -249,6 +311,34 @@ async fn chosen_thread(store: &Store, url: &str, host: &HostAuthority, clock: &A
             "{refused:?}"
         );
     }
+    // A system Task that copied a person's thread route is not a person's surface Task.
+    let copied = thread_task(store, host, "1794470400.100000").await;
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    sqlx::query("UPDATE supertag_v2_inbound_events SET event_id=$1 WHERE task_id=$2")
+        .bind(format!("work-session-report:{copied}"))
+        .bind(&copied)
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    connection.close().await.unwrap();
+    let refused = store
+        .create_objective(
+            OPERATOR,
+            &CreateObjectiveRequest {
+                operation_id: "refused-system".into(),
+                objective_id: "refused".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Never created".into(),
+                notification_task_id: Some(copied),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(StoreError::InvalidArgument(_))),
+        "{refused:?}"
+    );
     let thread = "1794470500.100000";
     let home = thread_task(store, host, thread).await;
     let turn = objective(store, host, "chosen", Some(&home), 80).await;
@@ -270,6 +360,32 @@ async fn chosen_thread(store: &Store, url: &str, host: &HostAuthority, clock: &A
             InboxNotificationStatus::Delivered,
             "via the Objective's thread".into()
         )]
+    );
+    // The chosen thread carries the item, so the operator's Slack is not told as well.
+    assert!(!slack_heard(store, "chosen").await);
+    // The chosen thread directs the Objective: a pause there pauses it (TS
+    // `findObjectiveByHomeSession`), and a resume resumes it.
+    assert!(
+        say(store, thread, "1794470501.100000", "<@UBOT1> pause")
+            .await
+            .is_some()
+    );
+    let objective = store.get_objective("chosen").await.unwrap();
+    assert!(objective.paused_at_ms.is_some(), "{objective:?}");
+    assert!(
+        say(store, thread, "1794470502.100000", "<@UBOT1> resume")
+            .await
+            .is_some()
+    );
+    let objective = store.get_objective("chosen").await.unwrap();
+    assert!(objective.paused_at_ms.is_none(), "{objective:?}");
+    let answers = deliver(store).await;
+    assert!(
+        answers
+            .iter()
+            .any(|(at, text)| at.as_deref() == Some(thread)
+                && text.starts_with("Paused. Objective chosen")),
+        "{answers:?}"
     );
 
     // The budget is reached and its notice is queued.
@@ -310,6 +426,8 @@ async fn chosen_thread(store: &Store, url: &str, host: &HostAuthority, clock: &A
         "{:?}",
         budget_status(store, "chosen").await
     );
+    // The thread no longer carries the item, so the operator's Slack hears about it instead.
+    assert!(slack_heard(store, "chosen").await);
     // A later sweep finds no home, so nothing is queued again.
     store.sweep_objectives().await.unwrap();
     assert!(notices(&deliver(store).await, "chosen").is_empty());

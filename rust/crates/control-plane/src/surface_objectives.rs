@@ -134,23 +134,38 @@ pub(crate) enum Handled {
 }
 
 struct Home {
+    /// The thread started the Objective; otherwise it is the Objective's chosen notice thread.
+    started: bool,
     objective_id: String,
+    /// The Tag the thread's surface route addresses.
     tag_id: String,
+    owner_tag_id: String,
     session_id: String,
 }
 
+/// The Objective a thread directs (TS `findObjectiveByHomeSession`): the Objective the thread
+/// started, else the newest open Objective whose operator-chosen notification Task is in it.
 async fn home_in(
     tx: &mut Transaction<'_, Any>,
     account: &str,
     conversation: &str,
     thread: &str,
 ) -> Result<Option<Home>> {
-    let row = sqlx::query("SELECT home.objective_id, home.tag_id, o.session_id FROM supertag_v2_surface_objectives home JOIN supertag_v2_objectives o ON o.objective_id=home.objective_id WHERE home.account_id=$1 AND home.conversation_id=$2 AND home.thread_id=$3")
+    let started = sqlx::query("SELECT home.objective_id, home.tag_id, o.owner_tag_id, o.session_id FROM supertag_v2_surface_objectives home JOIN supertag_v2_objectives o ON o.objective_id=home.objective_id WHERE home.account_id=$1 AND home.conversation_id=$2 AND home.thread_id=$3")
         .bind(account).bind(conversation).bind(thread).fetch_optional(&mut **tx).await?;
+    let (started, row) = match started {
+        Some(row) => (true, Some(row)),
+        None => (false, sqlx::query("SELECT o.objective_id, t.tag_id, o.owner_tag_id, o.session_id FROM supertag_v2_objectives o JOIN supertag_v2_inbound_events e ON e.task_id=o.notification_task_id JOIN supertag_v2_tasks t ON t.task_id=e.task_id WHERE e.account_id=$1 AND e.conversation_id=$2 AND e.thread_id=$3 AND o.status NOT IN ($4,$5) ORDER BY o.updated_at_ms DESC, o.objective_id DESC LIMIT 1")
+            .bind(account).bind(conversation).bind(thread)
+            .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64)
+            .fetch_optional(&mut **tx).await?),
+    };
     row.map(|row| {
         Ok(Home {
+            started,
             objective_id: row.try_get("objective_id")?,
             tag_id: row.try_get("tag_id")?,
+            owner_tag_id: row.try_get("owner_tag_id")?,
             session_id: row.try_get("session_id")?,
         })
     })
@@ -164,8 +179,14 @@ pub(crate) async fn handle_in(
     now_ms: i64,
 ) -> Result<Handled> {
     let account = message.origin.connector_account_id;
-    let home = home_in(tx, account, message.conversation_id, message.thread_id).await?;
+    let mut home = home_in(tx, account, message.conversation_id, message.thread_id).await?;
     let command = message.addressed.then(|| parse(message.prompt)).flatten();
+    // A thread chosen for an Objective's notices may still start an Objective of its own.
+    if matches!(command, Some(Command::Create(_) | Command::Invalid))
+        && home.as_ref().is_some_and(|home| !home.started)
+    {
+        home = None;
+    }
     // Directives outside a home thread are ordinary messages.
     if home.is_none() && !matches!(command, Some(Command::Create(_) | Command::Invalid)) {
         return Ok(Handled::Ordinary);
@@ -208,6 +229,11 @@ pub(crate) async fn handle_in(
         Some(Command::Pause) => directive_in(tx, &message, id, "pause", now_ms).await?,
         Some(Command::Resume) => directive_in(tx, &message, id, "resume", now_ms).await?,
         Some(Command::Approve) => directive_in(tx, &message, id, "approve", now_ms).await?,
+        // A chosen thread addressed to another Tag keeps that Tag's conversation: the
+        // Objective's turns run in its owner's Session, which this route cannot admit to.
+        None if !home.started && home.tag_id != home.owner_tag_id => {
+            return Ok(Handled::Ordinary);
+        }
         None => {
             // Any other message in the home thread is the Objective's next turn.
             let mut savepoint = tx.begin().await?;
@@ -441,15 +467,32 @@ pub(crate) async fn notice_home_in(
     }
 }
 
-/// The thread of a surface Task, while it verifies (TS `getVerifiedSurfaceTask`).
+/// Event ID prefixes of system Tasks that copy a person's thread route to post a notice there.
+pub(crate) const SYSTEM_ROUTE_EVENTS: [&str; 3] = [
+    "approval-budget-stop:",
+    "work-session-approval-stop:",
+    "work-session-report:",
+];
+
+/// The thread of a surface Task a person's message started, while it verifies (TS
+/// `getVerifiedSurfaceTask`).
 pub(crate) async fn task_home_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
 ) -> Result<Option<NoticeHome>> {
-    let Some(row) = sqlx::query("SELECT e.account_id, e.conversation_id, e.thread_id, t.tag_id FROM supertag_v2_inbound_events e JOIN supertag_v2_tasks t ON t.task_id=e.task_id WHERE e.task_id=$1")
+    let Some(row) = sqlx::query("SELECT e.event_id, e.account_id, e.conversation_id, e.thread_id, t.tag_id FROM supertag_v2_inbound_events e JOIN supertag_v2_tasks t ON t.task_id=e.task_id WHERE e.task_id=$1")
         .bind(task_id).fetch_optional(&mut **tx).await? else {
         return Ok(None);
     };
+    // A person's message started it (TS `notificationSource`, `actor.kind === "user"`), not a
+    // system notice or report that copied a person's route.
+    let event: String = row.try_get("event_id")?;
+    if SYSTEM_ROUTE_EVENTS
+        .iter()
+        .any(|prefix| event.starts_with(prefix))
+    {
+        return Ok(None);
+    }
     let account_id: String = row.try_get("account_id")?;
     if !route_verified_in(tx, &account_id, &row.try_get::<String, _>("tag_id")?).await? {
         return Ok(None);

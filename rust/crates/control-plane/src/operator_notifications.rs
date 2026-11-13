@@ -79,7 +79,7 @@ impl Store {
         let (inbox, complete) = self.inbox_for_notifications(principal).await?;
         let (mut tx, _) = self.write().await?;
         let now = self.execution_now_ms();
-        let items = items_in(&mut tx, inbox).await?;
+        let items = items_in(&mut tx, principal, inbox).await?;
         record_in(&mut tx, principal, &destinations, &items, now).await?;
         // A lease that lapsed on the last attempt is never claimed again.
         sqlx::query("UPDATE supertag_v2_operator_notifications SET status=$1,failed_at_ms=$2,last_error=$3,lease_token=NULL,lease_expires_at_ms=NULL WHERE principal=$4 AND status=$5 AND lease_expires_at_ms<=$2 AND attempt_count>=max_attempts")
@@ -300,7 +300,11 @@ fn valid_key(key: &str, provider: NotificationProvider) -> bool {
 /// Inbox items with what the outbox needs: a ledger key, a headline, and whether an approval
 /// blocks work. As in TypeScript, every approval the Inbox lists blocks: the Inbox lists one only
 /// while a Session waits on it, either running or ended waiting as the Session's latest Task.
-async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Result<Vec<Item>> {
+async fn items_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    inbox: Vec<InboxItem>,
+) -> Result<Vec<Item>> {
     let mut items = Vec::with_capacity(inbox.len());
     for item in inbox {
         let kind = InboxItemKind::try_from(item.kind).unwrap_or(InboxItemKind::Unspecified);
@@ -313,13 +317,7 @@ async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Resul
                 | InboxItemKind::ObjectiveLimit
                 | InboxItemKind::Approval
         ) && match &objective_id {
-            Some(objective) => sqlx::query_scalar::<_, String>(
-                "SELECT objective_id FROM supertag_v2_surface_objectives WHERE objective_id=$1",
-            )
-            .bind(objective)
-            .fetch_optional(&mut **tx)
-            .await?
-            .is_some(),
+            Some(objective) => carried_in(tx, principal, objective, &item).await?,
             None => false,
         };
         let key = ledger_key(&item);
@@ -334,6 +332,25 @@ async fn items_in(tx: &mut Transaction<'_, Any>, inbox: Vec<InboxItem>) -> Resul
         });
     }
     Ok(items)
+}
+
+/// TS `objectiveThreadCarries`: the Objective's notice home (its chosen thread, its start
+/// thread, or the deployment default) verifies, and the item's notification has not failed.
+/// A failed delivery there, such as a withdrawn limit notice, falls back to the operator's Slack.
+async fn carried_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    objective_id: &str,
+    item: &InboxItem,
+) -> Result<bool> {
+    if crate::surface_objectives::notice_home_in(tx, objective_id)
+        .await?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    let status = item_status_in(tx, principal, item).await?;
+    Ok(status.status != InboxNotificationStatus::Failed as i32)
 }
 
 /// The outbox ledger key of an Inbox item: its occurrence, so a new occurrence is told again.
