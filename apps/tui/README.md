@@ -14,6 +14,21 @@ The TUI lists Tags and named conversations, loads conversation history, sends me
 follows replies. Watch keeps the rail and open conversation current across clients. The TUI
 resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
 Task event sequence.
+
+Ctrl-P opens **Gateways**, including when only one connection exists. Press `a` to add a
+Gateway, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
+to verify access and save it. Optional certificate fields support private TLS authorities and
+client identities. `s` saves the current launch connection; `e` edits a selected saved
+connection's credential without moving it to a different Gateway URL. Enter switches, and
+`d` forgets the selected saved connection. Switching cancels the previous Gateway's requests
+and subscriptions and loads only the selected Gateway's Tags and conversations.
+
+Saved connections use a private native file, `supertag/tui-gateways.json` under the operating
+system's user configuration directory, with owner-only permissions. It is separate from the
+local service credentials and the desktop app's store. A launch handover keeps its selected
+Gateway and credentials; saved connections add to the chooser. Without a launch handover,
+`supertag-tui` reopens the last selected saved Gateway or shows the empty chooser for adding
+the first one. The token never appears in command arguments or the terminal display.
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
 message its owner. You can select a Team in the Objective form and read its members, concurrency
@@ -130,5 +145,5 @@ an extra pipe as file descriptor 3, and writes one JSON line to it:
 index of the selected Control Plane and `name` is left out for this machine's. When
 `SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane
 it selects, so the list holds that one alone. A saved connection whose credential cannot be read is
-left out. The binary never reads `~/.supertag` and takes no token from its arguments or environment;
-started any other way, it prints `Run supertag in a terminal to start the terminal UI.` and exits 2.
+left out. The legacy Node handover continues to supply its own connections. The binary takes no
+token from its arguments or environment; the runtime v2 saved-connection flow is described above.

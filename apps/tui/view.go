@@ -293,7 +293,11 @@ func (m model) renderStatus() string {
 	}
 	left += "ctrl+k commands  "
 	if m.switchable {
-		left += "ctrl+p Control Planes  "
+		if m.client.RuntimeV2() {
+			left += "ctrl+p Gateways  "
+		} else {
+			left += "ctrl+p Control Planes  "
+		}
 	}
 	state := okStyle.Render("connected")
 	if !m.connected {

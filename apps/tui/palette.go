@@ -68,8 +68,16 @@ func (a *app) commands() []paletteCommand {
 			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
 			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
-	if len(a.contexts) > 1 {
-		out = append(out, paletteCommand{commandSwitchControlPlane, "Switch Control Plane", contextLabel(a.contexts[a.current]) + " · " + switchKey})
+	if len(a.contexts) > 1 || a.manageGateways() {
+		title := "Switch Control Plane"
+		if a.manageGateways() {
+			title = "Gateways · add or switch"
+		}
+		about := "Add a Gateway"
+		if a.hasTarget {
+			about = contextLabel(a.contexts[a.current])
+		}
+		out = append(out, paletteCommand{commandSwitchControlPlane, title, about + " · " + switchKey})
 	}
 	if a.inner.client.RuntimeV2() {
 		out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})

@@ -25,7 +25,19 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	h, err := readHandover(os.NewFile(3, "supertag-target"))
+	store, storeErr := defaultGatewayStore()
+	var profiles gatewayProfiles
+	if storeErr == nil {
+		profiles, storeErr = store.load()
+	}
+	targetFile := os.NewFile(3, "supertag-target")
+	noHandover := true
+	if targetFile != nil {
+		if info, err := targetFile.Stat(); err == nil && info.Mode()&(os.ModeNamedPipe|os.ModeSocket) != 0 {
+			noHandover = false
+		}
+	}
+	h, err := startupTargets(targetFile, profiles)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, launchHint)
 		os.Exit(2)
@@ -33,8 +45,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	connect := dial(version)
+	launchContexts := append([]client.Target(nil), h.Contexts...)
 	if h.Protocol == "runtime.v2" {
 		connect = dialRuntimeV2(version)
+		h.Contexts = mergeGateways(h.Contexts, profiles.Gateways)
 	}
 	a, err := newApp(ctx, connect, h.Contexts, h.Current)
 	if err != nil {
@@ -42,6 +56,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer a.stop()
+	if h.Protocol == "runtime.v2" {
+		a.gatewayStore = store
+		a.savedGateways = profiles.Gateways
+		// Only a real handover is a launch-specific connection. Saved-only startup
+		// must not retain a forgotten connection after switching away.
+		a.launchContexts = launchContexts
+		if noHandover {
+			a.launchContexts = nil
+		}
+		if storeErr != nil {
+			a.inner.notice = note{text: "Saved Gateways could not be read safely. This launch connection is still available.", err: true}
+			a.choiceErr = "Saved Gateways could not be read safely. Check the private profile file and its permissions."
+		}
+	}
 	if _, err := tea.NewProgram(a).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
