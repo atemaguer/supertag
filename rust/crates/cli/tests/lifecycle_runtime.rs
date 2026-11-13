@@ -474,6 +474,7 @@ fn fake_launchd(machine: &mut Machine) -> Result<PathBuf> {
 }
 
 /// A private state directory holding a supertag.yaml.
+#[cfg(target_os = "macos")]
 fn state_with(directory: &Path, config: &Value) -> Result<PathBuf> {
     fs::create_dir_all(directory)?;
     fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
