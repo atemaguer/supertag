@@ -20,6 +20,7 @@ mod mcp;
 mod network;
 mod node_bridges;
 mod notifications;
+mod objective_overview;
 mod objectives;
 mod observe;
 mod operator_access;
@@ -1866,6 +1867,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health
         .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<ControlPlane>>()
         .await;
+    health
+        .set_serving::<
+            supertag_protocol::v2::objective_overviews_server::ObjectiveOverviewsServer<ControlPlane>,
+        >()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
@@ -1977,6 +1983,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_effects_service())
         .add_service(plane.spend_service())
         .add_service(plane.metrics_service())
+        .add_service(plane.objective_overview_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
@@ -2173,6 +2180,11 @@ async fn gateway(
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
         .await;
+    health
+        .set_serving::<
+            supertag_protocol::v2::objective_overviews_server::ObjectiveOverviewsServer<Gateway>,
+        >()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -2228,6 +2240,7 @@ async fn gateway(
         .add_service(gateway.spend_service())
         .add_service(gateway.metrics_service())
         .add_service(notifier.test_service(gateway.clone()))
+        .add_service(gateway.objective_overview_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router

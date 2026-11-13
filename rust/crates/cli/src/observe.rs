@@ -10,12 +10,12 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         GetArtifactVolumeRequest, GetGithubWorkspaceRequest, GetHostRequest, GetMetricsRequest,
-        GetObjectiveRequest, GetPolicyResourceRequest, GetSpendRequest, GetTagRequest,
+        GetObjectiveOverviewRequest, GetPolicyResourceRequest, GetSpendRequest, GetTagRequest,
         GetTaskRequest, GetTeamRequest, GetWorkSessionRequest, GetWorkspaceVolumeRequest,
         HostPhase, MetricSnapshot, SpendGrouping, SpendReport, WatchEvent, WatchKind, WatchRequest,
         artifact_volumes_client::ArtifactVolumesClient,
         github_workspaces_client::GithubWorkspacesClient, metrics_client::MetricsClient,
-        objectives_client::ObjectivesClient, operator_client::OperatorClient,
+        objective_overviews_client::ObjectiveOverviewsClient, operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient, policy_catalog_client::PolicyCatalogClient,
         spend_client::SpendClient, teams_client::TeamsClient, watch_event::Update,
         work_sessions_client::WorkSessionsClient, workspace_volumes_client::WorkspaceVolumesClient,
@@ -428,23 +428,40 @@ pub struct DescribeArgs {
     output: Output,
 }
 
-pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let id = args.id;
-    let (title, value) = fetch(channel, &token, args.kind, id).await?;
-    match args.output {
-        Output::Json => println!("{value}"),
-        Output::Text => print!("{}", describe_text(title, &value)),
-    }
-    Ok(())
-}
-
 macro_rules! client {
     ($client:ident, $channel:expr) => {
         $client::new($channel)
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     };
+}
+
+pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let id = args.id;
+    if matches!(args.kind, DescribeKind::Objective) {
+        let view = client!(ObjectiveOverviewsClient, channel)
+            .get_objective_overview(request(
+                GetObjectiveOverviewRequest {
+                    objective_id: id,
+                    ..Default::default()
+                },
+                &token,
+            )?)
+            .await?
+            .into_inner();
+        match args.output {
+            Output::Json => println!("{}", crate::objective_overview::json(&view)),
+            Output::Text => print!("{}", crate::objective_overview::text(&view)),
+        }
+        return Ok(());
+    }
+    let (title, value) = fetch(channel, &token, args.kind, id).await?;
+    match args.output {
+        Output::Json => println!("{value}"),
+        Output::Text => print!("{}", describe_text(title, &value)),
+    }
+    Ok(())
 }
 
 async fn fetch(
@@ -481,15 +498,7 @@ async fn fetch(
                     .into_inner(),
             ),
         ),
-        DescribeKind::Objective => (
-            "Objective",
-            crate::objectives::output(
-                client!(ObjectivesClient, channel)
-                    .get_objective(request(GetObjectiveRequest { objective_id: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
+        DescribeKind::Objective => unreachable!("describe objective renders the overview"),
         DescribeKind::Team => (
             "Team",
             crate::teams::team_json(

@@ -39,6 +39,75 @@ impl Record {
         self.value.revision += 1;
         self.updated_at_ms = now_ms;
     }
+
+    fn set_summary(&mut self, summary: &str) {
+        self.completion_summary = Some(summary.into());
+        self.value.completion_summary = Some(summary.into());
+    }
+}
+
+/// The completion report posted once to an Objective's home thread.
+const COMPLETION_REPORT_SUMMARY_CHARS: usize = 1500;
+
+fn completion_report(objective_id: &str, summary: Option<&str>) -> String {
+    let summary = summary.map(str::trim).unwrap_or_default();
+    if summary.is_empty() {
+        return format!("Objective {objective_id} is completed.");
+    }
+    let quoted = if summary.chars().count() > COMPLETION_REPORT_SUMMARY_CHARS {
+        let mut cut: String = summary
+            .chars()
+            .take(COMPLETION_REPORT_SUMMARY_CHARS - 1)
+            .collect();
+        cut.push('…');
+        cut
+    } else {
+        summary.to_owned()
+    };
+    format!("Objective {objective_id} is completed: {quoted}")
+}
+
+/// Posts the completion report once, keyed by the completing revision.
+async fn report_completion_in(
+    tx: &mut Transaction<'_, Any>,
+    record: &Record,
+    now_ms: i64,
+) -> Result<()> {
+    crate::surface_objectives::home_report_in(
+        tx,
+        &record.value.objective_id,
+        &record.value.owner_tag_id,
+        &format!("objective-completed:{}", record.value.revision),
+        &completion_report(
+            &record.value.objective_id,
+            record.completion_summary.as_deref(),
+        ),
+        now_ms,
+    )
+    .await
+}
+
+/// The home-thread text of a limit event (TS `budgetNoticeText` over
+/// `inboxLimitReason`): an approaching deadline states the time left when posted.
+fn home_limit_text(record: &Record, notice: &limits::Notice, now_ms: i64) -> String {
+    let reason = match (notice.kind, record.limits.deadline) {
+        (limits::NoticeKind::ObjectiveDeadlineApproaching, Some(deadline)) => {
+            let left = deadline.as_millis() - now_ms;
+            if left > 0 {
+                format!(
+                    "The Objective deadline {deadline} is near: {} left.",
+                    limits::readable_duration(left)
+                )
+            } else {
+                format!("The Objective deadline {deadline} has passed.")
+            }
+        }
+        _ => notice.message.clone(),
+    };
+    let id = &record.value.objective_id;
+    format!(
+        "Objective {id:?}: {reason} Inspect supertag describe objective {id}. An operator can change the budget or deadline with supertag objective set-limits."
+    )
 }
 
 fn invalid(message: &str) -> StoreError {
@@ -160,6 +229,9 @@ fn record_row(row: &AnyRow) -> Result<Record> {
             runtime_actions: Some(RuntimeActions {
                 actions: serde_json::from_str(&row.try_get::<String, _>("runtime_actions")?)?,
             }),
+            completion_summary: None,
+            cancelled_at_ms: None,
+            cancellation_reason: None,
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -175,6 +247,12 @@ fn record_row(row: &AnyRow) -> Result<Record> {
         cancellation_reason: row.try_get("cancellation_reason")?,
         completion_summary: row.try_get("completion_summary")?,
         idle_wake_count: row.try_get("idle_wake_count")?,
+    })
+    .map(|mut record: Record| {
+        record.value.completion_summary = record.completion_summary.clone();
+        record.value.cancelled_at_ms = record.cancelled_at_ms;
+        record.value.cancellation_reason = record.cancellation_reason.clone();
+        record
     })
 }
 
@@ -440,8 +518,13 @@ impl Store {
         } else {
             input.limit.min(12)
         } as i64;
+        // A completion summary may hold 256 KiB; Get and the overview carry it, a page does not.
         sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id>$1 ORDER BY objective_id LIMIT $2")
-            .bind(&input.after_id).bind(count).fetch_all(&self.pool).await?.iter().map(|row| Ok(record_row(row)?.value)).collect()
+            .bind(&input.after_id).bind(count).fetch_all(&self.pool).await?.iter().map(|row| {
+                let mut value = record_row(row)?.value;
+                value.completion_summary = None;
+                Ok(value)
+            }).collect()
     }
 
     pub async fn set_objective_runtime_actions(
@@ -703,6 +786,69 @@ impl Store {
         Ok(objective)
     }
 
+    /// An operator completes an open Objective, ongoing or not, with a required assessment.
+    /// Its open Tasks are cancelled. Unlike approval, it posts no completion report.
+    pub async fn complete_objective(
+        &self,
+        principal: &str,
+        input: &CompleteObjectiveRequest,
+    ) -> Result<Objective> {
+        operator(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        text("summary", &input.summary, 65_536)?;
+        let summary = input.summary.trim();
+        if summary.is_empty() {
+            return Err(invalid(
+                "a summary that assesses the outcome is required to complete an Objective",
+            ));
+        }
+        if input
+            .expected_revision
+            .is_some_and(|value| value == 0 || value > i64::MAX as u64)
+        {
+            return Err(invalid("a valid expected Objective revision is required"));
+        }
+        let fingerprint = digest("complete", input);
+        let (mut tx, _) = self.write().await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let mut record = get_in(&mut tx, &input.objective_id).await?;
+        if record.value.status == ObjectiveStatus::Completed as i32 {
+            return Err(refused("the Objective is already completed"));
+        }
+        if record.value.status == ObjectiveStatus::Cancelled as i32 {
+            return Err(refused("a cancelled Objective cannot be completed"));
+        }
+        if input
+            .expected_revision
+            .is_some_and(|value| value != record.value.revision)
+        {
+            return Err(StoreError::Conflict(
+                "Objective revision changed; reload before updating".into(),
+            ));
+        }
+        record.set_summary(summary);
+        record.change_status(ObjectiveStatus::Completed, now_ms);
+        save_in(&mut tx, &record).await?;
+        cancel_open_in(&mut tx, &input.objective_id, None).await?;
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &record.value,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record.value)
+    }
+
     pub async fn sweep_objectives(&self) -> Result<()> {
         let (mut tx, _) = self.write().await?;
         let now_ms = self.execution_now_ms();
@@ -782,6 +928,8 @@ pub(crate) async fn objective_action_in(
                 record.cancelled_at_ms = Some(now_ms);
                 record.cancellation_reason =
                     (!input.reason.is_empty()).then(|| input.reason.clone());
+                record.value.cancelled_at_ms = record.cancelled_at_ms;
+                record.value.cancellation_reason = record.cancellation_reason.clone();
                 record.change_status(ObjectiveStatus::Cancelled, now_ms);
             }
             cancel_open_in(tx, &input.objective_id, None).await?;
@@ -816,11 +964,18 @@ pub(crate) async fn review_in(
     crate::artifact_publications::review_in(tx, &record.value, principal, input.approved, now_ms)
         .await?;
     if input.approved {
-        record.change_status(ObjectiveStatus::Completed, now_ms);
+        // Approval accepts the owner's assessment as it stands (TS `approveObjective`);
+        // an operator who wants it changed requests changes instead.
         if !input.feedback.trim().is_empty() {
-            record.completion_summary = Some(input.feedback.clone());
+            return Err(invalid(
+                "approval takes no feedback; request changes to revise the owner's assessment",
+            ));
         }
+        // The ready signal always records a non-empty assessment, so TS's
+        // "Approved by operator" fallback has nothing to fill.
+        record.change_status(ObjectiveStatus::Completed, now_ms);
         cancel_open_in(tx, &input.objective_id, None).await?;
+        report_completion_in(tx, &record, now_ms).await?;
     } else {
         if input.feedback.trim().is_empty() {
             return Err(invalid("feedback is required to request changes"));
@@ -884,6 +1039,15 @@ pub(crate) async fn set_starting_task_in(
 
 pub(crate) async fn objective_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Objective> {
     Ok(get_in(tx, id).await?.value)
+}
+
+/// The Objective with its limit model, for read-only projections.
+pub(crate) async fn objective_limits_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+) -> Result<(Objective, limits::ObjectiveLimits)> {
+    let record = get_in(tx, id).await?;
+    Ok((record.value, record.limits))
 }
 
 pub(crate) async fn objective_admission_in(
@@ -1128,11 +1292,14 @@ pub(crate) async fn objective_finish_in(
     if record.value.status == ObjectiveStatus::Limited as i32 {
         return Err(invalid("only an operator can resume a limited Objective"));
     }
-    record.completion_summary = Some(result.into());
+    record.set_summary(result);
     record.change_status(status, now_ms);
     save_in(tx, &record).await?;
     if record.closed() {
         cancel_open_in(tx, &id, Some(&task.task_id)).await?;
+    }
+    if status == ObjectiveStatus::Completed {
+        report_completion_in(tx, &record, now_ms).await?;
     }
     Ok(())
 }
@@ -1269,6 +1436,21 @@ pub(crate) async fn reconcile_in(
     save_in(tx, &record).await?;
     for notice in limits::notices_to_deliver(&record.limits) {
         internal_turn_in(tx, &record, &notice.key, &notice.message, "notice", now_ms).await?;
+        // A person in the Objective's home thread learns of every limit event: the
+        // budget warning, an approaching deadline, and a reached budget or deadline
+        // (TS `objectiveLimitEvents` through `BudgetNotifications`). Setting a
+        // deadline is the operator's own act and reaches only the owner.
+        if notice.kind != limits::NoticeKind::ObjectiveDeadlineSet {
+            crate::surface_objectives::home_report_in(
+                tx,
+                &record.value.objective_id,
+                &record.value.owner_tag_id,
+                &format!("limit:{}", notice.key),
+                &home_limit_text(&record, &notice, now_ms),
+                now_ms,
+            )
+            .await?;
+        }
     }
     // Notices discovered after grace remain audit history but cannot gain execution authority.
     if limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None) {
@@ -1393,6 +1575,17 @@ impl objectives_server::Objectives for ControlPlane {
         Ok(Response::new(
             self.store
                 .review_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn complete_objective(
+        &self,
+        request: Request<CompleteObjectiveRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .complete_objective(&principal, &request.into_inner())
                 .await?,
         ))
     }

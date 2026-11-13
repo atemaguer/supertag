@@ -843,15 +843,43 @@ async fn exercise(database_url: &str) -> Result<()> {
         None,
     )
     .await?;
-    ensure!(described.starts_with("Objective\n"), "{described}");
+    // The Objective overview: status, outcome, owner, budget pool, and its work.
     ensure!(
-        described.contains("\nBudget currency: USD\n"),
+        described.starts_with(
+            "Objective launch: working\nOutcome: Launch the release\nOwner: builder\nBudget: "
+        ),
         "{described}"
     );
+    ensure!(described.contains(" of $5.00 spent"), "{described}");
+    ensure!(described.contains("\nWork: 1 Session\n"), "{described}");
     ensure!(
-        described.contains("\nOutcome: Launch the release\n"),
+        described.contains("Full record: supertag describe objective launch --output json"),
         "{described}"
     );
+    let overview = json_of(
+        &home,
+        &[
+            "--gateway",
+            "local",
+            "describe",
+            "objective",
+            "launch",
+            "--output",
+            "json",
+        ],
+        None,
+    )
+    .await?;
+    assert_eq!(overview["objective"]["outcome"], "Launch the release");
+    assert_eq!(overview["pool"]["limit_minor"], 500);
+    assert_eq!(overview["pool"]["currency"], "USD");
+    assert_eq!(overview["sessions"][0]["owner"], true);
+    assert_eq!(
+        overview["sessions"][0]["status"],
+        "OBJECTIVE_SESSION_STATUS_RUNNING"
+    );
+    assert_eq!(overview["tasks"][0]["task_id"], objective_task.as_str());
+    assert_eq!(overview["tasks"][0]["kind"], "start");
     let worker_host = ok(
         &home,
         &[
@@ -1093,6 +1121,69 @@ async fn exercise(database_url: &str) -> Result<()> {
         args.extend(get);
         assert_eq!(described, json_of(&home, &args, None).await?, "{kind}");
     }
+
+    // An operator completes the Objective with an assessment from a file.
+    let summary = temporary.path().join("summary.md");
+    let summary_path = summary.to_str().context("summary path")?;
+    std::fs::write(&summary, "  \n")?;
+    for file in [summary_path, "-"] {
+        let (success, _, stderr) = run(
+            &home,
+            &[
+                "--gateway",
+                "local",
+                "objective",
+                "complete",
+                "launch",
+                "--summary-file",
+                file,
+            ],
+            None,
+        )
+        .await?;
+        ensure!(
+            !success && stderr.contains("summary file is empty"),
+            "{stderr}"
+        );
+    }
+    std::fs::write(
+        &summary,
+        "Launched to all regions.\nChecks: smoke tests passed.\n",
+    )?;
+    let complete = [
+        "--gateway",
+        "local",
+        "objective",
+        "complete",
+        "launch",
+        "--summary-file",
+        summary_path,
+    ];
+    let completed = json_of(&home, &complete, None).await?;
+    assert_eq!(completed["status"], "OBJECTIVE_STATUS_COMPLETED");
+    assert_eq!(
+        completed["completion_summary"],
+        "Launched to all regions.\nChecks: smoke tests passed."
+    );
+    let described = ok(
+        &home,
+        &["--gateway", "local", "describe", "objective", "launch"],
+        None,
+    )
+    .await?;
+    ensure!(
+        described.starts_with(
+            "Objective launch: completed\nOutcome: Launch the release\nResult: Launched to all regions.\n  Checks: smoke tests passed.\n"
+        ),
+        "{described}"
+    );
+    ensure!(
+        described.contains("\nDelivered:\n  Launched to all regions.\n"),
+        "{described}"
+    );
+    ensure!(!described.contains("Follow it"), "{described}");
+    let (success, _, stderr) = run(&home, &complete, None).await?;
+    ensure!(!success && stderr.contains("already completed"), "{stderr}");
 
     // Each client's store directory rule applies: the terminal UI's must be
     // private, the desktop app's only owner-writable.

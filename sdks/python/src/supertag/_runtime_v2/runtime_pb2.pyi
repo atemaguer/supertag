@@ -2889,7 +2889,7 @@ class RuntimeActions(_message.Message):
     def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2905,6 +2905,9 @@ class Objective(_message.Message):
     REPORTED_SPEND_MINOR_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
     RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    COMPLETION_SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    CANCELLED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    CANCELLATION_REASON_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -2920,7 +2923,10 @@ class Objective(_message.Message):
     reported_spend_minor: int
     team_id: str
     runtime_actions: RuntimeActions
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ...) -> None: ...
+    completion_summary: str
+    cancelled_at_ms: int
+    cancellation_reason: str
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ...) -> None: ...
 
 class Team(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")
@@ -3181,6 +3187,18 @@ class ReviewObjectiveRequest(_message.Message):
     approved: bool
     feedback: str
     def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., approved: _Optional[bool] = ..., feedback: _Optional[str] = ...) -> None: ...
+
+class CompleteObjectiveRequest(_message.Message):
+    __slots__ = ("objective_id", "operation_id", "summary", "expected_revision")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    operation_id: str
+    summary: str
+    expected_revision: int
+    def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., summary: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
 
 class ReplyDestination(_message.Message):
     __slots__ = ("conversation_id", "thread_id")

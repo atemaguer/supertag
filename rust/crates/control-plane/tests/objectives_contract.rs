@@ -312,7 +312,7 @@ async fn review_lifecycle(
         objective_id: "ongoing".into(),
         operation_id: "approve".into(),
         approved: true,
-        feedback: "Operator ends the responsibility".into(),
+        feedback: String::new(),
     };
     let completed = store.review_objective(OPERATOR, &approval).await.unwrap();
     assert_eq!(completed.status, ObjectiveStatus::Completed as i32);

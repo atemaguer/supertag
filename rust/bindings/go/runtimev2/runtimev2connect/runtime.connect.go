@@ -186,6 +186,9 @@ const (
 	// ObjectivesReviewObjectiveProcedure is the fully-qualified name of the Objectives's
 	// ReviewObjective RPC.
 	ObjectivesReviewObjectiveProcedure = "/supertag.runtime.v2.Objectives/ReviewObjective"
+	// ObjectivesCompleteObjectiveProcedure is the fully-qualified name of the Objectives's
+	// CompleteObjective RPC.
+	ObjectivesCompleteObjectiveProcedure = "/supertag.runtime.v2.Objectives/CompleteObjective"
 	// InboxListItemsProcedure is the fully-qualified name of the Inbox's ListItems RPC.
 	InboxListItemsProcedure = "/supertag.runtime.v2.Inbox/ListItems"
 	// InboxGetQuestionProcedure is the fully-qualified name of the Inbox's GetQuestion RPC.
@@ -1372,6 +1375,8 @@ type ObjectivesClient interface {
 	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	// An operator completes an Objective with an assessment of its outcome.
+	CompleteObjective(context.Context, *connect.Request[runtimev2.CompleteObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 }
 
 // NewObjectivesClient constructs a client for the supertag.runtime.v2.Objectives service. By
@@ -1445,6 +1450,12 @@ func NewObjectivesClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(objectivesMethods.ByName("ReviewObjective")),
 			connect.WithClientOptions(opts...),
 		),
+		completeObjective: connect.NewClient[runtimev2.CompleteObjectiveRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesCompleteObjectiveProcedure,
+			connect.WithSchema(objectivesMethods.ByName("CompleteObjective")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1460,6 +1471,7 @@ type objectivesClient struct {
 	resumeObjective   *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
 	cancelObjective   *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
 	reviewObjective   *connect.Client[runtimev2.ReviewObjectiveRequest, runtimev2.Objective]
+	completeObjective *connect.Client[runtimev2.CompleteObjectiveRequest, runtimev2.Objective]
 }
 
 // CreateObjective calls supertag.runtime.v2.Objectives.CreateObjective.
@@ -1512,6 +1524,11 @@ func (c *objectivesClient) ReviewObjective(ctx context.Context, req *connect.Req
 	return c.reviewObjective.CallUnary(ctx, req)
 }
 
+// CompleteObjective calls supertag.runtime.v2.Objectives.CompleteObjective.
+func (c *objectivesClient) CompleteObjective(ctx context.Context, req *connect.Request[runtimev2.CompleteObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.completeObjective.CallUnary(ctx, req)
+}
+
 // ObjectivesHandler is an implementation of the supertag.runtime.v2.Objectives service.
 type ObjectivesHandler interface {
 	CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
@@ -1524,6 +1541,8 @@ type ObjectivesHandler interface {
 	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
+	// An operator completes an Objective with an assessment of its outcome.
+	CompleteObjective(context.Context, *connect.Request[runtimev2.CompleteObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 }
 
 // NewObjectivesHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1593,6 +1612,12 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(objectivesMethods.ByName("ReviewObjective")),
 		connect.WithHandlerOptions(opts...),
 	)
+	objectivesCompleteObjectiveHandler := connect.NewUnaryHandler(
+		ObjectivesCompleteObjectiveProcedure,
+		svc.CompleteObjective,
+		connect.WithSchema(objectivesMethods.ByName("CompleteObjective")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Objectives/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ObjectivesCreateObjectiveProcedure:
@@ -1615,6 +1640,8 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 			objectivesCancelObjectiveHandler.ServeHTTP(w, r)
 		case ObjectivesReviewObjectiveProcedure:
 			objectivesReviewObjectiveHandler.ServeHTTP(w, r)
+		case ObjectivesCompleteObjectiveProcedure:
+			objectivesCompleteObjectiveHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1662,6 +1689,10 @@ func (UnimplementedObjectivesHandler) CancelObjective(context.Context, *connect.
 
 func (UnimplementedObjectivesHandler) ReviewObjective(context.Context, *connect.Request[runtimev2.ReviewObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ReviewObjective is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) CompleteObjective(context.Context, *connect.Request[runtimev2.CompleteObjectiveRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.CompleteObjective is not implemented"))
 }
 
 // InboxClient is a client for the supertag.runtime.v2.Inbox service.

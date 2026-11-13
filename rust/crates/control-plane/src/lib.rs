@@ -26,6 +26,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod metrics;
 pub mod objective_limits;
+mod objective_overview;
 mod objectives;
 mod operator_access;
 pub mod operator_notifications;

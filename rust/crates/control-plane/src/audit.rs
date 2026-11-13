@@ -256,6 +256,12 @@ fn rule(path: &str) -> Option<Rule> {
             ReviewObjectiveRequest,
             |value| named("Objective", &value.objective_id)
         ),
+        ("Objectives", "CompleteObjective") => rule!(
+            "objective.complete",
+            "Objective",
+            CompleteObjectiveRequest,
+            |value| named("Objective", &value.objective_id)
+        ),
         ("Inbox", "AnswerQuestion") => {
             rule!("question.answer", "Task", AnswerQuestionRequest, |value| {
                 named("Task", &value.task_id)
