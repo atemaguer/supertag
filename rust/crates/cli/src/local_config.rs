@@ -63,6 +63,9 @@ enum Service {
         /// Where the operator hears about Inbox items; `desktop` when unset.
         #[serde(default)]
         notify: Option<Notify>,
+        /// A PostgreSQL database for the Control Plane instead of the state directory's SQLite file.
+        #[serde(default)]
+        database: Option<DatabaseSection>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -90,6 +93,14 @@ enum Service {
         #[serde(default)]
         concurrency: Option<u32>,
     },
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatabaseSection {
+    url: String,
+    /// A named secret holding the password, so the URL carries none.
+    #[serde(default)]
+    password: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -176,6 +187,26 @@ pub struct Plane {
     pub listen: SocketAddr,
     pub provision: Vec<crate::manifests::ProvisionSource>,
     pub notify: Notifications,
+    pub database: Option<Database>,
+}
+/// The control-plane service's `database`: a PostgreSQL URL without a password, and the
+/// named secret that holds the password.
+pub struct Database {
+    pub url: String,
+    pub password: Option<Secret>,
+}
+/// Why a local Control Plane database URL is unusable, without echoing it.
+pub fn check_database_url(url: &str) -> Result<()> {
+    let parsed = url::Url::parse(url).map_err(|_| anyhow::anyhow!("database URL is invalid"))?;
+    ensure!(
+        matches!(parsed.scheme(), "postgres" | "postgresql") && parsed.host().is_some(),
+        "database URL must be a postgresql:// URL"
+    );
+    ensure!(
+        parsed.password().is_none(),
+        "database URL must not contain a password; name a secret in database.password instead"
+    );
+    Ok(())
 }
 /// The Gateway's `--notify` destinations and the named secrets their webhooks send.
 #[derive(Clone)]
@@ -361,6 +392,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             provision,
             notify,
+            database,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -436,6 +468,30 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 }
                 secrets.insert(name.clone(), secret);
             }
+            let database = match database {
+                None => None,
+                Some(section) => {
+                    let url = section.url.trim().to_owned();
+                    check_database_url(&url)?;
+                    let password = match &section.password {
+                        None => None,
+                        Some(name) => {
+                            let mut secret = document
+                                .secrets
+                                .get(name)
+                                .with_context(|| {
+                                    format!("database password {name} is not a named secret")
+                                })?
+                                .clone();
+                            if let Secret::File(source) = &mut secret {
+                                source.file = resolve_path(base, &source.file)?;
+                            }
+                            Some(secret)
+                        }
+                    };
+                    Some(Database { url, password })
+                }
+            };
             plane = Some(Plane {
                 listen,
                 provision: sources,
@@ -443,6 +499,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                     destinations,
                     secrets,
                 },
+                database,
             });
             plane_name = Some(name.clone());
         }
@@ -739,6 +796,22 @@ pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<Stri
             unseen.insert(name.clone());
         }
     }
+    // What the Control Plane reads when it starts: its database URL and password.
+    let mut plane_names = vec!["SUPERTAG_DATABASE_URL", "PGPASSWORD"];
+    if let Some(Secret::Environment(secret)) = config
+        .plane
+        .as_ref()
+        .and_then(|plane| plane.database.as_ref())
+        .and_then(|database| database.password.as_ref())
+    {
+        plane_names.push(&secret.environment);
+    }
+    for name in plane_names {
+        if shell(name).is_some() && !unit_has(name) && config.environment.file_value(name).is_none()
+        {
+            unseen.insert(name.to_owned());
+        }
+    }
     // What hosts read when they start: an environment Auth Key and their harness credentials.
     for host in &config.hosts {
         let mut names: Vec<&str> = Vec::new();
@@ -992,20 +1065,20 @@ impl Secret {
             Self::Environment(source) => environment
                 .variable(&source.environment)
                 .and_then(|value| value.into_string().ok())
-                .context("Auth Key environment variable is unavailable")?,
+                .context("secret environment variable is unavailable")?,
             Self::File(source) => {
                 let file = OpenOptions::new()
                     .read(true)
                     .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
                     .open(&source.file)
-                    .context("read Auth Key file")?;
+                    .context("read secret file")?;
                 let metadata = file.metadata()?;
                 ensure!(
                     metadata.is_file()
                         && metadata.nlink() == 1
                         && metadata.uid() == unsafe { libc::geteuid() }
                         && metadata.mode() & 0o077 == 0,
-                    "Auth Key file must be a private regular file owned by this user"
+                    "secret file must be a private regular file owned by this user"
                 );
                 let mut value = String::new();
                 file.take(4097).read_to_string(&mut value)?;
@@ -1015,7 +1088,7 @@ impl Secret {
         let value = value.trim();
         ensure!(
             !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control),
-            "invalid Auth Key source"
+            "invalid secret value"
         );
         Ok(value.into())
     }
@@ -1328,6 +1401,48 @@ secrets:
         .err()
         .unwrap();
         assert!(!format!("{invalid:#}").contains("secret-looking-value"));
+    }
+    #[test]
+    fn control_plane_database_is_postgresql_with_a_named_password_secret() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = parse(
+            b"services: {cp: {type: control-plane, database: {url: 'postgresql://supertag@db.internal:5432/supertag', password: db}}}\nsecrets: {db: {file: db-password}}",
+            temp.path(),
+            |_| None,
+        )
+        .unwrap();
+        let database = config.plane.unwrap().database.unwrap();
+        assert_eq!(
+            database.url,
+            "postgresql://supertag@db.internal:5432/supertag"
+        );
+        assert!(matches!(
+            database.password,
+            Some(Secret::File(FileSecret { file })) if file == temp.path().join("db-password")
+        ));
+        for (input, message) in [
+            (
+                "services: {cp: {type: control-plane, database: {url: 'postgresql://supertag:hunter2@db/supertag'}}}",
+                "must not contain a password",
+            ),
+            (
+                "services: {cp: {type: control-plane, database: {url: 'sqlite:///tmp/state.db'}}}",
+                "must be a postgresql:// URL",
+            ),
+            (
+                "services: {cp: {type: control-plane, database: {url: 'postgresql://db/supertag', password: missing}}}",
+                "database password missing is not a named secret",
+            ),
+        ] {
+            let error = format!(
+                "{:#}",
+                parse(input.as_bytes(), temp.path(), |_| None)
+                    .err()
+                    .unwrap()
+            );
+            assert!(error.contains(message), "{input}: {error}");
+            assert!(!error.contains("hunter2"), "{error}");
+        }
     }
     #[test]
     fn invalid_unsupported_and_credential_bearing_config_fails_closed() {

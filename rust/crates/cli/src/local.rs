@@ -141,6 +141,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     let executable = std::env::current_exe()?;
 
     let mut children = Children::new(&directory)?;
+    children.database = postgres_database(None, &Environment::default())?;
     tokio::pin!(shutdown);
     let start = tokio::select! {
         result = async {
@@ -264,6 +265,48 @@ struct Children {
     worker_host: Option<Service>,
     /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
     notify: (Vec<String>, Vec<(String, String)>),
+    /// The Control Plane's database: the state directory's SQLite file unless set.
+    database: Option<PostgresDatabase>,
+}
+
+/// A PostgreSQL database for the local Control Plane, and the password it connects with.
+struct PostgresDatabase {
+    url: String,
+    password: Option<String>,
+}
+
+/// `SUPERTAG_DATABASE_URL` (the process environment, then `env_file`) wins over the
+/// control-plane service's `database`; neither means the state directory's SQLite file.
+/// A password secret becomes `PGPASSWORD` unless the environment already sets one.
+fn postgres_database(
+    configured: Option<&crate::local_config::Database>,
+    environment: &Environment,
+) -> Result<Option<PostgresDatabase>> {
+    let variable = |name: &str| {
+        environment
+            .variable(name)
+            .and_then(|value| value.into_string().ok())
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let url = match (variable("SUPERTAG_DATABASE_URL"), configured) {
+        (Some(url), _) => url,
+        (None, Some(database)) => database.url.clone(),
+        (None, None) => return Ok(None),
+    };
+    ensure!(
+        url.starts_with("postgres://") || url.starts_with("postgresql://"),
+        "the local Control Plane database must be a postgresql:// URL"
+    );
+    let password = match variable("PGPASSWORD") {
+        Some(password) => Some(password),
+        None => configured
+            .and_then(|database| database.password.as_ref())
+            .map(|secret| secret.read(environment))
+            .transpose()
+            .context("read the database password")?,
+    };
+    Ok(Some(PostgresDatabase { url, password }))
 }
 
 struct Service {
@@ -282,6 +325,7 @@ impl Children {
             gateway: None,
             worker_host: None,
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
+            database: None,
         })
     }
 
@@ -298,14 +342,23 @@ impl Children {
             workspace: gateway_workspace,
             surfaces,
         } = extras;
-        let database = directory.join("runtime.sqlite3");
-        open_private_file(&database, true)?;
-        let database_url = sqlite_url(&database)?;
         let mut plane = command(executable, "control-plane");
         plane
             .args(["--listen", "127.0.0.1:0"])
-            .env("SUPERTAG_DATABASE_URL", database_url)
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
+        match &self.database {
+            None => {
+                let database = directory.join("runtime.sqlite3");
+                open_private_file(&database, true)?;
+                plane.env("SUPERTAG_DATABASE_URL", sqlite_url(&database)?);
+            }
+            Some(database) => {
+                plane.env("SUPERTAG_DATABASE_URL", &database.url);
+                if let Some(password) = &database.password {
+                    plane.env("PGPASSWORD", password);
+                }
+            }
+        }
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
         }
@@ -1331,6 +1384,7 @@ pub async fn configured(
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
             base.notify = plane.notify.resolve(&environment);
+            base.database = postgres_database(plane.database.as_ref(), &environment)?;
             let endpoint = base
                 .start_base(
                     &executable,

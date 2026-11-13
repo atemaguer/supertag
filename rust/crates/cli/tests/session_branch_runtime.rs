@@ -31,6 +31,8 @@ const WAIT: Duration = Duration::from_secs(30);
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branches;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    local_supervisor_advances_one_session_branch_for_each_task;
 }
 
 struct Credentials {
@@ -340,9 +342,9 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     Ok(())
 }
 
-/// `supertag up` runs the Control Plane on SQLite, so this case has no PostgreSQL run.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn local_supervisor_advances_one_session_branch_for_each_task() -> Result<()> {
+async fn local_supervisor_advances_one_session_branch_for_each_task(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let source = root.join("source");
@@ -358,7 +360,11 @@ async fn local_supervisor_advances_one_session_branch_for_each_task() -> Result<
     fs::write(
         &file,
         serde_json::to_vec(&serde_json::json!({"version": 1, "services": {
-            "control-plane": {"type": "control-plane", "ports": ["127.0.0.1:0"]},
+            "control-plane": if database.starts_with("postgres") {
+                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": {"url": database}})
+            } else {
+                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"]})
+            },
             "laptop": {
                 "type": "host",
                 "adapter": ADAPTER,

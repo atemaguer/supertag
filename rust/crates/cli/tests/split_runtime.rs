@@ -570,6 +570,14 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     separate_processes_preserve_work_and_cancel_execution;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    killed_local_supervisor_stops_services_and_refuses_stale_endpoint;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    local_shutdown_replays_finish_before_next_session_task_without_rerunning_adapter;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    local_up_runs_work_and_reaps_its_services;
+    #[tokio::test]
+    native_codex_records_usage_and_restores_session_after_services_restart;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerunning;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending;
@@ -592,6 +600,16 @@ async fn separate_processes_preserve_work_and_cancel_execution(database: String)
 fn local_command() -> Command {
     let mut command = Command::new(BINARY);
     command.env_clear().stdin(Stdio::null());
+    command
+}
+
+/// A `supertag up` command whose local Control Plane uses `database`: the state
+/// directory's SQLite file for a SQLite URL, else the PostgreSQL database.
+fn local_up_command(database: &str) -> Command {
+    let mut command = local_command();
+    if database.starts_with("postgres") {
+        command.env("SUPERTAG_DATABASE_URL", database);
+    }
     command
 }
 
@@ -655,12 +673,13 @@ fn local_credentials(state: &Path) -> Result<Credentials> {
 }
 
 async fn local_up(
+    database: &str,
     directory: &Path,
     state: &Path,
     adapter: &Path,
     waiting: bool,
 ) -> Result<(Process, OperatorClient<ProtocolChannel>)> {
-    let mut command = local_command();
+    let mut command = local_up_command(database);
     command
         .args(["up", "--foreground"])
         .arg("--state-directory")
@@ -904,14 +923,21 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> Result<()> {
+async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
+    database: String,
+) -> Result<()> {
     use std::os::unix::process::ExitStatusExt;
 
     let directory = TempDir::new()?;
     let state = directory.path().join("local-state");
-    let (mut supervisor, client) =
-        local_up(directory.path(), &state, Path::new(ADAPTER), false).await?;
+    let (mut supervisor, client) = local_up(
+        &database,
+        directory.path(),
+        &state,
+        Path::new(ADAPTER),
+        false,
+    )
+    .await?;
     drop(client);
     let children = direct_children(supervisor.child.id())?;
     assert_eq!(children.len(), 3);
@@ -951,8 +977,14 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     }
     drop(stale);
 
-    let (mut restarted, mut client) =
-        local_up(directory.path(), &state, Path::new(ADAPTER), false).await?;
+    let (mut restarted, mut client) = local_up(
+        &database,
+        directory.path(),
+        &state,
+        Path::new(ADAPTER),
+        false,
+    )
+    .await?;
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
@@ -981,13 +1013,14 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn local_shutdown_replays_finish_before_next_session_task_without_rerunning_adapter()
--> Result<()> {
+async fn local_shutdown_replays_finish_before_next_session_task_without_rerunning_adapter(
+    database: String,
+) -> Result<()> {
     let directory = TempDir::new()?;
     let state = directory.path().join("local-state");
     let (adapter, launches) = recording_adapter(directory.path())?;
-    let (mut supervisor, mut client) = local_up(directory.path(), &state, &adapter, true).await?;
+    let (mut supervisor, mut client) =
+        local_up(&database, directory.path(), &state, &adapter, true).await?;
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
@@ -1079,7 +1112,8 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     );
     assert_eq!(journal["succeeded"], false);
 
-    let (mut restarted, mut client) = local_up(directory.path(), &state, &adapter, false).await?;
+    let (mut restarted, mut client) =
+        local_up(&database, directory.path(), &state, &adapter, false).await?;
     let failed =
         wait_for_state(&mut client, &credentials, &first.task_id, TaskState::Failed).await?;
     assert_eq!(failed.attempt_id, running.attempt_id);
@@ -1125,15 +1159,14 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn local_up_runs_work_and_reaps_its_services() -> Result<()> {
+async fn local_up_runs_work_and_reaps_its_services(database: String) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let directory = TempDir::new()?;
     // Exercise state-directory paths requiring SQLite URL escaping as well as shell quoting.
     let state = directory.path().join("local state ?");
     let state_arg = state.to_str().context("temporary directory is not UTF-8")?;
-    let mut command = local_command();
+    let mut command = local_up_command(&database);
     command.args([
         "up",
         "--foreground",
@@ -2076,8 +2109,9 @@ async fn slack_reply_streams_progress_and_never_repeats_an_uncertain_acknowledge
     exercise_slack_reply_streaming(&database, directory.path()).await
 }
 
-#[tokio::test]
-async fn native_codex_records_usage_and_restores_session_after_services_restart() -> Result<()> {
+async fn native_codex_records_usage_and_restores_session_after_services_restart(
+    database: String,
+) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use supertag_protocol::v2::{
         GetInputRequest, LiveInputState, QueueInputRequest, live_inputs_client::LiveInputsClient,
@@ -2102,7 +2136,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
 
     let start = || {
-        let mut command = local_command();
+        let mut command = local_up_command(&database);
         command
             .args(["up", "--foreground", "--state-directory"])
             .arg(&state)
