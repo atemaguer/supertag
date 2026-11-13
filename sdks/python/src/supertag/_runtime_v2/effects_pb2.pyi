@@ -14,11 +14,13 @@ class EffectReceiptState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EFFECT_RECEIPT_STATE_COMPLETED: _ClassVar[EffectReceiptState]
     EFFECT_RECEIPT_STATE_IN_DOUBT: _ClassVar[EffectReceiptState]
     EFFECT_RECEIPT_STATE_FAILED: _ClassVar[EffectReceiptState]
+    EFFECT_RECEIPT_STATE_IN_FLIGHT: _ClassVar[EffectReceiptState]
 EFFECT_RECEIPT_STATE_UNSPECIFIED: EffectReceiptState
 EFFECT_RECEIPT_STATE_ACQUIRED: EffectReceiptState
 EFFECT_RECEIPT_STATE_COMPLETED: EffectReceiptState
 EFFECT_RECEIPT_STATE_IN_DOUBT: EffectReceiptState
 EFFECT_RECEIPT_STATE_FAILED: EffectReceiptState
+EFFECT_RECEIPT_STATE_IN_FLIGHT: EffectReceiptState
 
 class EffectReceipt(_message.Message):
     __slots__ = ("idempotency_key", "fingerprint", "state", "operation", "result_json", "error", "task_id", "attempt_id", "started_at_ms", "settled_at_ms", "replayed")

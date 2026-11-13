@@ -1,5 +1,6 @@
 -- How a surface message chose the Task's GitHub Workspace: request, origin or default.
--- `refused` marks a Task that failed at admission because no authorized Workspace matched.
+-- `refused` marks a Task that failed at admission: it named a repository while its Tag may read
+-- none, or its Session's selected Workspace is no longer usable. `required` asks the requester.
 ALTER TABLE supertag_v2_tasks ADD COLUMN workspace_selection TEXT;
 -- The latest changed-path report of each running Attempt that has an Objective and a Workspace.
 CREATE TABLE supertag_v2_attempt_changed_paths (

@@ -34,6 +34,10 @@ const (
 	EffectReceiptState_EFFECT_RECEIPT_STATE_IN_DOUBT EffectReceiptState = 3
 	// The provider call failed without effect. The next Begin may acquire the effect again.
 	EffectReceiptState_EFFECT_RECEIPT_STATE_FAILED EffectReceiptState = 4
+	// A Begin found an unsettled receipt whose Attempt is still running, so its provider call may
+	// be in progress. Do not call the provider or settle the receipt; Begin again later. Another
+	// Attempt cannot Complete or Fail the receipt while this lasts.
+	EffectReceiptState_EFFECT_RECEIPT_STATE_IN_FLIGHT EffectReceiptState = 5
 )
 
 // Enum value maps for EffectReceiptState.
@@ -44,6 +48,7 @@ var (
 		2: "EFFECT_RECEIPT_STATE_COMPLETED",
 		3: "EFFECT_RECEIPT_STATE_IN_DOUBT",
 		4: "EFFECT_RECEIPT_STATE_FAILED",
+		5: "EFFECT_RECEIPT_STATE_IN_FLIGHT",
 	}
 	EffectReceiptState_value = map[string]int32{
 		"EFFECT_RECEIPT_STATE_UNSPECIFIED": 0,
@@ -51,6 +56,7 @@ var (
 		"EFFECT_RECEIPT_STATE_COMPLETED":   2,
 		"EFFECT_RECEIPT_STATE_IN_DOUBT":    3,
 		"EFFECT_RECEIPT_STATE_FAILED":      4,
+		"EFFECT_RECEIPT_STATE_IN_FLIGHT":   5,
 	}
 )
 
@@ -608,13 +614,14 @@ const file_supertag_runtime_v2_effects_proto_rawDesc = "" +
 	"\x06effect\x18\x02 \x01(\v21.supertag.runtime.v2.HarnessCompleteEffectRequestR\x06effect\"\xa0\x01\n" +
 	"\x11FailEffectRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12E\n" +
-	"\x06effect\x18\x02 \x01(\v2-.supertag.runtime.v2.HarnessFailEffectRequestR\x06effect*\xc5\x01\n" +
+	"\x06effect\x18\x02 \x01(\v2-.supertag.runtime.v2.HarnessFailEffectRequestR\x06effect*\xe9\x01\n" +
 	"\x12EffectReceiptState\x12$\n" +
 	" EFFECT_RECEIPT_STATE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dEFFECT_RECEIPT_STATE_ACQUIRED\x10\x01\x12\"\n" +
 	"\x1eEFFECT_RECEIPT_STATE_COMPLETED\x10\x02\x12!\n" +
 	"\x1dEFFECT_RECEIPT_STATE_IN_DOUBT\x10\x03\x12\x1f\n" +
-	"\x1bEFFECT_RECEIPT_STATE_FAILED\x10\x042\xab\x02\n" +
+	"\x1bEFFECT_RECEIPT_STATE_FAILED\x10\x04\x12\"\n" +
+	"\x1eEFFECT_RECEIPT_STATE_IN_FLIGHT\x10\x052\xab\x02\n" +
 	"\x0eHarnessEffects\x12[\n" +
 	"\x05Begin\x12..supertag.runtime.v2.HarnessBeginEffectRequest\x1a\".supertag.runtime.v2.EffectReceipt\x12a\n" +
 	"\bComplete\x121.supertag.runtime.v2.HarnessCompleteEffectRequest\x1a\".supertag.runtime.v2.EffectReceipt\x12Y\n" +

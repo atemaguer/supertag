@@ -103,11 +103,23 @@ async function verifyRuntime(binary) {
     const harnessImport = import.meta.resolve("supertag-ai/harness");
     await writeFile(
       adapter,
-      `import { openHarness, receipt } from ${JSON.stringify(harnessImport)};
+      `import { EffectReceiptState, openHarness, receipt } from ${JSON.stringify(harnessImport)};
 const harness = await openHarness(process.stdin);
 try {
   const run = await receipt(() => harness.client.attach({}));
   if (!run.task || process.env.SUPERTAG_HOST_TOKEN) throw new Error("invalid execution scope");
+  // Worker-managed effect receipts: a completed effect replays, an unsettled one is in doubt.
+  const effect = { idempotencyKey: "ticket/1", operation: "create_ticket", argumentsJson: '{"title":"Release"}' };
+  const begun = await harness.effects.begin(effect);
+  if (begun.state !== EffectReceiptState.ACQUIRED) throw new Error("effect was not acquired");
+  await harness.effects.complete({ ...effect, resultJson: '{"ticket":"T-1"}' });
+  const replay = await harness.effects.begin(effect);
+  if (replay.state !== EffectReceiptState.COMPLETED || !replay.replayed || replay.resultJson !== '{"ticket":"T-1"}')
+    throw new Error("completed effect did not replay");
+  const unsettled = { ...effect, idempotencyKey: "ticket/2" };
+  await harness.effects.begin(unsettled);
+  if ((await harness.effects.begin(unsettled)).state !== EffectReceiptState.IN_DOUBT)
+    throw new Error("unsettled effect was not in doubt");
   const result = "Installed Node harness for " + run.task.tagId;
   const event = { sequence: 1n, text: result };
   await receipt(() => harness.client.publish(event));
@@ -142,7 +154,9 @@ try {
       { timeoutMs: 3000 },
     );
     assert.equal(events.events.filter((event) => event.text === task.result).length, 1);
-    console.log("Installed Node harness executed one Task with an exact event replay.");
+    console.log(
+      "Installed Node harness executed one Task with an exact event replay and effect receipts.",
+    );
   } finally {
     abort.abort();
     client?.close();

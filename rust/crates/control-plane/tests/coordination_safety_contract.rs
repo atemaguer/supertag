@@ -227,6 +227,25 @@ async fn overlap(url: &str) {
     .unwrap();
     assert_eq!(rows, 0);
 
+    // A running Attempt whose lease renewal is late is still compared: its host does not resend
+    // an unchanged scan, so skipping it would lose the warning for good.
+    report(&store, &c, &["src/z.ts"], false).await.unwrap();
+    sqlx::query("UPDATE supertag_v2_tasks SET lease_expires_at_ms=1 WHERE task_id=$1")
+        .bind(&c.1.task_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let late = report(&store, &b, &["src/a.ts", "src/c.ts", "src/z.ts"], false)
+        .await
+        .unwrap();
+    assert_eq!(
+        late.overlapping_attempt_ids,
+        std::slice::from_ref(&c.1.attempt_id)
+    );
+    let told = notices(&pool).await;
+    assert_eq!(told.len(), 4);
+    assert!(told[3].contains("changing src/z.ts in Workspace project"));
+
     // An Attempt without an Objective is not compared, so its host stops reporting.
     store
         .submit_task(
@@ -475,6 +494,42 @@ async fn effects(url: &str) {
             .is_err()
     );
 
+    // While the Attempt that began an effect still runs, a parallel Task of the same Tag sees it
+    // in flight rather than in doubt and cannot settle it, so it cannot fail the receipt and
+    // call the provider a second time.
+    store
+        .submit_task(OPERATOR, &submit("integrator", "parallel"))
+        .await
+        .unwrap();
+    let parallel = claim("parallel").await;
+    let busy = store
+        .begin_effect(
+            &host,
+            &begin(&parallel, "task-1/comment/ambiguous", COMMENT),
+        )
+        .await
+        .unwrap();
+    assert_eq!(busy.state(), EffectReceiptState::InFlight);
+    assert_eq!(busy.attempt_id, first.attempt_id);
+    assert!(matches!(
+        store
+            .fail_effect(
+                &host,
+                &fail(&parallel, "task-1/comment/ambiguous", "not found")
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    assert!(matches!(
+        store
+            .complete_effect(
+                &host,
+                &complete(&parallel, "task-1/comment/ambiguous", "{}")
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+
     // After the Attempt ends, a later Task of the same Tag sees the same receipts and may
     // settle the in-doubt one after reconciling it with the provider.
     store
@@ -508,6 +563,17 @@ async fn effects(url: &str) {
         .unwrap();
     assert_eq!(still.state(), EffectReceiptState::InDoubt);
     assert_eq!(still.attempt_id, first.attempt_id);
+    assert_eq!(
+        store
+            .begin_effect(
+                &host,
+                &begin(&parallel, "task-1/comment/ambiguous", COMMENT)
+            )
+            .await
+            .unwrap()
+            .state(),
+        EffectReceiptState::InDoubt
+    );
     let reconciled = store
         .complete_effect(
             &host,

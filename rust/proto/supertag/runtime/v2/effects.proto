@@ -10,6 +10,8 @@ import "supertag/runtime/v2/runtime.proto";
 // the Tag, so a later Attempt or Task of that Tag replays a completed result instead of calling
 // the provider again. A receipt that was begun but never settled is in doubt: SuperTag never
 // acquires it again, and the integration must reconcile it with the provider and settle it.
+// While the Attempt that began it is still running, the receipt is in flight instead and only
+// that Attempt may settle it.
 //
 // Execution-local interface served by the Worker Host to its harness adapter.
 service HarnessEffects {
@@ -36,6 +38,10 @@ enum EffectReceiptState {
   EFFECT_RECEIPT_STATE_IN_DOUBT = 3;
   // The provider call failed without effect. The next Begin may acquire the effect again.
   EFFECT_RECEIPT_STATE_FAILED = 4;
+  // A Begin found an unsettled receipt whose Attempt is still running, so its provider call may
+  // be in progress. Do not call the provider or settle the receipt; Begin again later. Another
+  // Attempt cannot Complete or Fail the receipt while this lasts.
+  EFFECT_RECEIPT_STATE_IN_FLIGHT = 5;
 }
 
 message EffectReceipt {

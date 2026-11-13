@@ -5,7 +5,7 @@
 mod support;
 
 use sqlx::{Connection, Executor};
-use supertag_control_plane::{Store, StoreError};
+use supertag_control_plane::Store;
 use supertag_protocol::v2::{
     surface_account_identity::Provider as Identity, surface_location_scope::Provider as Scope, *,
 };
@@ -69,7 +69,7 @@ async fn grant(store: &Store, repositories: &[u64], expected: Option<u64>) {
         .put_permission_set(
             OPERATOR,
             &PutPermissionSetRequest {
-                operation_id: format!("read-{repositories:?}"),
+                operation_id: format!("read-{repositories:?}-{expected:?}"),
                 permission_set: Some(PermissionSet {
                     set_id: "source-read".into(),
                     name: "source-read".into(),
@@ -235,12 +235,14 @@ async fn contract(url: String) {
     );
     let later = slack(&store, 4, 3, "Thanks. Is acme/project the only one?").await;
     assert_eq!(selected(&later), selected(&default));
-    // Once a repository is readable, a reference to another one is still refused.
+    // Once a repository is readable, a reference to another one runs the Task and asks the
+    // requester to name one the Tag may read, as TypeScript's `selection-required` does.
     let other = slack(&store, 5, 5, "In acme/other, why?").await;
-    assert_eq!(
-        other.result.as_deref(),
-        Some("Tag engineer is not allowed to use GitHub repository acme/other")
-    );
+    assert_eq!(other.result, None);
+    assert_eq!(selected(&other), (None, None, Some("required")));
+    assert!(other.instructions.ends_with(
+        "The request does not identify a GitHub repository. Ask the requester to name exactly one of: acme/project. Do not inspect or make claims about a repository until they do."
+    ));
 
     // Two readable repositories: an unnamed one asks the requester to choose, and the answer in
     // the same thread selects it.
@@ -288,13 +290,25 @@ async fn contract(url: String) {
     );
 
     // A revoked read stops a later turn of a selected Session instead of running without it.
+    // The turn is accepted and fails at admission with the reason, so the surface replies rather
+    // than retrying the message (TypeScript fails it at resolution).
     grant(&store, &[124], Some(2)).await;
-    assert!(matches!(
-        store
-            .accept_slack_event(SLACK, &mention(9, 3, "engineer", "One more question"))
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
+    let revoked = slack(&store, 9, 3, "One more question").await;
+    assert_eq!(revoked.state, TaskState::Failed as i32);
+    assert_eq!(selected(&revoked), (None, None, Some("refused")));
+    assert_eq!(
+        revoked.result.as_deref(),
+        Some(
+            "Tag engineer is no longer allowed to use the GitHub Workspace project this Session selected"
+        )
+    );
+    // The Session keeps its selection: restoring the read lets the next turn use it again.
+    grant(&store, &[123, 124], Some(3)).await;
+    let restored = slack(&store, 11, 3, "And now?").await;
+    assert_eq!(
+        selected(&restored),
+        (Some("project"), Some(PROJECT_BASE), Some("default"))
+    );
 
     // A Tag's configured Workspace is never replaced by a message.
     store

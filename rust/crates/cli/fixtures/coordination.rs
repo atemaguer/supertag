@@ -118,6 +118,7 @@ impl Effects {
                 Ok(format!("{key} replayed {}", begun.result_json))
             }
             EffectReceiptState::InDoubt => Ok(format!("{key} in doubt")),
+            EffectReceiptState::InFlight => Ok(format!("{key} in flight")),
             EffectReceiptState::Acquired => {
                 self.call_provider(key)?;
                 let completed = self.complete(key, arguments, result).await?;

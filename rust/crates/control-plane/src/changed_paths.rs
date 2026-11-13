@@ -85,9 +85,11 @@ impl Store {
             tx.commit().await?;
             return Ok(response);
         }
-        let others = sqlx::query("SELECT c.attempt_id,c.task_id,c.paths FROM supertag_v2_attempt_changed_paths c JOIN supertag_v2_tasks t ON t.task_id=c.task_id AND t.attempt_id=c.attempt_id WHERE c.objective_id=$1 AND c.workspace_id=$2 AND c.attempt_id<>$3 AND c.truncated=0 AND t.state=$4 AND t.lease_expires_at_ms>$5 ORDER BY c.attempt_id")
+        // Every Attempt that still runs is compared, whether or not its lease renewal is late:
+        // hosts do not resend an unchanged scan, so a skipped comparison would never recur.
+        let others = sqlx::query("SELECT c.attempt_id,c.task_id,c.paths FROM supertag_v2_attempt_changed_paths c JOIN supertag_v2_tasks t ON t.task_id=c.task_id AND t.attempt_id=c.attempt_id WHERE c.objective_id=$1 AND c.workspace_id=$2 AND c.attempt_id<>$3 AND c.truncated=0 AND t.state=$4 ORDER BY c.attempt_id")
             .bind(&objective_id).bind(workspace_id).bind(&attempt.attempt_id)
-            .bind(TaskState::Running as i64).bind(now).fetch_all(&mut *tx).await?;
+            .bind(TaskState::Running as i64).fetch_all(&mut *tx).await?;
         for other in others {
             let other_attempt: String = other.try_get("attempt_id")?;
             let other_task: String = other.try_get("task_id")?;

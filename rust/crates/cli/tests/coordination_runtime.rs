@@ -530,8 +530,14 @@ impl Drop for MockSlack {
 }
 
 async fn mention(endpoint: &str, sequence: u64, text: &str) -> Result<()> {
+    reply(endpoint, sequence, sequence, text).await
+}
+
+/// A mention in the thread that message `thread` started.
+async fn reply(endpoint: &str, sequence: u64, thread: u64, text: &str) -> Result<()> {
     let ts = format!("1794470000.{sequence:06}");
-    let body = json!({"type":"event_callback","team_id":TEAM,"event_id":format!("Ev{sequence}"),"event":{"type":"app_mention","channel":CHANNEL,"user":"UALICE1","text":text,"ts":ts,"thread_ts":ts}}).to_string();
+    let thread_ts = format!("1794470000.{thread:06}");
+    let body = json!({"type":"event_callback","team_id":TEAM,"event_id":format!("Ev{sequence}"),"event":{"type":"app_mention","channel":CHANNEL,"user":"UALICE1","text":text,"ts":ts,"thread_ts":thread_ts}}).to_string();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)?
         .as_secs()
@@ -649,6 +655,37 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     .await?;
     slack
         .wait_for("Got it. I’m looking into this in Workspace project now.")
+        .await?;
+
+    // Once a repository is readable, naming another one runs the Task without a Workspace and
+    // asks the requester to choose (TypeScript `selection-required`), rather than refusing.
+    mention(
+        &ingress,
+        3,
+        "<@U0BOT> In rust-lang/cargo, how is this handled?",
+    )
+    .await?;
+    slack.wait_for("Got it. I’m looking into this now.").await?;
+
+    // A revoked read fails a later turn of the selected Session with a reply, instead of an
+    // ingress error that Slack would retry without ever answering.
+    let narrowed = spec(
+        root,
+        "narrowed.json",
+        json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:124","action":"contents:read"}]}),
+    )?;
+    json(cli(&[
+        "policy",
+        "put",
+        "permission-set",
+        &narrowed,
+        "--expected-revision",
+        "1",
+    ]))
+    .await?;
+    reply(&ingress, 4, 2, "<@U0BOT> One more question").await?;
+    slack
+        .wait_for("I ran into a problem while working on this: Tag builder is no longer allowed to use the GitHub Workspace project this Session selected")
         .await?;
     services.stop().await
 }

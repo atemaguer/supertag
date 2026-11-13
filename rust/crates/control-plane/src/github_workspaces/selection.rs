@@ -15,7 +15,7 @@ const MAX_CHOICES_SCANNED: i64 = 1000;
 pub(crate) const BY_REQUEST: &str = "request";
 pub(crate) const BY_ORIGIN: &str = "origin";
 pub(crate) const BY_DEFAULT: &str = "default";
-/// The Task failed at admission: it named a repository its Tag may not use.
+/// The Task failed at admission: it named a repository while its Tag may use none.
 pub(crate) const REFUSED: &str = "refused";
 /// The Task runs without a Workspace and asks its requester to name one repository.
 pub(crate) const REQUIRED: &str = "required";
@@ -29,7 +29,7 @@ pub(crate) enum Selection {
     },
     /// Several repositories qualify and the message names none of them.
     Required(String),
-    /// The message names a repository the Tag may not use.
+    /// The message names a repository while the Tag may use no GitHub Workspace.
     Refused(String),
 }
 
@@ -215,17 +215,23 @@ pub(crate) async fn select_in(
         {
             return Ok(selected(choice, BY_REQUEST));
         }
-        return Ok(Selection::Refused(refusal(tag_name, &requested)));
+        // A named repository outside the Tag's choices does not refuse: the requester is asked to
+        // choose one the Tag may read, as in TypeScript's `selection-required`.
+        return Ok(required(&choices));
     }
     if let [only] = choices.as_slice() {
         return Ok(selected(only, BY_DEFAULT));
     }
+    Ok(required(&choices))
+}
+
+fn required(choices: &[GithubWorkspace]) -> Selection {
     let mut names: Vec<_> = choices.iter().map(repository).collect();
     names.dedup();
-    Ok(Selection::Required(format!(
+    Selection::Required(format!(
         "\n\nThe request does not identify a GitHub repository. Ask the requester to name exactly one of: {}. Do not inspect or make claims about a repository until they do.",
         names.join(", ")
-    )))
+    ))
 }
 
 fn selected(choice: &GithubWorkspace, by: &'static str) -> Selection {

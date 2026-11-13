@@ -8,7 +8,9 @@
 //! retried. Deliberate differences: the journal is the Control Plane's database rather than a
 //! Worker-local file, so receipts survive host loss and are shared by every Attempt and Task of
 //! the Tag; and a later Attempt may settle an in-doubt receipt after reconciling it with the
-//! provider, which the TypeScript journal left to each integration.
+//! provider, which the TypeScript journal left to each integration. A receipt begun by another
+//! Attempt that is still running is in flight rather than in doubt, and only that Attempt may
+//! settle it, so a parallel Work Session of the Tag cannot fail it and call the provider again.
 use sha2::{Digest, Sha256};
 use sqlx::{Row, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -83,6 +85,28 @@ fn attempt(value: &Option<InspectAttemptRequest>) -> Result<&InspectAttemptReque
         .ok_or_else(|| invalid("Attempt identity is required"))
 }
 
+/// Whether an unsettled receipt was begun by another Attempt that is still its Task's running
+/// Attempt. A late lease renewal does not end it: only recovery or a finish replaces the Attempt.
+async fn in_flight_elsewhere(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    prior: &AnyRow,
+    attempt_id: &str,
+) -> Result<bool> {
+    let began: String = prior.try_get("attempt_id")?;
+    if began == attempt_id {
+        return Ok(false);
+    }
+    let running: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM supertag_v2_tasks WHERE task_id=$1 AND attempt_id=$2 AND state=$3",
+    )
+    .bind(prior.try_get::<String, _>("task_id")?)
+    .bind(&began)
+    .bind(TaskState::Running as i64)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(running.is_some())
+}
+
 const SELECT: &str =
     "SELECT * FROM supertag_v2_effect_receipts WHERE tag_id=$1 AND idempotency_key=$2";
 
@@ -137,8 +161,14 @@ impl Store {
                     return Ok(replay);
                 }
                 STARTED => {
-                    // Never acquired again: the provider may already have committed it.
-                    let doubt = receipt(prior, EffectReceiptState::InDoubt, false)?;
+                    // Never acquired again: the provider may already have committed it. While
+                    // another running Attempt began it, its call may still be in progress.
+                    let state = if in_flight_elsewhere(&mut tx, prior, &attempt.attempt_id).await? {
+                        EffectReceiptState::InFlight
+                    } else {
+                        EffectReceiptState::InDoubt
+                    };
+                    let doubt = receipt(prior, state, false)?;
                     tx.commit().await?;
                     return Ok(doubt);
                 }
@@ -261,6 +291,13 @@ impl Store {
             "error"
         };
         let current: i64 = prior.try_get("state")?;
+        if current == STARTED && in_flight_elsewhere(&mut tx, &prior, &attempt.attempt_id).await? {
+            // Reconciling now could see nothing yet, fail the receipt, and let a second provider
+            // call race the first one.
+            return Err(StoreError::FailedPrecondition(
+                "effect is in flight in another running Attempt".into(),
+            ));
+        }
         if current == STARTED {
             sqlx::query(&format!("UPDATE supertag_v2_effect_receipts SET state=$1,{column}=$2,settled_at_ms=$3 WHERE tag_id=$4 AND idempotency_key=$5 AND state=$6"))
                 .bind(state).bind(value).bind(now).bind(&task.tag_id).bind(effect.key).bind(STARTED)

@@ -132,12 +132,29 @@ def test_installed_harness_runs_one_task_and_replays_event(gateway_url, tmp_path
         """import asyncio
 import os
 import sys
-from supertag.harness_adapter import open_harness, runtime
+from supertag.harness_adapter import effects, open_harness, runtime
 
 async def run():
     assert "SUPERTAG_HOST_TOKEN" not in os.environ
     async with open_harness(sys.stdin.buffer) as harness:
         attached = await harness.client.Attach(runtime.HarnessAttachRequest(), timeout=5)
+        # Worker-managed effect receipts: a completed effect replays, an unsettled one is in doubt.
+        effect = dict(
+            idempotency_key="ticket/1", operation="create_ticket", arguments_json='{"title":"R"}'
+        )
+        begun = await harness.effects.Begin(effects.HarnessBeginEffectRequest(**effect), timeout=5)
+        assert begun.state == effects.EFFECT_RECEIPT_STATE_ACQUIRED
+        await harness.effects.Complete(
+            effects.HarnessCompleteEffectRequest(**effect, result_json='{"ticket":"T-1"}'),
+            timeout=5,
+        )
+        replay = await harness.effects.Begin(effects.HarnessBeginEffectRequest(**effect), timeout=5)
+        assert replay.state == effects.EFFECT_RECEIPT_STATE_COMPLETED and replay.replayed
+        assert replay.result_json == '{"ticket":"T-1"}'
+        unsettled = effects.HarnessBeginEffectRequest(**{**effect, "idempotency_key": "ticket/2"})
+        await harness.effects.Begin(unsettled, timeout=5)
+        doubt = await harness.effects.Begin(unsettled, timeout=5)
+        assert doubt.state == effects.EFFECT_RECEIPT_STATE_IN_DOUBT
         result = "Installed Python harness for " + attached.task.tag_id
         event = runtime.HarnessPublishRequest(sequence=1, text=result)
         await harness.client.Publish(event, timeout=5)

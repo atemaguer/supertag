@@ -32,6 +32,8 @@ class HarnessEffectsStub:
     the Tag, so a later Attempt or Task of that Tag replays a completed result instead of calling
     the provider again. A receipt that was begun but never settled is in doubt: SuperTag never
     acquires it again, and the integration must reconcile it with the provider and settle it.
+    While the Attempt that began it is still running, the receipt is in flight instead and only
+    that Attempt may settle it.
 
     Execution-local interface served by the Worker Host to its harness adapter.
     """
@@ -66,6 +68,8 @@ class HarnessEffectsServicer:
     the Tag, so a later Attempt or Task of that Tag replays a completed result instead of calling
     the provider again. A receipt that was begun but never settled is in doubt: SuperTag never
     acquires it again, and the integration must reconcile it with the provider and settle it.
+    While the Attempt that began it is still running, the receipt is in flight instead and only
+    that Attempt may settle it.
 
     Execution-local interface served by the Worker Host to its harness adapter.
     """
@@ -121,6 +125,8 @@ class HarnessEffects:
     the Tag, so a later Attempt or Task of that Tag replays a completed result instead of calling
     the provider again. A receipt that was begun but never settled is in doubt: SuperTag never
     acquires it again, and the integration must reconcile it with the provider and settle it.
+    While the Attempt that began it is still running, the receipt is in flight instead and only
+    that Attempt may settle it.
 
     Execution-local interface served by the Worker Host to its harness adapter.
     """
