@@ -818,15 +818,14 @@ impl<'a> System<'a> {
                         }))
             }
             Expect::Reclaimed { .. } => {
-                let acknowledged = !self.mock.requests.lock().await.is_empty();
                 exit.is_some()
                     && task.state() == TaskState::Failed
-                    && self.replies().await.is_ok_and(|replies| {
-                        replies
-                            .iter()
-                            .all(|reply| reply.state() == ReplyState::Delivered)
-                            && (!acknowledged || replies.len() == 1)
-                    })
+                    && (self.case.ingress != Ingress::Slack
+                        || self.replies().await.is_ok_and(|replies| {
+                            replies
+                                .iter()
+                                .any(|reply| reply.state() == ReplyState::Delivered)
+                        }))
             }
         })
     }
@@ -967,17 +966,20 @@ impl<'a> System<'a> {
                     "events {sequences:?}"
                 );
                 ensure!(result_posts == 0, "reclaimed Task posted a result");
-                ensure!(replies.len() <= 1, "replies {replies:?}");
-                ensure!(
-                    replies
+                if case.ingress == Ingress::Slack {
+                    ensure!(replies.len() == 1, "replies {replies:?}");
+                    ensure!(replies[0].state() == ReplyState::Delivered);
+                    let failure_posts = posts
                         .iter()
-                        .all(|reply| reply.state() == ReplyState::Delivered),
-                    "replies {replies:?}"
-                );
-                ensure!(
-                    provider_requests <= 2,
-                    "provider received {provider_requests} posts"
-                );
+                        .filter(|body| body["text"] == replies[0].text.as_str())
+                        .count();
+                    ensure!(
+                        failure_posts == 1 && provider_requests <= 2,
+                        "provider received {provider_requests} posts, {failure_posts} with the failure"
+                    );
+                } else {
+                    ensure!(replies.is_empty() && provider_requests == 0);
+                }
             }
         }
         match (case.ingress, case.expect) {

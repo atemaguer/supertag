@@ -347,6 +347,21 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
         sleep(Duration::from_millis(20)).await;
     }
     host.kill()?;
+    // A spawn whose process group was never recorded leaves execution unproven, so the
+    // restarted host cannot reclaim the Attempt and waits for the operator.
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(
+                state
+                    .join("attempt-processes")
+                    .join("process-unrecorded.json"),
+            )?;
+        std::io::Write::write_all(&mut file, br#"{"state":"pending"}"#)?;
+    }
     let mut command = host_command(&credentials, &public, &state);
     command.arg("--wait-for-recovery");
     host = Process::spawn(command, directory.path())?;
