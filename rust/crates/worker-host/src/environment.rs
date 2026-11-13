@@ -303,7 +303,7 @@ mod tests {
         let body = match exit_after {
             Some(delay) => format!("echo start >> '{}'\nsleep {delay}\nexit 1\n", log.display()),
             None => format!(
-                "echo start >> '{}'\ntrap 'echo term >> \"{}\"; exit 0' TERM\nwhile :; do sleep 0.05; done\n",
+                "trap 'echo term >> \"{}\"; exit 0' TERM\necho start >> '{}'\nwhile :; do sleep 0.05; done\n",
                 log.display(),
                 log.display()
             ),

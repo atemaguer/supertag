@@ -235,9 +235,10 @@ fn command(value: &Value, property: &str) -> Result<DevcontainerCommand> {
     }
 }
 
-/// POSIX path normalization as in Node's `path.posix.normalize`, for relative paths.
+/// POSIX path normalization exactly as Node's `path.posix.normalize`, which keeps a trailing slash.
 fn normalize(path: &str) -> String {
     let absolute = path.starts_with('/');
+    let trailing = path.ends_with('/');
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
         match part {
@@ -253,11 +254,15 @@ fn normalize(path: &str) -> String {
         }
     }
     let joined = parts.join("/");
-    match (absolute, joined.is_empty()) {
+    let mut normalized = match (absolute, joined.is_empty()) {
         (true, _) => format!("/{joined}"),
         (false, true) => ".".into(),
         (false, false) => joined,
+    };
+    if trailing && !normalized.ends_with('/') {
+        normalized.push('/');
     }
+    normalized
 }
 
 fn relative_path(value: &Value, property: &str) -> Result<String> {
@@ -266,7 +271,9 @@ fn relative_path(value: &Value, property: &str) -> Result<String> {
         !path.starts_with('/') && !path.contains(['\\', '\r', '\n']),
         "devcontainer property {property} must be a relative repository path"
     );
-    Ok(normalize(&path))
+    // Deliberate difference: TS keeps `tools/`, and its build-context prefix then becomes
+    // `tools//`, which matches no tracked file. Repository paths here never end in a slash.
+    Ok(normalize(path.trim_end_matches('/')))
 }
 
 /// Strips comments and trailing commas, as the devcontainer format allows.
@@ -673,7 +680,11 @@ pub fn apply_devcontainer_build_args(
         for line in &mut lines {
             let indent = line.len() - line.trim_start().len();
             let rest = &line[indent..];
-            if rest.len() < 3 || !rest[..3].eq_ignore_ascii_case("ARG") {
+            // Repository Dockerfiles may hold multibyte text; `get` refuses non-boundaries.
+            if !rest
+                .get(..3)
+                .is_some_and(|word| word.eq_ignore_ascii_case("ARG"))
+            {
                 continue;
             }
             let after = &rest[3..];
@@ -682,7 +693,10 @@ pub fn apply_devcontainer_build_args(
                 continue;
             }
             let declared = &after[spaces..];
-            if declared.len() < name.len() || !declared[..name.len()].eq_ignore_ascii_case(name) {
+            if !declared
+                .get(..name.len())
+                .is_some_and(|declared| declared.eq_ignore_ascii_case(name))
+            {
                 continue;
             }
             let tail = &declared[name.len()..];

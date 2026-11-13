@@ -290,6 +290,55 @@ fn applies_build_args_only_to_declared_arg_instructions() {
 }
 
 #[test]
+fn build_args_skip_multibyte_dockerfile_text_instead_of_panicking() {
+    let args = BTreeMap::from([("VERSION".to_owned(), "22".to_owned())]);
+    // An em dash covers bytes 2..5 and `é` covers 2..4: byte 3 is not a character boundary.
+    let source = "# \u{2014} install deps\néé ARG\nARG \u{e9}\u{e9}\u{e9}\u{e9}\nARG VERSION=20\nFROM node:${VERSION}\n";
+    assert_eq!(
+        apply_devcontainer_build_args(source, Some(&args)).unwrap(),
+        source.replace("VERSION=20", "VERSION=22")
+    );
+    assert!(
+        validated_devcontainer_dockerfile(
+            "# \u{2014} install deps\nARG VERSION=20\nFROM node:${VERSION}\n",
+            Some(&args)
+        )
+        .unwrap()
+        .contains("ARG VERSION=22")
+    );
+    assert!(
+        error(apply_devcontainer_build_args(
+            "# \u{2014}\nFROM x\n",
+            Some(&args)
+        ))
+        .contains("has no ARG")
+    );
+}
+
+#[test]
+fn keeps_node_trailing_slash_semantics_for_paths() {
+    // Node's `posix.normalize` keeps a trailing slash, so TS accepts this folder.
+    let parsed = parse_devcontainer_subset(
+        r#"{"workspaceFolder":"/workspaces/app/","build":{"dockerfile":"Dockerfile","context":"tools/"}}"#,
+    )
+    .unwrap();
+    assert_eq!(parsed.workspace_folder.as_deref(), Some("/workspaces/app/"));
+    // Repository paths drop the slash so the build-context prefix still matches files.
+    assert_eq!(parsed.build.unwrap().context.as_deref(), Some("tools"));
+    for folder in [
+        "/workspaces//app/",
+        "/workspaces/./app/",
+        "/workspaces/x/../app/",
+    ] {
+        let source = format!(r#"{{"workspaceFolder":"{folder}"}}"#);
+        assert!(
+            error(parse_devcontainer_subset(&source)).contains("normalized absolute path"),
+            "{folder}"
+        );
+    }
+}
+
+#[test]
 fn translates_a_dockerfile_arg_used_by_a_registry_from() {
     let definition = DevcontainerSubset {
         build: Some(DevcontainerBuild {
