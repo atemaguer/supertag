@@ -120,7 +120,14 @@ async fn audit_in(
         code: failure.unwrap_or("OK").into(),
         method: message.method.into(),
     };
-    crate::audit::insert_in(tx, None, now_ms, record, "Objective").await
+    let call = audit_call_id(message.origin.connector_account_id, message.event_id);
+    crate::audit::insert_in(tx, Some(&call), now_ms, record, "Objective").await
+}
+
+/// Groups the audit entries one provider event records, so they reach the audit log once its
+/// transaction commits.
+pub(crate) fn audit_call_id(account: &str, event_id: &str) -> String {
+    format!("surface-event:{account}:{event_id}")
 }
 
 pub(crate) enum Handled {

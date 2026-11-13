@@ -931,6 +931,8 @@ where
                     "Could not record the audit entry for {} {}: {error}",
                     rule.action, rule.kind
                 ));
+            } else {
+                store.emit_audit_call(&call.id).await;
             }
             Ok(response)
         })

@@ -7,6 +7,7 @@ mod artifact_direct;
 mod artifact_publications;
 mod artifact_volumes;
 mod audit;
+mod audit_sink;
 mod budget_pool;
 mod changed_paths;
 mod checkpoints;
@@ -49,6 +50,7 @@ mod workspace_mounts;
 mod workspaces;
 
 pub use audit::{AuditLayer, AuditService};
+pub use audit_sink::AuditSink;
 pub use github_workspaces::validate_manifest_workspace;
 pub use objectives::validate_manifest_objective;
 pub use operator_access::{AuditRecord, OPERATOR_TOKEN_LIFETIME_MS, OperatorAuthentication};
@@ -81,6 +83,12 @@ impl ControlPlane {
             store: Store::open(database_url).await?,
             gateway_token: Arc::new(gateway_token),
         })
+    }
+
+    /// Also writes every committed audit entry to `sink`.
+    pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
+        self.store = self.store.with_audit_sink(sink);
+        self
     }
 
     pub async fn seed_host(&self, host_id: &str, token_digest: &[u8]) -> anyhow::Result<()> {

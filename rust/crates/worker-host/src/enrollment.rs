@@ -248,7 +248,14 @@ mod tests {
         for enrolled in ["runner", "runner-2", "runner-10"] {
             assert!(suffixed_or_same(enrolled, "runner"), "{enrolled}");
         }
-        for enrolled in ["runner-1", "runner-02", "runner-x", "runner2", "other", "runner-2-2"] {
+        for enrolled in [
+            "runner-1",
+            "runner-02",
+            "runner-x",
+            "runner2",
+            "other",
+            "runner-2-2",
+        ] {
             assert!(!suffixed_or_same(enrolled, "runner"), "{enrolled}");
         }
     }

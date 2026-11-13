@@ -63,6 +63,9 @@ enum Service {
         /// Where the operator hears about Inbox items; `desktop` when unset.
         #[serde(default)]
         notify: Option<Notify>,
+        /// Where audit entries also go, besides the database: `stderr` or a JSON-lines file.
+        #[serde(default, rename = "audit-log")]
+        audit_log: Option<String>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -176,6 +179,8 @@ pub struct Plane {
     pub listen: SocketAddr,
     pub provision: Vec<crate::manifests::ProvisionSource>,
     pub notify: Notifications,
+    /// The Control Plane's `--audit-log`: `stderr` or an absolute file path.
+    pub audit_log: Option<String>,
 }
 /// The Gateway's `--notify` destinations and the named secrets their webhooks send.
 #[derive(Clone)]
@@ -361,6 +366,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             provision,
             notify,
+            audit_log,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -436,8 +442,22 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 }
                 secrets.insert(name.clone(), secret);
             }
+            let audit_log = audit_log
+                .as_ref()
+                .map(|value| {
+                    anyhow::Ok(if value == "stderr" {
+                        value.clone()
+                    } else {
+                        resolve_path(base, Path::new(value))?
+                            .to_str()
+                            .context("audit-log path must be UTF-8")?
+                            .to_owned()
+                    })
+                })
+                .transpose()?;
             plane = Some(Plane {
                 listen,
+                audit_log,
                 provision: sources,
                 notify: Notifications {
                     destinations,
@@ -1096,6 +1116,32 @@ secrets:
         .unwrap();
         assert!(c.plane.is_none());
         assert!(c.hosts[0].key.is_some());
+    }
+    #[test]
+    fn audit_log_is_stderr_or_a_path_resolved_from_the_file() {
+        let audit_log = |value: &str| {
+            parse(
+                format!(
+                    "services:\n  control-plane: {{type: control-plane, audit-log: {value}}}\n"
+                )
+                .as_bytes(),
+                Path::new("/trusted"),
+                |_| None,
+            )
+            .unwrap()
+            .plane
+            .unwrap()
+            .audit_log
+        };
+        assert_eq!(audit_log("stderr").as_deref(), Some("stderr"));
+        assert_eq!(
+            audit_log("logs/audit.jsonl").as_deref(),
+            Some("/trusted/logs/audit.jsonl")
+        );
+        assert_eq!(
+            audit_log("/var/log/audit.jsonl").as_deref(),
+            Some("/var/log/audit.jsonl")
+        );
     }
     #[test]
     fn one_host_serves_several_harnesses_with_per_harness_settings() {

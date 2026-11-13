@@ -351,6 +351,10 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
+        /// Also write each committed audit entry as one JSON line to `stderr` or to this absolute
+        /// file path, created owner-only. The database keeps every entry either way.
+        #[arg(long, value_name = "stderr|PATH")]
+        audit_log: Option<String>,
     },
     /// Run the public gRPC service for operators and Worker Hosts.
     Gateway {
@@ -957,7 +961,8 @@ async fn run(command: Command) -> Result<()> {
         Command::ControlPlane {
             listen,
             websocket_listen,
-        } => control_plane(listen, websocket_listen).await?,
+            audit_log,
+        } => control_plane(listen, websocket_listen, audit_log).await?,
         Command::Gateway {
             listen,
             websocket_listen,
@@ -1296,13 +1301,20 @@ async fn run(command: Command) -> Result<()> {
     Ok(())
 }
 
-async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result<()> {
+async fn control_plane(
+    listen: SocketAddr,
+    websocket: Option<SocketAddr>,
+    audit_log: Option<String>,
+) -> Result<()> {
     let builder = network::server(listen, websocket, true).await?;
-    let plane = ControlPlane::open(
+    let mut plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
         required_env("SUPERTAG_GATEWAY_TOKEN")?,
     )
     .await?;
+    if let Some(audit_log) = audit_log {
+        plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(&audit_log)?);
+    }
     if let Ok(token) = std::env::var("SUPERTAG_BOOTSTRAP_HOST_TOKEN") {
         ensure!(
             token.len() >= 32,

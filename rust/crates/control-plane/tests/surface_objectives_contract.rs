@@ -246,9 +246,14 @@ async fn contract(url: String) {
     .await;
     assert_eq!(steer.session_id, starting.session_id);
     assert_eq!(steer.state(), TaskState::Queued);
-    // Survives a Control Plane restart.
+    // Survives a Control Plane restart. The restarted one also writes its entries to a log.
     store.close().await;
-    let store = Store::open(&url).await.unwrap();
+    let log_directory = tempfile::tempdir().unwrap();
+    let log = log_directory.path().join("audit.jsonl");
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_audit_sink(supertag_control_plane::AuditSink::parse(log.to_str().unwrap()).unwrap());
     let mention = accept(
         &store,
         event(
@@ -548,6 +553,28 @@ async fn contract(url: String) {
             refused("objective.message"),
         ]
     );
+    // Each committed entry after the restart reached the log once, when its event committed.
+    let logged = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|line| line["target"] == format!("Objective/{}", objective.objective_id))
+        .map(|line| {
+            assert_eq!(line["type"], "supertag.audit");
+            assert_eq!(line["actor"], "slack:UALICE1");
+            let outcome = if line["outcome"] == "succeeded" {
+                AuditOutcome::Succeeded
+            } else {
+                AuditOutcome::Failed
+            };
+            (
+                outcome,
+                line["action"].as_str().unwrap().to_owned(),
+                line["code"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(logged, audited[1..]);
     // An empty invocation fails closed without an Objective.
     let empty_thread = "1794470100.100000";
     let empty = accept(

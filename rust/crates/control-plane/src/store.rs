@@ -71,6 +71,8 @@ pub struct Store {
     execution_clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
     /// When this process first swept ephemeral Worker Hosts.
     ephemeral_watch_since: Arc<std::sync::OnceLock<i64>>,
+    /// Where committed audit entries are also written, besides the database.
+    pub(crate) audit_sink: Option<Arc<crate::AuditSink>>,
 }
 
 impl Store {
@@ -304,6 +306,7 @@ impl Store {
             pool,
             execution_clock: None,
             ephemeral_watch_since: Arc::default(),
+            audit_sink: None,
         })
     }
 

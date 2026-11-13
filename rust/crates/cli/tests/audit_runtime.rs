@@ -67,6 +67,7 @@ impl Services {
             Uuid::new_v4().to_string(),
             Uuid::new_v4().to_string(),
             crash,
+            None,
         )
         .await
     }
@@ -76,8 +77,12 @@ impl Services {
         gateway_token: String,
         operator_token: String,
         crash: Option<(&str, &Path)>,
+        audit_log: Option<&Path>,
     ) -> Result<Self> {
         let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
+        if let Some(path) = audit_log {
+            control.arg("--audit-log").arg(path);
+        }
         control
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_DATABASE_URL", database);
@@ -158,6 +163,96 @@ database_tests! {
     worker_host_joins_are_recorded_under_their_auth_key;
     #[tokio::test]
     connect_gateway_saves_a_proven_token_for_later_commands;
+    #[tokio::test]
+    audit_log_receives_each_committed_entry_as_a_json_line;
+}
+
+/// `--audit-log PATH` appends every committed entry, failed calls included, to an owner-only
+/// JSON-lines file in the order they are recorded, with no secret, as TypeScript's file sink did.
+async fn audit_log_receives_each_committed_entry_as_a_json_line(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let log = directory.path().join("audit.jsonl");
+    let services = Services::start_with(
+        &database,
+        Uuid::new_v4().to_string(),
+        Uuid::new_v4().to_string(),
+        None,
+        Some(&log),
+    )
+    .await?;
+    services
+        .json(&["tag", "put", "reviewer", "--instructions", "Review"])
+        .await?;
+    let issued = services
+        .json(&[
+            "auth-key",
+            "create",
+            "fleet",
+            "--reusable",
+            "--tag",
+            "reviewer",
+        ])
+        .await?;
+    let secret = issued["auth_key"].as_str().context("auth_key")?.to_owned();
+    let refused = timeout(
+        WAIT,
+        services
+            .operator(&[
+                "auth-key",
+                "create",
+                "fleet",
+                "--reusable",
+                "--tag",
+                "reviewer",
+            ])
+            .output(),
+    )
+    .await??;
+    ensure!(
+        !refused.status.success(),
+        "a reused Auth Key name was accepted"
+    );
+    let recorded = services.audit().await?;
+    ensure!(recorded.len() == 3, "{recorded:?}");
+    let text = std::fs::read_to_string(&log)?;
+    ensure!(!text.contains(&secret), "the audit log holds the Auth Key");
+    let lines = text
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let logged = lines
+        .iter()
+        .map(|line| {
+            assert_eq!(line["type"], "supertag.audit");
+            assert!(line["id"].as_str().is_some_and(|id| !id.is_empty()));
+            assert!(line["at"].as_str().is_some_and(|at| at.ends_with('Z')));
+            assert!(line["method"].as_str().is_some_and(|m| m.starts_with('/')));
+            ["actor", "action", "target", "outcome", "code"]
+                .map(|field| line[field].as_str().unwrap_or_default().to_owned())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(logged, recorded);
+    assert_eq!(logged[2][3], "failed");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&log)?.permissions().mode() & 0o777, 0o600);
+    services.stop().await?;
+
+    // A relative path is refused before the service starts.
+    let refused = timeout(
+        WAIT,
+        binary(&["control-plane", "--audit-log", "audit.jsonl"])
+            .env("SUPERTAG_DATABASE_URL", &database)
+            .env("SUPERTAG_GATEWAY_TOKEN", Uuid::new_v4().to_string())
+            .output(),
+    )
+    .await??;
+    ensure!(!refused.status.success());
+    ensure!(
+        String::from_utf8_lossy(&refused.stderr).contains("absolute file path"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    Ok(())
 }
 
 /// The Control Plane dies after committing an audited change and before answering. The change
@@ -201,7 +296,8 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
     );
     let (gateway_token, operator_token) = services.stop().await?;
 
-    let services = Services::start_with(&database, gateway_token, operator_token, None).await?;
+    let services =
+        Services::start_with(&database, gateway_token, operator_token, None, None).await?;
     let mut connection = database::connect(&database).await?;
     let accepted: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks WHERE tag_id='reviewer'")
@@ -252,8 +348,7 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
             EnrollHostRequest {
                 host_id: host.into(),
                 operation_id: operation.into(),
-                token_digest: Sha256::digest(format!("credential for {host} {operation}"))
-                    .to_vec(),
+                token_digest: Sha256::digest(format!("credential for {host} {operation}")).to_vec(),
             },
             key,
             None,

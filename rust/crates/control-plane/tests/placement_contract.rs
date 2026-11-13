@@ -435,7 +435,11 @@ async fn ephemeral_contract(url: &str) {
         panic!("one event expected: {events:?}");
     };
     let mut removed_event: serde_json::Value = serde_json::from_str(&event.text).unwrap();
-    assert!(removed_event["attemptId"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(
+        removed_event["attemptId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
     removed_event["attemptId"] = serde_json::Value::Null;
     assert_eq!(
         removed_event,
@@ -508,9 +512,18 @@ async fn host_id_suffix_contract(url: &str) {
         let fleet = fleet.clone();
         async move { store.enroll_host(&request, &fleet).await }
     };
-    assert_eq!(enroll("runner", "one", "t1").await.unwrap().host_id, "runner");
-    assert_eq!(enroll("runner", "two", "t2").await.unwrap().host_id, "runner-2");
-    assert_eq!(enroll("runner", "two", "t2").await.unwrap().host_id, "runner-2");
+    assert_eq!(
+        enroll("runner", "one", "t1").await.unwrap().host_id,
+        "runner"
+    );
+    assert_eq!(
+        enroll("runner", "two", "t2").await.unwrap().host_id,
+        "runner-2"
+    );
+    assert_eq!(
+        enroll("runner", "two", "t2").await.unwrap().host_id,
+        "runner-2"
+    );
     assert!(matches!(
         enroll("runner", "two", "stolen").await,
         Err(StoreError::PermissionDenied)
@@ -531,7 +544,10 @@ async fn host_id_suffix_contract(url: &str) {
         )
         .await
         .unwrap();
-    assert_eq!(enroll("runner", "three", "t3").await.unwrap().host_id, "runner-4");
+    assert_eq!(
+        enroll("runner", "three", "t3").await.unwrap().host_id,
+        "runner-4"
+    );
     // A suffix that would make the ID too long is not tried.
     let long = "h".repeat(250);
     assert_eq!(enroll(&long, "long", "t4").await.unwrap().host_id, long);

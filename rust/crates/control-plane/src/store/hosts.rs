@@ -632,7 +632,9 @@ async fn available_host_id_in(
             return Ok(candidate);
         }
     }
-    Err(StoreError::Conflict("Worker Host ID is not available".into()))
+    Err(StoreError::Conflict(
+        "Worker Host ID is not available".into(),
+    ))
 }
 
 async fn host_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Option<AnyRow>> {

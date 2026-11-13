@@ -252,6 +252,8 @@ struct Children {
     worker_host: Option<Service>,
     /// The Gateway's `--notify` values and the environment their webhook secrets reach it in.
     notify: (Vec<String>, Vec<(String, String)>),
+    /// The Control Plane's `--audit-log`.
+    audit_log: Option<String>,
 }
 
 struct Service {
@@ -270,6 +272,7 @@ impl Children {
             gateway: None,
             worker_host: None,
             notify: crate::local_config::Notifications::default().resolve(&Environment::default()),
+            audit_log: None,
         })
     }
 
@@ -296,6 +299,9 @@ impl Children {
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
+        }
+        if let Some(audit_log) = &self.audit_log {
+            plane.arg("--audit-log").arg(audit_log);
         }
         let address = start_child(
             &mut self.control_plane,
@@ -1319,6 +1325,7 @@ pub async fn configured(
             // random loopback port on restart instead of silently retargeting credentials.
             let listen = stable_listen(&directory, plane.listen)?;
             base.notify = plane.notify.resolve(&environment);
+            base.audit_log.clone_from(&plane.audit_log);
             let endpoint = base
                 .start_base(
                     &executable,
