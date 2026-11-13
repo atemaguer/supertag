@@ -21,6 +21,8 @@ const PROCESS_ONLY: [&str; 8] = [
     "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
 ];
 const MAX_VARIABLES: usize = 1024;
+/// The only variables a per-user service unit carries from the shell that installed it.
+pub const UNIT_VARIABLES: [&str; 6] = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR"];
 
 /// Variables read from `env_file`. The process environment always wins over them.
 #[derive(Clone, Default)]
@@ -37,6 +39,16 @@ impl Environment {
     /// A runtime variable: the process environment first, then `env_file`. Blank counts as unset.
     pub fn variable(&self, name: &str) -> Option<OsString> {
         self.lookup(name, std::env::var_os(name))
+    }
+
+    /// A runtime variable as a supervisor under a service unit reads it: a unit variable from
+    /// this process, then `env_file`. Everything else in this shell is invisible to the unit.
+    pub fn unit_variable(&self, name: &str) -> Option<OsString> {
+        let process = UNIT_VARIABLES
+            .contains(&name)
+            .then(|| std::env::var_os(name))
+            .flatten();
+        self.lookup(name, process)
     }
 
     fn lookup(&self, name: &str, process: Option<OsString>) -> Option<OsString> {

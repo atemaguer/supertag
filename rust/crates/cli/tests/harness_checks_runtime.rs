@@ -358,49 +358,178 @@ fn configured_hosts_check_the_codex_cli_and_models_before_they_start() -> Result
 }
 
 #[test]
-fn ctrl_c_during_a_sign_in_probe_kills_it_and_removes_its_home() -> Result<()> {
+fn a_service_unit_host_is_checked_with_env_file_credentials_only() -> Result<()> {
     let machine = Machine::new()?;
-    let started = machine.home.join("started");
+    machine.fake("codex", &codex_exec(&machine, "env-file-key"))?;
+    fs::create_dir_all(&machine.state)?;
+    fs::set_permissions(&machine.state, fs::Permissions::from_mode(0o700))?;
+    let config = json!({
+        "name": "unit",
+        "services": {
+            "control-plane": {"type": "control-plane", "ports": ["127.0.0.1:0"],
+                "restart": "unless-stopped"},
+            "builder": {"type": "host", "harnesses": ["codex"], "restart": "unless-stopped"},
+        },
+    });
+    machine.private_file(
+        &machine.state.join("supertag.yaml"),
+        &serde_json::to_string(&config)?,
+    )?;
+    // The shell's key would work, but a service unit never sees it.
+    let shell_only = machine.fails(&["sign-in", "codex"], &[("CODEX_API_KEY", "env-file-key")])?;
+    assert!(shell_only.contains("codex: not signed in"), "{shell_only}");
+    assert!(!machine.home.join("codex.env").exists(), "{shell_only}");
+    // `supertag init` keeping this setup checks the same way, and stops before installing a
+    // unit whose host could not sign in.
+    for args in [
+        &["init", "--quiet", "-b", "main"][..],
+        &[
+            "-c",
+            "user.name=SuperTag",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&machine.home)
+            .env("HOME", &machine.home)
+            .status()?;
+        ensure!(status.success(), "git {args:?} failed");
+    }
+    let init = machine.fails(&["init", "--yes"], &[("CODEX_API_KEY", "env-file-key")])?;
+    assert!(
+        init.contains("No selected harness could complete the sign-in check"),
+        "{init}"
+    );
+    assert!(!machine.home.join("codex.env").exists(), "{init}");
+    assert!(!machine.state.join("supervisor.json").exists(), "{init}");
+    // The unit reads env_file, and a wrong key in the shell does not shadow it.
+    machine.private_file(&machine.state.join(".env"), "CODEX_API_KEY=env-file-key\n")?;
+    let signed_in = machine.ok(&["sign-in", "codex"], &[("CODEX_API_KEY", "wrong")])?;
+    assert!(signed_in.contains("codex: signed in"), "{signed_in}");
+    let environment = fs::read_to_string(machine.home.join("codex.env"))?;
+    assert!(
+        environment.contains("CODEX_API_KEY=env-file-key"),
+        "{environment}"
+    );
+    Ok(())
+}
+
+/// Signals that end `supertag sign-in` while a probe runs: Ctrl-C, `kill`, a closed terminal.
+#[test]
+fn a_signal_during_a_sign_in_probe_kills_it_and_removes_its_home() -> Result<()> {
+    for (signal, status) in [
+        (libc::SIGINT, 130),
+        (libc::SIGTERM, 143),
+        (libc::SIGHUP, 129),
+    ] {
+        let machine = Machine::new()?;
+        let temporary = machine.home.join("tmp");
+        fs::create_dir(&temporary)?;
+        let started = machine.home.join("started");
+        // OpenCode's probe home holds auth.json with the provider key.
+        machine.fake(
+            "opencode",
+            &format!(
+                "echo \"$HOME\" > '{0}.home'\necho $$ > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 1000",
+                started.display()
+            ),
+        )?;
+        let mut child = Command::new(BIN)
+            .args(["sign-in", "opencode", "--model", "openai/fixture"])
+            .env_clear()
+            .env("HOME", &machine.home)
+            .env("PATH", format!("{}:/usr/bin:/bin", machine.bin.display()))
+            .env("TMPDIR", &temporary)
+            .env("OPENAI_API_KEY", "test-secret")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        // The barrier is the probe recording its process ID, not a wall-clock budget.
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while !started.exists() {
+            ensure!(Instant::now() < deadline, "the probe never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // SAFETY: signals only the command this test started.
+        unsafe { libc::kill(child.id() as i32, signal) };
+        let exit = child.wait()?;
+        assert_eq!(exit.code(), Some(status), "signal {signal}: {exit:?}");
+        let pid: i32 = fs::read_to_string(&started)?.trim().parse()?;
+        // The probe was the command's child; once it is killed, init reaps the orphaned zombie.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // SAFETY: signal 0 only checks that the process exists.
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            ensure!(
+                Instant::now() < deadline,
+                "the probe outlived signal {signal}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let home = fs::read_to_string(started.with_extension("home"))?;
+        assert!(
+            home.trim().starts_with(&*temporary.to_string_lossy()),
+            "{home}"
+        );
+        assert!(
+            fs::read_dir(&temporary)?.next().is_none(),
+            "signal {signal} left the probe home and its auth.json behind"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn every_configured_host_is_checked_at_once() -> Result<()> {
+    let machine = Machine::new()?;
+    fs::create_dir_all(&machine.state)?;
+    fs::set_permissions(&machine.state, fs::Permissions::from_mode(0o700))?;
+    let listings = machine.home.join("listings");
+    fs::create_dir(&listings)?;
+    // Each host's model listing answers only once the other host's listing has started. Checked
+    // one host after another, the first listing would time out and be skipped with a note.
     machine.fake(
         "codex",
         &format!(
-            "echo \"$CODEX_HOME\" > '{0}.home'\necho $$ > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 1000",
-            started.display()
+            r#"if [ "$1" = --version ]; then echo codex-cli 0.163.0; exit 0; fi
+test "$*" = "app-server --listen stdio://" || exit 9
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) echo '{{"id":1,"result":{{}}}}';;
+    *'"method":"model/list"'*)
+      : > '{listings}/'$$
+      while [ "$(ls '{listings}' | wc -l)" -lt 2 ]; do sleep 0.05; done
+      echo '{{"id":2,"result":{{"data":[{{"id":"gpt-6-sol"}}]}}}}';;
+  esac
+done"#,
+            listings = listings.display()
         ),
     )?;
-    let mut child = Command::new(BIN)
-        .args(["sign-in", "codex"])
-        .env_clear()
-        .env("HOME", &machine.home)
-        .env("PATH", format!("{}:/usr/bin:/bin", machine.bin.display()))
-        .env("TMPDIR", std::env::temp_dir())
-        .env("CODEX_API_KEY", "test-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    // The barrier is the probe recording its process ID, not a wall-clock budget.
-    let deadline = Instant::now() + Duration::from_secs(120);
-    while !started.exists() {
-        ensure!(Instant::now() < deadline, "the probe never started");
-        std::thread::sleep(Duration::from_millis(10));
+    let host = json!({"type": "host", "harnesses": ["codex"], "models": {"codex": ["gpt-6-sol"]}});
+    let config = json!({
+        "name": "pair",
+        "services": {
+            "control-plane": {"type": "control-plane", "ports": ["127.0.0.1:0"]},
+            "first": host,
+            "second": host,
+        },
+    });
+    machine.private_file(
+        &machine.state.join("supertag.yaml"),
+        &serde_json::to_string(&config)?,
+    )?;
+    machine.ok(&["up"], &[])?;
+    for name in ["first", "second"] {
+        let logs = machine.ok(&["logs", name], &[])?;
+        assert!(!logs.contains("model check"), "{name}: {logs}");
     }
-    // SAFETY: signals only the command this test started.
-    unsafe { libc::kill(child.id() as i32, libc::SIGINT) };
-    let status = child.wait()?;
-    assert_eq!(status.code(), Some(130), "{status:?}");
-    let pid: i32 = fs::read_to_string(&started)?.trim().parse()?;
-    // The probe was the command's child; once it is killed, init reaps the orphaned zombie.
-    let deadline = Instant::now() + Duration::from_secs(30);
-    // SAFETY: signal 0 only checks that the process exists.
-    while unsafe { libc::kill(pid, 0) } == 0 {
-        ensure!(Instant::now() < deadline, "the probe outlived Ctrl-C");
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let home = fs::read_to_string(started.with_extension("home"))?;
-    assert!(
-        !Path::new(home.trim()).exists(),
-        "the probe home was left behind"
-    );
+    machine.ok(&["down", "--force"], &[])?;
     Ok(())
 }

@@ -1,7 +1,8 @@
-//! Bounded harness probes. Each probe runs with an explicit environment in its own process group;
-//! when its stop condition fires or it fails, the whole group is killed with SIGKILL and reaped.
-//! Probe stdout is read with fixed limits, and stderr is never read: native CLIs can print
-//! credentials there.
+//! Bounded harness probes. Each probe runs with an explicit environment in its own process group.
+//! The group is killed with SIGKILL before its leader is reaped, whether the leader exited,
+//! its stop condition fired, or it failed, so no descendant outlives the probe: while the leader
+//! is unreaped, its process ID names its group and cannot be reused. Probe stdout is read with
+//! fixed limits, and stderr is never read: native CLIs can print credentials there.
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
@@ -33,13 +34,18 @@ pub const PROCESS_VARIABLES: [&str; 11] = [
 ];
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
-static INTERRUPTED: OnceLock<watch::Sender<bool>> = OnceLock::new();
+/// The signal that stopped an interactive probe, once one has.
+static INTERRUPTED: OnceLock<watch::Sender<Option<i32>>> = OnceLock::new();
+/// Signals that end an interactive command. A probe runs in its own process group, so a signal
+/// sent to the terminal's group, or to this process, never reaches it; each is handled here.
+const ENDING_SIGNALS: [i32; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
 
 /// The stop condition of a probe in an interactive command (`sign-in`, `init`): a deadline, or
-/// Ctrl-C. Ctrl-C while a probe runs stops the probe so that its process group is killed and its
-/// temporary directory removed, and `exit_if_interrupted` then ends the command; Ctrl-C at any
-/// other time ends the command at once, as without a handler. Never used by the supervisor, which
-/// handles its own interrupts.
+/// SIGINT (Ctrl-C), SIGTERM or SIGHUP (a closed terminal). Such a signal while a probe runs stops
+/// the probe so that its process group is killed and its temporary directory removed, and
+/// `exit_if_interrupted` then ends the command; the signal at any other time ends the command at
+/// once, with the status the signal's default action would report to a shell. Never used by the
+/// supervisor, which handles its own signals.
 pub async fn interactive_deadline(timeout: Duration) {
     struct Active;
     impl Drop for Active {
@@ -51,32 +57,39 @@ pub async fn interactive_deadline(timeout: Duration) {
     let _active = Active;
     let mut interrupted = INTERRUPTED
         .get_or_init(|| {
-            let (sender, _) = watch::channel(false);
-            let watcher = sender.clone();
-            tokio::spawn(async move {
-                while tokio::signal::ctrl_c().await.is_ok() {
-                    if ACTIVE.load(Ordering::SeqCst) == 0 {
-                        std::process::exit(130);
+            let (sender, _) = watch::channel(None);
+            for number in ENDING_SIGNALS {
+                let Ok(mut signals) =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::from_raw(number))
+                else {
+                    continue;
+                };
+                let watcher = sender.clone();
+                tokio::spawn(async move {
+                    while signals.recv().await.is_some() {
+                        if ACTIVE.load(Ordering::SeqCst) == 0 {
+                            std::process::exit(128 + number);
+                        }
+                        watcher.send_replace(Some(number));
                     }
-                    watcher.send_replace(true);
-                }
-            });
+                });
+            }
             sender
         })
         .subscribe();
     tokio::select! {
         () = tokio::time::sleep(timeout) => {}
-        _ = interrupted.wait_for(|interrupted| *interrupted) => {}
+        _ = interrupted.wait_for(Option::is_some) => {}
     }
 }
 
-/// End the command if Ctrl-C stopped a probe. Call once the probe's cleanup has run.
+/// End the command if a signal stopped a probe. Call once the probe's cleanup has run.
 pub fn exit_if_interrupted() {
-    if INTERRUPTED
+    if let Some(number) = INTERRUPTED
         .get()
-        .is_some_and(|interrupted| *interrupted.borrow())
+        .and_then(|interrupted| *interrupted.borrow())
     {
-        std::process::exit(130);
+        std::process::exit(128 + number);
     }
 }
 
@@ -102,6 +115,9 @@ pub struct Probe {
     pid: libc::pid_t,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
+    /// The leader was reaped, after its group was killed; its process ID may name another
+    /// process now.
+    reaped: bool,
 }
 
 impl Probe {
@@ -134,6 +150,7 @@ impl Probe {
             pid,
             stdin,
             stdout,
+            reaped: false,
         })
     }
 
@@ -171,14 +188,23 @@ impl Probe {
         Ok(None)
     }
 
-    /// The rest of the output, at most `limit` bytes.
+    /// The rest of the output, at most `limit` bytes. Once the leader exits, its group is killed,
+    /// so a descendant that still holds the output cannot keep the probe running.
     pub async fn rest(&mut self, limit: usize) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        (&mut self.stdout)
-            .take(limit as u64 + 1)
-            .read_to_end(&mut bytes)
-            .await
-            .context("could not read probe output")?;
+        {
+            let mut limited = (&mut self.stdout).take(limit as u64 + 1);
+            let read = limited.read_to_end(&mut bytes);
+            tokio::pin!(read);
+            tokio::select! {
+                result = &mut read => { result.context("could not read probe output")?; }
+                result = exited(self.pid) => {
+                    result?;
+                    kill_group(self.pid);
+                    read.await.context("could not read probe output")?;
+                }
+            }
+        }
         ensure!(bytes.len() <= limit, "probe output exceeds its limit");
         Ok(bytes)
     }
@@ -202,33 +228,93 @@ impl Probe {
         self.stdin = None;
     }
 
+    /// Wait for the leader to exit, kill what is left of its group, then reap the leader.
     pub async fn wait(&mut self) -> Result<ExitStatus> {
         self.close_input();
-        self.child
+        ensure!(!self.reaped, "the probe was already reaped");
+        exited(self.pid).await?;
+        kill_group(self.pid);
+        let status = self
+            .child
             .wait()
             .await
-            .context("could not wait for the probe")
+            .context("could not wait for the probe")?;
+        self.reaped = true;
+        Ok(status)
     }
 
-    /// Kill the probe's process group unless its leader was already reaped, then reap it.
+    /// Kill the probe's process group, whether or not its leader has exited, then reap the leader.
     pub async fn finish(mut self) {
         self.stdin = None;
-        if matches!(self.child.try_wait(), Ok(None)) {
-            // SAFETY: the group leader is our unreaped child, so its group ID still names its group.
-            unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+        if !self.reaped {
+            kill_group(self.pid);
             let _ = self.child.wait().await;
+            self.reaped = true;
         }
     }
 }
 
 impl Drop for Probe {
     /// A dropped probe, such as one whose caller was cancelled, takes its process group with it.
+    /// The leader is reaped by Tokio afterwards.
     fn drop(&mut self) {
-        if matches!(self.child.try_wait(), Ok(None)) {
-            // SAFETY: the group leader is our unreaped child, so its group ID still names its group.
-            unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+        if !self.reaped {
+            kill_group(self.pid);
         }
     }
+}
+
+/// SIGKILL a probe's process group. Only called while its leader is unreaped, so the group ID
+/// cannot name another group.
+fn kill_group(pid: libc::pid_t) {
+    // SAFETY: sending a signal has no memory effects; see the caller's invariant above.
+    unsafe { libc::kill(-pid, libc::SIGKILL) };
+}
+
+/// Whether the child `pid` has exited, without reaping it.
+fn has_exited(pid: libc::pid_t) -> Result<bool> {
+    let id = libc::id_t::try_from(pid)?;
+    loop {
+        // SAFETY: zero is a valid siginfo_t, which waitid fills in.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is a valid, writable siginfo_t; WNOWAIT leaves the child unreaped.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                id,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            // SAFETY: waitid succeeded, so the child fields are initialised (zero when no child
+            // has exited).
+            return Ok(unsafe { info.si_pid() } != 0);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error).context("could not check the probe");
+        }
+    }
+}
+
+/// Resolves once the child `pid` has exited, leaving it unreaped.
+async fn exited(pid: libc::pid_t) -> Result<()> {
+    // Listening before the first check means no exit after it is missed; the poll is only a
+    // fallback.
+    let mut children = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child()).ok();
+    while !has_exited(pid)? {
+        match &mut children {
+            Some(children) => {
+                tokio::select! {
+                    _ = children.recv() => {}
+                    () = tokio::time::sleep(Duration::from_millis(100)) => {}
+                }
+            }
+            None => tokio::time::sleep(Duration::from_millis(20)).await,
+        }
+    }
+    Ok(())
 }
 
 /// Run `work` against a started probe until it finishes or `stop` fires, then kill and reap the
@@ -269,14 +355,15 @@ pub async fn output(
     .await
 }
 
-/// The process variables from this process plus the named credential variables from `lookup`.
+/// The process variables from `process` plus the named credential variables from `lookup`.
 pub fn variables<'a>(
+    process: impl Fn(&str) -> Option<OsString>,
     credentials: impl IntoIterator<Item = &'a str>,
     lookup: impl Fn(&str) -> Option<OsString>,
 ) -> Variables {
     let mut variables = Variables::new();
     for name in PROCESS_VARIABLES {
-        if let Some(value) = std::env::var_os(name) {
+        if let Some(value) = process(name) {
             variables.insert(name.into(), value);
         }
     }
@@ -366,6 +453,90 @@ pub(super) mod tests {
         }
     }
 
+    /// Waits until the process recorded in `pid_file` is gone, for at most 30 seconds.
+    async fn until_gone(pid_file: &Path, what: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !gone(pid_file) {
+            assert!(std::time::Instant::now() < deadline, "{what} survived");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// A leader that starts a background helper, records both process IDs, and exits at once.
+    fn exits_leaving_a_helper(
+        directory: &Path,
+        helper_output: &str,
+    ) -> (PathBuf, PathBuf, PathBuf) {
+        let started = directory.join("leader");
+        let helper = directory.join("helper");
+        let program = script(
+            directory,
+            "leave",
+            &format!(
+                "/bin/sleep 1000 {helper_output} &\necho $! > '{helper}'\necho $$ > '{started}.tmp'\nmv '{started}.tmp' '{started}'\necho done\nexit 0",
+                helper = helper.display(),
+                started = started.display()
+            ),
+        );
+        (program, started, helper)
+    }
+
+    #[tokio::test]
+    async fn an_exited_leader_takes_its_background_children_with_it() {
+        let path = Variables::from([("PATH".into(), "/usr/bin:/bin".into())]);
+        // A helper that keeps the output open would otherwise hold the probe to its deadline;
+        // one that let the output go would otherwise outlive the probe.
+        for helper_output in ["", ">/dev/null"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let (program, _, helper) = exits_leaving_a_helper(temporary.path(), helper_output);
+            let (status, stdout) = output(
+                &program,
+                &[],
+                &path,
+                None,
+                None,
+                1024,
+                // Only a regression waits this long; it then fails rather than hangs.
+                tokio::time::sleep(Duration::from_secs(60)),
+            )
+            .await
+            .unwrap();
+            assert!(status.success());
+            assert_eq!(stdout, b"done\n");
+            until_gone(&helper, "helper").await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stopped_or_dropped_probe_whose_leader_exited_still_kills_its_group() {
+        let path = Variables::from([("PATH".into(), "/usr/bin:/bin".into())]);
+        for drop_it in [false, true] {
+            let temporary = tempfile::tempdir().unwrap();
+            let (program, started, helper) = exits_leaving_a_helper(temporary.path(), "");
+            let probe = Probe::start(&program, &[], &path, None).unwrap();
+            let pid = probe.pid;
+            // The barrier: the leader has exited and is still unreaped.
+            let leader_exited = async {
+                exists(started.clone()).await;
+                exited(pid).await.unwrap();
+            };
+            if drop_it {
+                leader_exited.await;
+                drop(probe);
+            } else {
+                // The work never finishes on its own: the helper holds the output open.
+                let error = bounded(probe, leader_exited, async |probe| {
+                    std::future::pending::<()>().await;
+                    probe.rest(1024).await
+                })
+                .await
+                .unwrap_err();
+                assert!(error.to_string().contains("timed out"), "{error:#}");
+            }
+            until_gone(&helper, "helper").await;
+        }
+    }
+
     #[tokio::test]
     async fn a_dropped_probe_takes_its_process_group_with_it() {
         let temporary = tempfile::tempdir().unwrap();
@@ -394,9 +565,11 @@ pub(super) mod tests {
     async fn output_is_bounded_and_only_named_variables_pass() {
         let temporary = tempfile::tempdir().unwrap();
         let program = script(temporary.path(), "env", "/usr/bin/env");
-        let variables = variables(["FIXTURE_CREDENTIAL"], |name| {
-            (name == "FIXTURE_CREDENTIAL").then(|| "value".into())
-        });
+        let variables = variables(
+            |name| std::env::var_os(name),
+            ["FIXTURE_CREDENTIAL"],
+            |name| (name == "FIXTURE_CREDENTIAL").then(|| "value".into()),
+        );
         let (status, stdout) = output(
             &program,
             &[],

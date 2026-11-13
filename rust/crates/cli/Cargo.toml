@@ -22,6 +22,7 @@ required-features = ["test-fixtures"]
 anyhow.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap.workspace = true
+futures-util = { version = "0.3", features = ["sink"] }
 libc.workspace = true
 prost.workspace = true
 serde.workspace = true
@@ -45,7 +46,6 @@ uuid.workspace = true
 axum = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-futures-util = { version = "0.3", features = ["sink"] }
 hmac.workspace = true
 reqwest.workspace = true
 sqlx.workspace = true

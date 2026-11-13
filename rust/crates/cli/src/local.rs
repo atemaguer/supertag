@@ -1230,16 +1230,25 @@ pub async fn configured(
         } else {
             None
         };
-        for definition in config.hosts {
+        // Before any host registers or takes work: a Codex CLI that cannot run Tasks, or a
+        // configured model its provider does not offer, stops startup here. Every host's checks
+        // run together, so they fit within `up`'s readiness wait however many hosts there are.
+        let checks = futures_util::future::join_all(config.hosts.iter().map(async |definition| {
+            let host = crate::harness_checks::host_harnesses(definition)?;
+            crate::harness_checks::check_host(&host, &environment).await
+        }))
+        .await;
+        let mut host_notes: Vec<Vec<String>> = Vec::new();
+        for checked in checks {
+            host_notes.push(checked?);
+        }
+        for (definition, notes) in config.hosts.into_iter().zip(host_notes) {
             let target = definition
                 .gateway
                 .clone()
                 .or_else(|| endpoint.clone())
                 .context("host Gateway is unavailable")?;
-            // Before the host registers or takes work: a Codex CLI that cannot run Tasks, or a
-            // configured model its provider does not offer, stops it here.
-            let host = crate::harness_checks::host_harnesses(&definition)?;
-            for note in crate::harness_checks::check_host(&host, &environment).await? {
+            for note in notes {
                 note_line(&logs, &definition.name, &note)?;
             }
             let host_directory = directory.join("hosts").join(&definition.name);

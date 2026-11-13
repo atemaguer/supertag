@@ -90,6 +90,7 @@ fn on_path(program: &str) -> bool {
 /// Sign-in probes run with the credentials the host will have, each harness and model once.
 struct SignIns {
     environment: local_config::Environment,
+    supervisor: harness_checks::Supervisor,
     results: Vec<(Found, Option<String>, bool)>,
 }
 
@@ -106,8 +107,12 @@ impl SignIns {
             "Checking {} sign-in with the Worker Host credentials...",
             harness.harness()
         );
-        let variables =
-            harness_checks::worker_variables(harness.check(), model, &self.environment)?;
+        let variables = harness_checks::worker_variables(
+            harness.check(),
+            model,
+            &self.environment,
+            self.supervisor,
+        )?;
         let signed_in = harness_checks::probe_sign_in(harness.check(), model, &variables)
             .await
             .signed_in;
@@ -309,6 +314,8 @@ pub async fn init(args: InitArgs) -> Result<()> {
         }
         let mut sign_ins = SignIns {
             environment: config.environment.clone(),
+            // A service unit carries no credential from this shell, so neither does the check.
+            supervisor: harness_checks::Supervisor::of(&config),
             results: Vec::new(),
         };
         let mut checked = Vec::new();
@@ -337,6 +344,8 @@ pub async fn init(args: InitArgs) -> Result<()> {
 
     let mut sign_ins = SignIns {
         environment: local_config::default_environment(&state)?,
+        // The supertag.yaml init writes runs a background supervisor, which inherits this shell.
+        supervisor: harness_checks::Supervisor::ThisProcess,
         results: Vec::new(),
     };
     let mut signed_in = Vec::new();

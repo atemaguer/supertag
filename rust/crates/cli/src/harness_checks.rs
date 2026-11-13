@@ -78,17 +78,53 @@ pub fn instructions(harness: Harness) -> &'static str {
     }
 }
 
-/// The variables a Worker Host lane would give `harness`: this process's identity and locale,
-/// and the harness's credentials from this process or the configured env_file.
+/// Where a Worker Host's supervisor gets its environment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Supervisor {
+    /// This process: the shell for `supertag sign-in` or `supertag init` with a background
+    /// supervisor, and the supervisor itself for its startup checks.
+    ThisProcess,
+    /// A per-user service unit (`restart: unless-stopped`), which carries only
+    /// `UNIT_VARIABLES` from this shell; every credential comes from env_file.
+    ServiceUnit,
+}
+
+impl Supervisor {
+    pub fn of(config: &crate::local_config::Config) -> Self {
+        if config.service_unit {
+            Self::ServiceUnit
+        } else {
+            Self::ThisProcess
+        }
+    }
+}
+
+/// The variables a Worker Host lane would give `harness`: the supervisor's identity and locale,
+/// and the harness's credentials from the supervisor's environment or the configured env_file.
 pub fn worker_variables(
     harness: Harness,
     model: Option<&str>,
     environment: &crate::local_config::Environment,
+    supervisor: Supervisor,
 ) -> Result<Variables> {
     let credentials = supertag_worker_host::provider_environment_for(harness.kind(), model)?;
-    Ok(probe::variables(credentials.iter().copied(), |name| {
-        environment.variable(name)
-    }))
+    Ok(match supervisor {
+        Supervisor::ThisProcess => probe::variables(
+            |name| std::env::var_os(name),
+            credentials.iter().copied(),
+            |name| environment.variable(name),
+        ),
+        Supervisor::ServiceUnit => probe::variables(
+            |name| {
+                crate::local_config::UNIT_VARIABLES
+                    .contains(&name)
+                    .then(|| std::env::var_os(name))
+                    .flatten()
+            },
+            credentials.iter().copied(),
+            |name| environment.unit_variable(name),
+        ),
+    })
 }
 
 /// The Cursor bridge this installation runs Cursor Tasks with.
@@ -197,16 +233,24 @@ pub struct SignInArgs {
 /// work, and say how to sign in when they do not.
 pub async fn sign_in(args: SignInArgs) -> Result<()> {
     let state = crate::local_config::state_directory(args.state_directory)?;
-    let environment = match crate::local_config::load(args.file, &state)? {
-        Some(config) => config.environment,
-        None => crate::local_config::default_environment(&state)?,
+    let (environment, supervisor) = match crate::local_config::load(args.file, &state)? {
+        Some(config) => (config.environment.clone(), Supervisor::of(&config)),
+        None => (
+            crate::local_config::default_environment(&state)?,
+            Supervisor::ThisProcess,
+        ),
     };
     if args.harness == Harness::Opencode && args.model.is_none() {
         bail!(
             "OpenCode needs a model to check sign-in. Run supertag sign-in opencode --model provider/model."
         );
     }
-    let variables = worker_variables(args.harness, args.model.as_deref(), &environment)?;
+    let variables = worker_variables(
+        args.harness,
+        args.model.as_deref(),
+        &environment,
+        supervisor,
+    )?;
     println!(
         "Checking {} sign-in with the Worker Host credentials...",
         args.harness.name()
@@ -242,7 +286,12 @@ pub async fn check_host(
     let mut failures = Vec::new();
     for (kind, _, model) in &host.harnesses {
         if *kind == HarnessKind::Codex {
-            let variables = worker_variables(Harness::Codex, model.as_deref(), environment)?;
+            let variables = worker_variables(
+                Harness::Codex,
+                model.as_deref(),
+                environment,
+                Supervisor::ThisProcess,
+            )?;
             if let Some(failure) =
                 models::check_cli(&models::CODEX, &variables, tokio::time::sleep(CLI_TIMEOUT)).await
             {
@@ -257,15 +306,18 @@ pub async fn check_host(
             failures.join("\n  ")
         );
     }
-    let mut notes = Vec::new();
-    for (kind, configured, model) in &host.harnesses {
-        let Some(harness) = Harness::of(*kind) else {
-            continue;
-        };
-        if configured.is_empty() {
-            continue;
-        }
-        let variables = worker_variables(harness, model.as_deref(), environment)?;
+    // The listings run together, so a host's checks take as long as its slowest listing.
+    let listings = host
+        .harnesses
+        .iter()
+        .filter_map(|(kind, configured, model)| {
+            let harness = Harness::of(*kind)?;
+            (!configured.is_empty()).then_some((harness, configured, model))
+        });
+    let checks = futures_util::future::join_all(listings.map(
+        async |(harness, configured, model)| -> Result<ModelCheck> {
+        let variables =
+            worker_variables(harness, model.as_deref(), environment, Supervisor::ThisProcess)?;
         let checked = match harness {
             Harness::Codex => {
                 // The listing uses the CLI's own sign-in, never an API key, so it cannot spend.
@@ -321,7 +373,12 @@ pub async fn check_host(
                     .into(),
             ),
         };
-        match checked {
+        Ok(checked)
+    }))
+    .await;
+    let mut notes = Vec::new();
+    for checked in checks {
+        match checked? {
             ModelCheck::Ok => {}
             ModelCheck::Failed(message) => failures.push(message),
             ModelCheck::Skipped(note) => notes.push(note),

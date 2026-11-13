@@ -349,7 +349,7 @@ pub async fn opencode(variables: &Variables, model: &str, stop: impl Future<Outp
     .into_iter()
     .map(OsString::from)
     .collect();
-    let Ok((_, stdout)) = probe::output(
+    let Ok((status, stdout)) = probe::output(
         &executable,
         &args,
         &environment,
@@ -362,6 +362,10 @@ pub async fn opencode(variables: &Variables, model: &str, stop: impl Future<Outp
     else {
         return false;
     };
+    // As TypeScript's execFile, a failed exit is not sign-in whatever it printed.
+    if !status.success() {
+        return false;
+    }
     let mut text = false;
     let mut stopped = false;
     for line in stdout.split(|byte| *byte == b'\n') {
@@ -667,6 +671,13 @@ done"#,
             temporary.path(),
             "opencode",
             r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"error"}'; echo '{"type":"step_finish","part":{"reason":"stop"}}'"#,
+        );
+        assert!(!opencode(&variables, "openai/model", std::future::pending()).await);
+        // A complete answer from a failed run is not sign-in either.
+        recording(
+            temporary.path(),
+            "opencode",
+            r#"echo '{"type":"text","part":{"text":"OK"}}'; echo '{"type":"step_finish","part":{"reason":"stop"}}'; exit 1"#,
         );
         assert!(!opencode(&variables, "openai/model", std::future::pending()).await);
     }

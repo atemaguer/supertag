@@ -4,7 +4,7 @@ mod environment;
 use crate::harness::AdapterOptions;
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
-pub use environment::Environment;
+pub use environment::{Environment, UNIT_VARIABLES};
 use serde::Deserialize;
 use std::{
     cell::RefCell,
