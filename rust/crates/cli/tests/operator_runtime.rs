@@ -831,7 +831,8 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters() -> Result<()> 
         ("first-tag", "first-fixture-token"),
         ("second-tag", "second-fixture-token"),
     ] {
-        let private_token = Uuid::new_v4().to_string();
+        let private_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut control = control_plane(&private_token, token, "operator:tui");
         control.env(
             "SUPERTAG_DATABASE_URL",
