@@ -4,9 +4,9 @@ use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     output_policy::REQUIRED_OUTPUT_MISSING,
     task_artifact_inputs::input_root,
-    v2::{HostRecord, Task},
+    v2::{HostRecord, RemoteWorkspaceEnvironment, Task},
 };
-use supertag_workspaces::TransferArtifact;
+use supertag_workspaces::{TransferArtifact, devcontainer::RemoteDevcontainer};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
@@ -28,6 +28,7 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
+    (mcp_commit, environment): (Option<&str>, Option<RemoteDevcontainer>),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
 ) -> Result<(RemoteProvider, Option<String>)> {
@@ -67,8 +68,23 @@ pub(crate) async fn prepare(
         .attempt_timeout
         .saturating_add(Duration::from_secs(180))
         .min(Duration::from_secs(3600));
+    let environment = environment.map(|environment| RemoteWorkspaceEnvironment {
+        image: environment.image,
+        dockerfile_commands: environment.dockerfile_commands,
+        user: environment.user,
+        setup_commands: environment.setup_commands,
+    });
+    let setup = environment
+        .as_ref()
+        .is_some_and(|environment| !environment.setup_commands.is_empty());
     let sandbox = provider
-        .allocate(&record.owner(), timeout, &allowed_actions, cancel)
+        .allocate(
+            &record.owner(),
+            timeout,
+            &allowed_actions,
+            environment,
+            cancel,
+        )
         .await?;
     journal.record_sandbox_active(&record, sandbox)?;
     provider
@@ -76,6 +92,8 @@ pub(crate) async fn prepare(
             &export.bundle,
             &export.checkout.start_commit,
             &inputs.files,
+            mcp_commit,
+            setup,
             cancel,
         )
         .await?;

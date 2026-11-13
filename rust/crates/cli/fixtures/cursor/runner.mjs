@@ -108,6 +108,7 @@ async function runFixture() {
         "remote-output-git-reference",
         "remote-input-producer",
         "remote-input-consumer",
+        "remote-mcp",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -121,8 +122,13 @@ async function runFixture() {
     const output = mode.startsWith("remote-output-");
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
     const remoteInputs = mode.startsWith("remote-input-");
+    const remoteMcp = mode === "remote-mcp";
     const writable =
-      writes || shared || remoteInputs || (output && mode !== "remote-output-readonly");
+      writes ||
+      shared ||
+      remoteInputs ||
+      remoteMcp ||
+      (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
@@ -205,7 +211,75 @@ async function runFixture() {
       });
       assert.equal(blocked.isError, true);
     }
-    if (mode === "remote-input-consumer") {
+    if (remoteMcp) {
+      // The Task rewrites the server, its marker, and .mcp.json in its own checkout.
+      for (const [file_path, content] of [
+        ["marker.txt", "task\n"],
+        ["mcp-server.js", "process.exit(7);\n"],
+        [".mcp.json", '{"mcpServers":{"tools":{"command":"sh","args":["-c","exit 7"]}}}'],
+      ])
+        assert.equal((await call("write", { file_path, content })).isError, false);
+      const servers = request.mcpServers;
+      // Only the Task's granted server joins the Worker Host's own coordination server.
+      assert.deepEqual(
+        Object.keys(servers).filter((name) => name !== "supertag"),
+        ["tools"],
+      );
+      const server = servers.tools;
+      assert.equal(server.type, "http");
+      assert.match(server.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/tools$/u);
+      // The harness sees neither the command nor where it runs.
+      assert.ok(!JSON.stringify(server).includes("mcp-server.js"));
+      let session;
+      let id = 0;
+      const rpc = async (method, params, notification = false) => {
+        const response = await fetch(server.url, {
+          method: "POST",
+          headers: {
+            ...server.headers,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...(session ? { "mcp-session-id": session } : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method,
+            params,
+            ...(notification ? {} : { id: ++id }),
+          }),
+        });
+        session ??= response.headers.get("mcp-session-id") ?? undefined;
+        if (notification) return undefined;
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.error, undefined, JSON.stringify(body.error));
+        return body.result;
+      };
+      await rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "cursor-fixture", version: "1" },
+      });
+      await rpc("notifications/initialized", {}, true);
+      const listed = (await rpc("tools/list", {})).tools.map(({ name }) => name);
+      const tool = async (name) => {
+        const result = await rpc("tools/call", { name, arguments: {} });
+        return { isError: result.isError === true, text: result.content?.[0]?.text };
+      };
+      const first = await tool("read_marker");
+      const approval = await tool("write_note");
+      const hidden = await tool("hidden");
+      const again = await tool("read_marker");
+      await trace({
+        type: "mcp",
+        listed,
+        toolNames: server.toolNames,
+        first,
+        approval,
+        hidden,
+        again,
+      });
+    } else if (mode === "remote-input-consumer") {
       const evidence =
         /inputs\/[0-9a-f]{64}\/artifact-[0-9a-f]{64}\/(?:[\w-]+\/)*evidence\.txt/u.exec(
           request.prompt,

@@ -6074,6 +6074,11 @@ class RemoteWorkspaceProviderStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.FromString,
                 _registered_method=True)
+        self.RunMcpServer = channel.stream_stream(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
+                _registered_method=True)
 
 
 class RemoteWorkspaceProviderServicer:
@@ -6105,6 +6110,15 @@ class RemoteWorkspaceProviderServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RunMcpServer(self, request_iterator, context):
+        """One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
+        The first input is the start record; later inputs are its stdin. Outputs are its stdout.
+        Ending or cancelling the call stops the server process, never the sandbox.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -6127,6 +6141,11 @@ def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
                     servicer.Stop,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.SerializeToString,
+            ),
+            'RunMcpServer': grpc.stream_stream_rpc_method_handler(
+                    servicer.RunMcpServer,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -6239,6 +6258,33 @@ class RemoteWorkspaceProvider:
             '/supertag.runtime.v2.RemoteWorkspaceProvider/Stop',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RunMcpServer(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
             options,
             channel_credentials,
             insecure,

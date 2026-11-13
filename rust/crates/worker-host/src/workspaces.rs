@@ -283,6 +283,21 @@ impl Workspaces {
             .await
     }
 
+    /// The remote sandbox translated from the base commit's devcontainer subset, if any.
+    /// Refusals name the property, before any provider call.
+    pub(crate) async fn remote_environment(
+        &self,
+        prepared: &PreparedWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<Option<supertag_workspaces::devcontainer::RemoteDevcontainer>> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .trusted_devcontainer(cancel)
+            .await?
+            .as_ref()
+            .map(supertag_workspaces::devcontainer::remote_devcontainer)
+            .transpose()
+    }
+
     /// Removes an Attempt's MCP snapshot after its servers stopped; best effort.
     pub(crate) fn remove_mcp_snapshot(&self, prepared: &PreparedWorkspace) {
         if let Ok(workspace) = self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {

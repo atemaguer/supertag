@@ -3,21 +3,38 @@
 //! The process gets a minimal environment plus its catalog `env`, nothing else of the Worker
 //! Host's; its stderr is discarded so server output cannot carry that environment into logs. It
 //! runs in its own process group, which closing terminates: SIGTERM, then SIGKILL.
+//!
+//! A Workspace server of a remote Workspace runs inside the Task's sandbox instead, from the
+//! provider's trusted copy of the base commit. Its stdin and stdout cross the Worker Host's
+//! private provider stream; ending that stream stops the server, never the sandbox.
 
 use std::{process::Stdio, time::Duration};
 
 use serde_json::{Value, json};
+use supertag_protocol::{
+    MAX_MESSAGE_BYTES, authenticated_request,
+    v2::{
+        RemoteMcpServerInput, RemoteMcpServerStart, remote_mcp_server_input,
+        remote_workspace_provider_client::RemoteWorkspaceProviderClient,
+    },
+};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    process::{Child, Command},
+    sync::mpsc,
+    task::JoinHandle,
     time,
 };
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
-    Failure,
+    Failure, SandboxConnection,
     catalog::StdioServer,
     http::{PROTOCOL_VERSION, accepted_version, decode},
 };
+
+type Input = Box<dyn AsyncWrite + Send + Unpin>;
+type Output = BufReader<Box<dyn AsyncRead + Send + Unpin>>;
 
 /// The only Worker Host variables a stdio server inherits, as in the TypeScript Worker.
 const INHERITED: [&str; 11] = [
@@ -27,13 +44,16 @@ const INHERITED: [&str; 11] = [
 const MESSAGE_BYTES: usize = 256 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+const SANDBOX_CHUNK_BYTES: usize = 64 * 1024;
 
 pub(super) struct Session {
     child: Option<Child>,
     /// The server's process ID, which is also its process group ID.
     pid: Option<libc::pid_t>,
-    stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    /// A sandbox server's stream pump. It ends when the provider call does.
+    sandbox: Option<JoinHandle<()>>,
+    stdin: Option<Input>,
+    stdout: Output,
     next_id: u64,
     /// Set once the stream failed or a request went unanswered; nothing more is sent.
     broken: bool,
@@ -74,8 +94,85 @@ impl Session {
         Ok(Self {
             child: Some(child),
             pid,
-            stdin: Some(stdin),
-            stdout: BufReader::new(stdout),
+            sandbox: None,
+            stdin: Some(Box::new(stdin)),
+            stdout: BufReader::new(Box::new(stdout)),
+            next_id: 1,
+            broken: false,
+            unconfirmed_call: false,
+        })
+    }
+
+    /// Starts `command` inside the Task's sandbox, in the provider's trusted copy, with no
+    /// Worker Host variable. The provider refuses before staging or without a trusted copy.
+    pub(super) fn start_sandbox(
+        connection: &SandboxConnection,
+        name: &str,
+        command: &[String],
+    ) -> Result<Self, Failure> {
+        let (program, args) = command.split_first().ok_or(Failure::Unavailable)?;
+        let (sender, receiver) = mpsc::channel(4);
+        sender
+            .try_send(RemoteMcpServerInput {
+                part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
+                    name: name.to_owned(),
+                    command: program.clone(),
+                    args: args.to_vec(),
+                })),
+            })
+            .map_err(|_| Failure::Unavailable)?;
+        let request = authenticated_request(ReceiverStream::new(receiver), &connection.token, None)
+            .map_err(|_| Failure::Unavailable)?;
+        let mut client = RemoteWorkspaceProviderClient::new(connection.channel.clone())
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES);
+        let (input, mut pump_input) = tokio::io::duplex(SANDBOX_CHUNK_BYTES);
+        let (mut pump_output, output) = tokio::io::duplex(MESSAGE_BYTES);
+        let pump = tokio::spawn(async move {
+            // Input ends when the Session closes its stdin; the server then sees end of input.
+            let forward_input = async move {
+                let mut buffer = vec![0; SANDBOX_CHUNK_BYTES];
+                loop {
+                    match pump_input.read(&mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(size) => {
+                            let chunk = RemoteMcpServerInput {
+                                part: Some(remote_mcp_server_input::Part::Stdin(
+                                    buffer[..size].to_vec(),
+                                )),
+                            };
+                            if sender.send(chunk).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            };
+            let forward_output = async move {
+                let Ok(response) = client.run_mcp_server(request).await else {
+                    return;
+                };
+                let mut stream = response.into_inner();
+                while let Ok(Some(message)) = stream.message().await {
+                    if message.stdout.len() > MESSAGE_BYTES
+                        || pump_output.write_all(&message.stdout).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            };
+            // Output ending first means the server or the provider stopped it.
+            tokio::select! {
+                () = forward_output => {}
+                () = async { forward_input.await; std::future::pending::<()>().await } => {}
+            }
+        });
+        Ok(Self {
+            child: None,
+            pid: None,
+            sandbox: Some(pump),
+            stdin: Some(Box::new(input)),
+            stdout: BufReader::new(Box::new(output)),
             next_id: 1,
             broken: false,
             unconfirmed_call: false,
@@ -201,6 +298,13 @@ impl Session {
     pub(super) async fn close(&mut self) {
         self.broken = true;
         drop(self.stdin.take());
+        if let Some(mut pump) = self.sandbox.take() {
+            // End of input lets the server exit; ending the call makes the provider stop it.
+            if time::timeout(TERMINATE_GRACE, &mut pump).await.is_err() {
+                pump.abort();
+                let _ = pump.await;
+            }
+        }
         let Some(mut child) = self.child.take() else {
             return;
         };
@@ -236,6 +340,9 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.signal(libc::SIGKILL);
+        if let Some(pump) = self.sandbox.take() {
+            pump.abort();
+        }
     }
 }
 
@@ -266,6 +373,7 @@ mod tests {
             ],
             env: BTreeMap::from([("CATALOG_TOKEN".into(), "stdio-secret-value-7f3a".into())]),
             cwd: None,
+            sandboxed: false,
         }
     }
 
@@ -398,6 +506,7 @@ mod tests {
             command: vec!["/nonexistent/supertag-missing-mcp-server".into()],
             env: BTreeMap::new(),
             cwd: None,
+            sandboxed: false,
         };
         assert!(matches!(
             Session::start(&missing),

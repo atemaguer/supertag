@@ -151,6 +151,26 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
   }
 }
 
+/** A Workspace MCP server's stdin arrives in bounded chunks for as long as the server runs. */
+async function* boundedMcpInput<
+  T extends { part?: { case?: string | undefined; value?: unknown } },
+>(source: AsyncIterable<T>, limits: typeof MAXIMUM, context: HandlerContext): AsyncGenerator<T> {
+  try {
+    for await (const part of source) {
+      if (context.signal.aborted) throw cancelled();
+      const value = part.part?.value;
+      if (
+        part.part?.case === "stdin" &&
+        (!(value instanceof Uint8Array) || value.byteLength > limits.chunkBytes)
+      )
+        throw new ConnectError("Workspace MCP input exceeds its limit", Code.ResourceExhausted);
+      yield part;
+    }
+  } catch (error) {
+    throw safeError(error, context);
+  }
+}
+
 /** One private Host channel carries both lifecycle and scoped Workspace operations. */
 export async function startRemoteWorkspaceTransport(
   options: TransportOptions,
@@ -214,6 +234,16 @@ export async function startRemoteWorkspaceTransport(
           },
           stop: (request, context) =>
             invoke(context, () => options.provider.stop(request, context)),
+          runMcpServer: async function* (stream, context) {
+            try {
+              yield* options.provider.runMcpServer(
+                boundedMcpInput(stream, limits, context),
+                context,
+              );
+            } catch (error) {
+              throw safeError(error, context);
+            }
+          },
         });
         router.service(HarnessWorkspace, {
           execute: (request, context) =>

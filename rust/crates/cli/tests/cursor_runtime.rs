@@ -284,13 +284,25 @@ impl<'a> Runtime<'a> {
         harness: HarnessKind,
         actions: &[&str],
     ) -> Result<()> {
+        self.tag_with_mcp(fixture, tag_id, harness, actions, &[])
+            .await
+    }
+
+    async fn tag_with_mcp(
+        &mut self,
+        fixture: &Fixture,
+        tag_id: &str,
+        harness: HarnessKind,
+        actions: &[&str],
+        mcp_servers: &[&str],
+    ) -> Result<()> {
         self.operator
             .put_tag(self.credentials.request(PutTagRequest {
                 tag_id: tag_id.into(),
                 instructions: "Follow the fixture Task with its admitted tools.".into(),
                 allowed_actions: actions.iter().map(|action| (*action).into()).collect(),
                 workspace: Some(WorkspaceSpec {
-                    mcp_servers: vec![],
+                    mcp_servers: mcp_servers.iter().map(|name| (*name).into()).collect(),
                     mounts: vec![],
                     workspace_id: WORKSPACE.into(),
                     base_commit: fixture.base.clone(),
@@ -299,6 +311,46 @@ impl<'a> Runtime<'a> {
                 harness_kind: harness as i32,
                 ..Default::default()
             })?)
+            .await?;
+        Ok(())
+    }
+
+    /// Runs one operator CLI command against this runtime's Gateway.
+    async fn cli(&self, args: &[&str]) -> Result<Value> {
+        let (subcommand, args) = args.split_first().context("operator subcommand required")?;
+        let output = self
+            .credentials
+            .command(&[subcommand, "--gateway", &self.endpoint])
+            .args(args)
+            .output()
+            .await?;
+        ensure!(
+            output.status.success(),
+            "operator command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    }
+
+    /// Grants `permissions` to `tag_id` through a role.
+    async fn grant(&self, directory: &Path, tag_id: &str, permissions: Value) -> Result<()> {
+        let set = directory.join(format!("{tag_id}-grants.json"));
+        std::fs::write(
+            &set,
+            json!({"set_id": format!("{tag_id}-grants"), "name": format!("{tag_id}-grants"), "permissions": permissions})
+                .to_string(),
+        )?;
+        let role = directory.join(format!("{tag_id}-role.json"));
+        std::fs::write(
+            &role,
+            json!({"role_id": format!("{tag_id}-role"), "name": format!("{tag_id}-role"), "purpose": "Use Workspace MCP tools", "permission_set_ids": [format!("{tag_id}-grants")]})
+                .to_string(),
+        )?;
+        let set = set.to_str().context("permission set path")?;
+        let role = role.to_str().context("role path")?;
+        self.cli(&["policy", "put", "permission-set", set]).await?;
+        self.cli(&["policy", "put", "role", role]).await?;
+        self.cli(&["policy", "assign", &format!("{tag_id}-role"), tag_id])
             .await?;
         Ok(())
     }
@@ -553,6 +605,18 @@ database_tests! {
     cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint;
     #[tokio::test]
     cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed;
+    #[tokio::test]
+    cursor_e2b_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy;
+    #[tokio::test]
+    cursor_modal_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy;
+    #[tokio::test]
+    cursor_remote_workspace_refuses_a_stdio_mcp_credential_before_any_provider_call;
+    #[tokio::test]
+    cursor_e2b_workspace_builds_and_sets_up_the_trusted_devcontainer;
+    #[tokio::test]
+    cursor_modal_workspace_builds_and_sets_up_the_trusted_devcontainer;
+    #[tokio::test]
+    cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call;
 }
 
 async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
@@ -706,6 +770,447 @@ async fn cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_cred
     database: String,
 ) -> Result<()> {
     remote_workspace_round_trip(RemoteWorkspace::Modal, &database).await
+}
+
+async fn cursor_e2b_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy(
+    database: String,
+) -> Result<()> {
+    sandbox_mcp(RemoteWorkspace::E2b, &database).await
+}
+
+async fn cursor_modal_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy(
+    database: String,
+) -> Result<()> {
+    sandbox_mcp(RemoteWorkspace::Modal, &database).await
+}
+
+/// A dependency-free stdio MCP server. `read_marker` reports `marker.txt` in its working
+/// directory, how many times `write_note` ran, and any credential-like variable it can see.
+fn mcp_server(tools: &[&str]) -> String {
+    format!(
+        r#"const fs = require("node:fs");
+const readline = require("node:readline");
+let writes = 0;
+readline.createInterface({{ input: process.stdin }}).on("line", (line) => {{
+  const message = JSON.parse(line);
+  if (message.id === undefined) return;
+  let result;
+  if (message.method === "initialize")
+    result = {{ protocolVersion: "2025-06-18", capabilities: {{ tools: {{}} }}, serverInfo: {{ name: "t", version: "1" }} }};
+  else if (message.method === "tools/list")
+    result = {{ tools: {tools}.map((name) => ({{ name, inputSchema: {{ type: "object" }} }})) }};
+  else {{
+    if (message.params.name === "write_note") writes += 1;
+    const leaked = Object.keys(process.env).filter((key) => /TOKEN|SECRET|CANARY|PASSWORD|KEY/.test(key));
+    result = {{ content: [{{ type: "text", text: [fs.readFileSync("marker.txt", "utf8").trim(), "writes=" + writes, "leaked=" + leaked.join(",")].join("|") }}] }};
+  }}
+  process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: message.id, result }}) + "\n");
+}});
+"#,
+        tools = serde_json::to_string(tools).expect("tool names")
+    )
+}
+
+/// Commits a `.mcp.json`, its server, and a marker on top of the fixture base.
+async fn commit_mcp(fixture: &mut Fixture) -> Result<()> {
+    std::fs::write(
+        fixture.source.join(".mcp.json"),
+        json!({"mcpServers": {
+            "tools": {"command": "node", "args": ["mcp-server.js"]},
+            "docs": {"type": "http", "url": "https://docs.example.test/mcp", "headers": {"Authorization": "Bearer ${SUPERTAG_MCP_DOCS_TOKEN}"}},
+            "db": {"command": "node", "args": ["db.js"], "env": {"DB_TOKEN": "${SUPERTAG_MCP_DB_TOKEN}"}}
+        }})
+        .to_string(),
+    )?;
+    std::fs::write(
+        fixture.source.join("mcp-server.js"),
+        mcp_server(&["read_marker", "write_note", "hidden"]),
+    )?;
+    std::fs::write(fixture.source.join("marker.txt"), "trusted\n")?;
+    git(
+        &fixture.source,
+        &["add", ".mcp.json", "mcp-server.js", "marker.txt"],
+    )
+    .await?;
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Add a repository MCP server"],
+    )
+    .await?;
+    fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]).await?;
+    Ok(())
+}
+
+/// The Task's Workspace selects a repository stdio server. On a remote Workspace it runs inside
+/// the sandbox, from the provider's trusted copy of the base commit beside the checkout, with no
+/// Worker Host variable, behind the Worker Host's grants and approvals. The Task's own edits to
+/// the server, its marker, and `.mcp.json` change nothing it runs.
+async fn sandbox_mcp(provider: RemoteWorkspace, database: &str) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_mcp(&mut fixture).await?;
+    std::fs::write(
+        fixture.root.join("provider-kind"),
+        match provider {
+            RemoteWorkspace::E2b => "e2b",
+            RemoteWorkspace::Modal => "modal",
+        },
+    )?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
+    runtime
+        .tag_with_mcp(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+            &["tools"],
+        )
+        .await?;
+    runtime
+        .grant(
+            &fixture.root,
+            TAG,
+            json!([
+                {"target": "mcp", "action": "tools/read_marker"},
+                {"target": "mcp", "action": "tools/write_note", "approval_required": true}
+            ]),
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-mcp").await?;
+    let mut worker = runtime.worker_command(&fixture, "remote-mcp");
+    worker
+        .arg("--workspace-id")
+        .arg(WORKSPACE)
+        .arg("--workspace-source")
+        .arg(&fixture.source)
+        .arg(match provider {
+            RemoteWorkspace::E2b => "--e2b-workspace-provider",
+            RemoteWorkspace::Modal => "--modal-workspace-provider",
+        })
+        .arg(&fixture.node)
+        .arg(match provider {
+            RemoteWorkspace::E2b => "--e2b-workspace-provider-arg",
+            RemoteWorkspace::Modal => "--modal-workspace-provider-arg",
+        })
+        .arg(fixture.root.join("remote-provider.mjs"))
+        .env("E2B_API_KEY", "synthetic-e2b-provider-key")
+        .env("E2B_DOMAIN", "fixture.e2b.invalid")
+        .env("SUPERTAG_E2B_TEMPLATE", "fixture-template")
+        .env("SUPERTAG_MCP_CANARY", "host-canary")
+        .env("GITHUB_TOKEN", "host-canary");
+    worker_finished(worker.spawn()?, &fixture).await?;
+
+    let trace = fixture.trace()?;
+    let Some(calls) = trace.iter().find(|entry| entry["type"] == "mcp") else {
+        anyhow::bail!(
+            "the fixture made no MCP calls: {trace:?}; Task: {:?}; provider: {:?}",
+            runtime.task(&task.task_id).await?,
+            fixture.provider_trace()?
+        );
+    };
+    // Only granted tools reach the harness, and the server runs from the trusted copy: the
+    // Task's rewrite of its marker and script changes nothing, and it sees no host variable.
+    assert_eq!(calls["listed"], json!(["read_marker", "write_note"]));
+    assert_eq!(calls["toolNames"], json!(["read_marker", "write_note"]));
+    assert_eq!(
+        calls["first"],
+        json!({"isError": false, "text": "trusted|writes=0|leaked="})
+    );
+    // The approval-gated call and the ungranted tool never reached the server.
+    assert_eq!(calls["approval"]["isError"], true, "{calls}");
+    assert!(
+        calls["approval"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("requires approval")),
+        "{calls}"
+    );
+    assert_eq!(calls["hidden"]["isError"], true, "{calls}");
+    assert_eq!(calls["again"], calls["first"]);
+
+    let provider_trace = fixture.provider_trace()?;
+    let stage = provider_trace
+        .iter()
+        .find(|entry| entry["type"] == "stage")
+        .context("provider never staged")?;
+    assert_eq!(stage["mcpCommit"], fixture.base);
+    let starts: Vec<_> = provider_trace
+        .iter()
+        .filter(|entry| entry["type"] == "mcp-start")
+        .collect();
+    assert_eq!(starts.len(), 1, "{provider_trace:?}");
+    assert_eq!(starts[0]["name"], "tools");
+    assert_eq!(starts[0]["command"], "node");
+    assert_eq!(starts[0]["args"], json!(["mcp-server.js"]));
+    let allocation = stage["allocationId"].as_str().context("allocation")?;
+    let copy = fixture
+        .root
+        .join("remote-allocations")
+        .join(allocation)
+        .join("mcp");
+    assert_eq!(starts[0]["cwd"], copy.display().to_string());
+    assert_eq!(
+        std::fs::read_to_string(copy.join("marker.txt"))?,
+        "trusted\n"
+    );
+    // The server stopped before capture, and the sandbox stopped after it.
+    let order: Vec<_> = provider_trace
+        .iter()
+        .filter_map(|entry| entry["type"].as_str())
+        .filter(|kind| ["mcp-stop", "capture", "stop"].contains(kind))
+        .collect();
+    assert_eq!(order.first(), Some(&"mcp-stop"), "{provider_trace:?}");
+    assert_eq!(order.last(), Some(&"stop"), "{provider_trace:?}");
+    // The Worker Host's own MCP snapshot is gone, and no host value reached the provider.
+    let serialized = serde_json::to_string(&provider_trace)?;
+    assert!(!serialized.contains("host-canary"));
+    let task = runtime.task(&task.task_id).await?;
+    let result = task.result.clone().unwrap_or_default();
+    assert!(secret_free(&result), "{result}");
+    // The Attempt finished; the write_note call waits for its decision, never having run.
+    assert_eq!(task.state(), TaskState::Succeeded, "{task:?}");
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(&runtime.database).await?;
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_approvals WHERE attempt_id=$1 AND state=1 AND action LIKE 'mcp:%'",
+    )
+    .bind(task.attempt_id.as_deref().context("Attempt")?)
+    .fetch_one(&mut connection)
+    .await?;
+    assert_eq!(pending, 1);
+    runtime.stop().await
+}
+
+async fn cursor_remote_workspace_refuses_a_stdio_mcp_credential_before_any_provider_call(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_mcp(&mut fixture).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag_with_mcp(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+            &["db", "tools"],
+        )
+        .await?;
+    runtime
+        .grant(
+            &fixture.root,
+            TAG,
+            json!([
+                {"target": "mcp", "action": "tools/read_marker"},
+                {"target": "mcp", "action": "db/query"}
+            ]),
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-mcp").await?;
+    let mut worker = runtime.worker_command(&fixture, "refused");
+    worker
+        .arg("--workspace-id")
+        .arg(WORKSPACE)
+        .arg("--workspace-source")
+        .arg(&fixture.source)
+        .arg("--e2b-workspace-provider")
+        .arg(&fixture.node)
+        .arg("--e2b-workspace-provider-arg")
+        .arg(fixture.root.join("remote-provider.mjs"))
+        .env("E2B_API_KEY", "synthetic-e2b-provider-key")
+        .env("E2B_DOMAIN", "fixture.e2b.invalid")
+        .env("SUPERTAG_E2B_TEMPLATE", "fixture-template")
+        .env("SUPERTAG_MCP_DB_TOKEN", "db-canary-token");
+    worker_finished(worker.spawn()?, &fixture).await?;
+    let task = runtime.task(&task.task_id).await?;
+    assert_eq!(task.state(), TaskState::Failed, "{task:?}");
+    let result = task.result.clone().unwrap_or_default();
+    assert!(
+        result.contains("Workspace MCP server db references host credential SUPERTAG_MCP_DB_TOKEN in its env, but E2B runs Workspace stdio servers inside the Task's sandbox"),
+        "{result}"
+    );
+    assert!(!result.contains("db-canary-token"), "{result}");
+    // Neither the provider helper nor the harness started.
+    assert!(fixture.provider_trace()?.is_empty());
+    assert!(fixture.trace()?.is_empty());
+    runtime.stop().await
+}
+
+/// Commits a devcontainer subset on top of the fixture base; `.setup-*` files are ignored.
+async fn commit_devcontainer(fixture: &mut Fixture, json: &Value, dockerfile: &str) -> Result<()> {
+    std::fs::create_dir_all(fixture.source.join(".devcontainer"))?;
+    std::fs::write(
+        fixture.source.join(".devcontainer/devcontainer.json"),
+        json.to_string(),
+    )?;
+    std::fs::write(fixture.source.join(".devcontainer/Dockerfile"), dockerfile)?;
+    std::fs::write(fixture.source.join(".gitignore"), ".setup-*\n")?;
+    git(&fixture.source, &["add", ".devcontainer", ".gitignore"]).await?;
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Add a devcontainer"],
+    )
+    .await?;
+    fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]).await?;
+    Ok(())
+}
+
+async fn cursor_e2b_workspace_builds_and_sets_up_the_trusted_devcontainer(
+    database: String,
+) -> Result<()> {
+    remote_devcontainer(RemoteWorkspace::E2b, &database).await
+}
+
+async fn cursor_modal_workspace_builds_and_sets_up_the_trusted_devcontainer(
+    database: String,
+) -> Result<()> {
+    remote_devcontainer(RemoteWorkspace::Modal, &database).await
+}
+
+/// The base commit's devcontainer becomes the sandbox: its Dockerfile on the registry image, the
+/// Dockerfile's last USER as the image's user (so it owns the checkout and the trusted MCP copy),
+/// and all three lifecycle commands in the checkout after staging, with `${workspaceFolder}`
+/// naming the provider's checkout. Setup output the repository ignores is never delivered.
+async fn remote_devcontainer(provider: RemoteWorkspace, database: &str) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_devcontainer(
+        &mut fixture,
+        &json!({
+            "build": {"dockerfile": "Dockerfile", "args": {"PY": "3.13"}},
+            "containerEnv": {"TOOL_HOME": "${workspaceFolder}/.tool"},
+            "remoteEnv": {"GREETING": "it's ${containerEnv:TOOL_HOME}"},
+            "onCreateCommand": "echo created >> .setup-log",
+            "updateContentCommand": ["sh", "-c", "printf '%s|%s\\n' \"$TOOL_HOME\" \"$GREETING\" > .setup-env"],
+            "postCreateCommand": {"b": "echo post-b >> .setup-log", "a": "echo post-a >> .setup-log"},
+            "forwardPorts": [3000]
+        }),
+        "ARG PY=3.12\nFROM python:${PY}-slim\nRUN true\nUSER root\nUSER nobody\n",
+    )
+    .await?;
+    std::fs::write(
+        fixture.root.join("provider-kind"),
+        match provider {
+            RemoteWorkspace::E2b => "e2b",
+            RemoteWorkspace::Modal => "modal",
+        },
+    )?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-first").await?;
+    let worker = runtime.worker_with_remote(&fixture, "remote-first", false, Some(provider))?;
+    runtime
+        .wait_stream(&fixture, &task.task_id, "remote-first")
+        .await?;
+    let runner = pid(&fixture.started("remote-first")?, "pid")?;
+    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+    worker_finished(worker, &fixture).await?;
+    let task = runtime
+        .assert_success(&task.task_id, "remote-first")
+        .await?;
+    // Only the Task's own edit is delivered; the ignored setup output stays in the sandbox.
+    let delivery = task
+        .workspace_delivery
+        .as_ref()
+        .context("remote delivery missing")?;
+    ensure!(
+        delivery.committed && delivery.changed_files == 1,
+        "{delivery:?}"
+    );
+
+    let trace = fixture.provider_trace()?;
+    let environment = &trace
+        .iter()
+        .find(|entry| entry["type"] == "environment")
+        .with_context(|| format!("no devcontainer environment reached the provider: {trace:?}"))?["environment"];
+    assert_eq!(environment["image"], "python:3.13-slim");
+    assert_eq!(environment["user"], "nobody");
+    let commands: Vec<&str> = environment["dockerfileCommands"]
+        .as_array()
+        .context("Dockerfile commands")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(commands[..3], ["RUN true", "USER root", "USER nobody"]);
+    // Tools for staging install as root, then the image ends as the devcontainer's user.
+    assert_eq!(commands[3], "USER root");
+    assert!(commands[4].contains("python3"), "{commands:?}");
+    assert_eq!(commands[5..], ["USER nobody"]);
+    let order = |kind: &str| trace.iter().position(|entry| entry["type"] == kind);
+    // The image is built before the sandbox exists; setup runs only once it is staged.
+    assert!(order("environment") < order("allocate"));
+    assert!(order("allocate") < order("setup"));
+    let setup = trace
+        .iter()
+        .find(|entry| entry["type"] == "setup")
+        .context("setup never ran")?;
+    let checkout = PathBuf::from(setup["checkout"].as_str().context("checkout")?);
+    assert_eq!(
+        std::fs::read_to_string(checkout.join(".setup-log"))?,
+        "created\npost-a\npost-b\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(checkout.join(".setup-env"))?,
+        format!("{0}/.tool|it's {0}/.tool\n", checkout.display())
+    );
+    // Nothing from the Worker Host's environment reached the provider.
+    let serialized = serde_json::to_string(&trace)?;
+    assert!(!serialized.contains(&fixture.source.display().to_string()));
+    runtime.stop().await
+}
+
+/// A Dockerfile USER that is not a literal name is refused before any provider call, even when
+/// remoteUser would override it, and the refusal names the rule.
+async fn cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_devcontainer(
+        &mut fixture,
+        &json!({"remoteUser": "nobody", "build": {"dockerfile": "Dockerfile"}}),
+        "FROM python:3.13-slim\nARG NAME=nobody\nUSER $NAME\n",
+    )
+    .await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-first").await?;
+    worker_finished(
+        runtime.worker_with_remote(&fixture, "refused", false, Some(RemoteWorkspace::E2b))?,
+        &fixture,
+    )
+    .await?;
+    let task = runtime.task(&task.task_id).await?;
+    assert_eq!(task.state(), TaskState::Failed, "{task:?}");
+    let result = task.result.clone().unwrap_or_default();
+    assert!(
+        result.contains(
+            "Remote Workspace devcontainer: devcontainer build.dockerfile USER must name a literal user or user:group"
+        ),
+        "{result}"
+    );
+    // Neither the provider helper nor the harness started.
+    assert!(fixture.provider_trace()?.is_empty());
+    assert!(fixture.trace()?.is_empty());
+    runtime.stop().await
 }
 
 async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) -> Result<()> {

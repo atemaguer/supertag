@@ -2,6 +2,7 @@ import { sandboxExecutionEnvironment } from "@supertag/worker-sdk";
 import {
   createSandboxWorkspaceSession,
   MAX_TRANSFER,
+  type SandboxEnvironment,
   type SandboxWorkspaceSession,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { ModalClient } from "modal";
@@ -39,6 +40,8 @@ export interface ModalWorkspaceScope {
     readonly tags: Record<string, string>;
     readonly timeoutMs: number;
     readonly blockNetwork: true;
+    /** A devcontainer image: Dockerfile layers on its registry image or the configured one. */
+    readonly image?: Pick<SandboxEnvironment, "image" | "dockerfileCommands">;
   }): Promise<ModalSandboxClient>;
   close(): void;
 }
@@ -66,10 +69,13 @@ async function openNativeScope(): Promise<ModalWorkspaceScope> {
     const app = await client.apps.fromName(appName, { createIfMissing: false });
     return {
       inventory: modalSandboxInventory(client, { appId: app.appId, environment }),
-      async create(params) {
-        const image = /^im-(?:[A-Za-z0-9]{22}|[A-Za-z0-9]{26})$/u.test(imageName)
-          ? await client.images.fromId(imageName)
-          : await client.images.fromRegistry(imageName);
+      async create({ image: devcontainer, ...params }) {
+        const name = devcontainer?.image ?? imageName;
+        let image = /^im-(?:[A-Za-z0-9]{22}|[A-Za-z0-9]{26})$/u.test(name)
+          ? await client.images.fromId(name)
+          : client.images.fromRegistry(name);
+        if (devcontainer && devcontainer.dockerfileCommands.length > 0)
+          image = await image.dockerfileCommands([...devcontainer.dockerfileCommands]).build(app);
         return client.sandboxes.create(app, image, params);
       },
       close: () => client.close(),
@@ -176,7 +182,7 @@ export function createModalWorkspaceSession(
   const session = createSandboxWorkspaceSession({
     label: "Modal",
     validateOwner: sandboxOwnershipMetadata,
-    async allocate(owner, timeoutMs, signal) {
+    async allocate(owner, timeoutMs, signal, environment) {
       const connection = await withSignal(open, signal);
       const sandbox = await withSignal(
         () =>
@@ -185,6 +191,14 @@ export function createModalWorkspaceSession(
             tags: { ...sandboxOwnershipMetadata(owner) },
             timeoutMs: Math.min(Math.ceil(timeoutMs / 1000) * 1000, MAX_LIFETIME_MS),
             blockNetwork: true,
+            ...(environment && environment.dockerfileCommands.length > 0
+              ? {
+                  image: {
+                    ...(environment.image === undefined ? {} : { image: environment.image }),
+                    dockerfileCommands: environment.dockerfileCommands,
+                  },
+                }
+              : {}),
           }),
         signal,
       );

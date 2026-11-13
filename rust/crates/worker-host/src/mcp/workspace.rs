@@ -59,10 +59,15 @@ enum Declared<'a> {
 impl WorkspaceMcp {
     /// Reads the `names` servers from `.mcp.json` in `snapshot`, which must be a Worker-owned
     /// snapshot of the Task's base commit. `variables` supplies `SUPERTAG_MCP_*` values.
+    ///
+    /// `sandbox` names the remote Workspace provider whose sandbox runs the stdio servers. There
+    /// the Task could read a server's environment, so a stdio server that references a host
+    /// variable is refused, naming it, before its value is read.
     pub(crate) fn resolve(
         snapshot: &Path,
         names: &BTreeSet<&str>,
         variables: impl Fn(&str) -> Option<String>,
+        sandbox: Option<&str>,
     ) -> Result<Self> {
         let path = snapshot.join(".mcp.json");
         let document = read_config(&path)?;
@@ -86,7 +91,7 @@ impl WorkspaceMcp {
             let stdio = entry.contains_key("command")
                 || entry.get("type").and_then(Value::as_str) == Some("stdio");
             let (transport, declaration) = if stdio {
-                stdio_server(name, entry, snapshot, &variables, &mut secrets)?
+                stdio_server(name, entry, (snapshot, sandbox), &variables, &mut secrets)?
             } else {
                 http_server(name, entry, &variables, &mut secrets)?
             };
@@ -110,6 +115,9 @@ impl WorkspaceMcp {
             // The resolved launch, without the snapshot path: an approval stays bound to it
             // across the Task's Attempts and its continuations.
             match &transport {
+                Transport::Stdio(stdio) if stdio.sandboxed => {
+                    identity.update(serde_json::to_vec(&("sandbox-stdio", &stdio.command))?)
+                }
                 Transport::Stdio(stdio) => {
                     identity.update(serde_json::to_vec(&("stdio", &stdio.command, &stdio.env))?)
                 }
@@ -152,6 +160,15 @@ impl WorkspaceMcp {
                 servers: capabilities,
             },
         })
+    }
+}
+
+impl WorkspaceMcp {
+    /// Whether a selected stdio server runs inside a remote Workspace's sandbox.
+    pub(crate) fn sandboxed(&self) -> bool {
+        self.servers
+            .values()
+            .any(|server| matches!(&server.transport, Transport::Stdio(stdio) if stdio.sandboxed))
     }
 }
 
@@ -279,7 +296,7 @@ fn sole_reference(value: &str) -> Option<&str> {
 fn stdio_server(
     name: &str,
     entry: &Map<String, Value>,
-    snapshot: &Path,
+    (snapshot, sandbox): (&Path, Option<&str>),
     variables: &impl Fn(&str) -> Option<String>,
     secrets: &mut BTreeSet<String>,
 ) -> Result<(Transport, Declaration)> {
@@ -313,6 +330,33 @@ fn stdio_server(
                 "Workspace MCP server {name} env must map variable names to references like ${{SUPERTAG_MCP_NAME}}; literal values are not allowed"
             )
         })?;
+    if let Some(provider) = sandbox {
+        let variables: BTreeSet<_> = declared_env
+            .values()
+            .filter_map(|value| sole_reference(value))
+            .collect();
+        ensure!(
+            variables.is_empty(),
+            "Workspace MCP server {name} references host credential {} in its env, but {provider} runs Workspace stdio servers inside the Task's sandbox, where the Task could read it. Run this Workspace on a local Worker Host, or serve {name} over HTTP so its credential stays on the Worker Host",
+            variables.into_iter().collect::<Vec<_>>().join(", ")
+        );
+        // The provider resolves the command in its trusted copy of the base commit.
+        let mut launch = vec![command.to_owned()];
+        launch.extend(args.iter().cloned());
+        return Ok((
+            Transport::Stdio(StdioServer {
+                command: launch,
+                env: BTreeMap::new(),
+                cwd: None,
+                sandboxed: true,
+            }),
+            Declaration::Stdio {
+                command: command.to_owned(),
+                args,
+                env: declared_env,
+            },
+        ));
+    }
     let mut env = BTreeMap::new();
     for (key, value) in &declared_env {
         let resolved = expand(value, name, variables)?;
@@ -336,6 +380,7 @@ fn stdio_server(
             command: launch,
             env,
             cwd: Some(PathBuf::from(snapshot)),
+            sandboxed: false,
         }),
         Declaration::Stdio {
             command: command.to_owned(),
@@ -453,7 +498,7 @@ mod tests {
         }});
         let directory = snapshot(&config);
         let names = BTreeSet::from(["docs", "local", "script"]);
-        let resolved = WorkspaceMcp::resolve(directory.path(), &names, variables).unwrap();
+        let resolved = WorkspaceMcp::resolve(directory.path(), &names, variables, None).unwrap();
         assert_eq!(
             resolved.servers.keys().collect::<Vec<_>>(),
             ["docs", "local", "script"]
@@ -485,11 +530,16 @@ mod tests {
         assert!(digest.starts_with("sha256:") && digest.len() == 71);
         assert_eq!(resolved.record.servers.len(), 3);
         // Another value of a referenced variable keeps the digest; the launch binding changes.
-        let other = WorkspaceMcp::resolve(directory.path(), &names, |name| {
-            (name == "SUPERTAG_MCP_TOKEN")
-                .then(|| "another-token-value-1234".into())
-                .or_else(|| variables(name))
-        })
+        let other = WorkspaceMcp::resolve(
+            directory.path(),
+            &names,
+            |name| {
+                (name == "SUPERTAG_MCP_TOKEN")
+                    .then(|| "another-token-value-1234".into())
+                    .or_else(|| variables(name))
+            },
+            None,
+        )
         .unwrap();
         assert_eq!(&other.record.digest, digest);
         assert_ne!(
@@ -498,7 +548,7 @@ mod tests {
         );
         // The same declaration in another snapshot directory binds the same launch.
         let moved = snapshot(&config);
-        let again = WorkspaceMcp::resolve(moved.path(), &names, variables).unwrap();
+        let again = WorkspaceMcp::resolve(moved.path(), &names, variables, None).unwrap();
         assert_eq!(
             again.record.servers[1].provider_binding,
             resolved.record.servers[1].provider_binding
@@ -507,7 +557,8 @@ mod tests {
         let mut changed = config.clone();
         changed["mcpServers"]["local"]["args"] = json!(["server.mjs", "--changed"]);
         let changed_directory = snapshot(&changed);
-        let changed = WorkspaceMcp::resolve(changed_directory.path(), &names, variables).unwrap();
+        let changed =
+            WorkspaceMcp::resolve(changed_directory.path(), &names, variables, None).unwrap();
         assert_ne!(&changed.record.digest, digest);
     }
 
@@ -545,22 +596,32 @@ mod tests {
             (json!({"command":""}), "needs a command"),
         ] {
             let directory = snapshot(&json!({"mcpServers":{"local":entry}}));
-            let error =
-                WorkspaceMcp::resolve(directory.path(), &BTreeSet::from(["local"]), variables)
-                    .err()
-                    .unwrap()
-                    .to_string();
-            assert!(error.contains(message), "{entry}: {error}");
-        }
-        let directory = snapshot(&json!({"mcpServers":{}}));
-        let error = WorkspaceMcp::resolve(directory.path(), &BTreeSet::from(["local"]), variables)
+            let error = WorkspaceMcp::resolve(
+                directory.path(),
+                &BTreeSet::from(["local"]),
+                variables,
+                None,
+            )
             .err()
             .unwrap()
             .to_string();
+            assert!(error.contains(message), "{entry}: {error}");
+        }
+        let directory = snapshot(&json!({"mcpServers":{}}));
+        let error = WorkspaceMcp::resolve(
+            directory.path(),
+            &BTreeSet::from(["local"]),
+            variables,
+            None,
+        )
+        .err()
+        .unwrap()
+        .to_string();
         assert!(error.contains("is not defined in .mcp.json"), "{error}");
         let missing = tempfile::tempdir().unwrap();
         assert!(
-            WorkspaceMcp::resolve(missing.path(), &BTreeSet::from(["local"]), variables).is_err()
+            WorkspaceMcp::resolve(missing.path(), &BTreeSet::from(["local"]), variables, None)
+                .is_err()
         );
         // A symlinked configuration is never followed.
         let linked = tempfile::tempdir().unwrap();
@@ -571,8 +632,67 @@ mod tests {
         )
         .unwrap();
         assert!(
-            WorkspaceMcp::resolve(linked.path(), &BTreeSet::from(["local"]), variables).is_err()
+            WorkspaceMcp::resolve(linked.path(), &BTreeSet::from(["local"]), variables, None)
+                .is_err()
         );
+    }
+
+    #[test]
+    fn a_sandbox_runs_the_declared_command_and_refuses_host_credentials_by_name() {
+        let config = json!({"mcpServers":{
+            "tools":{"command":"node","args":["mcp-server.js"]},
+            "script":{"command":"./bin/server.sh"},
+            "docs":{"type":"http","url":"https://docs.example.test/mcp","headers":{"Authorization":"Bearer ${SUPERTAG_MCP_TOKEN}"}},
+            "db":{"command":"node","args":["db.js"],"env":{"DB_TOKEN":"${SUPERTAG_MCP_TOKEN}","LOG":"${SUPERTAG_MCP_ABSENT}"}}
+        }});
+        let directory = snapshot(&config);
+        let names = BTreeSet::from(["docs", "script", "tools"]);
+        let sandboxed =
+            WorkspaceMcp::resolve(directory.path(), &names, variables, Some("E2B")).unwrap();
+        for (name, command) in [
+            ("tools", vec!["node", "mcp-server.js"]),
+            ("script", vec!["./bin/server.sh"]),
+        ] {
+            let Transport::Stdio(server) = &sandboxed.servers[name].transport else {
+                panic!("stdio server expected");
+            };
+            // The provider resolves the command in its trusted copy, never in the host snapshot.
+            assert!(server.sandboxed && server.cwd.is_none() && server.env.is_empty());
+            assert_eq!(server.command, command);
+        }
+        // HTTP servers stay on the Worker Host with their host-held headers.
+        assert!(matches!(
+            sandboxed.servers["docs"].transport,
+            Transport::Http(_)
+        ));
+        // The same declaration digests alike, but a sandbox launch binds differently.
+        let local = WorkspaceMcp::resolve(directory.path(), &names, variables, None).unwrap();
+        assert_eq!(sandboxed.record.digest, local.record.digest);
+        assert_ne!(
+            sandboxed.servers["tools"].capability.provider_binding,
+            local.servers["tools"].capability.provider_binding
+        );
+        // A host credential in a sandboxed server's env is refused, naming the server and each
+        // variable, before any value is read: an absent variable is named, not reported missing.
+        let read = std::cell::Cell::new(false);
+        let error = WorkspaceMcp::resolve(
+            directory.path(),
+            &BTreeSet::from(["db", "tools"]),
+            |name| {
+                read.set(true);
+                variables(name)
+            },
+            Some("Modal"),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(
+            error.contains("Workspace MCP server db references host credential SUPERTAG_MCP_ABSENT, SUPERTAG_MCP_TOKEN in its env, but Modal runs Workspace stdio servers inside the Task's sandbox"),
+            "{error}"
+        );
+        assert!(!error.contains("workspace-token-value-81c2"));
+        assert!(!read.get());
     }
 
     #[test]

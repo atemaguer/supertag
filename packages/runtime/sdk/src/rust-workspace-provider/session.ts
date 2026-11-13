@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { posix } from "node:path";
-import type { ExecutionEnvironment } from "../index.js";
+import type { ExecutionEnvironment, ProcessHandle } from "../index.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 
@@ -8,6 +8,8 @@ export const MAX_TRANSFER = 256 * 1024 * 1024;
 const API_TIMEOUT_MS = 15_000;
 const ALLOCATE_TIMEOUT_MS = 60_000;
 const TRANSFER_TIMEOUT_MS = 120_000;
+/** A devcontainer image build before allocation, or its setup commands after staging. */
+export const BUILD_TIMEOUT_MS = 20 * 60_000;
 
 export interface SandboxOwner {
   readonly hostId: string;
@@ -36,10 +38,53 @@ export interface SandboxWorkspace {
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
 }
 
+/**
+ * The Worker Host's translation of the trusted commit's devcontainer subset. The provider builds
+ * `dockerfileCommands` on `image` (or on its configured template or image when absent) before the
+ * sandbox starts. The image ends as `user`, so every process the session starts, staging
+ * included, runs as that user and it owns the checkout and the trusted MCP copy.
+ */
+export interface SandboxEnvironment {
+  readonly image?: string;
+  readonly dockerfileCommands: readonly string[];
+  readonly user?: string;
+  /** Shell lines run in order in the checkout after staging; `"$1"` is the checkout path. */
+  readonly setupCommands: readonly string[];
+}
+
+export function validSandboxEnvironment(environment: SandboxEnvironment): boolean {
+  const line = (value: string) =>
+    value.length > 0 && value.length <= 65_536 && !/[\0\r\n]/u.test(value);
+  return (
+    (environment.image === undefined ||
+      (environment.image.length <= 512 && /^[^\s\p{Cc}]+$/u.test(environment.image))) &&
+    (environment.user === undefined ||
+      /^[A-Za-z0-9_][A-Za-z0-9._:-]{0,63}$/u.test(environment.user)) &&
+    environment.dockerfileCommands.length <= 256 &&
+    environment.dockerfileCommands.every(line) &&
+    // A user is set by the image, so the image is built whenever one is named.
+    (environment.user === undefined ||
+      environment.dockerfileCommands.at(-1) === `USER ${environment.user}`) &&
+    // Without a devcontainer image, the build only sets the user on the operator's base.
+    (environment.image === undefined
+      ? environment.dockerfileCommands.length <= 1
+      : environment.dockerfileCommands.length > 0) &&
+    environment.setupCommands.length <= 256 &&
+    environment.setupCommands.every(
+      (command) => command.length > 0 && command.length <= 65_536 && !command.includes("\0"),
+    )
+  );
+}
+
 export interface SandboxWorkspaceProvider {
   readonly label: string;
   validateOwner(owner: SandboxOwner): void;
-  allocate(owner: SandboxOwner, timeoutMs: number, signal: AbortSignal): Promise<SandboxWorkspace>;
+  allocate(
+    owner: SandboxOwner,
+    timeoutMs: number,
+    signal: AbortSignal,
+    environment?: SandboxEnvironment,
+  ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
 }
 
@@ -51,6 +96,28 @@ interface StageHeader {
   readonly startCommit: string;
   readonly bundle: { readonly sha256: string; readonly byteLength: bigint };
   readonly inputFiles?: readonly InputFile[];
+  /** The trusted commit Workspace stdio MCP servers run from, beside the checkout. */
+  readonly mcpCommit?: string;
+}
+
+export interface McpServerStart {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+const MCP_PATH = "/usr/local/bin:/usr/bin:/bin";
+
+function validMcpStart({ name, command, args }: McpServerStart): boolean {
+  const text = (value: string, maximum: number) =>
+    value.length > 0 && value.length <= maximum && !/\p{Cc}/u.test(value);
+  return (
+    /^[a-z0-9][a-z0-9_-]{0,63}$/u.test(name) &&
+    text(command, 4096) &&
+    command.trim() === command &&
+    args.length <= 64 &&
+    args.every((arg) => arg.length <= 4096 && !/\p{Cc}/u.test(arg))
+  );
 }
 
 interface CapturedTree {
@@ -164,9 +231,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let sandboxId: string | undefined;
   let root: string | undefined;
   let allowedActions: readonly string[] = [];
+  let setupCommands: readonly string[] = [];
   let stagedInputRoot = "";
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
+  let mcpStaged = false;
+  const mcpServers = new Set<ProcessHandle>();
   let uncertain = false;
   let allocationStarted = false;
   let hostRecordedSandbox = false;
@@ -189,6 +259,18 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
     );
   }
 
+  /** Workspace MCP servers end before capture or Stop, so none can change the tree after. */
+  async function stopMcpServers(): Promise<void> {
+    const running = [...mcpServers];
+    mcpServers.clear();
+    await Promise.all(
+      running.map(async (server) => {
+        server.kill("SIGKILL");
+        await server.wait().catch(() => undefined);
+      }),
+    );
+  }
+
   async function stop(request: { owner: SandboxOwner; sandboxId?: string }) {
     provider.validateOwner(request.owner);
     if (owner && !exactOwner(owner, request.owner)) throw workspaceError("owner differs");
@@ -203,6 +285,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
     captured = undefined;
     owner ??= { ...request.owner };
     lifetime.abort();
+    await stopMcpServers();
     const result = await provider.stop(owner, knownId ?? request.sandboxId);
     if (result.state === "stopped") stoppedSandboxId = result.sandboxId;
     return result;
@@ -210,7 +293,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
 
   return {
     async allocate(
-      request: { owner: SandboxOwner; timeoutMs: number; allowedActions: readonly string[] },
+      request: {
+        owner: SandboxOwner;
+        timeoutMs: number;
+        allowedActions: readonly string[];
+        environment?: SandboxEnvironment;
+      },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
       if (phase !== "new") throw workspaceError("allocation already attempted");
@@ -219,14 +307,19 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("sandbox lifetime is invalid");
       if (request.allowedActions.includes("commands:execute"))
         throw workspaceError("does not support commands:execute");
-      const signal = signalFor(caller, ALLOCATE_TIMEOUT_MS);
+      const { environment } = request;
+      if (environment !== undefined && !validSandboxEnvironment(environment))
+        throw workspaceError("devcontainer environment is invalid");
+      const build = (environment?.dockerfileCommands.length ?? 0) > 0;
+      const signal = signalFor(caller, build ? BUILD_TIMEOUT_MS : ALLOCATE_TIMEOUT_MS);
       signal.throwIfAborted();
       phase = "allocating";
       allocationStarted = true;
       owner = { ...request.owner };
       allowedActions = [...request.allowedActions];
+      setupCommands = [...(environment?.setupCommands ?? [])];
       try {
-        sandbox = await provider.allocate(owner, request.timeoutMs, signal);
+        sandbox = await provider.allocate(owner, request.timeoutMs, signal, environment);
         signal.throwIfAborted();
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
@@ -248,6 +341,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("must be allocated before staging");
       if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(header.startCommit))
         throw workspaceError("start commit is invalid");
+      if (
+        header.mcpCommit !== undefined &&
+        (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(header.mcpCommit) ||
+          header.mcpCommit.length !== header.startCommit.length)
+      )
+        throw workspaceError("trusted MCP commit is invalid");
       if (
         bytes.byteLength < 1 ||
         bytes.byteLength > MAX_TRANSFER ||
@@ -317,13 +416,38 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         }
         const result = await runTransfer(
           "stage",
-          [header.startCommit, header.bundle.sha256, bytes.byteLength.toString(), expectedRoot],
+          [
+            header.startCommit,
+            header.bundle.sha256,
+            bytes.byteLength.toString(),
+            expectedRoot,
+            header.mcpCommit ?? "",
+          ],
           signal,
         );
         if (result.exitCode !== 0 || result.stdout.trim() !== "staged")
           throw new Error("Pinned bundle could not be materialized");
         signal.throwIfAborted();
+        if (setupCommands.length > 0) {
+          // The devcontainer's lifecycle commands, from the trusted commit, run in the checkout
+          // as the image's user with the image's environment: never a Worker Host variable.
+          const setupSignal = signalFor(caller, BUILD_TIMEOUT_MS);
+          const setup = await sandbox.run(
+            [
+              "/bin/sh",
+              "-c",
+              ["set -e", 'cd -- "$1"', ...setupCommands].join("\n"),
+              "devcontainer-setup",
+              `${root}/checkout`,
+            ],
+            BUILD_TIMEOUT_MS,
+            setupSignal,
+          );
+          if (setup.exitCode !== 0) throw new Error("devcontainer setup failed");
+          signal.throwIfAborted();
+        }
         stagedInputRoot = expectedRoot;
+        mcpStaged = header.mcpCommit !== undefined;
         const environment = sandbox.environment(root);
         tools = createWorkspaceOperations({
           environment: observedEnvironment(
@@ -363,6 +487,44 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
       );
       return pending;
     },
+    /**
+     * Starts one Workspace stdio MCP server in the trusted copy beside the checkout, with only a
+     * fixed PATH and LANG: no Worker Host variable and no variable a Harness plan set.
+     */
+    async startMcpServer(start: McpServerStart, caller?: AbortSignal): Promise<ProcessHandle> {
+      if (phase !== "staged" || !sandbox || !root)
+        throw workspaceError("must be staged before an MCP server starts");
+      if (!mcpStaged) throw workspaceError("has no trusted MCP copy");
+      if (!validMcpStart(start)) throw workspaceError("MCP server launch is invalid");
+      const signal = caller ? AbortSignal.any([lifetime.signal, caller]) : lifetime.signal;
+      signal.throwIfAborted();
+      const server = await sandbox.environment(root).spawn(
+        {
+          command: "/usr/bin/env",
+          args: ["-i", `PATH=${MCP_PATH}`, "LANG=C.UTF-8", start.command, ...start.args],
+          cwd: "mcp",
+          environment: {},
+          replaceEnvironment: true,
+          streamInput: true,
+          streamOutput: true,
+        },
+        signal,
+      );
+      if (!server.write || !server.endInput || !server.output) {
+        server.kill("SIGKILL");
+        throw workspaceError("cannot stream MCP server input and output");
+      }
+      if (phase !== "staged") {
+        server.kill("SIGKILL");
+        throw workspaceError("tools were sealed");
+      }
+      mcpServers.add(server);
+      void server.wait().then(
+        () => mcpServers.delete(server),
+        () => mcpServers.delete(server),
+      );
+      return server;
+    },
     async capture(caller?: AbortSignal): Promise<CapturedTree> {
       caller?.throwIfAborted();
       if (phase === "captured" && captured) return captured;
@@ -374,6 +536,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         // Close admissions first. Allow active file processes to settle naturally.
         // Abort/transport uncertainty while a tool ran permanently prevents capture.
         await toolTail;
+        await stopMcpServers();
         await tools.dispose();
         if (uncertain) throw workspaceError("was modified by an unsettled operation");
         signal.throwIfAborted();
@@ -477,23 +640,11 @@ def git_command(args, bound=0):
             if process.poll() is None:
                 process.kill()
 
-def stage(commit, expected_hash, expected_length, input_root):
-    bundle = os.path.join(root, "source.bundle")
-    check(file_hash(bundle) == (int(expected_length), expected_hash))
-    object_format = "sha1" if len(commit) == 40 else "sha256"
-    git_command(["init", "--bare", "--template=", "--object-format=" + object_format])
-    heads = git_command(["bundle", "list-heads", bundle], 4096).splitlines()
-    check(len(heads) == 1)
-    fields = heads[0].split()
-    check(len(fields) == 2 and fields[0] == commit.encode("ascii") and
-          fields[1].startswith(b"refs/heads/supertag-deliveries/"))
-    git_command(["bundle", "verify", bundle])
-    git_command(["bundle", "unbundle", bundle])
-    check(git_command(["cat-file", "-t", commit], 64) == b"commit\n")
+def materialize(commit, destination):
     raw_tree = git_command(["ls-tree", "-rz", "--full-tree", commit], MAX_MANIFEST)
     entries = raw_tree.split(b"\0")
     check(entries.pop() == b"" and len(entries) <= MAX_ENTRIES)
-    os.mkdir(checkout)
+    os.mkdir(destination)
     with subprocess.Popen(git + ["cat-file", "--batch"],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL) as objects:
@@ -504,8 +655,8 @@ def stage(commit, expected_hash, expected_length, input_root):
                 file_mode, kind, oid = metadata.decode("ascii").split(" ")
                 check(file_mode in MODES and kind == "blob")
                 path = raw_path.decode("utf-8")
-                destination = os.path.join(checkout, *components(path))
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                target = os.path.join(destination, *components(path))
+                os.makedirs(os.path.dirname(target), exist_ok=True)
                 objects.stdin.write(oid.encode("ascii") + b"\n")
                 objects.stdin.flush()
                 actual_oid, kind, raw_size = objects.stdout.readline(128).split()
@@ -517,9 +668,9 @@ def stage(commit, expected_hash, expected_length, input_root):
                     check(size <= MAX_LINK)
                     body = objects.stdout.read(size)
                     check(len(body) == size)
-                    os.symlink(validate_link(path, body), destination)
+                    os.symlink(validate_link(path, body), target)
                 else:
-                    with open(destination, "xb") as file:
+                    with open(target, "xb") as file:
                         remaining = size
                         while remaining:
                             data = objects.stdout.read(min(CHUNK, remaining))
@@ -533,6 +684,27 @@ def stage(commit, expected_hash, expected_length, input_root):
         finally:
             if objects.poll() is None:
                 objects.kill()
+
+def stage(commit, expected_hash, expected_length, input_root, mcp_commit=""):
+    bundle = os.path.join(root, "source.bundle")
+    check(file_hash(bundle) == (int(expected_length), expected_hash))
+    object_format = "sha1" if len(commit) == 40 else "sha256"
+    git_command(["init", "--bare", "--template=", "--object-format=" + object_format])
+    heads = git_command(["bundle", "list-heads", bundle], 4096).splitlines()
+    check(len(heads) == 1)
+    fields = heads[0].split()
+    check(len(fields) == 2 and fields[0] == commit.encode("ascii") and
+          fields[1].startswith(b"refs/heads/supertag-deliveries/"))
+    git_command(["bundle", "verify", bundle])
+    git_command(["bundle", "unbundle", bundle])
+    check(git_command(["cat-file", "-t", commit], 64) == b"commit\n")
+    materialize(commit, checkout)
+    if mcp_commit:
+        # Workspace stdio MCP servers run from the trusted commit, outside the checkout.
+        check(len(mcp_commit) == len(commit))
+        check(git_command(["cat-file", "-t", mcp_commit], 64) == b"commit\n")
+        git_command(["merge-base", "--is-ancestor", mcp_commit, commit])
+        materialize(mcp_commit, os.path.join(root, "mcp"))
     os.unlink(bundle)
     if input_root:
         stage_inputs(input_root)

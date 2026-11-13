@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sandboxExecutionEnvironment } from "@supertag/worker-sdk";
 import {
   createSandboxWorkspaceSession,
+  type SandboxEnvironment,
   type SandboxWorkspaceSession,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
-import { Sandbox, type SandboxOpts } from "e2b";
+import { Sandbox, type SandboxOpts, Template } from "e2b";
 import { E2BExecutionEnvironmentProvider } from "../index.js";
 import { adaptE2B, type E2BSandboxClient, shellQuote } from "../sandbox.js";
 import {
@@ -23,10 +28,74 @@ export interface E2BWorkspaceSandbox {
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
 }
 
+/**
+ * One template build from a devcontainer translation. `dockerfile` starts from the devcontainer's
+ * registry image; without one, the build starts from the operator's template and sets `user`.
+ */
+export interface E2BWorkspaceTemplateBuild {
+  readonly name: string;
+  readonly dockerfile?: string;
+  readonly fromTemplate?: string;
+  readonly user?: string;
+}
+
+export interface E2BWorkspaceTemplates {
+  /** Builds a template and returns its template ID. */
+  build(spec: E2BWorkspaceTemplateBuild): Promise<string>;
+}
+
 interface E2BWorkspaceSessionOptions {
   readonly template?: string;
   readonly factory?: { create(options: SandboxOpts): Promise<E2BWorkspaceSandbox> };
   readonly inventory?: SandboxInventory;
+  readonly templates?: E2BWorkspaceTemplates;
+}
+
+export const nativeWorkspaceTemplates: E2BWorkspaceTemplates = {
+  async build(spec) {
+    if (spec.dockerfile === undefined) {
+      if (spec.fromTemplate === undefined || spec.user === undefined)
+        throw new Error("E2B Workspace template build is incomplete");
+      const template = Template().fromTemplate(spec.fromTemplate).setUser(spec.user);
+      return (await Template.build(template, spec.name)).templateId;
+    }
+    // A private, empty build context: the Dockerfile can name no Worker Host file.
+    const context = await mkdtemp(join(tmpdir(), "supertag-e2b-build-"));
+    try {
+      const path = join(context, "Dockerfile");
+      await writeFile(path, spec.dockerfile, { flag: "wx", mode: 0o600 });
+      const template = Template({ fileContextPath: context }).fromDockerfile(path);
+      const steps = (template as unknown as { instructions?: Array<{ type?: string }> })
+        .instructions;
+      if (
+        !Array.isArray(steps) ||
+        steps.some((step) => step.type === "COPY" || step.type === "ADD")
+      )
+        throw new Error("E2B devcontainer build.dockerfile could not be verified");
+      return (await Template.build(template, spec.name)).templateId;
+    } finally {
+      await rm(context, { recursive: true, force: true });
+    }
+  },
+};
+
+/** The same translation names the same template, so E2B reuses its cached layers. */
+export function e2bWorkspaceTemplateBuild(
+  environment: SandboxEnvironment,
+  template: string,
+): E2BWorkspaceTemplateBuild | undefined {
+  if (environment.dockerfileCommands.length === 0) return undefined;
+  const build =
+    environment.image === undefined
+      ? { fromTemplate: template, ...(environment.user ? { user: environment.user } : {}) }
+      : {
+          dockerfile: `${[`FROM ${environment.image}`, ...environment.dockerfileCommands].join("\n")}\n`,
+        };
+  const name = `supertag-workspace-${createHash("sha256")
+    .update(JSON.stringify(build))
+    .digest("hex")
+    .slice(0, 32)}`;
+  return { name, ...build };
 }
 
 const nativeFactory = {
@@ -63,14 +132,18 @@ export function createE2BWorkspaceSession(
   if (!template.trim() || template.length > 256 || /\p{Cc}/u.test(template))
     throw new Error("Invalid E2B Workspace template");
   const factory = options.factory ?? nativeFactory;
+  const templates = options.templates ?? nativeWorkspaceTemplates;
   const inventory = options.inventory ?? e2bSandboxInventory({ requestTimeoutMs: API_TIMEOUT_MS });
   return createSandboxWorkspaceSession({
     label: "E2B",
     validateOwner: sandboxOwnershipMetadata,
-    async allocate(owner, timeoutMs, signal) {
+    async allocate(owner, timeoutMs, signal, environment) {
       const metadata = sandboxOwnershipMetadata(owner);
+      const build = environment && e2bWorkspaceTemplateBuild(environment, template);
+      const built = build === undefined ? template : await templates.build(build);
+      signal.throwIfAborted();
       const sandbox = await factory.create({
-        template,
+        template: built,
         metadata: { ...metadata },
         timeoutMs: Math.min(timeoutMs, MAX_LIFETIME_MS),
         requestTimeoutMs: 30_000,

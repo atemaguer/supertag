@@ -55,10 +55,10 @@ impl Store {
         )
         .await?;
         let task = task_row(&owned)?;
-        let claude = task
+        let execution = task
             .attempt_execution
             .as_ref()
-            .filter(|execution| execution.harness_kind() == HarnessKind::ClaudeCode)
+            .filter(|execution| mcp::execution_serves_mcp(execution))
             .ok_or(StoreError::PermissionDenied)?;
         // A Workspace server is the one this Attempt recorded before it started; the host
         // catalog cannot supply a server of the same name for this Task.
@@ -68,7 +68,7 @@ impl Store {
                 .ok_or(StoreError::PermissionDenied)?
                 .servers
         } else {
-            claude.mcp_servers.clone()
+            execution.mcp_servers.clone()
         };
         let server = recorded
             .iter()
@@ -350,7 +350,7 @@ impl Store {
         if task
             .attempt_execution
             .as_ref()
-            .is_none_or(|execution| execution.harness_kind() != HarnessKind::ClaudeCode)
+            .is_none_or(|execution| !mcp::execution_serves_mcp(execution))
             || selected.is_empty()
             || !record
                 .servers

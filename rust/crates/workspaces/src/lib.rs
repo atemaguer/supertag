@@ -699,6 +699,23 @@ impl Workspace {
         Ok(path)
     }
 
+    /// The devcontainer subset at the base commit, read as data from the private repository.
+    /// Nothing is checked out and no repository command runs on the Worker Host.
+    pub async fn trusted_devcontainer(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<Option<devcontainer::DevcontainerSubset>> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        let repository = self.repository(cancel).await?.path().to_owned();
+        let base = self.inner.config.base_commit.clone();
+        tokio::task::spawn_blocking(move || {
+            devcontainer::read_trusted_devcontainer(&repository, &base)
+        })
+        .await
+        .context("devcontainer read stopped")?
+    }
+
     /// Removes an Attempt's MCP snapshot, if any.
     pub fn remove_mcp_snapshot(&self, task_id: &str, attempt_id: &str) -> Result<()> {
         let path = self.mcp_snapshot_path(task_id, attempt_id);

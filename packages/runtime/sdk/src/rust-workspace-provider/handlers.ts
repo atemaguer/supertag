@@ -75,7 +75,25 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async allocate(request, context) {
         if (!request.owner)
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
-        return session.allocate({ ...request, owner: request.owner }, context.signal);
+        const { owner, timeoutMs, allowedActions, environment } = request;
+        return session.allocate(
+          {
+            owner,
+            timeoutMs,
+            allowedActions,
+            ...(environment === undefined
+              ? {}
+              : {
+                  environment: {
+                    ...(environment.image === undefined ? {} : { image: environment.image }),
+                    dockerfileCommands: environment.dockerfileCommands,
+                    ...(environment.user === undefined ? {} : { user: environment.user }),
+                    setupCommands: environment.setupCommands,
+                  },
+                }),
+          },
+          context.signal,
+        );
       },
       async stage(stream, context) {
         if (stageInFlight)
@@ -88,7 +106,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           let offset = 0;
           for await (const { part } of stream) {
             if (part.case === "header" && !header) {
-              const { bundle, startCommit, inputFiles } = part.value;
+              const { bundle, startCommit, inputFiles, mcpCommit } = part.value;
               if (
                 !bundle ||
                 bundle.byteLength < 1n ||
@@ -105,7 +123,12 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
               }
               bundleLength = Number(bundle.byteLength);
               if (bundleLength + inputLength > MAX_TRANSFER) throw invalidBundle();
-              header = { startCommit, bundle, inputFiles };
+              header = {
+                startCommit,
+                bundle,
+                inputFiles,
+                ...(mcpCommit !== undefined ? { mcpCommit } : {}),
+              };
               bytes = new Uint8Array(bundleLength + inputLength);
             } else if (part.case === "payload" && bytes) {
               const payload = part.value;
@@ -135,6 +158,41 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
         for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_SIZE) {
           context.signal.throwIfAborted();
           yield { part: { case: "payload", value: bytes.subarray(offset, offset + CHUNK_SIZE) } };
+        }
+      },
+      async *runMcpServer(stream, context) {
+        const inputs = stream[Symbol.asyncIterator]();
+        const first = await inputs.next();
+        if (first.done || first.value.part.case !== "start")
+          throw new ConnectError("Workspace MCP server start is required", Code.InvalidArgument);
+        const { name, command, args } = first.value.part.value;
+        const server = await session.startMcpServer({ name, command, args }, context.signal);
+        const { write, endInput, output } = server;
+        if (!write || !endInput || !output)
+          throw new ConnectError("Workspace MCP server is unavailable", Code.Unavailable);
+        // The Host's input ends when it closes the server; then the server sees end of input.
+        const forwarded = (async () => {
+          for (;;) {
+            const next = await inputs.next();
+            if (next.done) break;
+            if (next.value.part.case !== "stdin")
+              throw new ConnectError("Invalid Workspace MCP server input", Code.InvalidArgument);
+            await write.call(server, next.value.part.value);
+          }
+          await endInput.call(server);
+        })();
+        // Never wait on the Host's input once the server ended: ending the call releases it.
+        forwarded.catch(() => server.kill("SIGKILL"));
+        const encoder = new TextEncoder();
+        try {
+          for await (const chunk of output) {
+            // Server diagnostics stay in the sandbox: stderr can echo its environment.
+            if (chunk.stream === "stdout" && chunk.text)
+              yield { stdout: encoder.encode(chunk.text) };
+          }
+        } finally {
+          server.kill("SIGKILL");
+          await server.wait().catch(() => undefined);
         }
       },
       async stop(request) {
