@@ -782,6 +782,41 @@ fn shell_path(path: &Path) -> Result<String> {
 
 #[tokio::test]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn bare_launcher_opens_the_gateway_chooser_without_a_local_service() -> Result<()> {
+    let binary =
+        std::env::var_os("SUPERTAG_RUST_TEST_TUI").context("terminal UI binary required")?;
+    let directory = tempfile::Builder::new()
+        .prefix("tui-chooser-")
+        .tempdir_in("/tmp")?;
+    let tmux = Tmux {
+        socket: directory.path().join("tmux.sock"),
+    };
+    let shell = format!(
+        "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_TUI_BINARY={} {}",
+        shell_path(directory.path())?,
+        shell_path(Path::new(&binary))?,
+        shell_path(Path::new(BINARY))?,
+    );
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "runtime",
+        "-x",
+        "120",
+        "-y",
+        "35",
+        &shell,
+    ])
+    .await?;
+    tmux.wait_for("Gateways").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "a"]).await?;
+    tmux.wait_for("Save a Gateway").await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
 async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
     let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
         .context("version-matched terminal UI binary required")?;
