@@ -1210,6 +1210,29 @@ impl ManagedHost {
             .await
     }
 
+    /// Start a lane a raised `concurrency` added. A lane that does not start is stopped and left
+    /// out, with the reason in the Host's log, so the running lanes and their Attempts go on;
+    /// the next `supertag up` that changes `concurrency` tries it again.
+    async fn raise_lane(&mut self, index: usize, executable: &Path) -> Result<()> {
+        let Err(error) = self.restart_lane(index, executable).await else {
+            return Ok(());
+        };
+        if let Some(mut service) = self.lanes[index].service.take() {
+            let _ = service.process.start_kill();
+            let _ = service.process.wait().await;
+        }
+        self.states.harness_of.lock().expect("lane harnesses")[index] = None;
+        self.states.set(index, LaneState::Pending);
+        note_line(
+            &self.logs,
+            &self.definition.name,
+            &format!(
+                "lane {} did not start and stays stopped: {error:#}",
+                self.lanes[index].directory.display()
+            ),
+        )
+    }
+
     /// Run `concurrency` lanes per harness without a restart. Raised lanes start under the
     /// Host's current registration. Lowered lanes are asked to stop once they hold no Attempt,
     /// so a running Attempt finishes and the lane's journal is left empty; presence reports the
@@ -1232,7 +1255,7 @@ impl ManagedHost {
                     Some(index) if self.lanes[index].service.is_none() => {
                         self.states.harness_of.lock().expect("lane harnesses")[index] =
                             Some(harness);
-                        self.restart_lane(index, executable).await?;
+                        self.raise_lane(index, executable).await?;
                     }
                     Some(_) => {}
                     None => {
@@ -1254,7 +1277,7 @@ impl ManagedHost {
                             .expect("lane harnesses")
                             .push(Some(harness));
                         let index = self.lanes.len() - 1;
-                        self.restart_lane(index, executable).await?;
+                        self.raise_lane(index, executable).await?;
                     }
                 }
             }
@@ -1400,6 +1423,9 @@ pub async fn configured(
     remove_endpoint(&directory)?;
     // A crashed supervisor leaves its status behind; it must not describe a reused PID.
     lifecycle::forget(&directory)?;
+    // A request a previous supervisor never applied would resize this one away from the file
+    // it starts with.
+    lifecycle::clear_concurrency_request(&directory)?;
     let executable = std::env::current_exe()?;
     let environment = Arc::new(config.environment);
     let mut base = Children::new(&directory)?;

@@ -1893,8 +1893,49 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     let status: Value = serde_json::from_slice(&fs::read(shared.state.join("supervisor.json"))?)?;
     assert_eq!(status["pid"], supervisor);
     assert_eq!(status["services"][0]["concurrency"], 1);
+
+    // A raised lane that cannot start stays stopped; the supervisor and its lanes go on.
+    let blocked = shared.state.join("hosts/shared/lanes/codex-2");
+    fs::write(&blocked, "not a directory")?;
+    let printed = shared.up(&serde_json::json!({"concurrency": 3}))?;
+    ensure!(
+        printed.contains("changed from 1 without a restart"),
+        "{printed}"
+    );
+    assert_eq!(shared.supervisor.child.id(), supervisor);
+    let log = fs::read_to_string(shared.state.join("logs/hosts/shared.log")).unwrap_or_default();
+    ensure!(
+        log.contains("codex-2 did not start and stays stopped"),
+        "{log}"
+    );
+    let fourth = submit(&mut operator, &token, "coder", "Task-c4").await?;
+    settled(&mut operator, &token, &fourth, TaskState::Succeeded).await?;
+    assert_eq!(shared.supervisor.child.id(), supervisor);
+    fs::remove_file(&blocked)?;
+    // The lane that ran it clears its journal after the Task settles.
+    timeout(WAIT, async {
+        while ["codex-0", "codex-1"].iter().any(|lane| {
+            shared
+                .state
+                .join(format!("hosts/shared/lanes/{lane}/attempt.json"))
+                .exists()
+        }) {
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("a lane kept its Attempt journal")?;
+
     let mut shared = shared;
     shared.supervisor.stop().await?;
+    // A request no supervisor applied does not resize the next one away from its file.
+    fs::write(
+        shared.state.join("concurrency-request.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "fingerprint": "stale",
+            "hosts": {"shared": 4}
+        }))?,
+    )?;
     // Nothing was stranded: a restart keeps the registration.
     shared.relaunch(&serde_json::json!({"concurrency": 1}))?;
     let again = host_until(&mut operator, &token, |status| {
@@ -1902,6 +1943,12 @@ async fn concurrency_changes_without_a_restart(database: String) -> Result<()> {
     })
     .await?;
     assert_eq!(again.generation, ready.generation);
+    assert!(!shared.state.join("concurrency-request.json").exists());
+    sleep(Duration::from_millis(500)).await;
+    assert_eq!(host(&mut operator, &token, "shared").await?.capacity, 2);
+    let status: Value = serde_json::from_slice(&fs::read(shared.state.join("supervisor.json"))?)?;
+    assert_eq!(status["services"][0]["concurrency"], 1);
+    assert_ne!(status["fingerprint"], "stale");
     shared.supervisor.stop().await?;
     Ok(())
 }

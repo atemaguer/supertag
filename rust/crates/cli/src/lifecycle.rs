@@ -505,6 +505,12 @@ pub fn take_concurrency_request(directory: &Path) -> Option<ConcurrencyRequest> 
     request
 }
 
+/// Remove a request no supervisor applied. A new supervisor starts with its file's
+/// `concurrency`, so an older request must not resize it.
+pub fn clear_concurrency_request(directory: &Path) -> io::Result<()> {
+    remove_if_present(&directory.join(CONCURRENCY_REQUEST))
+}
+
 /// Change the running hosts' concurrency in place: raised lanes start under the host's current
 /// registration, and lowered lanes finish their Attempt and stop, so running work is neither
 /// drained nor restarted.
