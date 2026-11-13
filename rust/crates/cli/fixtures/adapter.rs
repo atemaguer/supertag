@@ -677,6 +677,18 @@ async fn main() -> Result<()> {
             sleep(Duration::from_millis(20)).await;
         }
     }
+    // The Task's side effect: one line per execution, so a test counts executions per Task.
+    if let Some(effects) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--effects-log=")
+            .map(std::path::PathBuf::from)
+    }) {
+        use std::io::Write as _;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(effects)?
+            .write_all(format!("{}\n", task.task_id).as_bytes())?;
+    }
     if let Some(base) = std::env::args().find_map(|arg| {
         arg.strip_prefix("--partition-steps=")
             .map(std::path::PathBuf::from)

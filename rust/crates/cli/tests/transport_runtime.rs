@@ -21,6 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use supertag_protocol::negotiation::ProtocolChannel;
+use supertag_transport::{KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
@@ -318,13 +319,23 @@ fn sqlite(directory: &Path) -> String {
 #[derive(Default)]
 struct ProxyState {
     partitioned: AtomicBool,
+    /// Set by [`Proxy::silence`]: new connections are held open and never forwarded.
+    silent: AtomicBool,
     accepted: AtomicU64,
     refused: AtomicU64,
-    links: Mutex<Vec<AbortHandle>>,
+    links: Mutex<Vec<Link>>,
+}
+
+/// One relayed connection. A dead link keeps both sockets open and forwards nothing.
+struct Link {
+    task: AbortHandle,
+    dead: Arc<AtomicBool>,
 }
 
 /// A TCP relay in front of the Gateway for one Worker Host. A partition severs every
-/// open connection and refuses new ones until it is restored.
+/// open connection and refuses new ones until it is restored; a silent drop leaves
+/// every connection open but forwards nothing on it again, as a proxy or NAT that lost
+/// its state does.
 struct Proxy {
     address: SocketAddr,
     state: Arc<ProxyState>,
@@ -338,21 +349,23 @@ impl Proxy {
         let state = Arc::new(ProxyState::default());
         let shared = state.clone();
         let task = tokio::spawn(async move {
-            while let Ok((mut downstream, _)) = listener.accept().await {
+            while let Ok((downstream, _)) = listener.accept().await {
                 let mut links = shared.links.lock().unwrap();
                 if shared.partitioned.load(Ordering::SeqCst) {
                     shared.refused.fetch_add(1, Ordering::SeqCst);
                     drop(downstream);
                     continue;
                 }
-                shared.accepted.fetch_add(1, Ordering::SeqCst);
-                let link = tokio::spawn(async move {
-                    if let Ok(mut upstream) = TcpStream::connect(target).await {
-                        let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
-                    }
+                let dead = Arc::new(AtomicBool::new(shared.silent.load(Ordering::SeqCst)));
+                if !dead.load(Ordering::SeqCst) {
+                    shared.accepted.fetch_add(1, Ordering::SeqCst);
+                }
+                let task = tokio::spawn(relay(downstream, target, dead.clone()));
+                links.retain(|link| !link.task.is_finished());
+                links.push(Link {
+                    task: task.abort_handle(),
+                    dead,
                 });
-                links.retain(|link| !link.is_finished());
-                links.push(link.abort_handle());
             }
         });
         Ok(Self {
@@ -366,13 +379,25 @@ impl Proxy {
         let mut links = self.state.links.lock().unwrap();
         self.state.partitioned.store(true, Ordering::SeqCst);
         for link in links.drain(..) {
-            link.abort();
+            link.task.abort();
+        }
+    }
+
+    /// Stops forwarding on every open connection, without closing any, until
+    /// [`Proxy::restore`]; connections opened meanwhile are held open and never forwarded.
+    /// Only a new connection after the restore reaches the Gateway again.
+    fn silence(&self) {
+        let links = self.state.links.lock().unwrap();
+        self.state.silent.store(true, Ordering::SeqCst);
+        for link in links.iter() {
+            link.dead.store(true, Ordering::SeqCst);
         }
     }
 
     fn restore(&self) {
         let _links = self.state.links.lock().unwrap();
         self.state.partitioned.store(false, Ordering::SeqCst);
+        self.state.silent.store(false, Ordering::SeqCst);
     }
 
     fn accepted(&self) -> u64 {
@@ -393,6 +418,65 @@ impl Drop for Proxy {
         self.partition();
         self.task.abort();
     }
+}
+
+/// Relays one connection until either side closes it, or, once `dead`, holds both sockets
+/// open and discards whatever arrives.
+async fn relay(downstream: TcpStream, target: SocketAddr, dead: Arc<AtomicBool>) {
+    let upstream = if dead.load(Ordering::SeqCst) {
+        None
+    } else {
+        TcpStream::connect(target).await.ok()
+    };
+    let Some(upstream) = upstream else {
+        if dead.load(Ordering::SeqCst) {
+            // Dropping either half would close the connection; hold both until aborted.
+            let (read, _write) = downstream.into_split();
+            discard(read).await;
+            std::future::pending::<()>().await;
+        }
+        return;
+    };
+    let (down_read, down_write) = downstream.into_split();
+    let (up_read, up_write) = upstream.into_split();
+    tokio::join!(
+        pump(down_read, up_write, dead.clone()),
+        pump(up_read, down_write, dead)
+    );
+}
+
+/// Copies `from` to `to` while the link lives. On end of stream it closes `to`, unless
+/// the link is dead: then nothing, not even a close, crosses it.
+async fn pump(
+    mut from: tokio::net::tcp::OwnedReadHalf,
+    mut to: tokio::net::tcp::OwnedWriteHalf,
+    dead: Arc<AtomicBool>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buffer = vec![0_u8; 16 * 1024];
+    loop {
+        let read = match from.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        if dead.load(Ordering::SeqCst) {
+            continue;
+        }
+        if to.write_all(&buffer[..read]).await.is_err() {
+            return;
+        }
+    }
+    if dead.load(Ordering::SeqCst) {
+        // Dropping the write half would send a close; keep it until the link is aborted.
+        std::future::pending::<()>().await;
+    }
+    let _ = to.shutdown().await;
+}
+
+async fn discard(mut from: tokio::net::tcp::OwnedReadHalf) {
+    use tokio::io::AsyncReadExt;
+    let mut buffer = vec![0_u8; 16 * 1024];
+    while matches!(from.read(&mut buffer).await, Ok(read) if read > 0) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,18 +1316,27 @@ async fn reconnected(host: &Host, accepted: u64, bound: Duration) -> Result<Dura
 
 /// Ports `scripts/worklet-grpc-docker-soak.ts` (`tests/worklet-grpc-docker-soak.test.ts`
 /// checks its report) to the shipped Rust processes: two Worker Hosts, each the only
-/// host of its Tag, behind TCP relays to a Gateway in front of a separate Control Plane.
-/// Three faults come first, as in TypeScript: a Worker Host loses the Gateway while its
-/// Task runs and finishes during the partition; the Control Plane is killed and
-/// restarted while work runs; a Worker Host is restarted and then runs new work. A steady
-/// workload of two concurrent Tasks then runs for the soak duration. Every Task must
-/// succeed with one Attempt and one adapter launch; the JSON report gives latencies and
-/// fault recovery times (`SUPERTAG_TRANSPORT_REPORT` writes it to a file).
+/// host of its Tag and enrolled with its own Auth Key, behind TCP relays to a Gateway in
+/// front of a separate Control Plane. Four faults come first: a Worker Host's connection
+/// is severed while its Task runs and the Task finishes during the partition; a Worker
+/// Host's connections go silent (nothing forwarded, nothing closed, as `docker network
+/// disconnect` or a proxy that lost its state does) while its Task runs, so only HTTP/2
+/// keepalive can notice; the Control Plane is killed and restarted while work runs; a
+/// Worker Host is restarted and then runs new work. A steady workload of two concurrent
+/// Tasks then runs for the soak duration.
 ///
-/// Deliberate difference: TypeScript ran each service in its own Docker container and
-/// partitioned with `docker network disconnect`; here the partition is the relay, as in
-/// the rest of this file, and restarts are process restarts. Docker added network
-/// namespaces, not behavior the services see.
+/// The report is measured, not assumed: per Task, the Attempt the Control Plane recorded,
+/// the side effect the adapter wrote (`duplicate_task_ids`, `missing_effect_task_ids`),
+/// and the durable event journal (sequences 1 and 2: the Attempt start and the result);
+/// whether the two hosts hold distinct credentials; and whether each fault's Task
+/// `recovered` with one Attempt and one effect. `gates.passed` is their conjunction and
+/// fails the test. `SUPERTAG_TRANSPORT_REPORT` writes the report to a file.
+///
+/// Deliberate difference: TypeScript ran each service in its own Docker container, and a
+/// shared-execution service on a second network that the partition left connected. Here
+/// faults are injected at a TCP relay and restarts are process restarts; there is no
+/// shared-execution service, because the soak's adapter records its side effect itself
+/// (see the capability ledger).
 async fn exercise_soak(database: String) -> Result<Value> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1251,6 +1344,8 @@ async fn exercise_soak(database: String) -> Result<Value> {
     let tokens = Tokens::new();
     let mut services = Services::start(&database, root, &tokens).await?;
     let mut operator = OperatorClient::new(services.channel().await?);
+    let effects = root.join("soak-effects.log");
+    let effects_arg = format!("--effects-log={}", effects.display());
     let mut hosts = Vec::new();
     for tag in 0..2 {
         operator
@@ -1274,15 +1369,18 @@ async fn exercise_soak(database: String) -> Result<Value> {
                 root,
                 tag,
                 &format!("soak-tag-{tag}"),
-                &[],
+                &[&effects_arg],
             )
             .await?,
         );
     }
     let bound = Duration::from_secs(45);
+    // A silent drop is noticed only by an unanswered keepalive ping.
+    let silent_bound = KEEPALIVE_INTERVAL + KEEPALIVE_TIMEOUT + bound;
     let mut report = Report::default();
     let mut tasks = Vec::new();
-    let mut faults = Vec::new();
+    // Each fault and the Task that ran through it.
+    let mut faults: Vec<(Value, String)> = Vec::new();
 
     // A partition while a Task runs; the Task finishes while partitioned.
     let mut partitioned = vec![submit_soak_task(&mut operator, &tokens, 0, "partition").await?];
@@ -1317,13 +1415,57 @@ async fn exercise_soak(database: String) -> Result<Value> {
         &mut report,
     )
     .await?;
-    faults.push(json!({
-        "kind": "control-network-partition", "target": hosts[0].id,
-        "downtime_ms": restored.duration_since(disconnected).as_millis(),
-        "reconnect_latency_ms": reconnect.as_millis(),
-        "recovery_latency_ms": restored.elapsed().as_millis(),
-    }));
+    faults.push((
+        json!({
+            "kind": "control-network-partition", "target": hosts[0].id,
+            "downtime_ms": restored.duration_since(disconnected).as_millis(),
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": restored.elapsed().as_millis(),
+        }),
+        partitioned[0].task_id.clone(),
+    ));
     tasks.append(&mut partitioned);
+
+    // A silent drop while a Task runs: every open connection stops forwarding without a
+    // close, and connections opened meanwhile hang, until the drop ends. Only keepalive
+    // can tell the Worker Host and the Gateway that the connections they hold are gone.
+    let mut silenced = vec![submit_soak_task(&mut operator, &tokens, 1, "silent").await?];
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut silenced,
+        TaskState::Running,
+        bound,
+        &mut report,
+    )
+    .await?;
+    let accepted = hosts[1].proxy.accepted();
+    let dropped = Instant::now();
+    hosts[1].proxy.silence();
+    std::fs::write(&hosts[1].release, b"release")?;
+    sleep(Duration::from_secs(3)).await;
+    let restored = Instant::now();
+    hosts[1].proxy.restore();
+    let reconnect = reconnected(&hosts[1], accepted, silent_bound).await?;
+    wait_for_all(
+        &mut operator,
+        &tokens,
+        &mut silenced,
+        TaskState::Succeeded,
+        silent_bound,
+        &mut report,
+    )
+    .await?;
+    faults.push((
+        json!({
+            "kind": "control-network-silent-drop", "target": hosts[1].id,
+            "downtime_ms": restored.duration_since(dropped).as_millis(),
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": restored.elapsed().as_millis(),
+        }),
+        silenced[0].task_id.clone(),
+    ));
+    tasks.append(&mut silenced);
 
     // A Control Plane restart while a Task runs.
     let _ = std::fs::remove_file(&hosts[1].release);
@@ -1352,11 +1494,14 @@ async fn exercise_soak(database: String) -> Result<Value> {
         &mut report,
     )
     .await?;
-    faults.push(json!({
-        "kind": "control-plane-restart", "target": "control-plane",
-        "downtime_ms": downtime.as_millis(),
-        "recovery_latency_ms": back.elapsed().as_millis(),
-    }));
+    faults.push((
+        json!({
+            "kind": "control-plane-restart", "target": "control-plane",
+            "downtime_ms": downtime.as_millis(),
+            "recovery_latency_ms": back.elapsed().as_millis(),
+        }),
+        restarting[0].task_id.clone(),
+    ));
     tasks.append(&mut restarting);
 
     // A Worker Host restart, then new work on it.
@@ -1374,11 +1519,14 @@ async fn exercise_soak(database: String) -> Result<Value> {
         &mut report,
     )
     .await?;
-    faults.push(json!({
-        "kind": "worker-host-restart", "target": hosts[0].id,
-        "reconnect_latency_ms": reconnect.as_millis(),
-        "recovery_latency_ms": stopped.elapsed().as_millis(),
-    }));
+    faults.push((
+        json!({
+            "kind": "worker-host-restart", "target": hosts[0].id,
+            "reconnect_latency_ms": reconnect.as_millis(),
+            "recovery_latency_ms": stopped.elapsed().as_millis(),
+        }),
+        after[0].task_id.clone(),
+    ));
     tasks.append(&mut after);
 
     // Steady work: one Task per host at a time until the duration runs out.
@@ -1407,12 +1555,94 @@ async fn exercise_soak(database: String) -> Result<Value> {
         completion.push(submitted.elapsed().as_millis());
         tasks.append(&mut batch);
     }
+
+    // Audit every Task against what the Control Plane recorded and what the adapter did.
+    let mut effect_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for line in std::fs::read_to_string(&effects)?.lines() {
+        *effect_counts.entry(line.to_owned()).or_default() += 1;
+    }
+    let mut attempts = BTreeSet::new();
+    let mut attempt_failures = Vec::new();
+    let mut journal_failures = Vec::new();
+    for task in &tasks {
+        let observed = task_state(&mut operator, &tokens, &task.task_id).await?;
+        let expected = format!("{}: {} []", task.instructions, task.prompt);
+        let attempt = observed.attempt_id.clone().unwrap_or_default();
+        if observed.state() != TaskState::Succeeded
+            || task.attempt_id.as_deref() != Some(attempt.as_str())
+            || observed.result.as_deref() != Some(expected.as_str())
+            || !attempts.insert(attempt.clone())
+        {
+            attempt_failures.push(task.task_id.clone());
+        }
+        let events = operator
+            .list_events(tokens.request(ListEventsRequest {
+                task_id: task.task_id.clone(),
+                after_sequence: 0,
+                limit: 100,
+            })?)
+            .await?
+            .into_inner()
+            .events;
+        let history: Vec<_> = events
+            .iter()
+            .map(|event| (event.sequence, event.text.as_str()))
+            .collect();
+        if history != [(1, format!("{attempt} started").as_str()), (2, &expected)] {
+            journal_failures.push(task.task_id.clone());
+        }
+    }
+    let duplicate_task_ids: Vec<_> = effect_counts
+        .iter()
+        .filter(|(_, count)| **count > 1)
+        .map(|(task, _)| task.clone())
+        .collect();
+    let missing_effect_task_ids: Vec<_> = tasks
+        .iter()
+        .filter(|task| !effect_counts.contains_key(&task.task_id))
+        .map(|task| task.task_id.clone())
+        .collect();
+    let unknown_effects = effect_counts
+        .keys()
+        .filter(|id| !tasks.iter().any(|task| &task.task_id == *id))
+        .count();
+    let credentials = hosts
+        .iter()
+        .map(|host| {
+            let enrollment: Value = serde_json::from_slice(&std::fs::read(
+                host.directory.join(&host.id).join("enrollment.json"),
+            )?)?;
+            Ok(Sha256::digest(
+                enrollment["token"]
+                    .as_str()
+                    .context("enrollment credential missing")?
+                    .as_bytes(),
+            )
+            .to_vec())
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    let credentials_distinct = credentials.len() == hosts.len();
+    let faults: Vec<Value> = faults
+        .into_iter()
+        .map(|(mut fault, task)| {
+            fault["task_id"] = json!(task);
+            fault["recovered"] = json!(
+                !attempt_failures.contains(&task)
+                    && !journal_failures.contains(&task)
+                    && effect_counts.get(&task) == Some(&1)
+            );
+            fault
+        })
+        .collect();
     let launches: usize = hosts.iter().map(Host::launches).sum::<Result<_>>()?;
-    ensure!(
-        launches == tasks.len(),
-        "{launches} adapter launches for {} Tasks",
-        tasks.len()
-    );
+    let passed = attempt_failures.is_empty()
+        && journal_failures.is_empty()
+        && duplicate_task_ids.is_empty()
+        && missing_effect_task_ids.is_empty()
+        && unknown_effects == 0
+        && launches == tasks.len()
+        && credentials_distinct
+        && faults.iter().all(|fault| fault["recovered"] == true);
     completion.sort_unstable();
     let percentile = |values: &[u128], rank: usize| {
         values
@@ -1424,18 +1654,23 @@ async fn exercise_soak(database: String) -> Result<Value> {
         "database": if database.starts_with("postgres") { "postgresql" } else { "sqlite" },
         "duration_seconds": seconds,
         "tasks": tasks.len(),
-        "completed": tasks.len(),
-        "attempts": tasks.len(),
+        "attempts": attempts.len(),
+        "attempt_failure_task_ids": attempt_failures,
         "adapter_launches": launches,
-        "duplicate_executions": launches - tasks.len(),
+        "duplicate_task_ids": duplicate_task_ids,
+        "missing_effect_task_ids": missing_effect_task_ids,
+        "unknown_effects": unknown_effects,
+        "durable_journal_failure_task_ids": journal_failures,
+        "independent_worker_credentials": credentials_distinct,
         "batch_completion_ms": {"p50": percentile(&completion, 50), "p95": percentile(&completion, 95)},
         "faults": faults,
-        "gates": {"passed": true},
+        "gates": {"passed": passed},
     });
     println!("{}", serde_json::to_string_pretty(&summary)?);
     if let Some(path) = std::env::var_os("SUPERTAG_TRANSPORT_REPORT") {
         std::fs::write(path, serde_json::to_vec_pretty(&summary)?)?;
     }
+    ensure!(passed, "soak gates failed: {summary}");
     Ok(summary)
 }
 
