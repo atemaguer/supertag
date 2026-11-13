@@ -165,6 +165,40 @@ pub(crate) async fn operator_locations(
     locations_in(&mut tx, &capture, file, ids).await
 }
 
+/// The revision of a live Volume.
+pub(crate) async fn revision_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<u64>> {
+    let revision: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM supertag_v2_artifact_volumes WHERE volume_id=$1 AND deleted=0",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(revision.map(|value| value as u64))
+}
+
+/// Deletes an unused Volume at `expected_revision`.
+pub(crate) async fn delete_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    let volume = volume_in(tx, id).await?;
+    if expected_revision != volume.revision {
+        return Err(conflict());
+    }
+    unused(tx, id).await?;
+    let revision = i64::try_from(volume.revision)
+        .ok()
+        .and_then(|v| v.checked_add(1))
+        .ok_or_else(|| invalid("Volume revision exhausted"))?;
+    sqlx::query("UPDATE supertag_v2_artifact_volumes SET deleted=1,revision=$1 WHERE volume_id=$2")
+        .bind(revision)
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, "Volume", id).await
+}
+
 async fn unused(tx: &mut Transaction<'_, Any>, id: &str) -> Result<()> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_artifact_volume_copies WHERE volume_id=$1",
@@ -304,22 +338,7 @@ impl Store {
         if let Some(result) = prior(&mut tx, principal, &input.operation_id, &digest).await? {
             return Ok(result);
         }
-        let volume = volume_in(&mut tx, &input.volume_id).await?;
-        if input.expected_revision != volume.revision {
-            return Err(conflict());
-        }
-        unused(&mut tx, &input.volume_id).await?;
-        let revision = i64::try_from(volume.revision)
-            .ok()
-            .and_then(|v| v.checked_add(1))
-            .ok_or_else(|| invalid("Volume revision exhausted"))?;
-        sqlx::query(
-            "UPDATE supertag_v2_artifact_volumes SET deleted=1,revision=$1 WHERE volume_id=$2",
-        )
-        .bind(revision)
-        .bind(&input.volume_id)
-        .execute(&mut *tx)
-        .await?;
+        delete_in(&mut tx, &input.volume_id, input.expected_revision).await?;
         let result = DeleteArtifactVolumeResponse { deleted: true };
         record(&mut tx, principal, &input.operation_id, &digest, &result).await?;
         tx.commit().await?;

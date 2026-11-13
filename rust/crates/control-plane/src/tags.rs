@@ -151,46 +151,103 @@ impl Store {
             tx.rollback().await?;
             return Ok(response);
         }
-
-        // Alias ownership and exact ingress receipts remain available for replay.
-        sqlx::query(
-            "DELETE FROM supertag_v2_surface_locations WHERE connector_account_id IN
-             (SELECT connector_account_id FROM supertag_v2_managed_connector_aliases WHERE tag_id=$1)",
-        )
-        .bind(tag_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("DELETE FROM supertag_v2_host_tags WHERE tag_id=$1")
-            .bind(tag_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "DELETE FROM supertag_v2_mailbox_grants WHERE sender_tag_id=$1 OR recipient_tag_id=$1",
-        )
-        .bind(tag_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE supertag_v2_role_assignments SET status=$1,revision=revision+1
-             WHERE tag_id=$2 AND status=$3",
-        )
-        .bind(RoleAssignmentStatus::Inactive as i64)
-        .bind(tag_id)
-        .bind(RoleAssignmentStatus::Active as i64)
-        .execute(&mut *tx)
-        .await?;
-        let row = sqlx::query(
-            "UPDATE supertag_v2_tags SET retired_at_ms=$1,revision=revision+1
-             WHERE tag_id=$2 RETURNING *",
-        )
-        .bind(self.execution_now_ms())
-        .bind(tag_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let row = retire_unused_in(&mut tx, tag_id, self.execution_now_ms()).await?;
         response.tag = Some(tag_from_row(&row)?);
         tx.commit().await?;
         Ok(response)
     }
+}
+
+/// Retires an unused Tag after its blockers were checked, removing what binds it.
+async fn retire_unused_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    now_ms: i64,
+) -> Result<AnyRow> {
+    // Alias ownership and exact ingress receipts remain available for replay.
+    sqlx::query(
+        "DELETE FROM supertag_v2_surface_locations WHERE connector_account_id IN
+         (SELECT connector_account_id FROM supertag_v2_managed_connector_aliases WHERE tag_id=$1)",
+    )
+    .bind(tag_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM supertag_v2_host_tags WHERE tag_id=$1")
+        .bind(tag_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM supertag_v2_mailbox_grants WHERE sender_tag_id=$1 OR recipient_tag_id=$1",
+    )
+    .bind(tag_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE supertag_v2_role_assignments SET status=$1,revision=revision+1
+         WHERE tag_id=$2 AND status=$3",
+    )
+    .bind(RoleAssignmentStatus::Inactive as i64)
+    .bind(tag_id)
+    .bind(RoleAssignmentStatus::Active as i64)
+    .execute(&mut **tx)
+    .await?;
+    let row = sqlx::query(
+        "UPDATE supertag_v2_tags SET retired_at_ms=$1,revision=revision+1
+         WHERE tag_id=$2 RETURNING *",
+    )
+    .bind(now_ms)
+    .bind(tag_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    crate::apply_sets::forget(tx, "Tag", tag_id).await?;
+    Ok(row)
+}
+
+/// The revision of an active Tag; a retired or missing Tag has none.
+pub(crate) async fn active_revision_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<Option<u64>> {
+    let revision: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM supertag_v2_tags WHERE tag_id=$1 AND retired_at_ms IS NULL",
+    )
+    .bind(tag_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(revision.map(|value| value as u64))
+}
+
+/// Retires an active, unused Tag at `expected_revision`, as `retire_tag` does.
+pub(crate) async fn retire_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    expected_revision: u64,
+    now_ms: i64,
+) -> Result<()> {
+    if active_revision_in(tx, tag_id).await? != Some(expected_revision) {
+        return Err(StoreError::Conflict("Tag revision changed".into()));
+    }
+    let mut blockers = blockers(tx, tag_id).await?;
+    // Pruning never removes a Surface location the apply set did not remove itself.
+    let location: Option<String> = sqlx::query_scalar(
+        "SELECT l.location_id FROM supertag_v2_surface_locations l
+         JOIN supertag_v2_managed_connector_aliases a USING (connector_account_id)
+         WHERE a.tag_id=$1 ORDER BY l.location_id LIMIT 1",
+    )
+    .bind(tag_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(location) = location {
+        blockers.push(format!("Surface location {location}"));
+    }
+    if !blockers.is_empty() {
+        return Err(StoreError::FailedPrecondition(format!(
+            "Tag {tag_id} is in use by {}",
+            blockers.join(", ")
+        )));
+    }
+    retire_unused_in(tx, tag_id, now_ms).await?;
+    Ok(())
 }
 
 async fn blockers(tx: &mut Transaction<'_, Any>, tag_id: &str) -> Result<Vec<String>> {

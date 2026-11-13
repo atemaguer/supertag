@@ -28,6 +28,22 @@ pub(super) struct Catalog<'a> {
     relationships: manifest_relationships_client::ManifestRelationshipsClient<Channel>,
     manager: &'a str,
     create_only: bool,
+    /// The revision the current resource was planned against, if it exists.
+    observed: Option<u64>,
+    declared: BTreeMap<Key, Declared>,
+}
+
+/// A declared resource of a prunable kind, as this apply leaves it.
+struct Declared {
+    revision: u64,
+    created: bool,
+    /// False until a planned write of the resource succeeds.
+    applied: bool,
+}
+
+/// Kinds an apply set can prune; Surface Accounts and Objectives are never members.
+fn prunable(kind: Kind) -> bool {
+    !matches!(kind, Kind::SurfaceAccount | Kind::Objective)
 }
 
 enum Write {
@@ -49,6 +65,8 @@ enum Write {
 }
 
 pub(super) struct Change {
+    /// The declared resource this change writes.
+    key: Option<Key>,
     label: String,
     action: &'static str,
     write: Write,
@@ -149,6 +167,8 @@ impl<'a> Catalog<'a> {
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
             manager,
             create_only,
+            observed: None,
+            declared: BTreeMap::new(),
         })
     }
 
@@ -166,12 +186,25 @@ impl<'a> Catalog<'a> {
         for item in manifests {
             let name = item.name;
             let label = format!("{:?}/{name}", item.kind);
+            self.observed = None;
             let change = self
                 .plan_resource(item.resource, &name, &mut declarations, &mut followups)
                 .await
                 .with_context(|| format!("{label} from {}", item.source))?;
+            let key = (item.kind, name.clone());
+            if prunable(item.kind) {
+                self.declared.insert(
+                    key.clone(),
+                    Declared {
+                        revision: self.observed.unwrap_or_default(),
+                        created: self.observed.is_none(),
+                        applied: change.is_none(),
+                    },
+                );
+            }
             if let Some((exists, write)) = change {
                 changes.push(Change {
+                    key: prunable(item.kind).then_some(key),
                     label,
                     action: if exists { "update" } else { "create" },
                     write,
@@ -199,6 +232,7 @@ impl<'a> Catalog<'a> {
                 changes.insert(
                     index,
                     Change {
+                        key: None,
                         label: "provisioned Tags".into(),
                         action: "create",
                         write: Write::ProvisionTags(ProvisionTagsRequest { tags }),
@@ -281,6 +315,7 @@ impl<'a> Catalog<'a> {
                     token,
                 )?))
                 .await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only && prior.is_some() {
                     return Ok(None);
                 }
@@ -307,6 +342,7 @@ impl<'a> Catalog<'a> {
                     token,
                 )?))
                 .await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only && prior.is_some() {
                     declarations
                         .ids
@@ -351,6 +387,7 @@ impl<'a> Catalog<'a> {
             Resource::ContextSet(mut value) => {
                 let prior =
                     lookup(self.policy.get_context_set(request(reference(), token)?)).await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only
                     && let Some(prior) = prior
                 {
@@ -388,6 +425,7 @@ impl<'a> Catalog<'a> {
             Resource::PermissionSet(mut value) => {
                 let prior =
                     lookup(self.policy.get_permission_set(request(reference(), token)?)).await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only
                     && let Some(prior) = prior
                 {
@@ -428,6 +466,7 @@ impl<'a> Catalog<'a> {
             }
             Resource::Role(mut value) => {
                 let prior = lookup(self.policy.get_role(request(reference(), token)?)).await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only
                     && let Some(prior) = prior
                 {
@@ -471,6 +510,7 @@ impl<'a> Catalog<'a> {
                     token,
                 )?))
                 .await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
                 if self.create_only && prior.is_some() {
                     return Ok(None);
                 }
@@ -605,6 +645,7 @@ impl<'a> Catalog<'a> {
         followups: &mut Vec<Change>,
     ) -> Result<Option<(bool, Write)>> {
         let prior = self.tag(name).await?;
+        self.observed = prior.as_ref().map(|value| value.revision);
         if self.create_only && prior.is_some() {
             return Ok(None);
         }
@@ -753,6 +794,7 @@ impl<'a> Catalog<'a> {
         if !details.is_empty() {
             reconciliation.preview = false;
             followups.push(Change {
+                key: None,
                 label: format!("Tag/{name} relationships"),
                 action: "reconcile",
                 write: Write::Relationships(reconciliation),
@@ -786,6 +828,10 @@ impl<'a> Catalog<'a> {
                 .get_team(request(GetTeamRequest { team: name.into() }, self.token)?),
         )
         .await?;
+        self.observed = prior
+            .as_ref()
+            .filter(|prior| prior.team_id == name)
+            .map(|prior| prior.revision);
         if self.create_only
             && let Some(prior) = prior
         {
@@ -992,80 +1038,157 @@ impl<'a> Catalog<'a> {
 
     pub(super) async fn apply(&mut self, change: Change, report: bool) -> Result<()> {
         let token = self.token;
-        let result = match change.write {
+        let result: Result<Option<u64>, Status> = match change.write {
             Write::Account(input) => self
                 .surfaces
                 .put_surface_account(request(input, token)?)
                 .await
-                .map(|_| ()),
-            Write::Volume(input) => self.volumes.put(request(input, token)?).await.map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
+            Write::Volume(input) => self
+                .volumes
+                .put(request(input, token)?)
+                .await
+                .map(|value| Some(value.into_inner().revision)),
             Write::Workspace(input) => self
                 .workspaces
                 .put(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Context(input) => self
                 .policy
                 .put_context_set(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Permission(input) => self
                 .policy
                 .put_permission_set(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Role(input) => self
                 .policy
                 .put_role(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::ProvisionTag(_) => unreachable!("provisioned Tags are grouped in the plan"),
             Write::ProvisionTags(input) => self
                 .relationships
                 .provision_tags(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|_| None),
             Write::Tag(input) => self
                 .operator
                 .put_tag(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Team(input) => self
                 .teams
                 .create_team(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::UpdateTeam(input) => self
                 .teams
                 .update_team(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Location(input) => self
                 .surfaces
                 .put_surface_location(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|value| Some(value.into_inner().revision)),
             Write::Objective(input) => self
                 .objectives
                 .create_objective(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|_| None),
             Write::ObjectiveLimits(input) => self
                 .objectives
                 .set_limits(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|_| None),
             Write::Relationships(input) => self
                 .relationships
                 .reconcile_tag(request(input, token)?)
                 .await
-                .map(|_| ()),
+                .map(|_| None),
         };
-        result.with_context(|| format!("apply {}", change.label))?;
+        let revision = result.with_context(|| format!("apply {}", change.label))?;
+        if let (Some(key), Some(revision)) = (&change.key, revision)
+            && let Some(declared) = self.declared.get_mut(key)
+        {
+            declared.revision = revision;
+            declared.applied = true;
+        }
         if report {
             println!("configured {}", change.label);
         }
         Ok(())
+    }
+
+    /// Records the apply set's members and, with `prune`, removes those the
+    /// input no longer declares. Only resources whose planned write succeeded
+    /// are declared, so a failed apply records what it created and prunes nothing.
+    pub(super) async fn reconcile_apply_set(
+        &mut self,
+        prune: bool,
+        preview: bool,
+    ) -> Result<Vec<String>> {
+        if self.manager.is_empty() || self.create_only {
+            return Ok(Vec::new());
+        }
+        let declared = self
+            .declared
+            .iter()
+            .filter(|(_, value)| preview || value.applied)
+            .map(|((kind, name), value)| ApplySetDeclaration {
+                kind: format!("{kind:?}"),
+                name: name.clone(),
+                revision: value.revision,
+                created: value.created,
+            })
+            .collect();
+        let response = self
+            .relationships
+            .reconcile_apply_set(request(
+                ReconcileApplySetRequest {
+                    apply_set: self.manager.into(),
+                    declared,
+                    prune,
+                    preview,
+                },
+                self.token,
+            )?)
+            .await
+            .context("reconcile apply set")?
+            .into_inner();
+        Ok(response
+            .pruned
+            .into_iter()
+            .map(|item| prune_line(&item, preview, self.manager))
+            .collect())
+    }
+}
+
+fn prune_line(item: &ApplySetPrune, preview: bool, apply_set: &str) -> String {
+    let label = format!("{}/{}", item.kind, item.name);
+    let retires = matches!(item.kind.as_str(), "Tag" | "Role");
+    let verb = match (item.action(), preview, retires) {
+        (ApplySetPruneAction::Delete, true, true) => "retire",
+        (ApplySetPruneAction::Delete, true, false) => "delete",
+        (ApplySetPruneAction::Delete, false, true) => "retired",
+        (ApplySetPruneAction::Delete, false, false) => "deleted",
+        (ApplySetPruneAction::Keep, true, _) => "keep",
+        (ApplySetPruneAction::Keep, false, _) => "kept",
+        (ApplySetPruneAction::Release, true, _) => "release",
+        (ApplySetPruneAction::Release, false, _) => "released",
+        (ApplySetPruneAction::Forget | ApplySetPruneAction::Unspecified, true, _) => "forget",
+        (ApplySetPruneAction::Forget | ApplySetPruneAction::Unspecified, false, _) => "forgot",
+    };
+    match item.action() {
+        ApplySetPruneAction::Delete => format!("{verb} {label}"),
+        ApplySetPruneAction::Keep | ApplySetPruneAction::Release => {
+            format!("{verb} {label}: {}", item.reason)
+        }
+        _ => format!("{verb} {label}: no longer exists; it leaves apply set {apply_set}"),
     }
 }
 

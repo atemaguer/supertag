@@ -32,9 +32,13 @@ pub struct ManifestArgs {
     /// YAML documents, a JSON array, a directory of manifests, or - for stdin.
     #[arg(short = 'f', long = "file", required = true)]
     files: Vec<PathBuf>,
-    /// Name the manager that owns the manifest's Tag relationships.
+    /// Apply as this apply set: it owns the Tag relationships it declares and
+    /// the resources it creates.
     #[arg(long = "set")]
     manager: Option<String>,
+    /// Remove the apply set's resources that the input no longer declares.
+    #[arg(long, requires = "manager")]
+    prune: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -444,15 +448,38 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         false,
     )?;
     let changes = catalog.plan(manifests).await?;
-    if changes.is_empty() {
+    if !apply {
+        let mut lines = changes
+            .iter()
+            .map(plan::Change::preview)
+            .collect::<Vec<_>>();
+        if args.prune {
+            lines.extend(catalog.reconcile_apply_set(true, true).await?);
+        }
+        if lines.is_empty() {
+            println!("No changes.");
+        }
+        for line in lines {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+    let unchanged = changes.is_empty();
+    for change in changes {
+        if let Err(error) = catalog.apply(change, true).await {
+            // Record what this apply created so a rerun still owns it; never prune here.
+            if let Err(record) = catalog.reconcile_apply_set(false, false).await {
+                return Err(error.context(format!("{record:#}")));
+            }
+            return Err(error);
+        }
+    }
+    let pruned = catalog.reconcile_apply_set(args.prune, false).await?;
+    if unchanged && pruned.is_empty() {
         println!("No changes.");
     }
-    for change in changes {
-        if apply {
-            catalog.apply(change, true).await?;
-        } else {
-            println!("{}", change.preview());
-        }
+    for line in pruned {
+        println!("{line}");
     }
     Ok(())
 }

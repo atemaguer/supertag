@@ -47,6 +47,60 @@ service OperatorEvents {
 service ManifestRelationships {
   rpc ReconcileTag(ReconcileTagRelationshipsRequest) returns (ReconcileTagRelationshipsResponse);
   rpc ProvisionTags(ProvisionTagsRequest) returns (ProvisionTagsResponse);
+  // Records an apply set's members and, with prune, removes the members its
+  // input no longer declares, all in one serialized Control Plane write.
+  rpc ReconcileApplySet(ReconcileApplySetRequest) returns (ReconcileApplySetResponse);
+}
+
+// One resource an apply set's input declares. Kinds are SurfaceLocation,
+// Team, Tag, Role, PermissionSet, ContextSet, Workspace and Volume.
+message ApplySetDeclaration {
+  string kind = 1;
+  // The manifest's metadata.name.
+  string name = 2;
+  // The resource's revision as this apply left it: the revision its write
+  // returned, or the revision it planned against when it did not write.
+  uint64 revision = 3;
+  // True when this apply created the resource. Only a resource an apply set
+  // created joins it; an existing resource is never adopted.
+  bool created = 4;
+}
+
+message ReconcileApplySetRequest {
+  // 1 to 63 lowercase letters, digits, hyphens or underscores.
+  string apply_set = 1;
+  // Every resource of a prunable kind the input declares.
+  repeated ApplySetDeclaration declared = 2;
+  // Removes the set's members the input no longer declares.
+  bool prune = 3;
+  // Reports what reconciling would do and changes nothing.
+  bool preview = 4;
+}
+
+enum ApplySetPruneAction {
+  APPLY_SET_PRUNE_ACTION_UNSPECIFIED = 0;
+  // The member is deleted, or retired for a Tag or Role.
+  APPLY_SET_PRUNE_ACTION_DELETE = 1;
+  // The member is still in use. It stays in the set for the next prune.
+  APPLY_SET_PRUNE_ACTION_KEEP = 2;
+  // Another writer changed the member after this apply set last applied it.
+  // It is left in place and leaves the set.
+  APPLY_SET_PRUNE_ACTION_RELEASE = 3;
+  // The member no longer exists. It leaves the set.
+  APPLY_SET_PRUNE_ACTION_FORGET = 4;
+}
+
+message ApplySetPrune {
+  string kind = 1;
+  string name = 2;
+  ApplySetPruneAction action = 3;
+  // For KEEP and RELEASE: why.
+  string reason = 4;
+}
+
+message ReconcileApplySetResponse {
+  // In removal order: dependents before what they use.
+  repeated ApplySetPrune pruned = 1;
 }
 
 // Creates the declared Tags and their policy relationships atomically. A Tag

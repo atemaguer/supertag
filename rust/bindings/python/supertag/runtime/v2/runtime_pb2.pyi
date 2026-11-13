@@ -10,6 +10,14 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class ApplySetPruneAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    APPLY_SET_PRUNE_ACTION_UNSPECIFIED: _ClassVar[ApplySetPruneAction]
+    APPLY_SET_PRUNE_ACTION_DELETE: _ClassVar[ApplySetPruneAction]
+    APPLY_SET_PRUNE_ACTION_KEEP: _ClassVar[ApplySetPruneAction]
+    APPLY_SET_PRUNE_ACTION_RELEASE: _ClassVar[ApplySetPruneAction]
+    APPLY_SET_PRUNE_ACTION_FORGET: _ClassVar[ApplySetPruneAction]
+
 class WatchKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WATCH_KIND_UNSPECIFIED: _ClassVar[WatchKind]
@@ -244,6 +252,11 @@ class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REPLY_STATE_DELIVERED: _ClassVar[ReplyState]
     REPLY_STATE_FAILED: _ClassVar[ReplyState]
     REPLY_STATE_UNCERTAIN: _ClassVar[ReplyState]
+APPLY_SET_PRUNE_ACTION_UNSPECIFIED: ApplySetPruneAction
+APPLY_SET_PRUNE_ACTION_DELETE: ApplySetPruneAction
+APPLY_SET_PRUNE_ACTION_KEEP: ApplySetPruneAction
+APPLY_SET_PRUNE_ACTION_RELEASE: ApplySetPruneAction
+APPLY_SET_PRUNE_ACTION_FORGET: ApplySetPruneAction
 WATCH_KIND_UNSPECIFIED: WatchKind
 WATCH_KIND_TAG: WatchKind
 WATCH_KIND_TASK: WatchKind
@@ -386,6 +399,48 @@ REPLY_STATE_CLAIMED: ReplyState
 REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
+
+class ApplySetDeclaration(_message.Message):
+    __slots__ = ("kind", "name", "revision", "created")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    CREATED_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    revision: int
+    created: bool
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., revision: _Optional[int] = ..., created: _Optional[bool] = ...) -> None: ...
+
+class ReconcileApplySetRequest(_message.Message):
+    __slots__ = ("apply_set", "declared", "prune", "preview")
+    APPLY_SET_FIELD_NUMBER: _ClassVar[int]
+    DECLARED_FIELD_NUMBER: _ClassVar[int]
+    PRUNE_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    apply_set: str
+    declared: _containers.RepeatedCompositeFieldContainer[ApplySetDeclaration]
+    prune: bool
+    preview: bool
+    def __init__(self, apply_set: _Optional[str] = ..., declared: _Optional[_Iterable[_Union[ApplySetDeclaration, _Mapping]]] = ..., prune: _Optional[bool] = ..., preview: _Optional[bool] = ...) -> None: ...
+
+class ApplySetPrune(_message.Message):
+    __slots__ = ("kind", "name", "action", "reason")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    action: ApplySetPruneAction
+    reason: str
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., action: _Optional[_Union[ApplySetPruneAction, str]] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class ReconcileApplySetResponse(_message.Message):
+    __slots__ = ("pruned",)
+    PRUNED_FIELD_NUMBER: _ClassVar[int]
+    pruned: _containers.RepeatedCompositeFieldContainer[ApplySetPrune]
+    def __init__(self, pruned: _Optional[_Iterable[_Union[ApplySetPrune, _Mapping]]] = ...) -> None: ...
 
 class ProvisionTagsRequest(_message.Message):
     __slots__ = ("tags",)

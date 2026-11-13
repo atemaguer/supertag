@@ -420,8 +420,159 @@ spec: {purpose: Observe releases.}
     )?;
     assert_eq!(grants["grants"].as_array().unwrap().len(), 2);
 
+    prune_apply_set(root, &gateway).await?;
+
     gateway_process.kill().await?;
     plane.kill().await?;
+    Ok(())
+}
+
+async fn volume_exists(gateway: &str, id: &str) -> Result<bool> {
+    let output = timeout(
+        Duration::from_secs(12),
+        cli(&["volume", "--gateway", gateway, "get", id]).output(),
+    )
+    .await??;
+    Ok(output.status.success())
+}
+
+async fn prune_apply_set(root: &Path, gateway: &str) -> Result<()> {
+    let set = root.join("apply-set");
+    std::fs::create_dir(&set)?;
+    let volume = |name: &str, source: &str| {
+        format!(
+            "apiVersion: supertag/v1\nkind: Volume\nmetadata: {{name: {name}}}\nspec: {{source: \"{source}\"}}\n"
+        )
+    };
+    std::fs::write(
+        set.join("keep.yaml"),
+        volume("set-keep", "file:///srv/keep"),
+    )?;
+    std::fs::write(set.join("a.yaml"), volume("set-a", "file:///srv/a"))?;
+    std::fs::write(set.join("b.yaml"), volume("set-b", "file:///srv/b"))?;
+    // `archive` already exists from an apply without a set: it is never adopted.
+    std::fs::write(
+        set.join("archive.yaml"),
+        volume("archive", "file:///var/lib/supertag/archive"),
+    )?;
+    std::fs::write(
+        set.join("crew.yaml"),
+        r#"
+apiVersion: supertag/v1
+kind: Tag
+metadata: {name: set-worker}
+spec: {instructions: "Do the set's work."}
+---
+apiVersion: supertag/v1
+kind: Team
+metadata: {name: set-crew}
+spec: {members: [set-worker]}
+---
+apiVersion: supertag/v1
+kind: ContextSet
+metadata: {name: set-context}
+spec: {items: []}
+"#,
+    )?;
+    let path = set.to_str().context("apply set path")?;
+    let error = command(gateway, &["apply", "-f", path, "--prune"], false).await?;
+    assert!(error.contains("--set"), "{error}");
+    command(
+        gateway,
+        &["apply", "-f", path, "--set", "release", "--prune"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        command(
+            gateway,
+            &["diff", "-f", path, "--set", "release", "--prune"],
+            true
+        )
+        .await?
+        .trim(),
+        "No changes."
+    );
+
+    // An operator's imperative Volume and another writer's edit of a member.
+    let outside = root.join("outside.yaml");
+    std::fs::write(&outside, volume("set-b", "file:///srv/b-by-hand"))?;
+    command(gateway, &["apply", "-f", outside.to_str().unwrap()], true).await?;
+    command(
+        gateway,
+        &[
+            "volume",
+            "put",
+            "operator-volume",
+            "--source",
+            "file:///srv/operator",
+            "--operation-id",
+            "operator-volume",
+        ],
+        true,
+    )
+    .await?;
+
+    for omitted in ["a.yaml", "b.yaml", "archive.yaml", "crew.yaml"] {
+        std::fs::remove_file(set.join(omitted))?;
+    }
+    let preview = command(
+        gateway,
+        &["diff", "-f", path, "--set", "release", "--prune"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        preview.trim(),
+        "delete Team/set-crew\n\
+         retire Tag/set-worker\n\
+         delete ContextSet/set-context\n\
+         delete Volume/set-a\n\
+         release Volume/set-b: changed outside apply set release after it was applied",
+        "{preview}"
+    );
+    // A diff changes nothing, and an apply without --prune removes nothing.
+    command(gateway, &["get-tag", "set-worker"], true).await?;
+    assert_eq!(
+        command(gateway, &["apply", "-f", path, "--set", "release"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    assert!(volume_exists(gateway, "set-a").await?);
+
+    let applied = command(
+        gateway,
+        &["apply", "-f", path, "--set", "release", "--prune"],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        applied.trim(),
+        "deleted Team/set-crew\n\
+         retired Tag/set-worker\n\
+         deleted ContextSet/set-context\n\
+         deleted Volume/set-a\n\
+         released Volume/set-b: changed outside apply set release after it was applied",
+        "{applied}"
+    );
+    let worker: Value =
+        serde_json::from_str(&command(gateway, &["get-tag", "set-worker"], true).await?)?;
+    assert!(worker["retired_at_ms"].is_number(), "{worker}");
+    assert!(!volume_exists(gateway, "set-a").await?);
+    for kept in ["set-keep", "set-b", "archive", "operator-volume", "shared"] {
+        assert!(volume_exists(gateway, kept).await?, "{kept}");
+    }
+    assert_eq!(
+        command(
+            gateway,
+            &["diff", "-f", path, "--set", "release", "--prune"],
+            true
+        )
+        .await?
+        .trim(),
+        "No changes."
+    );
     Ok(())
 }
 

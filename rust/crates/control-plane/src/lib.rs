@@ -1,3 +1,4 @@
+mod apply_sets;
 mod approvals;
 mod artifact_acquisitions;
 mod artifact_captures;

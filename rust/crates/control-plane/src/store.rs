@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 55;
+        const SCHEMA_VERSION: i64 = 56;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -177,6 +177,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0053_manifest_relationships.sql"),
                 include_str!("../migrations/sqlite/0054_direct_artifact_transfer.sql"),
                 include_str!("../migrations/sqlite/0055_workspace_volume_mounts.sql"),
+                include_str!("../migrations/sqlite/0056_apply_set_members.sql"),
             ]
         } else {
             [
@@ -235,6 +236,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0053_manifest_relationships.sql"),
                 include_str!("../migrations/postgresql/0054_direct_artifact_transfer.sql"),
                 include_str!("../migrations/postgresql/0055_workspace_volume_mounts.sql"),
+                include_str!("../migrations/postgresql/0056_apply_set_members.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

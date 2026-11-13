@@ -1,5 +1,5 @@
 //! Location policy is evaluated only for an authenticated connector admission.
-mod catalog;
+pub(crate) mod catalog;
 
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};

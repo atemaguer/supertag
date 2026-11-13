@@ -23,6 +23,39 @@ async fn catalog_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<Gi
     bytes.as_deref().map(policy::decode).transpose()
 }
 
+/// The revision of a cataloged Workspace.
+pub(crate) async fn revision_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<u64>> {
+    Ok(catalog_in(tx, id).await?.map(|value| value.revision))
+}
+
+/// Deletes a Workspace no active Tag uses, at `expected_revision`.
+pub(crate) async fn delete_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    let prior = catalog_in(tx, id)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("GitHub Workspace was not found".into()))?;
+    if prior.revision != expected_revision {
+        return Err(StoreError::Conflict(
+            "GitHub Workspace revision changed".into(),
+        ));
+    }
+    let used: Option<String> = sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE workspace_id=$1 AND retired_at_ms IS NULL LIMIT 1")
+        .bind(id).fetch_optional(&mut **tx).await?;
+    if used.is_some() {
+        return Err(StoreError::FailedPrecondition(
+            "GitHub Workspace is still assigned to a Tag".into(),
+        ));
+    }
+    sqlx::query("DELETE FROM supertag_v2_github_workspaces WHERE workspace_id=$1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, "Workspace", id).await
+}
+
 pub fn validate_manifest_workspace(value: &mut GithubWorkspace) -> Result<()> {
     if !valid_workspace_id(&value.workspace_id) {
         return Err(invalid("valid Workspace ID required"));
@@ -318,25 +351,7 @@ impl Store {
         {
             return Ok(prior);
         }
-        let prior = catalog_in(&mut tx, &input.workspace_id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound("GitHub Workspace was not found".into()))?;
-        if prior.revision != input.expected_revision {
-            return Err(StoreError::Conflict(
-                "GitHub Workspace revision changed".into(),
-            ));
-        }
-        let used: Option<String> = sqlx::query_scalar("SELECT tag_id FROM supertag_v2_tags WHERE workspace_id=$1 AND retired_at_ms IS NULL LIMIT 1")
-            .bind(&input.workspace_id).fetch_optional(&mut *tx).await?;
-        if used.is_some() {
-            return Err(StoreError::FailedPrecondition(
-                "GitHub Workspace is still assigned to a Tag".into(),
-            ));
-        }
-        sqlx::query("DELETE FROM supertag_v2_github_workspaces WHERE workspace_id=$1")
-            .bind(&input.workspace_id)
-            .execute(&mut *tx)
-            .await?;
+        delete_in(&mut tx, &input.workspace_id, input.expected_revision).await?;
         let response = DeleteGithubWorkspaceResponse {};
         policy::receipt(&mut tx, principal, &input.operation_id, &digest, &response).await?;
         tx.commit().await?;

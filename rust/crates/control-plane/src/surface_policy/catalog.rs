@@ -16,6 +16,31 @@ async fn account_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<Su
     bytes.map(|bytes| policy::decode(&bytes)).transpose()
 }
 
+/// The revision of a Surface location.
+pub(crate) async fn location_revision_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+) -> Result<Option<u64>> {
+    Ok(location_in(tx, id).await?.map(|value| value.revision))
+}
+
+/// Deletes a Surface location at `expected_revision`.
+pub(crate) async fn delete_location_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+    expected_revision: u64,
+) -> Result<()> {
+    let value = location_in(tx, id)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Surface location was not found".into()))?;
+    revision(Some(expected_revision), Some(value.revision))?;
+    sqlx::query("DELETE FROM supertag_v2_surface_locations WHERE location_id=$1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    crate::apply_sets::forget(tx, "SurfaceLocation", id).await
+}
+
 async fn location_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<SurfaceLocation>> {
     let bytes: Option<Vec<u8>> = sqlx::query_scalar(
         "SELECT payload FROM supertag_v2_surface_locations WHERE location_id=$1",
@@ -337,14 +362,7 @@ impl Store {
         if let Some(value) = policy::replay(&mut tx, principal, &input.operation_id, &hash).await? {
             return Ok(value);
         }
-        let value = location_in(&mut tx, &input.location_id)
-            .await?
-            .ok_or_else(|| StoreError::NotFound("Surface location was not found".into()))?;
-        revision(Some(input.expected_revision), Some(value.revision))?;
-        sqlx::query("DELETE FROM supertag_v2_surface_locations WHERE location_id=$1")
-            .bind(&input.location_id)
-            .execute(&mut *tx)
-            .await?;
+        delete_location_in(&mut tx, &input.location_id, input.expected_revision).await?;
         let response = DeletePolicyResourceResponse { deleted: true };
         policy::receipt(&mut tx, principal, &input.operation_id, &hash, &response).await?;
         tx.commit().await?;
