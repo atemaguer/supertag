@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// Operator Tokens and the audit log, reached through the Gateway.
+//
+// An Operator Token is a named, revocable credential that one teammate or
+// machine presents instead of the admin operator token. Calls made with it act
+// as the operator `token:NAME`. Only the admin operator token creates, lists,
+// reads, rotates, and revokes Operator Tokens. Every operator may read the
+// audit log.
+service OperatorAccess {
+  // Records a new token from the digest of a secret the caller generated. The
+  // Control Plane never receives the secret. Names are never reused.
+  rpc CreateOperatorToken(CreateOperatorTokenRequest) returns (OperatorToken);
+  rpc GetOperatorToken(GetOperatorTokenRequest) returns (OperatorToken);
+  rpc ListOperatorTokens(ListOperatorTokensRequest) returns (ListOperatorTokensResponse);
+  // Replaces the secret of a token that is not revoked and restarts its
+  // lifetime. The previous secret is refused from then on.
+  rpc RotateOperatorToken(RotateOperatorTokenRequest) returns (OperatorToken);
+  // Idempotent. The token is refused from then on, including by calls and
+  // streams already in progress.
+  rpc RevokeOperatorToken(RevokeOperatorTokenRequest) returns (OperatorToken);
+  // Newest first.
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse);
+}
+
+// Private Gateway-to-Control Plane resolution of a presented Operator Token.
+service OperatorDirectory {
+  rpc Authenticate(AuthenticateOperatorRequest) returns (OperatorIdentity);
+}
+
+message CreateOperatorTokenRequest {
+  // 1-63 lowercase letters, digits, hyphens, or underscores, starting with a
+  // letter or digit.
+  string name = 1;
+  // Retrying with the same operation ID and digest returns the same token.
+  string operation_id = 2;
+  // SHA-256 of the full secret.
+  bytes secret_digest = 3;
+}
+
+message GetOperatorTokenRequest {
+  string name = 1;
+}
+
+message ListOperatorTokensRequest {
+  // 0 means 50; at most 500.
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message ListOperatorTokensResponse {
+  repeated OperatorToken tokens = 1;
+  string next_cursor = 2;
+}
+
+message RotateOperatorTokenRequest {
+  string name = 1;
+  string operation_id = 2;
+  // SHA-256 of the new secret.
+  bytes secret_digest = 3;
+}
+
+message RevokeOperatorTokenRequest {
+  string name = 1;
+}
+
+// An Operator Token's phase. Revocation wins over expiry.
+enum OperatorTokenPhase {
+  OPERATOR_TOKEN_PHASE_UNSPECIFIED = 0;
+  OPERATOR_TOKEN_PHASE_ACTIVE = 1;
+  OPERATOR_TOKEN_PHASE_EXPIRED = 2;
+  OPERATOR_TOKEN_PHASE_REVOKED = 3;
+}
+
+// A token as an operator sees it. It never includes the secret or its digest.
+message OperatorToken {
+  string name = 1;
+  // The operator calls made with it act as, such as `token:laptop-2`.
+  string operator_id = 2;
+  OperatorTokenPhase phase = 3;
+  int64 created_at_ms = 4;
+  int64 expires_at_ms = 5;
+  // Refreshed at most once a minute.
+  optional int64 last_used_at_ms = 6;
+  optional int64 revoked_at_ms = 7;
+  optional int64 rotated_at_ms = 8;
+  // 1 for the first secret; increases with each rotation.
+  uint64 secret_revision = 9;
+  // The bare operator ID that created it.
+  string created_by = 10;
+}
+
+message AuthenticateOperatorRequest {
+  // SHA-256 of the presented bearer secret.
+  bytes token_digest = 1;
+}
+
+message OperatorIdentity {
+  // The bare operator ID, such as `token:laptop-2`.
+  string operator_id = 1;
+}
+
+enum AuditOutcome {
+  AUDIT_OUTCOME_UNSPECIFIED = 0;
+  AUDIT_OUTCOME_SUCCEEDED = 1;
+  AUDIT_OUTCOME_FAILED = 2;
+}
+
+// One administrative or authority-changing operator call. It names who acted
+// and on what, never a credential, digest, or request body.
+message AuditEntry {
+  string id = 1;
+  // When the Control Plane finished handling the call.
+  int64 at_ms = 2;
+  // The bare operator ID, such as `local` or `token:laptop-2`.
+  string actor = 3;
+  // Such as `tag.put`, `operator-token.revoke`, or `approval.decide`.
+  string action = 4;
+  // `Kind/ID`, such as `Tag/reviewer`; only the kind when the call failed.
+  string target = 5;
+  AuditOutcome outcome = 6;
+  // The gRPC status code name, such as `OK` or `NOT_FOUND`.
+  string code = 7;
+  // The gRPC method, such as `/supertag.runtime.v2.Operator/PutTag`.
+  string method = 8;
+}
+
+message ListAuditEntriesRequest {
+  // Only entries at or after this time. 0 lists from the oldest.
+  int64 since_ms = 1;
+  // Only entries by this exact bare operator ID. Empty lists every operator's.
+  string actor = 2;
+  // 0 means 50; more than 500 is refused.
+  uint32 limit = 3;
+  // The `next_cursor` of the previous page.
+  string cursor = 4;
+}
+
+message ListAuditEntriesResponse {
+  repeated AuditEntry entries = 1;
+  string next_cursor = 2;
+}
