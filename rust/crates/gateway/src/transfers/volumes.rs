@@ -1,4 +1,4 @@
-//! Explicit storage-host consent and descriptor-relative verified file copies.
+//! Explicit storage-host consent and verified artifact copies.
 use super::*;
 use std::{
     collections::BTreeMap,
@@ -9,8 +9,19 @@ use std::{
 use supertag_protocol::{artifacts::MAX_ARTIFACT_FILE_BYTES, volumes::file_volume_path};
 use supertag_workspaces::packages::open_directory;
 
+mod s3;
+
 #[derive(Clone, Default)]
-pub struct ArtifactVolumeMappings(BTreeMap<String, Mapping>);
+pub struct ArtifactVolumeMappings {
+    files: BTreeMap<String, Mapping>,
+    objects: BTreeMap<String, s3::S3Mapping>,
+}
+
+#[derive(Clone)]
+enum Storage {
+    File(Mapping),
+    S3(s3::S3Mapping),
+}
 #[derive(Clone)]
 struct Mapping {
     source: String,
@@ -61,7 +72,40 @@ impl ArtifactVolumeMappings {
                 },
             );
         }
-        Ok(Self(mappings))
+        Ok(Self {
+            files: mappings,
+            objects: BTreeMap::new(),
+        })
+    }
+
+    pub fn with_s3_config(mut self, path: &Path) -> Result<Self> {
+        ensure!(
+            self.objects.is_empty(),
+            "S3 Volume mappings are already configured"
+        );
+        let objects = s3::load(path)?;
+        ensure!(
+            objects.keys().all(|id| !self.files.contains_key(id)),
+            "duplicate artifact Volume mapping"
+        );
+        self.objects = objects;
+        Ok(self)
+    }
+
+    fn resolve(&self, volume: &ArtifactVolume) -> Result<Storage, Status> {
+        if let Some(mapping) = self.files.get(&volume.volume_id)
+            && mapping.source == volume.source
+        {
+            return Ok(Storage::File(mapping.clone()));
+        }
+        if let Some(mapping) = self.objects.get(&volume.volume_id)
+            && mapping.source == volume.source
+        {
+            return Ok(Storage::S3(mapping.clone()));
+        }
+        Err(Status::failed_precondition(
+            "Gateway has no matching artifact Volume consent",
+        ))
     }
 }
 fn private_directory(file: &File) -> Result<()> {
@@ -106,19 +150,32 @@ fn child_directory(parent: &File, name: &str, create: bool) -> Result<File> {
     private_directory(&file)?;
     Ok(file)
 }
-fn parent(mapping: &Mapping, key: &str, blob: &BlobReference, create: bool) -> Result<File> {
-    let parts: Vec<_> = key.split('/').collect();
+fn key_parts<'a>(key: &'a str, blob: &BlobReference) -> Result<[&'a str; 4]> {
+    let mut parts = key.split('/');
+    let (Some("attempts"), Some(attempt), Some("sha256"), Some(hash), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        anyhow::bail!("invalid artifact Volume storage key");
+    };
     ensure!(
-        parts.len() == 4
-            && parts[0] == "attempts"
-            && parts[2] == "sha256"
-            && parts[3] == blob.sha256
-            && !parts[1].is_empty()
-            && parts[1]
+        supertag_protocol::valid_sha256(&blob.sha256)
+            && blob.byte_length <= MAX_ARTIFACT_FILE_BYTES
+            && hash == blob.sha256
+            && !attempt.is_empty()
+            && attempt.len() <= 128
+            && attempt
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')),
         "invalid artifact Volume storage key"
     );
+    Ok(["attempts", attempt, "sha256", hash])
+}
+fn parent(mapping: &Mapping, key: &str, blob: &BlobReference, create: bool) -> Result<File> {
+    let parts = key_parts(key, blob)?;
     let mut directory = mapping.directory.try_clone()?;
     for part in &parts[..3] {
         directory = child_directory(&directory, part, create)?;
@@ -190,11 +247,6 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
         .as_ref()
         .and_then(|f| f.blob.as_ref())
         .context("copy has no blob")?;
-    ensure!(
-        supertag_protocol::valid_sha256(&blob.sha256)
-            && blob.byte_length <= MAX_ARTIFACT_FILE_BYTES,
-        "invalid artifact Volume blob"
-    );
     current(&mapping)?;
     let destination = parent(&mapping, &copy.storage_key, blob, true)?;
     let final_name = CString::new(blob.sha256.clone())?;
@@ -275,9 +327,9 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
 }
 impl GatewayTransfers {
     pub fn with_artifact_volumes(mut self, mappings: ArtifactVolumeMappings) -> Result<Self> {
-        if !mappings.0.is_empty() {
+        if !mappings.files.is_empty() || !mappings.objects.is_empty() {
             let directory = self.directory()?.canonicalize()?;
-            for mapping in mappings.0.values() {
+            for mapping in mappings.files.values() {
                 ensure!(
                     !mapping.root.starts_with(&directory) && !directory.starts_with(&mapping.root),
                     "artifact Volume must not overlap Gateway state"
@@ -320,15 +372,7 @@ impl artifact_volumes_server::ArtifactVolumes for GatewayTransfers {
             .volume
             .as_ref()
             .ok_or_else(|| Status::data_loss("copy has no Volume"))?;
-        let mapping = self
-            .volumes
-            .0
-            .get(&volume.volume_id)
-            .filter(|m| m.source == volume.source)
-            .cloned()
-            .ok_or_else(|| {
-                Status::failed_precondition("Gateway has no matching artifact Volume consent")
-            })?;
+        let mapping = self.volumes.resolve(volume)?;
         let file = copy
             .file
             .clone()
@@ -343,6 +387,45 @@ impl artifact_volumes_server::ArtifactVolumes for GatewayTransfers {
             .ok_or_else(|| Status::data_loss("copy has invalid bytes"))?;
         let permit = self.acquire()?;
         let key = copy.storage_key.clone();
+        let mapping = match mapping {
+            Storage::File(mapping) => mapping,
+            Storage::S3(mapping) => {
+                let reader = mapping
+                    .read(self.directory()?, &key, &blob)
+                    .await
+                    .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))?
+                    .ok_or_else(|| Status::data_loss("verified artifact Volume copy is missing"))?;
+                let mut recheck = Request::new(input);
+                *recheck.metadata_mut() = metadata;
+                let gateway = self.clone();
+                let authorize = move || {
+                    let mut request = Request::new(recheck.get_ref().clone());
+                    *request.metadata_mut() = recheck.metadata().clone();
+                    let gateway = gateway.clone();
+                    let copy = copy.clone();
+                    async move {
+                        if gateway.get_copy(request).await?.into_inner() != copy {
+                            return Err(Status::data_loss("artifact Volume receipt changed"));
+                        }
+                        Ok(())
+                    }
+                };
+                authorize().await?;
+                return Ok(Response::new(download_stream(
+                    reader,
+                    permit,
+                    blob,
+                    ArtifactDownload {
+                        part: Some(artifact_download::Part::File(file)),
+                    },
+                    |chunk| ArtifactDownload {
+                        part: Some(artifact_download::Part::Chunk(chunk)),
+                    },
+                    authorize,
+                    Duration::from_secs(60),
+                )));
+            }
+        };
         let (bytes, permit) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             current(&mapping)?;
             let directory = parent(&mapping, &key, &blob, false)?;
@@ -393,15 +476,7 @@ impl artifact_volumes_server::ArtifactVolumes for GatewayTransfers {
         if volume.revision != input.expected_revision {
             return Err(Status::failed_precondition("Volume revision differs"));
         }
-        let mapping = self
-            .volumes
-            .0
-            .get(&volume.volume_id)
-            .filter(|m| m.source == volume.source)
-            .cloned()
-            .ok_or_else(|| {
-                Status::failed_precondition("Gateway has no matching artifact Volume consent")
-            })?;
+        let mapping = self.volumes.resolve(&volume)?;
         let mut reserve = Request::new(input);
         *reserve.metadata_mut() = metadata.clone();
         let reserved = self
@@ -418,14 +493,23 @@ impl artifact_volumes_server::ArtifactVolumes for GatewayTransfers {
         }
         let permit = self.acquire()?;
         let source = self.directory()?.to_path_buf();
-        let snapshot = reserved.clone();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            persist(mapping, source, snapshot)
-        })
-        .await
-        .map_err(|_| Status::internal("artifact Volume copy worker failed"))?
-        .map_err(|_| Status::data_loss("artifact Volume copy could not be durably verified"))?;
+        let persisted = match mapping {
+            Storage::File(mapping) => {
+                let snapshot = reserved.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    persist(mapping, source, snapshot)
+                })
+                .await
+                .map_err(|_| Status::internal("artifact Volume copy worker failed"))?
+            }
+            Storage::S3(mapping) => {
+                let _permit = permit;
+                mapping.persist(&source, &reserved).await
+            }
+        };
+        persisted
+            .map_err(|_| Status::data_loss("artifact Volume copy could not be durably verified"))?;
         let mut commit = Request::new(CommitArtifactVolumeCopyRequest {
             copy_id: reserved.copy_id,
             verified_blob: reserved.file.and_then(|f| f.blob),
@@ -524,7 +608,7 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let maps = ArtifactVolumeMappings::new(vec![("volume".into(), path)]).unwrap();
-        let mapping = maps.0["volume"].clone();
+        let mapping = maps.files["volume"].clone();
         let source = root.join("cas");
         std::fs::create_dir(&source).unwrap();
         let bytes = b"verified evidence";
@@ -554,7 +638,7 @@ mod tests {
         std::fs::remove_dir_all(&source).unwrap();
         let reopened = ArtifactVolumeMappings::new(vec![("volume".into(), mapping.root.clone())])
             .unwrap()
-            .0
+            .files
             .remove("volume")
             .unwrap();
         persist(reopened.clone(), source.clone(), copy.clone()).unwrap();

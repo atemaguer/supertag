@@ -211,6 +211,12 @@ enum Command {
         /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
         #[arg(long = "artifact-volume")]
         artifact_volumes: Vec<String>,
+        /// JSON file with explicit S3-compatible Volume mappings and credential environment names.
+        #[arg(
+            long,
+            long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Gateway reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
+        )]
+        artifact_s3_volumes: Option<PathBuf>,
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
         #[arg(long, requires = "slack_listen")]
@@ -681,6 +687,7 @@ async fn run(command: Command) -> Result<()> {
             control_plane,
             checkpoint_directory,
             artifact_volumes,
+            artifact_s3_volumes,
             slack_listen,
             slack_state_directory,
             github_listen,
@@ -698,6 +705,7 @@ async fn run(command: Command) -> Result<()> {
                 checkpoint_directory,
                 GatewayConnectors {
                     artifact_volumes,
+                    artifact_s3_volumes,
                     slack: slack_listen.zip(slack_state_directory),
                     github: github_listen.zip(github_state_directory),
                     github_workspace: github_workspace_directory,
@@ -1454,6 +1462,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
 
 struct GatewayConnectors {
     artifact_volumes: Vec<String>,
+    artifact_s3_volumes: Option<PathBuf>,
     slack: Option<(SocketAddr, PathBuf)>,
     github: Option<(SocketAddr, PathBuf)>,
     github_workspace: Option<PathBuf>,
@@ -1543,7 +1552,10 @@ async fn gateway(
         .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
     let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?
-        .with_artifact_volumes(volumes::mappings(connectors.artifact_volumes)?)?;
+        .with_artifact_volumes(volumes::mappings(
+            connectors.artifact_volumes,
+            connectors.artifact_s3_volumes,
+        )?)?;
     let mut source_reader = None;
     let publication = if let Some(directory) = connectors.github_workspace {
         let sources = github_workspace_sources(directory.clone())?;

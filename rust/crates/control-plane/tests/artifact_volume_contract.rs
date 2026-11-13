@@ -65,10 +65,25 @@ async fn exercise(url: &str) {
             .revision,
         2
     );
+    let object_input = PutArtifactVolumeRequest {
+        operation_id: "register-object".into(),
+        volume_id: "object".into(),
+        source: "s3://evidence-bucket/organization/archive".into(),
+        expected_revision: 0,
+    };
+    let object = store.put_artifact_volume(OP, &object_input).await.unwrap();
+    assert_eq!(object.source, object_input.source);
+    assert_eq!(object.revision, 1);
+    assert_eq!(
+        store.put_artifact_volume(OP, &object_input).await.unwrap(),
+        object
+    );
     for source in [
         "file://user:secret@host/root",
         "file:///srv/data?secret=bad",
-        "s3://bucket/key",
+        "s3://bucket/key?credential=bad",
+        "s3://wrong%2fbucket/path",
+        "s3://bucket/key/../other",
         "file:///srv/../escape",
         "file:///srv/a%00b",
         "file:///srv/data#secret",

@@ -33,9 +33,17 @@ pub async fn server(listen: SocketAddr, private: bool) -> Result<Server> {
 }
 
 pub async fn endpoint(uri: String, private: bool) -> Result<Endpoint> {
+    endpoint_with_timeout(uri, private, Duration::from_secs(15)).await
+}
+
+pub async fn endpoint_with_timeout(
+    uri: String,
+    private: bool,
+    timeout: Duration,
+) -> Result<Endpoint> {
     let mut endpoint = Endpoint::from_shared(uri)?
         .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15));
+        .timeout(timeout);
     match endpoint.uri().scheme_str() {
         Some("https") => {
             let mut tls = ClientTlsConfig::new();

@@ -96,17 +96,14 @@ fn volume(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
     c.args(args);
     c
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes() -> Result<()> {
-    let temporary = tempfile::tempdir()?;
-    let root = temporary.path().canonicalize()?;
-    let volume_path = root.join("volume");
-    std::fs::create_dir(&volume_path)?;
-    std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
-    let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(gateway(&credentials, &root, &private, false)).await?;
-    let channel = Channel::from_shared(public.clone())?.connect().await?;
+#[path = "support/s3_artifact_volume.rs"]
+mod s3_artifact_volume;
+
+async fn capture(
+    credentials: &Credentials,
+    public: &str,
+) -> Result<(String, Vec<u8>, BlobReference)> {
+    let channel = Channel::from_shared(public.to_owned())?.connect().await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     operator
@@ -222,7 +219,20 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         registered.generation,
     ))
     .await?;
-    let artifact_id = artifact.summary.unwrap().artifact_id;
+    Ok((artifact.summary.unwrap().artifact_id, bytes, blob))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_bytes() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let root = temporary.path().canonicalize()?;
+    let volume_path = root.join("volume");
+    std::fs::create_dir(&volume_path)?;
+    std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
+    let credentials = Credentials::new();
+    let (mut control, private) = service(plane(&credentials, &root, "127.0.0.1:0")).await?;
+    let (mut ingress, public) = service(gateway(&credentials, &root, &private, false)).await?;
+    let (artifact_id, bytes, blob) = capture(&credentials, &public).await?;
     let source = format!("file://{}", volume_path.display());
     let registered = json(volume(
         &credentials,

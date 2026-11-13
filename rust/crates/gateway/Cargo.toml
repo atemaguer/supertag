@@ -10,6 +10,8 @@ publish.workspace = true
 test-fixtures = []
 
 [dependencies]
+aws-credential-types = "1.2.14"
+aws-sigv4 = { version = "1.4.2", default-features = false, features = ["sign-http", "http1"] }
 anyhow.workspace = true
 async-stream = "0.3"
 axum = "0.8"
@@ -35,6 +37,7 @@ supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
+tracing = "0.1"
 uuid.workspace = true

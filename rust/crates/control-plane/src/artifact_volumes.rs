@@ -11,7 +11,7 @@ use supertag_protocol::{
     artifacts::{MAX_ARTIFACT_FILE_BYTES, validate_artifact_path},
     v2::*,
     valid_sha256,
-    volumes::file_volume_path,
+    volumes::validate_volume_source,
 };
 use tonic::{Request, Response, Status};
 fn hash(kind: &str, input: &impl Message) -> String {
@@ -112,7 +112,7 @@ impl Store {
         operator(principal)?;
         name("Volume ID", &input.volume_id)?;
         name("operation ID", &input.operation_id)?;
-        file_volume_path(&input.source).map_err(|e| invalid(e.message()))?;
+        validate_volume_source(&input.source).map_err(|e| invalid(e.message()))?;
         let digest = hash("put", input);
         let (mut tx, _) = self.write().await?;
         if let Some(result) = prior(&mut tx, principal, &input.operation_id, &digest).await? {
