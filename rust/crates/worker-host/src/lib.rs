@@ -35,11 +35,12 @@ use journal::{Attempt, Entry, Journal};
 use prost::Message;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
+    negotiation::{self, NegotiationError},
     v2::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
-        HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest,
-        Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, ServiceRole,
+        StartTaskRequest, Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
@@ -291,6 +292,21 @@ pub async fn run(
     let registration = loop {
         if shutdown.is_cancelled() {
             return Ok(());
+        }
+        // Refuse an incompatible Gateway before registering for work.
+        match negotiation::negotiate(
+            channel.clone(),
+            ServiceRole::WorkerHost,
+            ServiceRole::Gateway,
+        )
+        .await
+        {
+            Ok(_) => {}
+            Err(NegotiationError::Unavailable(_)) => {
+                wait_for_work(&shutdown).await;
+                continue;
+            }
+            Err(error) => return Err(error.into()),
         }
         let response = registration
             .register_host(request(
@@ -1864,6 +1880,7 @@ fn retryable(error: &Status) -> bool {
         error.code(),
         Code::Unavailable | Code::DeadlineExceeded | Code::Cancelled
     ) || supertag_protocol::interrupted_transport(error)
+        || supertag_protocol::local_transport_failure(error)
 }
 
 async fn wait_for_work(shutdown: &CancellationToken) {

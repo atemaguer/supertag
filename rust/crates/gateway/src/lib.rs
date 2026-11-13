@@ -108,6 +108,19 @@ impl Gateway {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
+    /// Worker Hosts negotiate their protocol version here before enrolling or registering.
+    pub fn negotiation_service(
+        &self,
+    ) -> protocol_negotiation_server::ProtocolNegotiationServer<
+        supertag_protocol::negotiation::Negotiator,
+    > {
+        supertag_protocol::negotiation::Negotiator::new(
+            ServiceRole::Gateway,
+            &[ServiceRole::WorkerHost],
+        )
+        .service()
+    }
+
     pub fn host_enrollment_service(&self) -> HostEnrollmentServer<Self> {
         HostEnrollmentServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)

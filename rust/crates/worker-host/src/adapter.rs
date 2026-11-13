@@ -90,6 +90,35 @@ struct RunState {
 }
 
 impl Bridge {
+    /// Repeats an idempotent upstream call across a transient Gateway partition
+    /// until execution authority ends, so the harness does not fail for a
+    /// disconnect its Worker Host is still allowed to ride out.
+    async fn retry_upstream<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<R, Status>
+    where
+        M: Clone,
+        F: FnMut(RegisteredHost, Request<M>) -> Fut,
+        Fut: std::future::Future<Output = Result<Response<R>, Status>>,
+    {
+        loop {
+            let deadline = self.inputs.active_deadline()?;
+            let sent = Instant::now();
+            let mut upstream = authenticated_request(message.clone(), &self.host_token, None)?;
+            upstream.set_timeout(
+                deadline
+                    .saturating_duration_since(sent)
+                    .min(Duration::from_secs(5)),
+            );
+            match call(self.host.clone(), upstream).await {
+                Ok(response) => return Ok(response.into_inner()),
+                Err(error) if crate::retryable(&error) => {
+                    time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(250)))
+                        .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
         if !matches_bearer(request, &self.token) {
             return Err(Status::unauthenticated("execution credential required"));
@@ -133,23 +162,17 @@ impl Harness for Bridge {
         request: Request<HarnessAttachRequest>,
     ) -> Result<Response<HarnessRun>, Status> {
         self.authenticate(&request)?;
-        let mut upstream = authenticated_request(self.attempt(), &self.host_token, None)?;
-        upstream.set_timeout(Duration::from_secs(5));
         let capabilities = self
-            .host
-            .clone()
-            .get_attempt_capabilities(upstream)
-            .await?
-            .into_inner();
+            .retry_upstream(self.attempt(), |mut host, request| async move {
+                host.get_attempt_capabilities(request).await
+            })
+            .await?;
         let history = if matches!(self.harness, HarnessKind::Opencode | HarnessKind::Cursor) {
-            let mut upstream = authenticated_request(self.attempt(), &self.host_token, None)?;
-            upstream.set_timeout(Duration::from_secs(5));
-            self.host
-                .clone()
-                .get_attempt_history(upstream)
-                .await?
-                .into_inner()
-                .entries
+            self.retry_upstream(self.attempt(), |mut host, request| async move {
+                host.get_attempt_history(request).await
+            })
+            .await?
+            .entries
         } else {
             vec![]
         };
@@ -209,22 +232,23 @@ impl Harness for Bridge {
             ));
         }
         let event = request.into_inner();
-        let mut upstream = authenticated_request(
-            AppendEventRequest {
-                task_id: self.task_id().into(),
-                attempt_id: self.assignment.attempt_id.clone(),
-                lease_token: self.assignment.lease_token.clone(),
-                sequence: event.sequence,
-                text: event.text,
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(Duration::from_secs(5));
-        let event = self.host.clone().append_event(upstream).await?;
+        let append = AppendEventRequest {
+            task_id: self.task_id().into(),
+            attempt_id: self.assignment.attempt_id.clone(),
+            lease_token: self.assignment.lease_token.clone(),
+            sequence: event.sequence,
+            text: event.text,
+        };
+        // The Control Plane deduplicates an event by sequence and content, so an
+        // append whose outcome the transport lost is safely repeated.
+        let event = self
+            .retry_upstream(append, |mut host, request| async move {
+                host.append_event(request).await
+            })
+            .await?;
         supertag_protocol::crash_point("worker-host.append-event", "answered");
         drop(state);
-        Ok(event)
+        Ok(Response::new(event))
     }
 
     async fn report_usage(

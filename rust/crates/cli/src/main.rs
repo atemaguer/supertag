@@ -47,11 +47,12 @@ use supertag_gateway::{
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
+    negotiation::{Negotiator, negotiate},
     v2::{
         ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
         GetTagRequest, GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest,
         ListNativeUsageRequest, ListTagsRequest, PolicyExecutionSettings, PutTagRequest,
-        ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest,
+        ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest, ServiceRole,
         SubmitTaskRequest, Tag, Task, WorkspaceSpec,
         artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
@@ -1485,6 +1486,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     let served = builder
         .add_service(health_service)
         .add_service(
+            Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Gateway]).service(),
+        )
+        .add_service(
             OperatorServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -1609,6 +1613,13 @@ async fn gateway(
         .await?
         .connect()
         .await?;
+    // Refuse an incompatible Control Plane before accepting any public traffic.
+    negotiate(
+        channel.clone(),
+        ServiceRole::Gateway,
+        ServiceRole::ControlPlane,
+    )
+    .await?;
     let gateway_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
     let slack = match connectors.slack {
         Some((address, state_directory)) => {
@@ -1745,6 +1756,7 @@ async fn gateway(
     let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
+        .add_service(gateway.negotiation_service())
         .add_service(gateway.operator_service())
         .add_service(gateway.conversations_service())
         .add_service(gateway.worker_host_service())
