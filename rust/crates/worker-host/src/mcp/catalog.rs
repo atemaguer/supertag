@@ -227,22 +227,29 @@ impl McpCatalog {
     }
 
     /// Loads the catalog. Servers with `"oauth": true` take their tokens from `logins`, the
-    /// store `supertag mcp login` writes. A server without a current login is advertised as
-    /// needing one, so Tasks that need it wait, as in the TypeScript Worker.
+    /// store `supertag mcp login` writes. As in the TypeScript host service, a server this host
+    /// never logged in to refuses the start; one whose login lapsed is advertised as needing a
+    /// new login, so Tasks that need it wait.
     pub fn load(path: Option<&Path>, logins: Option<McpLoginStore>) -> Result<Self> {
         let Some(path) = path else {
             return Ok(Self::default());
         };
         let bytes = read_private(path)?;
         let mut catalog = Self::parse(&bytes, |name| std::env::var(name).ok())?;
-        if let Some(server) = catalog.servers.values().find(|server| {
-            matches!(&server.transport, Transport::Http(http) if http.oauth)
-        }) && logins.is_none()
-        {
-            anyhow::bail!(
-                "MCP server {} needs an MCP login store",
-                server.capability.name
-            );
+        for server in catalog.servers.values() {
+            if let Transport::Http(http) = &server.transport
+                && http.oauth
+            {
+                let store = logins.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("MCP server {} needs an MCP login store", http.name)
+                })?;
+                if let Err(error) = store.check(&http.name, http.endpoint.as_str())
+                    && store.state(&http.name, http.endpoint.as_str(), super::oauth::now_ms())
+                        == super::oauth::McpLoginState::Missing
+                {
+                    return Err(error);
+                }
+            }
         }
         catalog.logins = logins;
         Ok(catalog)
@@ -254,9 +261,10 @@ impl McpCatalog {
         self.servers
             .iter()
             .filter(|(name, server)| match &server.transport {
-                Transport::Http(http) if http.oauth => !self.logins.as_ref().is_some_and(|store| {
-                    store.check(name, http.endpoint.as_str()).is_ok()
-                }),
+                Transport::Http(http) if http.oauth => self
+                    .logins
+                    .as_ref()
+                    .is_none_or(|store| store.check(name, http.endpoint.as_str()).is_err()),
                 _ => false,
             })
             .map(|(name, _)| name.clone())
@@ -739,16 +747,12 @@ mod tests {
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
         let store = McpLoginStore::new(root.path().join("mcp-logins"));
         assert!(McpCatalog::load(Some(&file), None).is_err());
-        // Without a login the host starts and advertises the server as needing one.
-        let waiting = McpCatalog::load(Some(&file), Some(store.clone())).unwrap();
-        assert_eq!(waiting.lapsed_logins(), ["docs"]);
-        let profile = HarnessExecutionProfile {
-            mcp_servers: waiting.capabilities(),
-            ..Default::default()
-        };
-        let advertised = McpCatalog::advertised(&profile, &waiting.lapsed_logins());
-        assert!(advertised.mcp_servers.is_empty());
-        assert_eq!(advertised.mcp_login_servers, ["docs"]);
+        // A host that never logged in refuses to start, naming the command.
+        let error = McpCatalog::load(Some(&file), Some(store.clone()))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("supertag mcp login docs"), "{error}");
         store
             .store(
                 "docs",
@@ -768,15 +772,25 @@ mod tests {
             .unwrap();
         let catalog = McpCatalog::load(Some(&file), Some(store.clone())).unwrap();
         assert!(catalog.lapsed_logins().is_empty());
+        let profile = HarnessExecutionProfile {
+            mcp_servers: catalog.capabilities(),
+            ..Default::default()
+        };
         assert_eq!(
             McpCatalog::advertised(&profile, &catalog.lapsed_logins()),
             profile
         );
-        // A login refused later is advertised again as needing one, without a restart.
+        // A login refused later is advertised as needing a new one, without a restart.
         let mut lapsed = store.read("docs").unwrap().unwrap();
         lapsed.lapsed_at = Some(2);
         store.store("docs", &lapsed).unwrap();
         assert_eq!(catalog.lapsed_logins(), ["docs"]);
+        let advertised = McpCatalog::advertised(&profile, &catalog.lapsed_logins());
+        assert!(advertised.mcp_servers.is_empty());
+        assert_eq!(advertised.mcp_login_servers, ["docs"]);
+        // A host whose login already lapsed still starts, advertising the hold.
+        let restarted = McpCatalog::load(Some(&file), Some(store.clone())).unwrap();
+        assert_eq!(restarted.lapsed_logins(), ["docs"]);
         let Transport::Http(server) = &catalog.servers["docs"].transport else {
             panic!("HTTP server expected");
         };

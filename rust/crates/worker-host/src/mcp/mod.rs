@@ -22,11 +22,11 @@ use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 pub use catalog::{McpCatalog, McpCatalogEntry};
-pub(crate) use workspace::{WorkspaceMcp, host_variable as workspace_mcp_variable};
 pub use oauth::{
     LoginOptions as McpLoginOptions, McpLogin, McpLoginState, McpLoginStore, login_command,
     run_login as run_mcp_login,
 };
+pub(crate) use workspace::{WorkspaceMcp, host_variable as workspace_mcp_variable};
 
 const SCHEMA_BYTES: usize = 16 * 1024;
 const DISCOVERY_PAGES: usize = 16;
@@ -186,9 +186,9 @@ impl AttemptMcp {
                     })
             } else {
                 catalog.servers.get(name).filter(|config| {
-                    task.attempt_execution.as_ref().is_some_and(|execution| {
-                        execution.mcp_servers.contains(&config.capability)
-                    })
+                    task.attempt_execution
+                        .as_ref()
+                        .is_some_and(|execution| execution.mcp_servers.contains(&config.capability))
                 })
             };
             let Some(config) = config else {

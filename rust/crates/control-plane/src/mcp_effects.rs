@@ -301,9 +301,9 @@ async fn workspace_record_in(
 }
 
 fn valid_workspace_digest(digest: &str) -> bool {
-    digest
-        .strip_prefix("sha256:")
-        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')))
+    digest.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64 && hex.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+    })
 }
 
 impl Store {
@@ -360,7 +360,9 @@ impl Store {
         {
             return Err(StoreError::PermissionDenied);
         }
-        if let Some(prior) = workspace_record_in(&mut tx, &attempt.task_id, &attempt.attempt_id).await? {
+        if let Some(prior) =
+            workspace_record_in(&mut tx, &attempt.task_id, &attempt.attempt_id).await?
+        {
             if prior != record {
                 return Err(StoreError::Conflict(
                     "this Attempt already recorded different Workspace MCP servers".into(),

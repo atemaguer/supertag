@@ -267,10 +267,8 @@ impl Workspaces {
     /// Removes an Attempt's MCP snapshot after its servers stopped; best effort.
     pub(crate) fn remove_mcp_snapshot(&self, prepared: &PreparedWorkspace) {
         if let Ok(workspace) = self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {
-            let _ = workspace.remove_mcp_snapshot(
-                &prepared.checkout.task_id,
-                &prepared.checkout.attempt_id,
-            );
+            let _ = workspace
+                .remove_mcp_snapshot(&prepared.checkout.task_id, &prepared.checkout.attempt_id);
         }
     }
 

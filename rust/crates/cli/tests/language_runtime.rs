@@ -1,3 +1,5 @@
+#[path = "support/mcp_runtime.rs"]
+mod mcp_runtime;
 #[path = "support/python_artifacts_runtime.rs"]
 mod python_artifacts_runtime;
 #[path = "support/task_artifact_inputs_runtime.rs"]
@@ -271,11 +273,23 @@ impl LanguageServices {
     }
 
     fn worker(&self, harness: &str, directory: &Path, runtime: &Path, entry: &Path) -> Command {
+        let mut host = self.serving_worker(harness, directory, runtime, entry);
+        host.arg("--once");
+        host
+    }
+
+    /// A Worker Host that keeps serving until it is stopped.
+    fn serving_worker(
+        &self,
+        harness: &str,
+        directory: &Path,
+        runtime: &Path,
+        entry: &Path,
+    ) -> Command {
         let mut host = command(&[
             "worker-host",
             "--gateway",
             &self.public,
-            "--once",
             "--harness",
             harness,
             "--harness-model",
@@ -648,13 +662,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         ])
         .await?;
     let task_id = task["task_id"].as_str().context("Task ID")?;
-    let catalog_worker = |state: &str| {
-        let mut host = services.worker(
-            "claude-code",
-            &directory.join(state),
-            Path::new(&node),
-            &entry,
-        );
+    let configure = |host: &mut Command| {
         host.arg("--claude-path")
             .arg(&native)
             .arg("--mcp-catalog")
@@ -662,6 +670,15 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
             .env("ANTHROPIC_API_KEY", "fixture-provider-key")
             .env("CATALOG_MCP_AUTH", "synthetic-catalog-credential")
             .env("WORKER_ONLY_VARIABLE", "worker-only-value");
+    };
+    let catalog_worker = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.join(state),
+            Path::new(&node),
+            &entry,
+        );
+        configure(&mut host);
         host
     };
     success(catalog_worker("catalog-host")).await?;
@@ -717,9 +734,17 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     let resumed_id = decision["continuation_task_id"]
         .as_str()
         .context("MCP continuation Task")?;
-    success(catalog_worker("catalog-resume")).await?;
-    let resumed = services.operator(&["get-task", resumed_id]).await?;
-    assert_eq!(resumed["state"], "TASK_STATE_SUCCEEDED", "{resumed}");
+    // This Worker Host keeps running after the Attempt, so a stopped server proves the Attempt
+    // closed it, not that the host exited.
+    let mut serving = services.serving_worker(
+        "claude-code",
+        &directory.join("catalog-resume"),
+        Path::new(&node),
+        &entry,
+    );
+    configure(&mut serving);
+    let mut serving = serving.stderr(Stdio::null()).spawn()?;
+    let resumed = wait_for_state(&services, resumed_id, "TASK_STATE_SUCCEEDED").await?;
     assert_eq!(
         resumed["result"],
         "fixture resumed and dispatched one approved MCP effect"
@@ -766,7 +791,28 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         );
     }
     assert_eq!(launches, 2);
+    assert!(
+        serving.try_wait()?.is_none(),
+        "the Worker Host must still be running"
+    );
+    serving.kill().await?;
     services.stop().await
+}
+
+/// Polls a Task until it reaches `state`.
+async fn wait_for_state(services: &LanguageServices, task_id: &str, state: &str) -> Result<Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let task = services.operator(&["get-task", task_id]).await?;
+        if task["state"] == state {
+            return Ok(task);
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "Task {task_id} did not reach {state}: {task}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 #[tokio::test]

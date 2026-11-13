@@ -41,8 +41,9 @@ use supertag_protocol::{
     v2::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
-        HostRecord, InspectAttemptRequest, RecordWorkspaceMcpRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest,
-        Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        HostRecord, InspectAttemptRequest, RecordWorkspaceMcpRequest, RegisterHostRequest,
+        ResolvedSkill, StartTaskRequest, Task, TaskState,
+        artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
@@ -1395,12 +1396,7 @@ async fn run_assignment(
             token,
             shutdown,
             &cancel,
-            mcp::AttemptMcp::prepare(
-                &options.mcp_catalog,
-                workspace_mcp.as_ref(),
-                &task,
-                &cancel,
-            ),
+            mcp::AttemptMcp::prepare(&options.mcp_catalog, workspace_mcp.as_ref(), &task, &cancel),
         )
         .await
         {
@@ -1735,14 +1731,16 @@ async fn workspace_mcp(
         .map_err(|error| Status::invalid_argument(format!("{error:#}")))?;
     client
         .clone()
-        .record_workspace_mcp(request(
-            RecordWorkspaceMcpRequest {
-                attempt: Some(attempt.inspect()),
-                record: Some(resolved.record.clone()),
-            },
-            token,
+        .record_workspace_mcp(
+            request(
+                RecordWorkspaceMcpRequest {
+                    attempt: Some(attempt.inspect()),
+                    record: Some(resolved.record.clone()),
+                },
+                token,
+            )
+            .map_err(|_| Status::internal("Workspace MCP record request failed"))?,
         )
-        .map_err(|_| Status::internal("Workspace MCP record request failed"))?)
         .await?;
     Ok(resolved)
 }

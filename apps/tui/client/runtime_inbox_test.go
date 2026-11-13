@@ -169,3 +169,15 @@ func TestRuntimeV2InboxPagingAndAnswerRetry(t *testing.T) {
 		t.Fatalf("AnswerQuestion() = %v, %v in %d calls", answer, err, calls)
 	}
 }
+
+func TestRuntimeV2McpLoginInboxItem(t *testing.T) {
+	item := runtimeInboxItem(&v2.InboxItem{
+		Key:         "mcp_login:task-1:docs",
+		Kind:        v2.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN,
+		ObjectiveId: "docs",
+		Reason:      "The Task needs MCP server docs, whose login lapsed on its Worker Host. Run supertag mcp login docs on that host; the Task waits until then.",
+	})
+	if item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN || item.GetReason() == "" {
+		t.Fatalf("MCP login item = %v", item)
+	}
+}

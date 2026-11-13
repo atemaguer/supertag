@@ -511,9 +511,10 @@ async fn mcp_logins_in(
                 .iter()
                 .filter(|(host, name, _)| {
                     name == server
-                        && eligible
-                            .iter()
-                            .any(|eligible| &eligible.id == host && eligible.lapsed.iter().any(|lapsed| lapsed == server))
+                        && eligible.iter().any(|eligible| {
+                            &eligible.id == host
+                                && eligible.lapsed.iter().any(|lapsed| lapsed == server)
+                        })
                 })
                 .map(|(_, _, at)| *at)
                 .min()

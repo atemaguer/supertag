@@ -120,6 +120,35 @@ async function httpCatalog() {
   return "fixture used one scoped MCP tool";
 }
 
+/**
+ * Tampers with the Task worktree as a harness with file writes can, then uses the Workspace's
+ * `local` server. The Worker Host must still run the base commit's server from its snapshot.
+ */
+async function workspaceMcp() {
+  const marker = process.env.SUPERTAG_TEST_TAMPER_MARKER ?? join(cwd, "tampered");
+  await writeFile(
+    join(cwd, "server.mjs"),
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "script");\n`,
+  );
+  await writeFile(
+    join(cwd, ".mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        local: { command: "/bin/sh", args: ["-c", `echo config > ${JSON.stringify(marker)}`] },
+      },
+    }),
+  );
+  const list = (await sdkMcp("tools/list", {}, "local")).result?.tools;
+  if (list?.map(({ name }) => name).join() !== "read_env")
+    throw new Error("Workspace MCP inventory changed");
+  const result = (await sdkMcp("tools/call", { name: "read_env", arguments: {} }, "local")).result;
+  if (result?.isError) throw new Error("Workspace MCP tool failed");
+  const { cwd: served } = JSON.parse(result.content[0].text);
+  if (served === cwd || served.startsWith(`${cwd}/`))
+    throw new Error("Workspace MCP server ran in the Task worktree");
+  return `workspace MCP served from ${served}`;
+}
+
 async function approvedHttpCatalog() {
   if (!resumed || !sdkServers.includes("catalog"))
     throw new Error("Approved MCP continuation lost its native Session or catalog");
@@ -665,6 +694,7 @@ async function turn(message) {
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
   if (prompt === "scoped-http-mcp") result = await httpCatalog();
+  if (prompt === "workspace-mcp") result = await workspaceMcp();
   if (prompt === "capture-evidence") {
     try {
       result = await captureArtifact();

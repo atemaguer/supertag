@@ -69,7 +69,9 @@ impl WorkspaceMcp {
         let declared = document
             .get("mcpServers")
             .and_then(Value::as_object)
-            .ok_or_else(|| anyhow::anyhow!("Workspace MCP configuration .mcp.json must contain mcpServers"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Workspace MCP configuration .mcp.json must contain mcpServers")
+            })?;
         let mut servers = BTreeMap::new();
         let mut secrets = BTreeSet::new();
         let mut selected = Vec::new();
@@ -108,11 +110,9 @@ impl WorkspaceMcp {
             // The resolved launch, without the snapshot path: an approval stays bound to it
             // across the Task's Attempts and its continuations.
             match &transport {
-                Transport::Stdio(stdio) => identity.update(serde_json::to_vec(&(
-                    "stdio",
-                    &stdio.command,
-                    &stdio.env,
-                ))?),
+                Transport::Stdio(stdio) => {
+                    identity.update(serde_json::to_vec(&("stdio", &stdio.command, &stdio.env))?)
+                }
                 Transport::Http(http) => {
                     let headers: BTreeMap<_, _> = http
                         .headers
@@ -232,7 +232,9 @@ fn expand(value: &str, name: &str, variables: &impl Fn(&str) -> Option<String>) 
         );
         let resolved = variables(key)
             .filter(|value| !value.is_empty() && value.len() <= 4096)
-            .ok_or_else(|| anyhow::anyhow!("Workspace MCP server {name} needs environment variable {key}"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Workspace MCP server {name} needs environment variable {key}")
+            })?;
         ensure!(
             !control(&resolved),
             "Workspace MCP server {name}: {key} contains control characters"
@@ -287,7 +289,9 @@ fn stdio_server(
         .filter(|command| !command.trim().is_empty() && !control(command) && command.len() <= 4096)
         .ok_or_else(|| anyhow::anyhow!("Workspace MCP server {name} needs a command"))?;
     let args = strings(entry.get("args"))
-        .filter(|args| args.len() <= 64 && args.iter().all(|arg| !control(arg) && arg.len() <= 4096))
+        .filter(|args| {
+            args.len() <= 64 && args.iter().all(|arg| !control(arg) && arg.len() <= 4096)
+        })
         .ok_or_else(|| {
             anyhow::anyhow!("Workspace MCP server {name} args must be a list of strings")
         })?;
@@ -465,7 +469,11 @@ mod tests {
         };
         assert_eq!(
             script.command,
-            [directory.path().join("./bin/server.sh").display().to_string()]
+            [directory
+                .path()
+                .join("./bin/server.sh")
+                .display()
+                .to_string()]
         );
         assert!(
             resolved
@@ -506,20 +514,42 @@ mod tests {
     #[test]
     fn refuses_host_credentials_literals_and_argument_references() {
         for (entry, message) in [
-            (json!({"command":"node","env":{"KEY":"${GITHUB_TOKEN}"}}), "may reference only variables named SUPERTAG_MCP_"),
-            (json!({"command":"node","env":{"KEY":"literal"}}), "literal values are not allowed"),
-            (json!({"command":"node","args":["${SUPERTAG_MCP_TOKEN}"]}), "must not reference environment variables"),
-            (json!({"command":"node","env":{"KEY":"${SUPERTAG_MCP_ABSENT}"}}), "needs environment variable SUPERTAG_MCP_ABSENT"),
-            (json!({"type":"sse","url":"https://x.example.test/mcp"}), "must have type http or stdio"),
-            (json!({"url":"http://192.0.2.1/mcp"}), "HTTPS or literal loopback"),
-            (json!({"url":"https://x.example.test/mcp","headers":{"Authorization":"Bearer fixed"}}), "headers must reference environment variables"),
+            (
+                json!({"command":"node","env":{"KEY":"${GITHUB_TOKEN}"}}),
+                "may reference only variables named SUPERTAG_MCP_",
+            ),
+            (
+                json!({"command":"node","env":{"KEY":"literal"}}),
+                "literal values are not allowed",
+            ),
+            (
+                json!({"command":"node","args":["${SUPERTAG_MCP_TOKEN}"]}),
+                "must not reference environment variables",
+            ),
+            (
+                json!({"command":"node","env":{"KEY":"${SUPERTAG_MCP_ABSENT}"}}),
+                "needs environment variable SUPERTAG_MCP_ABSENT",
+            ),
+            (
+                json!({"type":"sse","url":"https://x.example.test/mcp"}),
+                "must have type http or stdio",
+            ),
+            (
+                json!({"url":"http://192.0.2.1/mcp"}),
+                "HTTPS or literal loopback",
+            ),
+            (
+                json!({"url":"https://x.example.test/mcp","headers":{"Authorization":"Bearer fixed"}}),
+                "headers must reference environment variables",
+            ),
             (json!({"command":""}), "needs a command"),
         ] {
             let directory = snapshot(&json!({"mcpServers":{"local":entry}}));
-            let error = WorkspaceMcp::resolve(directory.path(), &BTreeSet::from(["local"]), variables)
-                .err()
-                .unwrap()
-                .to_string();
+            let error =
+                WorkspaceMcp::resolve(directory.path(), &BTreeSet::from(["local"]), variables)
+                    .err()
+                    .unwrap()
+                    .to_string();
             assert!(error.contains(message), "{entry}: {error}");
         }
         let directory = snapshot(&json!({"mcpServers":{}}));
@@ -529,12 +559,20 @@ mod tests {
             .to_string();
         assert!(error.contains("is not defined in .mcp.json"), "{error}");
         let missing = tempfile::tempdir().unwrap();
-        assert!(WorkspaceMcp::resolve(missing.path(), &BTreeSet::from(["local"]), variables).is_err());
+        assert!(
+            WorkspaceMcp::resolve(missing.path(), &BTreeSet::from(["local"]), variables).is_err()
+        );
         // A symlinked configuration is never followed.
         let linked = tempfile::tempdir().unwrap();
         let target = snapshot(&json!({"mcpServers":{"local":{"command":"node"}}}));
-        std::os::unix::fs::symlink(target.path().join(".mcp.json"), linked.path().join(".mcp.json")).unwrap();
-        assert!(WorkspaceMcp::resolve(linked.path(), &BTreeSet::from(["local"]), variables).is_err());
+        std::os::unix::fs::symlink(
+            target.path().join(".mcp.json"),
+            linked.path().join(".mcp.json"),
+        )
+        .unwrap();
+        assert!(
+            WorkspaceMcp::resolve(linked.path(), &BTreeSet::from(["local"]), variables).is_err()
+        );
     }
 
     #[test]
