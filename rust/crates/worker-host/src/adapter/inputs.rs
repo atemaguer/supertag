@@ -311,7 +311,7 @@ mod tests {
                 })
                 .is_ok()
             {
-                return Err(Status::unavailable("Gateway partitioned"));
+                return Err(Status::unavailable("Control Plane partitioned"));
             }
             let state = match LiveInputReceipt::try_from(receipt).unwrap() {
                 LiveInputReceipt::Accepted => LiveInputState::Accepted,

@@ -1,7 +1,9 @@
-//! `supertag test notification`: send a harmless sample through every destination the Gateway
+//! `supertag test notification`: send a harmless sample through every destination a Gateway
 //! is configured to notify. TypeScript parity: `apps/cli/src/notification-command.ts`. The
 //! Gateway that delivers operator notifications sends the sample, so the command checks the
 //! same settings and senders the outbox uses, including a remote Gateway's.
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::Subcommand;
 use supertag_protocol::{
@@ -12,14 +14,18 @@ use supertag_protocol::{
     },
 };
 
-use crate::{Connection, connect_operator, request};
+use crate::request;
 
 #[derive(Subcommand)]
 pub enum TestCommand {
-    /// Send a sample notification through every configured destination.
+    /// Send a sample notification through every destination a Gateway notifies.
     Notification {
-        #[command(flatten)]
-        connection: Connection,
+        /// Gateway URL; reads SUPERTAG_OPERATOR_TOKEN. Without it, the local Gateway.
+        #[arg(long, conflicts_with = "state_directory")]
+        gateway: Option<String>,
+        /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
         /// Link the sample to this Objective.
         #[arg(long, default_value = "")]
         objective: String,
@@ -28,10 +34,18 @@ pub enum TestCommand {
 
 pub async fn run(command: TestCommand) -> Result<()> {
     let TestCommand::Notification {
-        connection,
+        gateway,
+        state_directory,
         objective,
     } = command;
-    let (channel, token) = connect_operator(connection).await?;
+    let (url, token) = match gateway {
+        Some(url) => (url, crate::required_env("SUPERTAG_OPERATOR_TOKEN")?),
+        None => crate::local::gateway_connection(&crate::local_config::state_directory(
+            state_directory,
+        )?)?,
+    };
+    let channel =
+        crate::network::gateway_operator_channel(&crate::network::endpoint(url).await?).await?;
     let response = OperatorNotificationTestClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)

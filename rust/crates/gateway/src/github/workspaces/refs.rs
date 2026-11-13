@@ -19,7 +19,7 @@ impl GithubWorkspaceSources {
                 && source.repository == self.0.repository
                 && source.commit_sha.is_empty()
                 && source.resolved_revision.is_none(),
-            "source selector is not configured on this Gateway"
+            "source selector is not configured on this Control Plane"
         );
         let token = self
             .0

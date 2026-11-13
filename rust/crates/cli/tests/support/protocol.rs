@@ -1,7 +1,6 @@
-//! Negotiated test channels. The Gateway and Control Plane refuse every call
-//! that does not name a negotiated protocol version, so a test that calls a
-//! running service directly negotiates first, as an operator client with a
-//! Gateway or as a Gateway with a Control Plane.
+//! Negotiated test channels. The Control Plane refuses every call that does not
+//! name a negotiated protocol version, so a test that calls a running service
+//! directly negotiates first, as an operator client.
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
@@ -17,8 +16,8 @@ use tonic::{
     transport::{Channel, Endpoint},
 };
 
-/// Negotiates on `channel` and returns it bound to the selected version. A
-/// Control Plane accepts only a Gateway, so the test speaks as one there.
+/// Negotiates on `channel` and returns it bound to the selected version, as an
+/// operator client or, where only Gateways are accepted, as a Gateway.
 pub async fn negotiated(channel: Channel) -> Result<ProtocolChannel> {
     let mut client = ProtocolNegotiationClient::new(channel.clone());
     let offer = |role: ServiceRole| NegotiateProtocolRequest {

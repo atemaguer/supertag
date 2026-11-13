@@ -16,9 +16,9 @@ Commands:
   health                Check a public or private gRPC service using the configured TLS trust
   setup                 Prepare a deployment of the Control Plane and Gateway, or connect a collaboration surface account
   check                 Validate a deployment's configuration without connecting
-  verify                Check a running deployment through its public Gateway
-  diff                  Preview an organization manifest through the Gateway
-  apply                 Apply an organization manifest through the Gateway
+  verify                Check a running deployment through its public Control Plane endpoint
+  diff                  Preview an organization manifest through the Control Plane
+  apply                 Apply an organization manifest through the Control Plane
   github-publication    Stop further provider writes of a GitHub publication
   workspace             Select GitHub Workspace sources pinned to one repository and commit
   reply                 Resolve uncertain connector replies from provider evidence
@@ -47,12 +47,12 @@ Commands:
   status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
   version               Print this CLI's version and the version of the running local services
   config                Print the resolved supertag.yaml that supertag up runs
-  control-plane         Run the private service that stores work and schedules execution
-  gateway               Run the public gRPC service for operators and Worker Hosts
-  tui                   Open the terminal UI for a saved or explicitly configured Gateway
+  control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
+  gateway               Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as a client of the Control Plane
+  tui                   Open the terminal UI for a saved or explicitly configured Control Plane
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts
-  connect               Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+  connect               Check an operator token against a Control Plane, then save the Control Plane under a name for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -73,9 +73,9 @@ Commands:
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved in the terminal UI or desktop app, for the operator command that follows
-  -h, --help                Print help
-  -V, --version             Print version
+      --control-plane <URL|NAME>  Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app, for the operator command that follows
+  -h, --help                      Print help
+  -V, --version                   Print version
 ```
 
 ## `supertag health`
@@ -87,7 +87,7 @@ Usage: supertag health [OPTIONS] --endpoint <ENDPOINT>
 
 Options:
       --endpoint <ENDPOINT>
-          Public Gateway or private Control Plane endpoint
+          Control Plane or Gateway endpoint
       --service <SERVICE>
           Fully qualified gRPC service name; an empty string checks overall server status [default: supertag.runtime.v2.Operator]
       --timeout-seconds <TIMEOUT_SECONDS>
@@ -170,8 +170,8 @@ Usage: supertag setup surface slack [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -200,8 +200,8 @@ Usage: supertag setup surface github [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -236,8 +236,8 @@ Usage: supertag setup surface linear [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -265,8 +265,8 @@ Usage: supertag setup surface lark [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -294,8 +294,8 @@ Usage: supertag setup surface teams [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -356,12 +356,12 @@ Options:
 ## `supertag verify`
 
 ```text
-Check a running deployment through its public Gateway
+Check a running deployment through its public Control Plane endpoint
 
 Usage: supertag verify <COMMAND>
 
 Commands:
-  deployment  Check a deployed Gateway: health, authentication, the Control Plane hop, and readiness
+  deployment  Check a deployed Control Plane: health, authentication, and readiness
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -371,33 +371,33 @@ Options:
 ## `supertag verify deployment`
 
 ```text
-Check a deployed Gateway: health, authentication, the Control Plane hop, and readiness
+Check a deployed Control Plane: health, authentication, and readiness
 
 Usage: supertag verify deployment [OPTIONS] <URL>
 
 Arguments:
-  <URL>  The Gateway's public HTTPS origin, such as https://supertag.example.com
+  <URL>  The Control Plane's public HTTPS origin, such as https://supertag.example.com
 
 Options:
       --env-file <ENV_FILE>  Private env file that holds SUPERTAG_OPERATOR_TOKEN
       --require-ready        Fail unless at least one Worker Host is ready
   -h, --help                 Print help
 
-The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Gateway's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Gateway requires client certificates. Verification registers no Worker Host and runs no Task.
+The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Control Plane's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Control Plane requires client certificates. Verification registers no Worker Host and runs no Task.
 ```
 
 ## `supertag diff`
 
 ```text
-Preview an organization manifest through the Gateway
+Preview an organization manifest through the Control Plane
 
 Usage: supertag diff [OPTIONS] --file <FILES>
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -f, --file <FILES>
           YAML documents, a JSON array, a directory of manifests, or - for stdin
       --set <MANAGER>
@@ -411,15 +411,15 @@ Options:
 ## `supertag apply`
 
 ```text
-Apply an organization manifest through the Gateway
+Apply an organization manifest through the Control Plane
 
 Usage: supertag apply [OPTIONS] --file <FILES>
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -f, --file <FILES>
           YAML documents, a JSON array, a directory of manifests, or - for stdin
       --set <MANAGER>
@@ -442,10 +442,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -461,14 +461,14 @@ Arguments:
   <PUBLICATION_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why provider writes stop; recorded with the cancellation
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -481,14 +481,14 @@ Select GitHub Workspace sources pinned to one repository and commit
 Usage: supertag workspace [OPTIONS] <COMMAND>
 
 Commands:
-  put   Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway
+  put   Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Control Plane
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -496,7 +496,7 @@ Options:
 ## `supertag workspace put`
 
 ```text
-Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway
+Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Control Plane
 
 Usage: supertag workspace put [OPTIONS] --account <ACCOUNT> --repository-id <REPOSITORY_ID> --repository <REPOSITORY> <WORKSPACE_ID>
 
@@ -506,12 +506,12 @@ Arguments:
 Options:
       --account <ACCOUNT>
           Configured GitHub account that reads the repository
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --repository-id <REPOSITORY_ID>
           Numeric GitHub repository ID, which survives renames
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --repository <REPOSITORY>
           Repository as OWNER/NAME; must match the repository ID
       --commit <COMMIT>
@@ -540,10 +540,10 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -559,14 +559,14 @@ Arguments:
   <REPLY_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --decision <DECISION>
           What the provider shows happened to the reply [possible values: delivered, failed]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --evidence <EVIDENCE>
           What you checked at the provider that shows the outcome
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --provider-receipt <PROVIDER_RECEIPT>
           Required for a delivered decision; identifies the observed provider response
       --operation-id <OPERATION_ID>
@@ -587,10 +587,10 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -606,14 +606,14 @@ Arguments:
   <FILE>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -631,10 +631,10 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -651,12 +651,12 @@ Arguments:
   <TAG_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -672,14 +672,14 @@ Arguments:
   <ASSIGNMENT_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -698,10 +698,10 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -717,14 +717,14 @@ Arguments:
   <FILE>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -756,8 +756,8 @@ Options:
           GitHub repository as OWNER/NAME
       --repo-id <REPOSITORY_ID>
           GitHub numeric repository ID
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -793,8 +793,8 @@ Options:
           GitHub repository as OWNER/NAME
       --repo-id <REPOSITORY_ID>
           GitHub numeric repository ID
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -817,10 +817,10 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -836,14 +836,14 @@ Arguments:
   <FILE>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -875,8 +875,8 @@ Options:
           GitHub repository as OWNER/NAME
       --repo-id <REPOSITORY_ID>
           GitHub numeric repository ID
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -912,8 +912,8 @@ Options:
           GitHub repository as OWNER/NAME
       --repo-id <REPOSITORY_ID>
           GitHub numeric repository ID
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -934,10 +934,10 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -953,14 +953,14 @@ Arguments:
   <FILE>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -977,10 +977,10 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 
@@ -998,14 +998,14 @@ Arguments:
   <FILE>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1064,16 +1064,16 @@ Usage: supertag host [OPTIONS] <COMMAND>
 Commands:
   drain              Stop assigning new Tasks while the Worker Host finishes current work
   resume             Allow the Worker Host to claim new Tasks again
-  enroll             Enroll this installation with a one-time Auth Key. Its own --gateway and --state-directory name the Gateway to enroll with and the new Worker Host's state
+  enroll             Enroll this installation with a one-time Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
   revoke             Revoke a Worker Host and its execution authority
   rotate-credential  Replace an enrolled Worker Host's credential. The previous one stops working at once
   help               Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1089,10 +1089,10 @@ Arguments:
   <HOST_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1108,10 +1108,10 @@ Arguments:
   <HOST_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1119,16 +1119,16 @@ Options:
 ## `supertag host enroll`
 
 ```text
-Enroll this installation with a one-time Auth Key. Its own --gateway and --state-directory name the Gateway to enroll with and the new Worker Host's state
+Enroll this installation with a one-time Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
 
-Usage: supertag host enroll [OPTIONS] --gateway <GATEWAY> --state-directory <STATE_DIRECTORY> <HOST_ID>
+Usage: supertag host enroll [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY> <HOST_ID>
 
 Arguments:
   <HOST_ID>  
 
 Options:
-      --gateway <GATEWAY>
-          Gateway URL to enroll with
+      --control-plane <CONTROL_PLANE>
+          Control Plane URL to enroll with
       --state-directory <STATE_DIRECTORY>
           Private directory for this Worker Host's enrollment and execution journal
       --auth-key <AUTH_KEY>
@@ -1148,10 +1148,10 @@ Arguments:
   <HOST_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1167,14 +1167,14 @@ Arguments:
   <HOST_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --out <OUT>
           Write the new credential to this new owner-only file, for a host that reads SUPERTAG_HOST_TOKEN from its own secret manager
       --host-state-directory <HOST_STATE_DIRECTORY>
           Install the new credential in the state directory of this machine's stopped, enrolled Worker Host. It uses the credential when it next starts
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1192,10 +1192,10 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1212,10 +1212,10 @@ Arguments:
   [LABELS]...  Required labels. Omit every label to allow any bound host
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1231,10 +1231,10 @@ Arguments:
   <TASK_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1251,10 +1251,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1271,12 +1271,12 @@ Arguments:
   <TEXT>     
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Supply the same ID to retry an answer after a lost response
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1294,10 +1294,10 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1313,12 +1313,12 @@ Arguments:
   <APPROVAL_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective-scope
           Allow this Tag's Workstream posts to the same Team for this Objective
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --valid-until-ms <VALID_UNTIL_MS>
           End of the approval, in milliseconds since the Unix epoch. Omit for no end
       --operation-id <OPERATION_ID>
@@ -1338,14 +1338,14 @@ Arguments:
   <APPROVAL_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why the request is denied; the Tag sees this reason
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1412,10 +1412,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1432,12 +1432,12 @@ Arguments:
   <RECIPIENT_TAG_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1454,12 +1454,12 @@ Arguments:
   <RECIPIENT_TAG_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1478,10 +1478,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1500,11 +1500,11 @@ Arguments:
           
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
 
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1521,10 +1521,10 @@ Arguments:
   <NAME>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1540,10 +1540,10 @@ Arguments:
   <NAME>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1556,10 +1556,10 @@ List recorded operator changes, newest first, with actor, action, target, and ou
 Usage: supertag audit [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --since <SINCE>
           Only changes at or after this time, such as 2026-10-01T09:00:00Z or 2026-10-01
       --actor <ACTOR>
@@ -1587,10 +1587,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -1606,14 +1606,14 @@ Arguments:
   <TEAM_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <NAME>
           Display name. Defaults to the Team ID
       --member <MEMBER>
           Member Tag ID. Repeat for each member
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --max-concurrency <MAX_CONCURRENCY>
           Most Tasks the Team runs at once. Omit for no Team limit
       --operation-id <OPERATION_ID>
@@ -1633,14 +1633,14 @@ Arguments:
   <TEAM>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <NAME>
           New display name
       --member <MEMBER>
           Replace the members with these Tag IDs. Repeat for each member
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --max-concurrency <MAX_CONCURRENCY>
           Most Tasks the Team runs at once
       --clear-concurrency
@@ -1774,14 +1774,14 @@ Options:
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
-      --workspace-from-gateway
-          Retrieve each Workspace's accepted GitHub source from the Gateway
+      --workspace-from-control-plane
+          Retrieve each Workspace's accepted GitHub source from the Control Plane
 
       --skill-catalog <SKILL_CATALOG>
           Private host allowlist of Skill packages
 
-      --gateway-listen <GATEWAY_LISTEN>
-          Address the local Gateway listens on. Port 0 picks a free port
+      --control-plane-listen <CONTROL_PLANE_LISTEN>
+          Address the local Control Plane listens on. Port 0 picks a free port
           
           [default: 127.0.0.1:0]
 
@@ -1856,8 +1856,8 @@ Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
 Usage: supertag status [OPTIONS]
 
 Options:
-      --gateway <GATEWAY>
-          Remote Gateway; reads SUPERTAG_OPERATOR_TOKEN
+      --control-plane <CONTROL_PLANE>
+          Remote Control Plane URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
       --output <OUTPUT>
@@ -1903,25 +1903,9 @@ Options:
 ## `supertag control-plane`
 
 ```text
-Run the private service that stores work and schedules execution
+Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
 
 Usage: supertag control-plane [OPTIONS]
-
-Options:
-      --listen <LISTEN>
-          Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
-      --websocket-listen <WEBSOCKET_LISTEN>
-          Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
-  -h, --help
-          Print help
-```
-
-## `supertag gateway`
-
-```text
-Run the public gRPC service for operators and Worker Hosts
-
-Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
 
 Options:
       --listen <LISTEN>
@@ -1932,17 +1916,40 @@ Options:
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
 
-      --control-plane <CONTROL_PLANE>
-          Private Control Plane URL that this Gateway forwards to
-
-      --checkpoint-directory <CHECKPOINT_DIRECTORY>
-          Private directory for Session checkpoint archives that Worker Hosts transfer through this Gateway
+      --transfer-directory <TRANSFER_DIRECTORY>
+          Private directory for files Worker Hosts transfer through the Control Plane: Session checkpoints, workspace bundles, and GitHub publication blobs. Replicas of the public API must share it
 
       --artifact-volume <ARTIFACT_VOLUMES>
           Explicit storage-host consent: VOLUME_ID=/absolute/private/directory
 
       --artifact-s3-volumes <ARTIFACT_S3_VOLUMES>
-          Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Gateway reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
+          Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
+
+      --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
+          Private scratch for GitHub source bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Requires the transfer directory
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag gateway`
+
+```text
+Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as a client of the Control Plane
+
+Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
+
+Options:
+      --listen <LISTEN>
+          Address for the test notification. Port 0 picks a free port
+          
+          [default: 127.0.0.1:0]
+
+      --websocket-listen <WEBSOCKET_LISTEN>
+          Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
+
+      --control-plane <CONTROL_PLANE>
+          Control Plane URL this Gateway connects to
 
       --slack-listen <SLACK_LISTEN>
           Address for Slack webhooks. Requires the Slack state directory
@@ -1955,9 +1962,6 @@ Options:
 
       --github-state-directory <GITHUB_STATE_DIRECTORY>
           Private directory for GitHub connector state and reply receipts
-
-      --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
-          Private scratch for GitHub source bundles, using the configured GitHub account. The GitHub Surface connector reads the same `SUPERTAG_GITHUB_*` variables, so one Gateway serves either a GitHub Workspace or a GitHub location, not both
 
       --linear-listen <LINEAR_LISTEN>
           Address for Linear webhooks. Requires the Linear state directory
@@ -1984,15 +1988,15 @@ Options:
 ## `supertag tui`
 
 ```text
-Open the terminal UI for a saved or explicitly configured Gateway
+Open the terminal UI for a saved or explicitly configured Control Plane
 
 Usage: supertag tui [OPTIONS]
 
 Options:
-      --gateway <GATEWAY>
-          Gateway URL or the name of a saved Gateway
+      --control-plane <CONTROL_PLANE>
+          Control Plane URL or the name of a saved Control Plane
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --binary <BINARY>
           Terminal UI executable. Also reads SUPERTAG_TUI_BINARY
       --workspace <WORKSPACE>
@@ -2006,11 +2010,11 @@ Options:
 ```text
 Connect a Worker Host and run accepted Tasks through an adapter
 
-Usage: supertag worker-host [OPTIONS] --gateway <GATEWAY> --state-directory <STATE_DIRECTORY>
+Usage: supertag worker-host [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY>
 
 Options:
-      --gateway <GATEWAY>
-          Gateway URL this Worker Host connects to
+      --control-plane <CONTROL_PLANE>
+          Control Plane URL this Worker Host connects to
 
       --state-directory <STATE_DIRECTORY>
           Private directory for this Worker Host's enrollment and execution journal
@@ -2080,8 +2084,8 @@ Options:
       --workspace-source <WORKSPACE_SOURCE>
           Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
 
-      --workspace-from-gateway
-          Retrieve each Workspace's accepted GitHub source from the Gateway
+      --workspace-from-control-plane
+          Retrieve each Workspace's accepted GitHub source from the Control Plane
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
           Owner-controlled JSON mappings for read-only Workspace Volume copies
@@ -2172,10 +2176,10 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2191,14 +2195,14 @@ Arguments:
   <NAME>  The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --host <HOST_ID>
           Worker Host ID a one-time key enrolls. Omit with --reusable
       --reusable
           Enroll any number of Worker Hosts, each choosing its own ID
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --ephemeral
           Remove hosts that join with this key once they go offline
       --label <LABELS>
@@ -2224,10 +2228,10 @@ Arguments:
   <NAME>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2235,22 +2239,22 @@ Options:
 ## `supertag connect`
 
 ```text
-Check an operator token against a Gateway, then save the Gateway under a name for `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+Check an operator token against a Control Plane, then save the Control Plane under a name for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
 Arguments:
-  <URL>  The Gateway origin, such as https://supertag.example.com
+  <URL>  The Control Plane origin, such as https://supertag.example.com
 
 Options:
       --name <NAME>
           The name to save it under
       --replace
-          Replace a Gateway already saved under this name for the same origin
+          Replace a Control Plane already saved under this name for the same origin
       --server-ca-file <SERVER_CA_FILE>
-          PEM file of the certificate authority that signed the Gateway's TLS certificate
+          PEM file of the certificate authority that signed the Control Plane's TLS certificate
       --client-cert-file <CLIENT_CERT_FILE>
-          PEM client certificate for a Gateway that requires mutual TLS
+          PEM client certificate for a Control Plane that requires mutual TLS
       --client-key-file <CLIENT_KEY_FILE>
           PEM private key of the client certificate
   -h, --help
@@ -2267,14 +2271,14 @@ Usage: supertag tag [OPTIONS] <COMMAND>
 Commands:
   put     Set the instructions and allowed actions for a Tag
   retire  Retire a Tag by ID while preserving its work history
-  update  Change where a Tag works: add or remove its location on a connected surface. Its own --gateway, --state-directory, and --file name the local configuration it edits
+  update  Change where a Tag works: add or remove its location on a connected surface. Its own --control-plane, --state-directory, and --file name the local configuration it edits
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2290,14 +2294,14 @@ Arguments:
   <TAG_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --name <DISPLAY_NAME>
           Display name. Defaults to the Tag ID for a new Tag
       --instructions <INSTRUCTIONS>
           Standing instructions the Tag follows in every Task
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --allow <ALLOW>
           Action the Tag may take, such as files:read. Repeat for each action
       --require-workstream-approval
@@ -2339,12 +2343,12 @@ Arguments:
   <TAG_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --dry-run
           Show blockers and what retirement would detach
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2352,7 +2356,7 @@ Options:
 ## `supertag tag update`
 
 ```text
-Change where a Tag works: add or remove its location on a connected surface. Its own --gateway, --state-directory, and --file name the local configuration it edits
+Change where a Tag works: add or remove its location on a connected surface. Its own --control-plane, --state-directory, and --file name the local configuration it edits
 
 Usage: supertag tag update [OPTIONS] <TAG>
 
@@ -2378,8 +2382,8 @@ Options:
           GitHub numeric repository ID
       --allowed-user <ALLOWED_USERS>
           Provider user ID allowed to ask the Tag for work there (numeric on GitHub). Repeat for more users
-      --gateway <URL|NAME>
-          Gateway URL or saved Gateway name. Defaults to this machine's running local services
+      --control-plane <URL|NAME>
+          Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
           State directory with supertag.yaml and the file credential vault. Defaults to SUPERTAG_STATE_DIR, then ~/.supertag
   -f, --file <FILE>
@@ -2408,10 +2412,10 @@ Commands:
   help             Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2427,14 +2431,14 @@ Arguments:
   <PROMPT>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           Tag that does the work
       --session <SESSION>
           Session that the turn belongs to; a new name starts a new Session
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --max-reported-tokens <MAX_REPORTED_TOKENS>
@@ -2466,10 +2470,10 @@ Arguments:
   <TASK_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2487,10 +2491,10 @@ Arguments:
 Options:
       --after <AFTER>
           Only entries after this sequence number [default: 0]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2509,10 +2513,10 @@ Arguments:
 Options:
       --after <AFTER>
           Only entries after this sequence number [default: 0]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2529,12 +2533,12 @@ Arguments:
   <TEXT>     
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2551,14 +2555,14 @@ Arguments:
   <ATTEMPT_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --decision <DECISION>
           Mark the Attempt failed, or run the Task again [possible values: failed, retry]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --evidence <EVIDENCE>
           What you checked that shows the Attempt stopped and what it did
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --confirmed-stopped
           Confirm that no process of this Attempt is still running
       --operation-id <OPERATION_ID>
@@ -2578,14 +2582,14 @@ Arguments:
   <TASK_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --kind <KIND>
           Which published result to download [possible values: patch, bundle]
       --output <OUTPUT>
           Local file to create with the download. It must not already exist
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2604,10 +2608,10 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2624,14 +2628,14 @@ Arguments:
   <ARTIFACT_ID>     
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --path <PATH>
           File in the artifact to publish. Repeat for each file
       --audience <AUDIENCE>
           Destination Objective ID that may use the files. Repeat for each Objective
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --supersedes <SUPERSEDES>
           Earlier publication that this one replaces
   -h, --help
@@ -2649,12 +2653,12 @@ Arguments:
   <PUBLICATION_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2670,10 +2674,10 @@ Arguments:
   <PUBLICATION_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2692,10 +2696,10 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2713,10 +2717,10 @@ Arguments:
   <OBJECTIVE_ID>    
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2732,12 +2736,12 @@ Arguments:
   <CONSUMPTION_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2753,10 +2757,10 @@ Arguments:
   <CONSUMPTION_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2770,15 +2774,15 @@ Usage: supertag volume [OPTIONS] <COMMAND>
 
 Commands:
   put       Register a file or S3-compatible Volume. Existing metadata requires its exact revision
-  copy      Copy one exact artifact file. The Gateway must separately consent to this Volume's storage
-  download  Download and re-verify one recorded copy, including after the Gateway cache is lost
+  copy      Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
+  download  Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2794,14 +2798,14 @@ Arguments:
   <VOLUME_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --source <SOURCE>
-          Canonical file:///absolute/path or s3://bucket/prefix. The Gateway supplies storage endpoints and credentials
+          Canonical file:///absolute/path or s3://bucket/prefix. The Control Plane supplies storage endpoints and credentials
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --expected-revision <EXPECTED_REVISION>
           The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
   -h, --help
@@ -2811,7 +2815,7 @@ Options:
 ## `supertag volume copy`
 
 ```text
-Copy one exact artifact file. The Gateway must separately consent to this Volume's storage
+Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
 
 Usage: supertag volume copy [OPTIONS] --path <PATH> --expected-revision <EXPECTED_REVISION> --operation-id <OPERATION_ID> <VOLUME_ID> <ARTIFACT_ID>
 
@@ -2820,14 +2824,14 @@ Arguments:
   <ARTIFACT_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --path <PATH>
           File in the artifact to copy
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice
   -h, --help
@@ -2837,7 +2841,7 @@ Options:
 ## `supertag volume download`
 
 ```text
-Download and re-verify one recorded copy, including after the Gateway cache is lost
+Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost
 
 Usage: supertag volume download [OPTIONS] --output <OUTPUT> <COPY_ID>
 
@@ -2845,12 +2849,12 @@ Arguments:
   <COPY_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --output <OUTPUT>
           Local file to create with the verified copy. It must not already exist
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2867,10 +2871,10 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2886,14 +2890,14 @@ Arguments:
   <VOLUME_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --source <SOURCE>
           Canonical file:///absolute/path of the data directory
       --expected-revision <EXPECTED_REVISION>
           The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2910,10 +2914,10 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2929,14 +2933,14 @@ Arguments:
   <ARTIFACT_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --path <PATH>
           File in the artifact to download
       --output <OUTPUT>
           Local file to create with the verified download. It must not already exist
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2952,10 +2956,10 @@ Arguments:
   <ID>  A Task ID, or a Session ID to import that Session's latest delivery
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --tag <TAG>
           The Tag whose Session to import, when more than one Tag has a Session with this ID
       --repository <REPOSITORY>
@@ -2976,10 +2980,10 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -2996,14 +3000,14 @@ Arguments:
   <DECISION>  [possible values: fail, retry]
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --evidence <EVIDENCE>
           What you checked that shows whether the message arrived
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3016,7 +3020,7 @@ Check operator settings by sending a sample
 Usage: supertag test <COMMAND>
 
 Commands:
-  notification  Send a sample notification through every configured destination
+  notification  Send a sample notification through every destination a Gateway notifies
   help          Print this message or the help of the given subcommand(s)
 
 Options:
@@ -3026,15 +3030,15 @@ Options:
 ## `supertag test notification`
 
 ```text
-Send a sample notification through every configured destination
+Send a sample notification through every destination a Gateway notifies
 
 Usage: supertag test notification [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --gateway <GATEWAY>
+          Gateway URL; reads SUPERTAG_OPERATOR_TOKEN. Without it, the local Gateway
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
       --objective <OBJECTIVE>
           Link the sample to this Objective [default: ""]
   -h, --help
@@ -3049,10 +3053,10 @@ Report recorded spend by Objective, Tag, or day
 Usage: supertag spend [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --by <BY>
           Group Attempts by Objective (default), Tag, or UTC day claimed [default: objective] [possible values: objective, tag, day]
       --since <SINCE>
@@ -3071,10 +3075,10 @@ Read an operational snapshot: resource and Task counts, usage, Worker Host capac
 Usage: supertag metrics [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --output <OUTPUT>
           Print readable text, or JSON for scripts [default: text] [possible values: text, json]
   -h, --help
@@ -3122,10 +3126,10 @@ Commands:
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3141,14 +3145,14 @@ Arguments:
   [ID]  Tag ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --include-retired
           Also list retired Tags
       --limit <LIMIT>
           Most entries to return on one page [default: 100]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
   -h, --help
@@ -3166,10 +3170,10 @@ Arguments:
   <ID>  Task ID
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3185,14 +3189,14 @@ Arguments:
   [ID]  Objective ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --after-id <AFTER_ID>
           Continue after the last ID the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3208,14 +3212,14 @@ Arguments:
   [ID]  Team ID or name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --member <MEMBER>
           Only Teams this Tag belongs to [default: ""]
       --limit <LIMIT>
           Most entries to return on one page [default: 32]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
   -h, --help
@@ -3233,14 +3237,14 @@ Arguments:
   [ID]  Worker Host ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 32]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3256,14 +3260,14 @@ Arguments:
   [ID]  Work Session ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --report-task <REPORT_TASK>
           Show the child Task associated with this report
       --parent-tag <PARENT_TAG>
           Tag that started the Work Sessions
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --parent-session <PARENT_SESSION>
           Session that started the Work Sessions
       --starter-task <STARTER_TASK>
@@ -3287,14 +3291,14 @@ Arguments:
   [ID]  Role ID or name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3310,14 +3314,14 @@ Arguments:
   [ID]  Permission Set ID or name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3333,14 +3337,14 @@ Arguments:
   [ID]  Context Set ID or name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3356,14 +3360,14 @@ Arguments:
   [ID]  Volume ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 30]
       --after-id <AFTER_ID>
           Continue after the last ID the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3379,14 +3383,14 @@ Arguments:
   [ID]  Copy ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --volume-id <VOLUME_ID>
           Only copies made into this Volume [default: ""]
       --limit <LIMIT>
           Most entries to return on one page [default: 30]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -3404,10 +3408,10 @@ Arguments:
   <ID>  Workspace Volume ID
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3423,14 +3427,14 @@ Arguments:
   [ID]  Workspace ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --after-id <AFTER_ID>
           Continue after the last ID the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3446,14 +3450,14 @@ Arguments:
   [ID]  Auth Key name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 100]
       --cursor <CURSOR>
           The next_cursor of the previous page [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3469,14 +3473,14 @@ Arguments:
   [ID]  Operator Token name. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3492,14 +3496,14 @@ Arguments:
   [ID]  Artifact ID. Omit to list with --task
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --task <TASK>
           Task whose artifacts to list
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -3517,14 +3521,14 @@ Arguments:
   [ID]  Publication ID. Omit to list with --objective
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Objective whose approvals to list
       --limit <LIMIT>
           Most entries to return on one page [default: 30]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -3542,14 +3546,14 @@ Arguments:
   [ID]  Consumption ID. Omit to list with --objective
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Objective whose approvals to list
       --limit <LIMIT>
           Most entries to return on one page [default: 30]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -3567,14 +3571,14 @@ Arguments:
   [ID]  Publication ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --task-id <TASK_ID>
           Only results of this Task [default: ""]
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -3594,12 +3598,12 @@ Arguments:
 Options:
       --account <ACCOUNT>
           Only replies sent through this connector account [default: ""]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state <STATE>
           Only replies in this delivery state [possible values: pending, claimed, delivered, failed, uncertain]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --before-order <BEFORE_ORDER>
@@ -3619,10 +3623,10 @@ Arguments:
   <ID>  Input ID, as `task input` printed it
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3638,14 +3642,14 @@ Arguments:
   [ID]  Surface Account ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3663,12 +3667,12 @@ Arguments:
 Options:
       --account <ACCOUNT>
           Only locations of this account [default: ""]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 20]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
   -h, --help
@@ -3683,12 +3687,12 @@ List Role assignments
 Usage: supertag get role-assignment [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --role <ROLE>
           Only assignments of this Role [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --tag <TAG>
           Only assignments to this Tag [default: ""]
       --active
@@ -3709,14 +3713,14 @@ List the incoming and outgoing direct message grants of a Tag
 Usage: supertag get mailbox-grant [OPTIONS] --tag <TAG>
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --tag <TAG>
           The Tag whose incoming and outgoing grants to list
       --limit <LIMIT>
           Most entries to return on one page [default: 32]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
   -h, --help
@@ -3731,14 +3735,14 @@ List the messages sent to or from a Tag
 Usage: supertag get message [OPTIONS] --mailbox <MAILBOX>
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --mailbox <MAILBOX>
           The Tag whose sent and received messages to list
       --limit <LIMIT>
           Most entries to return on one page [default: 32]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
   -h, --help
@@ -3753,14 +3757,14 @@ List a Team's newest Workstream posts, or those after a sequence
 Usage: supertag get workstream-post [OPTIONS] --team <TEAM>
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --team <TEAM>
           The Team whose Workstream to read, by ID or name
       --after-sequence <AFTER_SEQUENCE>
           Continue after this post sequence instead of reading the newest posts
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --limit <LIMIT>
           Most entries to return on one page [default: 16]
       --cursor <CURSOR>
@@ -3780,12 +3784,12 @@ Arguments:
   [ID]  Approval ID. Omit to list
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Only approvals for this Objective [default: ""]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --task <TASK>
           Only approvals requested by this Task [default: ""]
       --pending
@@ -3809,10 +3813,10 @@ Arguments:
   <ID>  The ID of the Task that asked
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3825,14 +3829,14 @@ List the questions and work waiting for an operator
 Usage: supertag get inbox-item [OPTIONS]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective <OBJECTIVE>
           Only items for this Objective [default: ""]
       --kind <KIND>
           Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --cursor <CURSOR>
@@ -3853,10 +3857,10 @@ Arguments:
   <ID>    The resource's ID or name
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --output <OUTPUT>
           Print readable text, or JSON for scripts [default: text] [possible values: text, json]
   -h, --help
@@ -3880,10 +3884,10 @@ Commands:
   help              Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3899,12 +3903,12 @@ Arguments:
   <ID>  Team ID or name
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3920,14 +3924,14 @@ Arguments:
   <ID>  Permission Set ID or name
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3943,14 +3947,14 @@ Arguments:
   <ID>  Context Set ID or name
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3966,14 +3970,14 @@ Arguments:
   <ID>  Volume ID
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -3989,14 +3993,14 @@ Arguments:
   <ID>  Workspace ID
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4012,14 +4016,14 @@ Arguments:
   <ID>  Surface Location ID
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4035,10 +4039,10 @@ Arguments:
   [KIND]...  Only these kinds of change; omit for every kind [possible values: tag, task, conversation-message, objective, team, workstream-post]
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --resume-token <RESUME_TOKEN>
           Continue after the last notice a previous watch printed
       --limit <LIMIT>
@@ -4071,10 +4075,10 @@ Commands:
   help                 Print this message or the help of the given subcommand(s)
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4091,12 +4095,12 @@ Arguments:
   <OUTCOME>       
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --owner <OWNER>
           Tag that owns the Objective until it is met
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --team <TEAM>
           Optional Team ID or name
       --ongoing
@@ -4128,14 +4132,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --limit <LIMIT>
           Most entries to return on one page [default: 50]
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4151,14 +4155,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --deadline <DEADLINE>
           New RFC 3339 deadline with a time zone
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --clear-deadline
           Remove the deadline
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --budget-minor <BUDGET_MINOR>
           New spending limit in minor currency units, such as cents
       --currency <CURRENCY>
@@ -4184,14 +4188,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --runtime-action <RUNTIME_ACTIONS>
           Runtime action future turns may use. Repeat for each action
       --no-runtime-actions
           Allow no runtime actions in future turns
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. If given, the change is refused when the resource has changed since
       --operation-id <OPERATION_ID>
@@ -4211,14 +4215,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4234,14 +4238,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4257,14 +4261,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --reason <REASON>
           Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4281,14 +4285,14 @@ Arguments:
   <DECISION>      [possible values: approve, request-changes]
 
 Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --feedback <FEEDBACK>
           What to change; required to request changes, refused on approval [default: ""]
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
   -h, --help
           Print help
 ```
@@ -4304,14 +4308,14 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --summary-file <SUMMARY_FILE>
           File holding the assessment; `-` reads standard input
       --expected-revision <EXPECTED_REVISION>
           Refuse when the Objective changed since this revision
       --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway
+          Use the local services in this state directory instead of a Control Plane URL
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help

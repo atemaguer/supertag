@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "The local SuperTag desktop window.",
   "windows": ["main"],
-  "permissions": ["gateway-client"]
+  "permissions": ["control-plane-client"]
 }

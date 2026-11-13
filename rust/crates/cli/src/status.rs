@@ -25,9 +25,9 @@ const MAX_PAGES: usize = 100;
 
 #[derive(Args)]
 pub struct StatusArgs {
-    /// Remote Gateway; reads SUPERTAG_OPERATOR_TOKEN.
+    /// Remote Control Plane URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN.
     #[arg(long, conflicts_with = "state_directory")]
-    gateway: Option<String>,
+    control_plane: Option<String>,
     /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
@@ -79,29 +79,34 @@ struct InboxView {
     truncated: bool,
 }
 
-fn connection(gateway: Option<String>, state_directory: Option<PathBuf>) -> Result<Connection> {
-    Ok(match gateway {
-        Some(gateway) => Connection {
-            gateway: Some(gateway),
+fn connection(
+    control_plane: Option<String>,
+    state_directory: Option<PathBuf>,
+) -> Result<Connection> {
+    Ok(match control_plane {
+        Some(control_plane) => Connection {
+            control_plane: Some(control_plane),
             state_directory: None,
         },
-        // `supertag --gateway URL status` selects the Gateway before the command name.
-        None if state_directory.is_none() && crate::ROOT_GATEWAY.get().is_some() => Connection {
-            gateway: None,
-            state_directory: None,
-        },
+        // `supertag --control-plane URL status` selects the Control Plane before the command name.
+        None if state_directory.is_none() && crate::ROOT_CONTROL_PLANE.get().is_some() => {
+            Connection {
+                control_plane: None,
+                state_directory: None,
+            }
+        }
         None => Connection {
-            gateway: None,
+            control_plane: None,
             state_directory: Some(local_config::state_directory(state_directory)?),
         },
     })
 }
 
 /// What the organization is doing now: Worker Hosts, Tags, unfinished Objectives, and the
-/// operator inbox, read through the Gateway's operator API.
+/// operator inbox, read through the Control Plane's operator API.
 pub async fn status(args: StatusArgs) -> Result<()> {
     let (channel, token) =
-        crate::connect_operator(connection(args.gateway, args.state_directory)?).await?;
+        crate::connect_operator(connection(args.control_plane, args.state_directory)?).await?;
     let mut operator = OperatorClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);

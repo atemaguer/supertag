@@ -1,4 +1,4 @@
-import type { Gateway, Message } from "../gateway";
+import type { ControlPlane, Message } from "../control-plane";
 import { ResultFiles } from "./result-files";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -34,7 +34,7 @@ export function ConversationEntry({
   message: Message;
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
-  onSaveArtifact: Gateway["saveArtifact"];
+  onSaveArtifact: ControlPlane["saveArtifact"];
 }) {
   const { task, workSessionReportId } = message;
   const report = workSessionReportId !== undefined;

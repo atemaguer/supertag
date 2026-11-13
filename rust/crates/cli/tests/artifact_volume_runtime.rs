@@ -79,14 +79,11 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, database: &str, listen: &str) -> Command {
-    let mut c = credentials.command(&["control-plane", "--listen", listen]);
-    c.env("SUPERTAG_DATABASE_URL", database);
-    c
-}
-fn gateway(credentials: &Credentials, root: &Path, private: &str, mapped: bool) -> Command {
-    let mut c = credentials.command(&["gateway", "--control-plane", private]);
-    c.arg("--checkpoint-directory").arg(root.join("cas"));
+fn plane(credentials: &Credentials, root: &Path, database: &str, mapped: bool) -> Command {
+    let mut c = credentials.command(&["control-plane", "--listen", "127.0.0.1:0"]);
+    c.env("SUPERTAG_DATABASE_URL", database)
+        .arg("--transfer-directory")
+        .arg(root.join("cas"));
     if mapped {
         c.arg("--artifact-volume")
             .arg(format!("durable={}", root.join("volume").display()));
@@ -94,14 +91,14 @@ fn gateway(credentials: &Credentials, root: &Path, private: &str, mapped: bool) 
     c
 }
 fn volume(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["volume", "--gateway", public]);
+    let mut c = credentials.command(&["volume", "--control-plane", public]);
     c.args(args);
     c
 }
 /// `supertag get` for Volumes and their copies, or `supertag delete` with a leading "delete".
 fn resource(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
     let (verb, args) = args.split_first().expect("a verb");
-    let mut c = credentials.command(&[verb, "--gateway", public]);
+    let mut c = credentials.command(&[verb, "--control-plane", public]);
     c.args(args);
     c
 }
@@ -238,7 +235,7 @@ fn capture_download(
     artifact: &str,
     output: &Path,
 ) -> Command {
-    let mut command = credentials.command(&["artifact", "--gateway", public]);
+    let mut command = credentials.command(&["artifact", "--control-plane", public]);
     command
         .args(["download", artifact, "--path", "report.txt", "--output"])
         .arg(output);
@@ -391,8 +388,7 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     std::fs::create_dir(&volume_path)?;
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(gateway(&credentials, &root, &private, false)).await?;
+    let (mut control, public) = service(plane(&credentials, &root, &database, false)).await?;
     let (artifact_id, bytes, blob) = capture(&credentials, &public).await?;
     let source = format!("file://{}", volume_path.display());
     let registered = json(volume(
@@ -430,9 +426,9 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
             .is_empty()
     );
     assert_eq!(std::fs::read_dir(&volume_path)?.count(), 0);
-    stop(&mut ingress).await?;
-    let (next, next_public) = service(gateway(&credentials, &root, &private, true)).await?;
-    ingress = next;
+    stop(&mut control).await?;
+    let (next, next_public) = service(plane(&credentials, &root, &database, true)).await?;
+    control = next;
     let receipt = json(volume(&credentials, &next_public, &copy_args)).await?;
     assert_eq!(receipt["state"], "ARTIFACT_VOLUME_COPY_STATE_VERIFIED");
     let destination = volume_path.join(receipt["storage_key"].as_str().unwrap());
@@ -457,14 +453,11 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     .output()
     .await?;
     assert!(!deletion.status.success());
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     // The durable Volume remains usable after both service replacement and CAS loss.
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (next, new_private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
+    let (next, new_public) = service(plane(&credentials, &root, &database, true)).await?;
     control = next;
-    let (next, new_public) = service(gateway(&credentials, &root, &new_private, true)).await?;
-    ingress = next;
     assert_eq!(
         json(volume(&credentials, &new_public, &copy_args)).await?,
         receipt
@@ -523,7 +516,6 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         .await?,
         receipt
     );
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     Ok(())
 }

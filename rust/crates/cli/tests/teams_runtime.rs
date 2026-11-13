@@ -72,36 +72,32 @@ fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>>
 #[cfg(feature = "test-fixtures")]
 database_tests! {
     #[tokio::test]
-    direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart;
+    direct_mailbox_grants_and_private_harness_delivery_survive_control_plane_restart;
 }
 
 #[cfg(feature = "test-fixtures")]
-async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart(
+async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plane_restart(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
     let host_token = Uuid::new_v4().to_string();
-    let mut plane_command = command(&["control-plane"]);
-    plane_command
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
-        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane_command).await?;
-    let gateway_command = || {
-        let mut cmd = command(&["gateway", "--control-plane", &private]);
+    let plane_command = || {
+        let mut cmd = command(&["control-plane"]);
         cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env("SUPERTAG_DATABASE_URL", &database);
         cmd
     };
-    let (mut gateway, public) = service(gateway_command()).await?;
+    let (mut plane, public) = service(plane_command()).await?;
     for tag in ["sender", "recipient", "observer"] {
         cli(
             &[
                 "tag",
                 "put",
-                "--gateway",
+                "--control-plane",
                 &public,
                 tag,
                 "--instructions",
@@ -116,7 +112,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     cli(
         &[
             "team",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "readers",
@@ -130,7 +126,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     .await?;
     let allow = [
         "mailbox-grant",
-        "--gateway",
+        "--control-plane",
         &public,
         "allow",
         "sender",
@@ -156,7 +152,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     cli(
         &[
             "mailbox-grant",
-            "--gateway",
+            "--control-plane",
             &public,
             "allow",
             "sender",
@@ -168,7 +164,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let page = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "mailbox-grants",
             "--tag",
@@ -185,7 +181,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let next = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "mailbox-grants",
             "--tag",
@@ -213,7 +209,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let revoked = cli(
         &[
             "mailbox-grant",
-            "--gateway",
+            "--control-plane",
             &public,
             "revoke",
             "sender",
@@ -231,7 +227,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         &[
             "task",
             "submit",
-            "--gateway",
+            "--control-plane",
             &public,
             "--tag",
             "sender",
@@ -248,7 +244,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         WAIT,
         command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--adapter",
             ADAPTER,
@@ -268,7 +264,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     );
     let source_id = submitted["task_id"].as_str().context("sender Task ID")?;
     let source = cli(
-        &["get", "task", "--gateway", &public, source_id],
+        &["get", "task", "--control-plane", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -279,7 +275,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let pending = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "messages",
             "--mailbox",
@@ -306,7 +302,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &public,
             "recipient",
             "--instructions",
@@ -315,13 +311,13 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         &operator_token,
     )
     .await?;
-    gateway.kill().await?;
-    let (new_gateway, public) = service(gateway_command()).await?;
-    gateway = new_gateway;
+    plane.kill().await?;
+    let (restarted, public) = service(plane_command()).await?;
+    plane = restarted;
     let durable = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "mailbox-grants",
             "--tag",
@@ -343,7 +339,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         WAIT,
         command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--adapter",
             ADAPTER,
@@ -363,7 +359,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let handled = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "messages",
             "--mailbox",
@@ -385,7 +381,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         .as_str()
         .context("inbox Task ID")?;
     let inbox = cli(
-        &["get", "task", "--gateway", &public, inbox_id],
+        &["get", "task", "--control-plane", &public, inbox_id],
         &operator_token,
     )
     .await?;
@@ -402,7 +398,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let observed = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "messages",
             "--mailbox",
@@ -420,7 +416,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let workstream = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "workstream-posts",
             "--team",
@@ -440,7 +436,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     cli(
         &[
             "mailbox-grant",
-            "--gateway",
+            "--control-plane",
             &public,
             "revoke",
             "sender",
@@ -452,7 +448,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let replay = cli(
         &[
             "mailbox-grant",
-            "--gateway",
+            "--control-plane",
             &public,
             "allow",
             "sender",
@@ -467,7 +463,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     let current = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "mailbox-grants",
             "--tag",
@@ -482,21 +478,20 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
             .context("revoked grants")?
             .is_empty()
     );
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }
 
 database_tests! {
     #[tokio::test]
-    cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway;
+    cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_plane;
     #[tokio::test]
-    operator_teams_and_attempt_workstreams_run_across_the_gateway;
+    operator_teams_and_attempt_workstreams_run_through_the_control_plane;
     #[tokio::test]
-    objective_questions_survive_gateway_restart_and_answer_once;
+    objective_questions_survive_control_plane_restart_and_answer_once;
 }
 
-async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
+async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_plane(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -506,19 +501,15 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     let mut plane = command(&["control-plane"]);
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (_plane, private) = service(plane).await?;
-    let mut gateway = command(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (_gateway, public) = service(gateway).await?;
+    let (_plane, public) = service(plane).await?;
     cli(
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &public,
             "engineer",
             "--instructions",
@@ -552,7 +543,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
         let value = cli(
             &[
                 kind,
-                "--gateway",
+                "--control-plane",
                 &public,
                 "put",
                 file.to_str().context("policy fixture path")?,
@@ -565,7 +556,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     let assignment = cli(
         &[
             "role-assignment",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "review",
@@ -625,7 +616,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     let inactive = cli(
         &[
             "role-assignment",
-            "--gateway",
+            "--control-plane",
             &public,
             "deactivate",
             id,
@@ -671,19 +662,15 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let mut plane = command(&["control-plane"]);
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (_plane, private) = service(plane).await?;
-    let mut gateway = command(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (_gateway, public) = service(gateway).await?;
+    let (_plane, public) = service(plane).await?;
     cli(
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &public,
             "owner",
             "--instructions",
@@ -698,7 +685,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     cli(
         &[
             "team",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "release",
@@ -713,7 +700,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let objective = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "rollout",
@@ -731,7 +718,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         WAIT,
         command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--adapter",
             ADAPTER,
@@ -757,7 +744,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let page = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "inbox-items",
             "--kind",
@@ -770,7 +757,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         .as_str()
         .context("Objective Task ID")?;
     let task = cli(
-        &["get", "task", "--gateway", &public, source_id],
+        &["get", "task", "--control-plane", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -782,7 +769,11 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let approval_id = match item["approval"]["approval_id"].as_str() {
         Some(id) => id,
         None => {
-            let history = cli(&["get", "--gateway", &public, "approvals"], &operator_token).await?;
+            let history = cli(
+                &["get", "--control-plane", &public, "approvals"],
+                &operator_token,
+            )
+            .await?;
             anyhow::bail!(
                 "missing approval for fixture Task {task}; Inbox {page}; approval history {history}"
             );
@@ -792,7 +783,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     assert_eq!(item["operator_eligible"], true);
     assert_eq!(item["approval"]["resource"], "release");
     let detail = cli(
-        &["get", "--gateway", &public, "approval", approval_id],
+        &["get", "--control-plane", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
@@ -871,7 +862,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     );
     let decision_args = [
         "approval",
-        "--gateway",
+        "--control-plane",
         &public,
         "approve",
         approval_id,
@@ -928,7 +919,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         Code::AlreadyExists
     );
     let used = cli(
-        &["get", "--gateway", &public, "approval", approval_id],
+        &["get", "--control-plane", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
@@ -936,7 +927,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let page = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "workstream-posts",
             "--team",
@@ -952,7 +943,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     Ok(())
 }
 
-async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
+async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     database: String,
 ) -> Result<()> {
     let service_token = Uuid::new_v4().to_string();
@@ -961,21 +952,17 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     let mut plane = command(&["control-plane"]);
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane).await?;
-    let mut gateway = command(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (mut gateway, public) = service(gateway).await?;
+    let (mut plane, public) = service(plane).await?;
 
     for tag in ["engineer", "reviewer"] {
         cli(
             &[
                 "tag",
                 "put",
-                "--gateway",
+                "--control-plane",
                 &public,
                 tag,
                 "--instructions",
@@ -988,7 +975,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     let team = cli(
         &[
             "team",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "release",
@@ -1009,7 +996,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     let update = cli(
         &[
             "team",
-            "--gateway",
+            "--control-plane",
             &public,
             "update",
             "Release review",
@@ -1023,7 +1010,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     let objective = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "rollout",
@@ -1142,7 +1129,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     let page = cli(
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "workstream-posts",
             "--team",
@@ -1185,7 +1172,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
         tag_id: "reviewer".into(),
         ..Default::default()
     };
-    // The public Gateway rejects a host credential even with a forged operator
+    // The public Control Plane rejects a host credential even with a forged operator
     // principal. The native Attempt API infers its Tag from owned authority.
     assert_eq!(
         mailbox
@@ -1314,35 +1301,30 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
             .is_none()
     );
 
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }
 
-async fn objective_questions_survive_gateway_restart_and_answer_once(
+async fn objective_questions_survive_control_plane_restart_and_answer_once(
     database: String,
 ) -> Result<()> {
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
     let host_token = Uuid::new_v4().to_string();
-    let mut plane_command = command(&["control-plane"]);
-    plane_command
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
-        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(plane_command).await?;
-    let gateway_command = || {
-        let mut cmd = command(&["gateway", "--control-plane", &private]);
+    let plane_command = || {
+        let mut cmd = command(&["control-plane"]);
         cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env("SUPERTAG_DATABASE_URL", &database);
         cmd
     };
-    let (mut gateway, public) = service(gateway_command()).await?;
+    let (mut plane, public) = service(plane_command()).await?;
     cli(
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &public,
             "owner",
             "--instructions",
@@ -1354,7 +1336,7 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
     let objective = cli(
         &[
             "objective",
-            "--gateway",
+            "--control-plane",
             &public,
             "create",
             "question-flow",
@@ -1468,7 +1450,7 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
             .is_some()
     );
     let listed = cli(
-        &["get", "--gateway", &public, "inbox-items"],
+        &["get", "--control-plane", &public, "inbox-items"],
         &operator_token,
     )
     .await?;
@@ -1489,19 +1471,25 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
         Code::Unauthenticated
     );
     // The durable question is owned by the Control Plane and remains answerable
-    // after the entire public ingress process is replaced.
-    gateway.kill().await?;
-    let (restarted, public) = service(gateway_command()).await?;
-    gateway = restarted;
+    // after the Control Plane process is replaced.
+    plane.kill().await?;
+    let (restarted, public) = service(plane_command()).await?;
+    plane = restarted;
     let question = cli(
-        &["get", "--gateway", &public, "question", &attempt.task_id],
+        &[
+            "get",
+            "--control-plane",
+            &public,
+            "question",
+            &attempt.task_id,
+        ],
         &operator_token,
     )
     .await?;
     assert_eq!(question["text"], "Which release route should I use?");
     let answer_args = [
         "question",
-        "--gateway",
+        "--control-plane",
         &public,
         "answer",
         &attempt.task_id,
@@ -1515,7 +1503,7 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
     assert_eq!(replay["task_id"], answer["task_id"]);
     assert!(
         cli(
-            &["get", "--gateway", &public, "inbox-items"],
+            &["get", "--control-plane", &public, "inbox-items"],
             &operator_token
         )
         .await?["items"]
@@ -1563,7 +1551,6 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
             .assignment
             .is_none()
     );
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }

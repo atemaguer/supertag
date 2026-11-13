@@ -66,7 +66,7 @@ enum Service {
     },
     Host {
         #[serde(default, rename = "control-plane")]
-        gateway: Option<String>,
+        control_plane: Option<String>,
         #[serde(default, rename = "auth-key")]
         auth_key: Option<String>,
         #[serde(default)]
@@ -210,7 +210,7 @@ impl Default for Notifications {
 #[derive(Clone)]
 pub struct Host {
     pub name: String,
-    pub gateway: Option<String>,
+    pub control_plane: Option<String>,
     pub key: Option<Secret>,
     /// One entry per configured harness, or the single protocol adapter.
     pub harnesses: Vec<AdapterOptions>,
@@ -371,7 +371,10 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             // The supervisor stops when its Control Plane exits; `unless-stopped` asks for a
             // per-user service unit that starts the supervisor again.
             let _ = restart;
-            ensure!(ports.len() <= 1, "configure one public Gateway listener");
+            ensure!(
+                ports.len() <= 1,
+                "configure one public Control Plane listener"
+            );
             let port = ports
                 .first()
                 .map(String::as_str)
@@ -380,16 +383,16 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 SocketAddr::from(([127, 0, 0, 1], port))
             } else {
                 port.parse::<SocketAddr>()
-                    .context("invalid Gateway listener")?
+                    .context("invalid Control Plane listener")?
             };
             ensure!(
                 listen.ip().is_loopback(),
-                "local Gateway listener must be loopback"
+                "local Control Plane listener must be loopback"
             );
             if let Some(url) = url {
                 ensure!(
                     url.trim_end_matches('/') == format!("http://{listen}"),
-                    "local Gateway URL must match its listener"
+                    "local Control Plane URL must match its listener"
                 );
             }
             ensure!(
@@ -479,7 +482,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
     let mut hosts = Vec::new();
     for (name, service) in document.services {
         let Service::Host {
-            gateway,
+            control_plane,
             auth_key,
             harnesses,
             adapter,
@@ -518,10 +521,10 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             // Plane polling even when idle. More than one Attempt per harness is opt-in.
             None => 1,
         };
-        let target = gateway
+        let target = control_plane
             .as_deref()
             .or(plane_name.as_deref())
-            .context("host requires a control-plane service or Gateway URL")?;
+            .context("host requires a control-plane service or Control Plane URL")?;
         let remote = if Some(target) == plane_name.as_deref() {
             None
         } else {
@@ -643,7 +646,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         let skills = skills.map(|p| resolve_path(base, &p)).transpose()?;
         hosts.push(Host {
             name,
-            gateway: remote,
+            control_plane: remote,
             key,
             harnesses: selected,
             concurrency,
@@ -965,12 +968,12 @@ fn provision_files(base: &Path, path: &Path) -> Result<Vec<crate::manifests::Pro
         .collect())
 }
 fn validate_endpoint(value: &str) -> Result<()> {
-    let uri: tonic::transport::Uri = value.parse().context("invalid Gateway endpoint")?;
+    let uri: tonic::transport::Uri = value.parse().context("invalid Control Plane endpoint")?;
     ensure!(
         uri.authority().is_some_and(|a| !a.as_str().contains('@'))
             && uri.query().is_none()
             && uri.path() == "/",
-        "Gateway endpoint must be an origin without credentials"
+        "Control Plane endpoint must be an origin without credentials"
     );
     match uri.scheme_str() {
         Some("https") => {}
@@ -979,9 +982,9 @@ fn validate_endpoint(value: &str) -> Result<()> {
                 .trim_matches(['[', ']'])
                 .parse::<std::net::IpAddr>()
                 .is_ok_and(|ip| ip.is_loopback())),
-            "cleartext Gateway must use a literal loopback address"
+            "cleartext Control Plane must use a literal loopback address"
         ),
-        _ => bail!("Gateway must use HTTPS or loopback HTTP"),
+        _ => bail!("Control Plane must use HTTPS or loopback HTTP"),
     };
     Ok(())
 }
@@ -1086,7 +1089,7 @@ services:
         );
         let c = parse(
             br#"services:
-  laptop: {type: host, control-plane: https://gateway.example, auth-key: key, harnesses: [cursor]}
+  laptop: {type: host, control-plane: https://control-plane.example, auth-key: key, harnesses: [cursor]}
 secrets:
   key: {environment: JOIN_KEY}
 "#,
@@ -1224,7 +1227,7 @@ secrets:
                     supertag_worker_host::WorkspaceSource::Local(path) => {
                         (mapping.workspace_id.as_str(), path.to_str().unwrap())
                     }
-                    supertag_worker_host::WorkspaceSource::Gateway => unreachable!(),
+                    supertag_worker_host::WorkspaceSource::ControlPlane => unreachable!(),
                 })
                 .collect();
             assert_eq!(
@@ -1263,7 +1266,7 @@ secrets:
         let env = temp.path().join("fixture.env");
         fs::write(
             &env,
-            "GATEWAY=https://gateway.example\nJOIN_KEY=file-join-key\nMODEL=from-file\n",
+            "CONTROL_PLANE=https://control-plane.example\nJOIN_KEY=file-join-key\nMODEL=from-file\n",
         )
         .unwrap();
         fs::set_permissions(&env, fs::Permissions::from_mode(0o600)).unwrap();
@@ -1272,7 +1275,7 @@ x-defaults: &host {type: host, harnesses: [codex]}
 services:
   laptop:
     <<: *host
-    control-plane: ${GATEWAY}
+    control-plane: ${CONTROL_PLANE}
     auth-key: key
     models: {codex: ["${MODEL}", "${SECOND:-fallback-model}"]}
 secrets:
@@ -1283,7 +1286,10 @@ secrets:
         })
         .unwrap();
         let host = &config.hosts[0];
-        assert_eq!(host.gateway.as_deref(), Some("https://gateway.example"));
+        assert_eq!(
+            host.control_plane.as_deref(),
+            Some("https://control-plane.example")
+        );
         assert_eq!(
             host.harnesses[0].execution_profile().unwrap().model_ids,
             ["fallback-model", "from-shell"]
@@ -1321,7 +1327,7 @@ secrets:
         .unwrap();
         assert!(missing.to_string().contains("${ABSENT} is not set"));
         let invalid = parse(
-            b"services: {laptop: {type: host, control-plane: https://gateway.example, harnesses: [codex], concurrency: '${N}'}}",
+            b"services: {laptop: {type: host, control-plane: https://control-plane.example, harnesses: [codex], concurrency: '${N}'}}",
             temp.path(),
             |_| Some("secret-looking-value".into()),
         )

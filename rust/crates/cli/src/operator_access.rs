@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use supertag_gateway::OPERATOR_TOKEN_SECRET_PREFIX;
+use supertag_protocol::OPERATOR_TOKEN_SECRET_PREFIX;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,

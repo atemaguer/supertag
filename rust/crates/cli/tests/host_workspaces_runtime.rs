@@ -1,4 +1,4 @@
-//! Placement through real Control Plane, Gateway, Worker Host, and CLI processes: one Worker Host
+//! Placement through real Control Plane, Worker Host, and CLI processes: one Worker Host
 //! serving several named Workspace checkouts, operator-named Auth Keys, and Worker Host credential
 //! rotation. Mirrors tests/workspace-advertisement.test.ts (repeated `--workspace NAME=PATH`),
 //! tests/workspace-git-resolver.test.ts (two Workspace names on one checkout),
@@ -36,7 +36,6 @@ struct Services {
     host: String,
     public: String,
     _plane: Child,
-    _gateway: Child,
 }
 
 impl Services {
@@ -47,27 +46,22 @@ impl Services {
         let mut plane = bare(&["control-plane"]);
         plane
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway)
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host)
-            .env("SUPERTAG_DATABASE_URL", database);
-        let (plane, private) = service(plane).await?;
-        let mut command = bare(&["gateway", "--control-plane", &private]);
-        command
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
-            .arg("--checkpoint-directory")
-            .arg(directory.join("gateway-artifacts"));
-        let (gateway_process, public) = service(command).await?;
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host)
+            .env("SUPERTAG_DATABASE_URL", database)
+            .arg("--transfer-directory")
+            .arg(directory.join("transfers"));
+        let (plane, public) = service(plane).await?;
         Ok(Self {
             operator,
             host,
             public,
             _plane: plane,
-            _gateway: gateway_process,
         })
     }
 
     fn cli(&self, args: &[&str]) -> Command {
-        let mut command = bare(&[args[0], "--gateway", &self.public]);
+        let mut command = bare(&[args[0], "--control-plane", &self.public]);
         command
             .args(&args[1..])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator);
@@ -78,7 +72,7 @@ impl Services {
     fn worker(&self, state: &Path, token: Option<&str>, workspaces: &[(&str, &Path)]) -> Command {
         let mut command = bare(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &self.public,
             "--adapter",
             ADAPTER,
@@ -340,7 +334,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
         "host",
         "enroll",
         "laptop-host",
-        "--gateway",
+        "--control-plane",
         &services.public,
         "--auth-key",
         &key,

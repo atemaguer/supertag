@@ -48,7 +48,7 @@ async fn up(state: &Path, adapter_flag: &str) -> Result<Child> {
     timeout(WAIT, stdout.read_line(&mut endpoint)).await??;
     ensure!(
         endpoint.starts_with("http://127.0.0.1:"),
-        "supervisor did not report a local Gateway"
+        "supervisor did not report a local Control Plane"
     );
     cli(
         state,

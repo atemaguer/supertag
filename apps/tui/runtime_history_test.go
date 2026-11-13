@@ -115,7 +115,7 @@ func TestRuntimeHistoryOrdersTheReceiptAfterEarlierExternalTurns(t *testing.T) {
 	}
 	m = update(t, m, runtimePage(c.runtime.revision, local, remote, old))
 	if !slices.Equal(c.runtime.order, []string{"old", "remote", "local"}) {
-		t.Fatalf("history did not follow Gateway order: %v", c.runtime.order)
+		t.Fatalf("history did not follow Control Plane order: %v", c.runtime.order)
 	}
 	newer := runtimeHistoryMessage("new", "New request", "New reply")
 	m = update(t, m, runtimePage(c.runtime.revision, newer, local))

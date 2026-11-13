@@ -21,7 +21,7 @@ impl Bridge {
 
 #[tonic::async_trait]
 // Each Work Session call carries an operation ID that the Control Plane replays,
-// so a call whose answer a Gateway partition lost is retried within authority.
+// so a call whose answer a Control Plane partition lost is retried within authority.
 impl HarnessWorkSessions for Bridge {
     async fn r#continue(
         &self,

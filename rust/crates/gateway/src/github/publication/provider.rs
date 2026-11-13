@@ -153,7 +153,7 @@ impl Provider {
             job.account_id == self.account
                 && job.repository_id == self.repository_id
                 && job.repository == self.repository,
-            "publication destination is not configured on this Gateway"
+            "publication destination is not configured on this Control Plane"
         );
         target(job)?;
         Ok(())

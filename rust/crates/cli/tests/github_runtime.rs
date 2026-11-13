@@ -389,7 +389,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_GITHUB_API_URL", &mock.endpoint);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload() -> Value {
     json!({"action":"created","sender":{"id":42,"type":"User"},"repository":{"id":123,"full_name":REPOSITORY},"issue":{"number":7},"comment":{"id":456,"body":"@supertag inspect the repository"}})
@@ -468,7 +469,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -880,7 +881,7 @@ async fn github_app_cli_authenticates_signed_pr_discussion_and_reuses_scoped_tok
         "app-gateway",
     )?;
     let endpoints = gateway.endpoints(2).await?;
-    let public = &endpoints[0];
+    let public = &private;
     let http = &endpoints[1];
     put_tag(public, &credentials).await?;
     let mut input = payload();

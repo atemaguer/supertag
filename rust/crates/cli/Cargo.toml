@@ -7,7 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-test-fixtures = ["supertag-gateway/test-fixtures", "supertag-protocol/crash-points"]
+test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-protocol/crash-points"]
 
 [[bin]]
 name = "supertag"
@@ -16,6 +16,11 @@ path = "src/main.rs"
 [[bin]]
 name = "supertag-fixture-adapter"
 path = "fixtures/adapter.rs"
+required-features = ["test-fixtures"]
+
+[[bin]]
+name = "supertag-example-connector"
+path = "fixtures/example_connector.rs"
 required-features = ["test-fixtures"]
 
 [dependencies]
@@ -31,6 +36,7 @@ serde-saphyr = { version = "2.1.1", default-features = false, features = ["deser
 sha2.workspace = true
 supertag-control-plane.workspace = true
 supertag-codex-adapter.workspace = true
+supertag-api.workspace = true
 supertag-gateway.workspace = true
 supertag-protocol.workspace = true
 supertag-transport.workspace = true
@@ -213,6 +219,11 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "coordination_runtime"
 path = "tests/coordination_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "external_connector_runtime"
+path = "tests/external_connector_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]

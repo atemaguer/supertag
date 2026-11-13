@@ -1,6 +1,6 @@
 import { Download } from "lucide-react";
 import { useState } from "react";
-import type { Gateway, ResultArtifact } from "../gateway";
+import type { ControlPlane, ResultArtifact } from "../control-plane";
 import { describe } from "../lib/polling";
 import { Button } from "./ui/button";
 
@@ -9,7 +9,7 @@ export function ResultFiles({
   onSave,
 }: {
   artifacts: ResultArtifact[];
-  onSave: Gateway["saveArtifact"];
+  onSave: ControlPlane["saveArtifact"];
 }) {
   const [saving, setSaving] = useState<string>();
   const [feedback, setFeedback] = useState<{ key: string; text: string; error?: boolean }>();

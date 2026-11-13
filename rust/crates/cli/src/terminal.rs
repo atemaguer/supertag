@@ -162,6 +162,7 @@ mod tests {
             "cli",
             "protocol",
             "control-plane",
+            "api",
             "gateway",
             "worker-host",
             "codex-adapter",

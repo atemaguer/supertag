@@ -20,7 +20,7 @@ import (
 )
 
 // runtimeClient projects runtime v2 replies into the Go UI's existing presentation types.
-// Every call on this client uses the Gateway's generated gRPC client.
+// Every call on this client uses the Control Plane's generated gRPC client.
 type runtimeClient struct {
 	operator      runtimev2connect.OperatorClient
 	conversations runtimev2connect.ConversationsClient
@@ -33,14 +33,14 @@ type runtimeClient struct {
 	artifactFiles runtimev2connect.ArtifactTransfersClient
 }
 
-// NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2. The first call
+// NewRuntimeV2 connects to the public Control Plane over binary gRPC and HTTP/2. The first call
 // negotiates the SuperTag protocol version, which every call then names.
 func NewRuntimeV2(target Target, version string) (*Client, error) {
 	base, err := url.Parse(strings.TrimSpace(target.URL))
 	if err != nil || base.Hostname() == "" || base.User != nil ||
 		(base.Path != "" && base.Path != "/") || base.RawQuery != "" ||
 		base.ForceQuery || base.Fragment != "" {
-		return nil, errors.New("invalid Gateway URL")
+		return nil, errors.New("invalid Control Plane URL")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Protocols = new(http.Protocols)
@@ -48,10 +48,10 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 	case "http":
 		ip := net.ParseIP(base.Hostname())
 		if ip == nil || !ip.IsLoopback() {
-			return nil, errors.New("cleartext Gateway URL must use a loopback IP address")
+			return nil, errors.New("cleartext Control Plane URL must use a loopback IP address")
 		}
 		if target.ServerCAFile != "" || target.ClientCertFile != "" || target.ClientKeyFile != "" {
-			return nil, errors.New("Gateway TLS settings require an HTTPS URL")
+			return nil, errors.New("Control Plane TLS settings require an HTTPS URL")
 		}
 		transport.Proxy = nil
 		transport.Protocols.SetUnencryptedHTTP2(true)
@@ -63,15 +63,15 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		}
 		transport.TLSClientConfig = config
 	default:
-		return nil, errors.New("Gateway URL must use http or https")
+		return nil, errors.New("Control Plane URL must use http or https")
 	}
 	if target.Token == "" {
-		return nil, errors.New("Gateway operator credential required")
+		return nil, errors.New("Control Plane operator credential required")
 	}
 	httpClient := &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return errors.New("the Gateway redirected; requests must stay on the configured origin")
+			return errors.New("the Control Plane redirected; requests must stay on the configured origin")
 		},
 	}
 	origin := base.Scheme + "://" + base.Host
@@ -106,21 +106,21 @@ func runtimeTLS(target Target) (*tls.Config, error) {
 	if target.ServerCAFile != "" {
 		certificates, err := os.ReadFile(target.ServerCAFile)
 		if err != nil {
-			return nil, fmt.Errorf("read Gateway certificate authority: %w", err)
+			return nil, fmt.Errorf("read Control Plane certificate authority: %w", err)
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(certificates) {
-			return nil, errors.New("Gateway certificate authority contains no PEM certificates")
+			return nil, errors.New("Control Plane certificate authority contains no PEM certificates")
 		}
 		config.RootCAs = roots
 	}
 	if (target.ClientCertFile == "") != (target.ClientKeyFile == "") {
-		return nil, errors.New("configure both the Gateway client certificate and key")
+		return nil, errors.New("configure both the Control Plane client certificate and key")
 	}
 	if target.ClientCertFile != "" {
 		certificate, err := tls.LoadX509KeyPair(target.ClientCertFile, target.ClientKeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("read Gateway client identity: %w", err)
+			return nil, fmt.Errorf("read Control Plane client identity: %w", err)
 		}
 		config.Certificates = []tls.Certificate{certificate}
 	}
@@ -128,7 +128,7 @@ func runtimeTLS(target Target) (*tls.Config, error) {
 }
 
 func unavailable(feature string) error {
-	return &APIError{Code: connect.CodeUnimplemented, Message: feature + " is unavailable on this Gateway."}
+	return &APIError{Code: connect.CodeUnimplemented, Message: feature + " is unavailable on this Control Plane."}
 }
 
 func (c *runtimeClient) listTags(ctx context.Context) ([]*operatorv1.Tag, error) {
@@ -171,7 +171,7 @@ func (c *runtimeClient) sendMessage(ctx context.Context, tag, conversation, text
 			return nil, err
 		}
 		if res.Msg.GetTask().GetTaskId() == "" || res.Msg.GetTask().GetTagId() != tag || res.Msg.GetConversation() != conversation {
-			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different conversation message."}
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
 		}
 		return runtimeMessage(res.Msg), nil
 	})
@@ -185,7 +185,7 @@ func (c *runtimeClient) getMessage(ctx context.Context, tag, id string) (*v2.Con
 		return nil, apiError(err)
 	}
 	if res.Msg.GetTask().GetTaskId() != id || res.Msg.GetTask().GetTagId() != tag {
-		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different conversation Task."}
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation Task."}
 	}
 	return res.Msg, nil
 }
@@ -202,7 +202,7 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 	items := make([]*operatorv1.Message, 0, len(res.Msg.GetMessages()))
 	for _, message := range res.Msg.GetMessages() {
 		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" || message.GetConversation() != conversation {
-			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different conversation message."}
+			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
 		}
 		item, err := c.projectMessage(ctx, message)
 		if err != nil {
@@ -234,7 +234,7 @@ func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*o
 					return nil, err
 				}
 				if message.GetConversation() != conv.GetName() || message.GetTask().GetSessionId() != conv.GetSessionId() {
-					return nil, workSessionDataLoss("Gateway returned a different conversation preview.")
+					return nil, workSessionDataLoss("Control Plane returned a different conversation preview.")
 				}
 				if message.GetWorkSessionReportId() != "" {
 					preview, author = "Work Session report pending.", operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG

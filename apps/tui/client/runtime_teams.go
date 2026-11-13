@@ -31,7 +31,7 @@ func (c *runtimeClient) listTeams(ctx context.Context) ([]*operatorv1.Team, erro
 			return teams, nil
 		}
 		if seen[next] {
-			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway Team cursor did not advance."}
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane Team cursor did not advance."}
 		}
 		seen[next] = true
 		cursor = next
@@ -54,7 +54,7 @@ func (c *runtimeClient) getTeam(ctx context.Context, name string, posts int32) (
 	}
 	for _, post := range res.Msg.GetPosts() {
 		if post.GetTeamId() != view.Team.GetId() {
-			return TeamView{}, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different Team's Workstream post."}
+			return TeamView{}, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different Team's Workstream post."}
 		}
 		view.TagNames[post.GetAuthorTagId()] = post.GetAuthorTagId()
 		for _, tag := range post.GetToTagIds() {

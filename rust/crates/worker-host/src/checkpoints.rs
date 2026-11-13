@@ -55,7 +55,7 @@ impl Transfers {
                 .into_inner();
         if returned != reference {
             return Err(Status::data_loss(
-                "Gateway returned a different checkpoint receipt",
+                "Control Plane returned a different checkpoint receipt",
             ));
         }
         Ok(returned)

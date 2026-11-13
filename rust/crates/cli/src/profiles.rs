@@ -1,9 +1,9 @@
-//! Resolve a saved Gateway by name from the stores the terminal UI and the
+//! Resolve a saved Control Plane by name from the stores the terminal UI and the
 //! desktop app maintain, and save one in the terminal UI's store for
 //! `supertag connect`. Saving follows the terminal UI's own protocol
-//! (`apps/tui/gateway_store.go`): an exclusive non-blocking lock on
-//! `tui-gateways.json.lock`, a private staged file renamed into place, and the
-//! saved Gateway made active. The clients own switching and removal.
+//! (`apps/tui/control_plane_store.go`): an exclusive non-blocking lock on
+//! `tui-control-planes.json.lock`, a private staged file renamed into place, and the
+//! saved Control Plane made active. The clients own switching and removal.
 use std::{
     fs::{File, OpenOptions},
     io::Read,
@@ -16,9 +16,9 @@ use serde::Deserialize;
 
 const MAX_STORE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// One saved Gateway with its operator token and optional TLS files.
+/// One saved Control Plane with its operator token and optional TLS files.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SavedGateway {
+pub struct SavedControlPlane {
     pub url: String,
     pub token: String,
     pub server_ca_file: Option<PathBuf>,
@@ -30,11 +30,11 @@ pub struct SavedGateway {
 struct TuiProfiles {
     version: u32,
     #[serde(default)]
-    gateways: Vec<TuiGateway>,
+    control_planes: Vec<TuiControlPlane>,
 }
 
 #[derive(Deserialize)]
-struct TuiGateway {
+struct TuiControlPlane {
     url: String,
     token: String,
     #[serde(default)]
@@ -49,12 +49,12 @@ struct TuiGateway {
 
 #[derive(Deserialize)]
 struct DesktopProfiles {
-    #[serde(default)]
-    gateways: Vec<DesktopGateway>,
+    #[serde(default, rename = "controlPlanes")]
+    control_planes: Vec<DesktopControlPlane>,
 }
 
 #[derive(Deserialize)]
-struct DesktopGateway {
+struct DesktopControlPlane {
     profile: DesktopProfile,
     token: String,
 }
@@ -70,7 +70,7 @@ struct DesktopProfile {
 fn config_directory() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").filter(|home| !home.is_empty());
     if cfg!(target_os = "macos") {
-        let home = home.context("HOME is required to find saved Gateways")?;
+        let home = home.context("HOME is required to find saved Control Planes")?;
         return Ok(PathBuf::from(home).join("Library/Application Support"));
     }
     if let Some(directory) = std::env::var_os("XDG_CONFIG_HOME")
@@ -79,20 +79,20 @@ fn config_directory() -> Result<PathBuf> {
     {
         return Ok(directory);
     }
-    let home = home.context("HOME or XDG_CONFIG_HOME is required to find saved Gateways")?;
+    let home = home.context("HOME or XDG_CONFIG_HOME is required to find saved Control Planes")?;
     Ok(PathBuf::from(home).join(".config"))
 }
 
 pub fn tui_store() -> Result<PathBuf> {
-    Ok(config_directory()?.join("supertag/tui-gateways.json"))
+    Ok(config_directory()?.join("supertag/tui-control-planes.json"))
 }
 
 pub fn desktop_store() -> Result<PathBuf> {
-    Ok(config_directory()?.join("ai.supertag.desktop/gateways.json"))
+    Ok(config_directory()?.join("ai.supertag.desktop/control-planes.json"))
 }
 
 /// Group or other permission bits each client refuses on its store directory:
-/// the terminal UI requires a private directory (`gatewayStore.directory`),
+/// the terminal UI requires a private directory (`controlPlaneStore.directory`),
 /// the desktop app one that only its owner can write (`lock_profiles`).
 const TUI_DIRECTORY_MASK: u32 = 0o077;
 const DESKTOP_DIRECTORY_MASK: u32 = 0o022;
@@ -103,12 +103,12 @@ const DESKTOP_DIRECTORY_MASK: u32 = 0o022;
 fn read_private(path: &Path, directory_mask: u32) -> Result<Option<Vec<u8>>> {
     let directory = path
         .parent()
-        .context("saved Gateway store has no directory")?;
+        .context("saved Control Plane store has no directory")?;
     let metadata = match std::fs::symlink_metadata(directory) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => bail!(
-            "could not safely read the saved Gateway directory {}",
+            "could not safely read the saved Control Plane directory {}",
             directory.display()
         ),
     };
@@ -116,7 +116,7 @@ fn read_private(path: &Path, directory_mask: u32) -> Result<Option<Vec<u8>>> {
     let uid = unsafe { libc::geteuid() };
     ensure!(
         metadata.is_dir() && metadata.uid() == uid && metadata.mode() & directory_mask == 0,
-        "saved Gateway directory {} must be private and owned by this user",
+        "saved Control Plane directory {} must be private and owned by this user",
         directory.display()
     );
     let file = match OpenOptions::new()
@@ -126,16 +126,19 @@ fn read_private(path: &Path, directory_mask: u32) -> Result<Option<Vec<u8>>> {
     {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => bail!("could not safely read saved Gateways at {}", path.display()),
+        Err(_) => bail!(
+            "could not safely read saved Control Planes at {}",
+            path.display()
+        ),
     };
     check_private(&file, path)?;
     let mut bytes = Vec::new();
     file.take(MAX_STORE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .with_context(|| format!("read saved Gateways at {}", path.display()))?;
+        .with_context(|| format!("read saved Control Planes at {}", path.display()))?;
     ensure!(
         bytes.len() as u64 <= MAX_STORE_BYTES,
-        "saved Gateways at {} are too large",
+        "saved Control Planes at {} are too large",
         path.display()
     );
     Ok(Some(bytes))
@@ -150,7 +153,7 @@ fn check_private(file: &File, path: &Path) -> Result<()> {
             && metadata.nlink() == 1
             && metadata.mode() & 0o077 == 0
             && metadata.uid() == uid,
-        "saved Gateways at {} must be a private regular file owned by this user",
+        "saved Control Planes at {} must be a private regular file owned by this user",
         path.display()
     );
     Ok(())
@@ -164,37 +167,37 @@ fn valid_token(token: &str) -> bool {
     !token.is_empty() && token.len() <= 8192 && token.bytes().all(|byte| (33..=126).contains(&byte))
 }
 
-fn tui_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedGateway>> {
+fn tui_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedControlPlane>> {
     let profiles: TuiProfiles =
-        serde_json::from_slice(bytes).context("terminal UI saved Gateways are unreadable")?;
+        serde_json::from_slice(bytes).context("terminal UI saved Control Planes are unreadable")?;
     ensure!(
         profiles.version == 1,
-        "terminal UI saved Gateways have an unsupported format"
+        "terminal UI saved Control Planes have an unsupported format"
     );
     Ok(profiles
-        .gateways
+        .control_planes
         .into_iter()
-        .filter(|gateway| gateway.name == name)
-        .map(|gateway| SavedGateway {
-            url: gateway.url,
-            token: gateway.token,
-            server_ca_file: optional_path(gateway.server_ca_file),
-            client_cert_file: optional_path(gateway.client_cert_file),
-            client_key_file: optional_path(gateway.client_key_file),
+        .filter(|saved| saved.name == name)
+        .map(|saved| SavedControlPlane {
+            url: saved.url,
+            token: saved.token,
+            server_ca_file: optional_path(saved.server_ca_file),
+            client_cert_file: optional_path(saved.client_cert_file),
+            client_key_file: optional_path(saved.client_key_file),
         })
         .collect())
 }
 
-fn desktop_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedGateway>> {
+fn desktop_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedControlPlane>> {
     let profiles: DesktopProfiles =
-        serde_json::from_slice(bytes).context("desktop saved Gateways are unreadable")?;
+        serde_json::from_slice(bytes).context("desktop saved Control Planes are unreadable")?;
     Ok(profiles
-        .gateways
+        .control_planes
         .into_iter()
-        .filter(|gateway| gateway.profile.name == name)
-        .map(|gateway| SavedGateway {
-            url: gateway.profile.origin,
-            token: gateway.token,
+        .filter(|saved| saved.profile.name == name)
+        .map(|saved| SavedControlPlane {
+            url: saved.profile.origin,
+            token: saved.token,
             server_ca_file: None,
             client_cert_file: None,
             client_key_file: None,
@@ -202,18 +205,18 @@ fn desktop_matches(bytes: &[u8], name: &str) -> Result<Vec<SavedGateway>> {
         .collect())
 }
 
-/// A Gateway argument names a saved Gateway unless it is a URL.
-pub fn is_url(gateway: &str) -> bool {
-    gateway.contains("://")
+/// A Control Plane argument names a saved Control Plane unless it is a URL.
+pub fn is_url(control_plane: &str) -> bool {
+    control_plane.contains("://")
 }
 
-/// Finds the one saved Gateway with this name across the terminal UI and
-/// desktop stores. The same name saved for different Gateways is refused
+/// Finds the one saved Control Plane with this name across the terminal UI and
+/// desktop stores. The same name saved for different Control Planes is refused
 /// rather than guessed.
-pub fn resolve(name: &str) -> Result<SavedGateway> {
+pub fn resolve(name: &str) -> Result<SavedControlPlane> {
     ensure!(
         !name.trim().is_empty() && !name.chars().any(char::is_control),
-        "enter a saved Gateway name or a Gateway URL"
+        "enter a saved Control Plane name or a Control Plane URL"
     );
     let mut found = Vec::new();
     if let Some(bytes) = read_private(&tui_store()?, TUI_DIRECTORY_MASK)? {
@@ -224,28 +227,28 @@ pub fn resolve(name: &str) -> Result<SavedGateway> {
     }
     let Some(first) = found.first().cloned() else {
         bail!(
-            "no saved Gateway is named {name:?}; save it in the terminal UI or desktop app, or pass a Gateway URL"
+            "no saved Control Plane is named {name:?}; save it in the terminal UI or desktop app, or pass a Control Plane URL"
         );
     };
     ensure!(
         found.iter().all(|other| other.url.trim_end_matches('/')
             == first.url.trim_end_matches('/')
             && other.token == first.token),
-        "saved Gateway name {name:?} refers to different connections; rename one in the terminal UI or desktop app"
+        "saved Control Plane name {name:?} refers to different connections; rename one in the terminal UI or desktop app"
     );
     ensure!(
         valid_token(&first.token),
-        "saved Gateway {name:?} has an invalid operator token"
+        "saved Control Plane {name:?} has an invalid operator token"
     );
     ensure!(
         first.client_cert_file.is_some() == first.client_key_file.is_some(),
-        "saved Gateway {name:?} must name both the client certificate and key"
+        "saved Control Plane {name:?} must name both the client certificate and key"
     );
     Ok(first)
 }
 
-/// One Gateway to save: a name, an origin, the operator token, and optional TLS files.
-pub struct NewGateway {
+/// One Control Plane to save: a name, an origin, the operator token, and optional TLS files.
+pub struct NewControlPlane {
     pub name: String,
     pub url: String,
     pub token: String,
@@ -255,8 +258,8 @@ pub struct NewGateway {
 }
 
 /// The origin form the terminal UI stores: lowercase scheme and host, no default port.
-fn gateway_origin(raw: &str) -> Result<String> {
-    let url = url::Url::parse(raw.trim()).context("enter a Gateway URL")?;
+fn control_plane_origin(raw: &str) -> Result<String> {
+    let url = url::Url::parse(raw.trim()).context("enter a Control Plane URL")?;
     ensure!(
         matches!(url.scheme(), "http" | "https")
             && url.host_str().is_some_and(|host| !host.is_empty())
@@ -266,9 +269,9 @@ fn gateway_origin(raw: &str) -> Result<String> {
             && url.query().is_none()
             && url.fragment().is_none()
             && raw.len() <= 2048,
-        "enter a Gateway origin without credentials, path, query or fragment"
+        "enter a Control Plane origin without credentials, path, query or fragment"
     );
-    let host = url.host().context("enter a Gateway URL")?;
+    let host = url.host().context("enter a Control Plane URL")?;
     if url.scheme() == "http" {
         let loopback = match host {
             url::Host::Ipv4(address) => address.is_loopback(),
@@ -277,7 +280,7 @@ fn gateway_origin(raw: &str) -> Result<String> {
         };
         ensure!(
             loopback,
-            "remote Gateways require HTTPS; HTTP requires a loopback IP"
+            "remote Control Planes require HTTPS; HTTP requires a loopback IP"
         );
     }
     let host = match host {
@@ -302,7 +305,7 @@ fn path_text(path: &Option<PathBuf>) -> Result<String> {
     Ok(text.to_owned())
 }
 
-/// A Gateway connection in the form the terminal UI stores.
+/// A Control Plane connection in the form the terminal UI stores.
 struct Checked {
     url: String,
     server_ca: String,
@@ -310,18 +313,18 @@ struct Checked {
     client_key: String,
 }
 
-fn check(gateway: &NewGateway) -> Result<Checked> {
-    let name = gateway.name.as_str();
+fn check(saved: &NewControlPlane) -> Result<Checked> {
+    let name = saved.name.as_str();
     ensure!(
         !name.trim().is_empty() && name.len() <= 64 && !name.chars().any(char::is_control),
-        "enter a Gateway name of 1 to 64 characters"
+        "enter a Control Plane name of 1 to 64 characters"
     );
-    ensure!(valid_token(&gateway.token), "enter a valid operator token");
-    let url = gateway_origin(&gateway.url)?;
+    ensure!(valid_token(&saved.token), "enter a valid operator token");
+    let url = control_plane_origin(&saved.url)?;
     let [server_ca, client_cert, client_key] = [
-        &gateway.server_ca_file,
-        &gateway.client_cert_file,
-        &gateway.client_key_file,
+        &saved.server_ca_file,
+        &saved.client_cert_file,
+        &saved.client_key_file,
     ]
     .map(path_text);
     let (server_ca, client_cert, client_key) = (server_ca?, client_cert?, client_key?);
@@ -331,7 +334,7 @@ fn check(gateway: &NewGateway) -> Result<Checked> {
     );
     ensure!(
         url.starts_with("https:") || (server_ca.is_empty() && client_cert.is_empty()),
-        "TLS files require an HTTPS Gateway"
+        "TLS files require an HTTPS Control Plane"
     );
     Ok(Checked {
         url,
@@ -341,38 +344,38 @@ fn check(gateway: &NewGateway) -> Result<Checked> {
     })
 }
 
-/// The origin `gateway` would be saved under, refusing anything `save` refuses about the
+/// The origin `saved` would be saved under, refusing anything `save` refuses about the
 /// connection itself, so a token is never sent to a URL that cannot be saved.
-pub fn checked_origin(gateway: &NewGateway) -> Result<String> {
-    Ok(check(gateway)?.url)
+pub fn checked_origin(saved: &NewControlPlane) -> Result<String> {
+    Ok(check(saved)?.url)
 }
 
-/// Saves `gateway` in the terminal UI's store and makes it active. A name already saved for
+/// Saves `saved` in the terminal UI's store and makes it active. A name already saved for
 /// this origin is replaced only with `replace`, keeping the Workspace the terminal UI chose for
 /// it; a name saved for another origin is refused.
-pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
-    let name = gateway.name.as_str();
+pub fn save(saved: &NewControlPlane, replace: bool) -> Result<PathBuf> {
+    let name = saved.name.as_str();
     let Checked {
         url,
         server_ca,
         client_cert,
         client_key,
-    } = check(gateway)?;
+    } = check(saved)?;
     let path = tui_store()?;
     let directory = path
         .parent()
-        .context("saved Gateway store has no directory")?;
+        .context("saved Control Plane store has no directory")?;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(directory)
-        .context("could not create the saved Gateway directory")?;
+        .context("could not create the saved Control Plane directory")?;
     let metadata = std::fs::symlink_metadata(directory)?;
     // SAFETY: geteuid takes no arguments and cannot fail.
     let uid = unsafe { libc::geteuid() };
     ensure!(
         metadata.is_dir() && metadata.uid() == uid && metadata.mode() & TUI_DIRECTORY_MASK == 0,
-        "saved Gateway directory {} must be private and owned by this user",
+        "saved Control Plane directory {} must be private and owned by this user",
         directory.display()
     );
     let mut lock_path = path.clone().into_os_string();
@@ -385,24 +388,24 @@ pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(&lock_path)
-        .context("could not safely lock saved Gateways")?;
+        .context("could not safely lock saved Control Planes")?;
     check_private(&lock, Path::new(&lock_path))?;
     lock.try_lock()
-        .map_err(|_| anyhow::anyhow!("saved Gateways are busy; try again"))?;
+        .map_err(|_| anyhow::anyhow!("saved Control Planes are busy; try again"))?;
 
     let mut profiles = match read_private(&path, TUI_DIRECTORY_MASK)? {
         Some(bytes) => {
             let value: serde_json::Value = serde_json::from_slice(&bytes)
-                .context("saved Gateway file has an unsupported format")?;
+                .context("saved Control Plane file has an unsupported format")?;
             ensure!(
                 value["version"] == 1 && value.is_object(),
-                "saved Gateway file has an unsupported format"
+                "saved Control Plane file has an unsupported format"
             );
             value
         }
-        None => serde_json::json!({"version": 1, "gateways": []}),
+        None => serde_json::json!({"version": 1, "control_planes": []}),
     };
-    let mut entry = serde_json::json!({"url": url, "token": gateway.token, "name": name});
+    let mut entry = serde_json::json!({"url": url, "token": saved.token, "name": name});
     for (field, value) in [
         ("server_ca_file", server_ca),
         ("client_cert_file", client_cert),
@@ -412,35 +415,41 @@ pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
             entry[field] = value.into();
         }
     }
-    let gateways = profiles["gateways"]
+    let control_planes = profiles["control_planes"]
         .as_array_mut()
-        .context("saved Gateway file has an unsupported format")?;
-    match gateways.iter_mut().find(|saved| saved["name"] == name) {
+        .context("saved Control Plane file has an unsupported format")?;
+    match control_planes
+        .iter_mut()
+        .find(|saved| saved["name"] == name)
+    {
         Some(saved) => {
-            let origin = saved["url"].as_str().map(gateway_origin);
+            let origin = saved["url"].as_str().map(control_plane_origin);
             ensure!(
                 matches!(origin, Some(Ok(ref origin)) if origin == &url),
-                "this name belongs to another Gateway URL"
+                "this name belongs to another Control Plane URL"
             );
             ensure!(
                 replace,
-                "Gateway {name:?} is already saved; pass --replace to replace it"
+                "Control Plane {name:?} is already saved; pass --replace to replace it"
             );
             if let Some(workspace) = saved.get("workspace").filter(|value| value.is_string()) {
                 entry["workspace"] = workspace.clone();
             }
             *saved = entry;
         }
-        None => gateways.push(entry),
+        None => control_planes.push(entry),
     }
     profiles["active"] = name.into();
     let mut data = serde_json::to_vec(&profiles)?;
     data.push(b'\n');
     ensure!(
         data.len() <= 1 << 20,
-        "saved Gateways exceed the storage limit"
+        "saved Control Planes exceed the storage limit"
     );
-    let staged = directory.join(format!(".tui-gateways-{}", uuid::Uuid::new_v4().simple()));
+    let staged = directory.join(format!(
+        ".tui-control-planes-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
     let written = (|| -> std::io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -456,7 +465,7 @@ pub fn save(gateway: &NewGateway, replace: bool) -> Result<PathBuf> {
     if written.is_err() {
         let _ = std::fs::remove_file(&staged);
     }
-    written.context("could not save Gateway connections")?;
+    written.context("could not save Control Plane connections")?;
     drop(lock);
     Ok(path)
 }
@@ -467,7 +476,7 @@ mod tests {
 
     #[test]
     fn reads_both_store_formats_by_name() {
-        let tui = br#"{"version":1,"active":"prod","gateways":[{"url":"https://gw.example","token":"tok","name":"prod","server_ca_file":"/ca.pem"},{"url":"http://127.0.0.1:1","token":"t2","name":"dev"}]}"#;
+        let tui = br#"{"version":1,"active":"prod","control_planes":[{"url":"https://gw.example","token":"tok","name":"prod","server_ca_file":"/ca.pem"},{"url":"http://127.0.0.1:1","token":"t2","name":"dev"}]}"#;
         let found = tui_matches(tui, "prod").unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].url, "https://gw.example");
@@ -475,10 +484,10 @@ mod tests {
             found[0].server_ca_file.as_deref(),
             Some(Path::new("/ca.pem"))
         );
-        let desktop = br#"{"active":"https://gw.example","gateways":[{"profile":{"name":"prod","origin":"https://gw.example"},"token":"tok"}]}"#;
+        let desktop = br#"{"active":"https://gw.example","controlPlanes":[{"profile":{"name":"prod","origin":"https://gw.example"},"token":"tok"}]}"#;
         assert_eq!(desktop_matches(desktop, "prod").unwrap()[0].token, "tok");
         assert!(desktop_matches(desktop, "missing").unwrap().is_empty());
-        assert!(tui_matches(br#"{"version":2,"gateways":[]}"#, "prod").is_err());
+        assert!(tui_matches(br#"{"version":2,"control_planes":[]}"#, "prod").is_err());
     }
 
     #[test]

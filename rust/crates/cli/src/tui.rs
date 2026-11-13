@@ -10,7 +10,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::json;
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
-use crate::{Connection, ROOT_GATEWAY, resolve_target};
+use crate::{Connection, ROOT_CONTROL_PLANE, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,15 +20,15 @@ fn default_connection() -> Result<Connection> {
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
         "run supertag in a terminal or select a command with --help"
     );
-    if let Ok(gateway) = std::env::var("SUPERTAG_GATEWAY_URL") {
+    if let Ok(control_plane) = std::env::var("SUPERTAG_CONTROL_PLANE_URL") {
         return Ok(Connection {
-            gateway: Some(gateway),
+            control_plane: Some(control_plane),
             state_directory: None,
         });
     }
     let state_directory = crate::local_config::state_directory(None).ok();
     Ok(Connection {
-        gateway: None,
+        control_plane: None,
         state_directory,
     })
 }
@@ -38,8 +38,8 @@ pub async fn launch(
     binary: Option<PathBuf>,
     workspace: Option<String>,
 ) -> Result<()> {
-    let implicit = connection.gateway.is_none()
-        && ROOT_GATEWAY.get().is_none()
+    let implicit = connection.control_plane.is_none()
+        && ROOT_CONTROL_PLANE.get().is_none()
         && connection.state_directory.is_none();
     let connection = if implicit {
         default_connection()?
@@ -47,7 +47,7 @@ pub async fn launch(
         connection
     };
     let allow_saved_only = implicit
-        && connection.gateway.is_none()
+        && connection.control_plane.is_none()
         && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
         && workspace.is_none();
     let target = match resolve_target(connection) {
@@ -77,7 +77,7 @@ pub async fn launch(
     // The terminal UI dials native gRPC itself.
     ensure!(
         !endpoint.tunnelled(),
-        "the terminal UI connects only to https:// or loopback http:// Gateway URLs"
+        "the terminal UI connects only to https:// or loopback http:// Control Plane URLs"
     );
     let tls = endpoint.url().starts_with("https:");
     let saved = target.tls.clone();

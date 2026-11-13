@@ -44,7 +44,7 @@ func TestRuntimeWatchResumesAndMapsTypedChanges(t *testing.T) {
 				if err := stream.Send(&v2.WatchEvent{ResumeToken: "message", Update: &v2.WatchEvent_Change{Change: change}}); err != nil {
 					return err
 				}
-				return connect.NewError(connect.CodeUnavailable, errors.New("Gateway restarted"))
+				return connect.NewError(connect.CodeUnavailable, errors.New("Control Plane restarted"))
 			case "message":
 				if err := stream.Send(&v2.WatchEvent{ResumeToken: "new-head", Update: &v2.WatchEvent_Resync{Resync: &v2.WatchResync{}}}); err != nil {
 					return err

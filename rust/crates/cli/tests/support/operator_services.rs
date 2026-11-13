@@ -1,4 +1,4 @@
-//! A Control Plane and a Gateway as separate processes, and the operator CLI run against them.
+//! A Control Plane as a separate process, and the operator CLI run against it.
 #![allow(dead_code)]
 
 use std::{
@@ -31,7 +31,6 @@ pub struct OperatorServices {
     pub gateway_url: String,
     operator_token: String,
     plane: Child,
-    gateway: Child,
 }
 
 fn command(home: &Path, args: &[&str]) -> Command {
@@ -68,27 +67,13 @@ impl OperatorServices {
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", Uuid::new_v4().to_string())
             .env("SUPERTAG_DATABASE_URL", database_url);
-        let (plane, private) = service(plane).await?;
-        let mut gateway = command(
-            home.path(),
-            &[
-                "gateway",
-                "--control-plane",
-                &private,
-                "--listen",
-                "127.0.0.1:0",
-            ],
-        );
-        gateway
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-        let (gateway, gateway_url) = service(gateway).await?;
+        plane.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+        let (plane, gateway_url) = service(plane).await?;
         Ok(Self {
             home,
             gateway_url,
             operator_token,
             plane,
-            gateway,
         })
     }
 
@@ -96,9 +81,9 @@ impl OperatorServices {
         self.home.path().to_owned()
     }
 
-    /// Runs `supertag --gateway URL ARGS` with the operator token.
+    /// Runs `supertag --control-plane URL ARGS` with the operator token.
     pub async fn run(&self, args: &[&str]) -> Result<Output> {
-        let args = [&["--gateway", self.gateway_url.as_str()][..], args].concat();
+        let args = [&["--control-plane", self.gateway_url.as_str()][..], args].concat();
         let mut command = command(self.home.path(), &args);
         command.env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
         let output = timeout(WAIT, command.output()).await??;
@@ -132,7 +117,6 @@ impl OperatorServices {
     }
 
     pub async fn stop(mut self) -> Result<()> {
-        self.gateway.kill().await?;
         self.plane.kill().await?;
         Ok(())
     }

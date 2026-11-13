@@ -1,5 +1,5 @@
 //! Two labelled Worker Hosts joined with one reusable Auth Key, through real
-//! Control Plane, Gateway, and Worker Host processes. Mirrors
+//! Control Plane and Worker Host processes. Mirrors
 //! tests/label-placement.test.ts "places Session Tasks only on bound Worker
 //! Hosts that carry the Tag's runsOn labels".
 
@@ -67,14 +67,14 @@ async fn json(command: Command) -> Result<Value> {
 fn operator(group: &[&str], rest: &[&str], gateway: &str, token: &str) -> Command {
     let mut command = binary(group);
     command
-        .args(["--gateway", gateway])
+        .args(["--control-plane", gateway])
         .args(rest)
         .env("SUPERTAG_OPERATOR_TOKEN", token);
     command
 }
 
 fn enroll(gateway: &str, state: &Path, host: &str, key: &str) -> Command {
-    let mut command = binary(&["host", "enroll", host, "--gateway", gateway]);
+    let mut command = binary(&["host", "enroll", host, "--control-plane", gateway]);
     command
         .arg("--state-directory")
         .arg(state)
@@ -85,7 +85,7 @@ fn enroll(gateway: &str, state: &Path, host: &str, key: &str) -> Command {
 async fn run_once(gateway: &str, state: &Path, labels: &[&str]) -> Result<()> {
     let mut command = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         gateway,
         "--adapter",
         ADAPTER,
@@ -111,12 +111,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     control
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_DATABASE_URL", database);
-    let (mut control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &token);
-    let (mut gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &token);
+    let (mut control, public) = service(control).await?;
     let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
 
     for tag in ["researcher", "trainer"] {
@@ -295,10 +291,10 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     ensure!(!refused.status.success(), "a revoked key enrolled a host");
     run_once(&public, &cpu_state, &["cpu"]).await?;
 
-    // Invalid declared labels fail before the host contacts the Gateway.
+    // Invalid declared labels fail before the host contacts the Control Plane.
     let mut invalid = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &public,
         "--adapter",
         ADAPTER,
@@ -340,8 +336,6 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         json(op(&["get"], &["host", "ci-runner"])).await?["ephemeral"],
         true
     );
-
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }
@@ -360,15 +354,12 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
         let mut control = binary(&["control-plane", "--listen", listen]);
         control
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &token)
             .env("SUPERTAG_DATABASE_URL", database);
         control
     };
-    let (mut control, private) = service(control_command("127.0.0.1:0")).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &token);
-    let (mut gateway, public) = service(gateway).await?;
+    let (mut control, public) = service(control_command("127.0.0.1:0")).await?;
+    let private = public.clone();
     let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
     json(op(
         &["tag", "put", "builder", "--instructions", "Build"],
@@ -390,7 +381,13 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
     let key = issued["auth_key"].as_str().context("missing Auth Key")?;
     let state = directory.join("runner");
     json(enroll(&public, &state, "runner", key)).await?;
-    let mut runner = binary(&["worker-host", "--gateway", &public, "--adapter", ADAPTER]);
+    let mut runner = binary(&[
+        "worker-host",
+        "--control-plane",
+        &public,
+        "--adapter",
+        ADAPTER,
+    ]);
     runner.arg("--state-directory").arg(&state);
     let mut runner = runner.stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
     let deadline = tokio::time::Instant::now() + WAIT;
@@ -457,7 +454,6 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
             .any(|host| host["host_id"] == "runner"),
         "a removed host is still listed: {listed}"
     );
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }

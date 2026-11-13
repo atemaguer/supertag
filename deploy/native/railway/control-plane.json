@@ -1,7 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "startCommand": "/usr/local/bin/supertag-hosted-entrypoint control-plane --listen [::]:3435",
+    "startCommand": "/usr/local/bin/supertag-hosted-entrypoint control-plane --listen [::]:3434 --transfer-directory /var/lib/supertag/transfers",
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10

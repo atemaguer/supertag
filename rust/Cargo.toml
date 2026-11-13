@@ -35,6 +35,7 @@ uuid = { version = "1", features = ["v4"] }
 supertag-protocol = { path = "crates/protocol" }
 supertag-control-plane = { path = "crates/control-plane" }
 supertag-codex-adapter = { path = "crates/codex-adapter" }
+supertag-api = { path = "crates/api" }
 supertag-gateway = { path = "crates/gateway" }
 supertag-transport = { path = "crates/transport" }
 supertag-worker-host = { path = "crates/worker-host" }

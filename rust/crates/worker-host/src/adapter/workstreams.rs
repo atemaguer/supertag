@@ -64,7 +64,7 @@ impl HarnessWorkstreams for Bridge {
         }
         let input = request.into_inner();
         // Reads are repeated freely; a post carries an operation ID the Control
-        // Plane replays, so both ride out a Gateway partition within authority.
+        // Plane replays, so both ride out a Control Plane partition within authority.
         let upstream = ReadAttemptWorkstreamRequest {
             attempt: Some(self.attempt()),
             after_sequence: input.after_sequence,

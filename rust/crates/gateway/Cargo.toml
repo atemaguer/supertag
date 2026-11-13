@@ -10,8 +10,6 @@ publish.workspace = true
 test-fixtures = []
 
 [dependencies]
-aws-credential-types = "1.2.14"
-aws-sigv4 = { version = "1.4.2", default-features = false, features = ["sign-http", "http1"] }
 anyhow.workspace = true
 async-stream = "0.3"
 axum = "0.8"

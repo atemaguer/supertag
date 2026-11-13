@@ -21,7 +21,7 @@ use crate::{journal::Journal, request};
 
 #[derive(Deserialize, Serialize)]
 struct Enrollment {
-    gateway: String,
+    control_plane: String,
     host_id: String,
     operation_id: String,
     token: String,
@@ -45,7 +45,7 @@ struct Receipt {
 }
 
 pub async fn enroll(
-    gateway: Target,
+    control_plane: Target,
     directory: &Path,
     host_id: String,
     auth_key: Option<&str>,
@@ -54,7 +54,7 @@ pub async fn enroll(
     let mut state = match read(&journal)? {
         Some(state) => state,
         None => Enrollment {
-            gateway: gateway.url(),
+            control_plane: control_plane.url(),
             host_id: host_id.clone(),
             operation_id: Uuid::new_v4().to_string(),
             token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
@@ -63,7 +63,7 @@ pub async fn enroll(
         },
     };
     ensure!(
-        state.gateway == gateway.url() && state.host_id == host_id,
+        state.control_plane == control_plane.url() && state.host_id == host_id,
         "Worker Host state belongs to another enrollment"
     );
     if let Some(receipt) = &state.receipt {
@@ -77,13 +77,13 @@ pub async fn enroll(
         .filter(|key| !key.is_empty())
         .context("Auth Key required")?;
 
-    // Preserve the operation and candidate credential before contacting the Gateway,
+    // Preserve the operation and candidate credential before contacting the Control Plane,
     // so that a consumed key can replay the enrollment after a lost response.
     save(&journal, &state)?;
     let channel = supertag_protocol::negotiation::connect(
-        gateway.connect_lazy(),
+        control_plane.connect_lazy(),
         ServiceRole::WorkerHost,
-        ServiceRole::Gateway,
+        ServiceRole::ControlPlane,
     )
     .await?;
     let mut enrollment = HostEnrollmentClient::new(channel)
@@ -111,11 +111,11 @@ pub async fn enroll(
     Ok(record)
 }
 
-pub(crate) fn host_token(journal: &Journal, gateway: &Target) -> Result<String> {
+pub(crate) fn host_token(journal: &Journal, control_plane: &Target) -> Result<String> {
     let state = read(journal)?.context("enroll this Worker Host first")?;
     ensure!(
-        state.gateway == gateway.url(),
-        "Worker Host state belongs to another Gateway endpoint"
+        state.control_plane == control_plane.url(),
+        "Worker Host state belongs to another Control Plane endpoint"
     );
     ensure!(
         state.receipt.is_some(),

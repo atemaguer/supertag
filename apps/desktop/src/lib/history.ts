@@ -1,4 +1,4 @@
-import type { Message, MessagePage } from "../gateway";
+import type { Message, MessagePage } from "../control-plane";
 
 export interface History {
   messages: Message[];
@@ -39,7 +39,7 @@ export async function readHistory(
     ) {
       return { messages, nextCursor: next.nextCursor };
     }
-    if (seen.has(next.nextCursor)) throw new Error("The Gateway repeated a history cursor.");
+    if (seen.has(next.nextCursor)) throw new Error("The Control Plane repeated a history cursor.");
     seen.add(next.nextCursor);
     cursor = next.nextCursor;
   }

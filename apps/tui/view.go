@@ -109,8 +109,8 @@ func (m model) renderConversation() string {
 		case m.tagsErr != nil:
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
 		case m.client.RuntimeV2():
-			return wrap.Render("No Tags are set up on this Gateway.\n\n" +
-				"Run supertag tag put --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
+			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
+				"Run supertag tag put --help for setup. For a shared Control Plane, ask its operator to set up a Tag.")
 		default:
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
 				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +
@@ -294,7 +294,7 @@ func (m model) renderStatus() string {
 	left += "ctrl+k commands  "
 	if m.switchable {
 		if m.client.RuntimeV2() {
-			left += "ctrl+p Gateways  "
+			left += "ctrl+p Control Planes  "
 		} else {
 			left += "ctrl+p Control Planes  "
 		}

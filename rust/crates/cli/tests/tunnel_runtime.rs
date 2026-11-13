@@ -3,10 +3,11 @@
 //! outer `wss://` TLS and forwards plain HTTP/1.1, while SuperTag's mutual TLS runs end to
 //! end inside the tunnel:
 //!
-//! - every Gateway call shape (unary, client-streaming Workspace upload, server-streaming
-//!   artifact download and Watch) and the Gateway's own Control Plane calls;
-//! - severing either tunnel mid-Attempt, after which the Worker Host and Gateway reconnect
-//!   and the Attempt completes once;
+//! - every Control Plane call shape (unary, client-streaming Workspace upload,
+//!   server-streaming artifact download and Watch), a Gateway's calls to the Control Plane,
+//!   and the operator's call to the Gateway;
+//! - severing either client's tunnel mid-Attempt, after which the Worker Host and Gateway
+//!   reconnect and the Attempt completes once;
 //! - refusal of clients without valid inner TLS;
 //! - with Docker, the same deployment behind a real HTTP/1.1-only nginx that forwards only
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
@@ -432,7 +433,8 @@ struct Tokens {
 }
 
 /// A Control Plane and Gateway that both require client certificates and also accept
-/// WebSocket tunnels; the Gateway reaches the Control Plane only through its edge.
+/// WebSocket tunnels. Operators and Worker Hosts reach the Control Plane through its edge;
+/// the Gateway reaches it through an edge of its own.
 struct Deployment {
     root: PathBuf,
     tokens: Tokens,
@@ -441,10 +443,11 @@ struct Deployment {
     host_leaf: Leaf,
     edge_leaf: Leaf,
     control_plane: Service,
+    control_native: SocketAddr,
+    control_tunnel: SocketAddr,
     control_edge: Edge,
     gateway: Service,
-    gateway_native: SocketAddr,
-    gateway_tunnel: SocketAddr,
+    gateway_link: Edge,
     gateway_edge: Edge,
 }
 
@@ -461,30 +464,36 @@ impl Deployment {
 
         let mut command = binary(&["control-plane", "--websocket-listen", "127.0.0.1:0"]);
         command
+            .arg("--transfer-directory")
+            .arg(root.join("transfers"))
             .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
             .env("SUPERTAG_DATABASE_URL", database);
         server_tls(&mut command, &control_leaf, &pki.ca());
         let mut control_plane = Service::spawn(command, root, "control-plane")?;
-        control_plane.address().await?;
+        let control_native = control_plane.address().await?;
         let control_tunnel = control_plane.address().await?;
         let control_edge = Edge::start(control_tunnel, &edge_leaf).await?;
+        let gateway_link = Edge::start(control_tunnel, &edge_leaf).await?;
 
+        // The Gateway's notification outbox polls the Control Plane, so its link carries
+        // calls on its own.
         let mut command = binary(&[
             "gateway",
             "--control-plane",
-            &control_edge.url(),
+            &gateway_link.url(),
             "--websocket-listen",
             "127.0.0.1:0",
+            "--notify",
+            "desktop",
         ]);
         command
-            .arg("--checkpoint-directory")
-            .arg(root.join("gateway-artifacts"))
             .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         server_tls(&mut command, &gateway_leaf, &pki.ca());
         client_tls(&mut command, &pki.ca(), Some(&gateway_leaf));
         let mut gateway = Service::spawn(command, root, "gateway")?;
-        let gateway_native = gateway.address().await?;
+        gateway.address().await?;
         let gateway_tunnel = gateway.address().await?;
         let gateway_edge = Edge::start(gateway_tunnel, &edge_leaf).await?;
         Ok(Self {
@@ -495,32 +504,34 @@ impl Deployment {
             edge_leaf,
             pki,
             control_plane,
+            control_native,
+            control_tunnel,
             control_edge,
             gateway,
-            gateway_native,
-            gateway_tunnel,
+            gateway_link,
             gateway_edge,
         })
     }
 
-    /// An operator command against `gateway` with the operator's client certificate.
-    fn operator_at(&self, gateway: &str, args: &[&str], leaf: Option<&Leaf>) -> Command {
+    /// An operator command against `url` with the operator's client certificate.
+    fn operator_at(&self, url: &str, args: &[&str], leaf: Option<&Leaf>) -> Command {
         let mut command = binary(args);
         command
-            .args(["--gateway", gateway])
+            .args(["--control-plane", url])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.tokens.operator);
         client_tls(&mut command, &self.pki.ca(), leaf);
         command
     }
 
     fn operator(&self, args: &[&str]) -> Command {
-        self.operator_at(&self.gateway_edge.url(), args, Some(&self.operator_leaf))
+        self.operator_at(&self.control_edge.url(), args, Some(&self.operator_leaf))
     }
 
-    /// An operator command on the Gateway's native listener, which no edge partition affects.
+    /// An operator command on the Control Plane's native listener, which no edge partition
+    /// affects.
     fn native_operator(&self, args: &[&str]) -> Command {
         self.operator_at(
-            &format!("https://{}", self.gateway_native),
+            &format!("https://{}", self.control_native),
             args,
             Some(&self.operator_leaf),
         )
@@ -547,8 +558,8 @@ impl Deployment {
         protocol::negotiated(self.operator_target(url)?.connect().await?).await
     }
 
-    /// Issues an Auth Key for `host`, enrolls it through `gateway`, and returns its state.
-    async fn enroll(&self, host: &str, tag: &str, gateway: &str) -> Result<PathBuf> {
+    /// Issues an Auth Key for `host`, enrolls it through `url`, and returns its state.
+    async fn enroll(&self, host: &str, tag: &str, url: &str) -> Result<PathBuf> {
         let issued =
             run_json(self.operator(&["auth-key", "create", host, "--host", host, "--tag", tag]))
                 .await?;
@@ -556,7 +567,7 @@ impl Deployment {
         std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
         let state = self.root.join(host);
-        let mut enroll = binary(&["host", "enroll", host, "--gateway", gateway]);
+        let mut enroll = binary(&["host", "enroll", host, "--control-plane", url]);
         enroll
             .arg("--state-directory")
             .arg(&state)
@@ -567,8 +578,8 @@ impl Deployment {
         Ok(state)
     }
 
-    fn worker_host(&self, gateway: &str, state: &Path, adapter: &Path) -> Command {
-        let mut command = binary(&["worker-host", "--gateway", gateway, "--adapter"]);
+    fn worker_host(&self, url: &str, state: &Path, adapter: &Path) -> Command {
+        let mut command = binary(&["worker-host", "--control-plane", url, "--adapter"]);
         command.arg(adapter).arg("--state-directory").arg(state);
         client_tls(&mut command, &self.pki.ca(), Some(&self.host_leaf));
         command
@@ -640,17 +651,18 @@ fn finished(task: &Value) -> bool {
 // ---------------------------------------------------------------------------
 // Call shapes
 
-/// The Gateway's whole public surface and its Control Plane link run through tunnels:
-/// unary operator and Worker Host calls, the client-streaming Workspace upload, the
-/// server-streaming artifact download, and a Watch stream. The native listener keeps
-/// working beside the tunnel, and clients without valid inner TLS are refused.
+/// The Control Plane's whole public surface runs through a tunnel: unary operator and Worker
+/// Host calls, the client-streaming Workspace upload, the server-streaming artifact download,
+/// and a Watch stream. A Gateway reaches the Control Plane, and an operator the Gateway,
+/// through tunnels too. The native listener keeps working beside the tunnel, and clients
+/// without valid inner TLS are refused.
 async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let mut deployment = Deployment::start(&database, root).await?;
-    let public = deployment.gateway_edge.url();
+    let public = deployment.control_edge.url();
 
     let source = root.join("source");
     std::fs::create_dir(&source)?;
@@ -731,7 +743,7 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     );
     assert_eq!(receipt["sha256"], delivery["bundle"]["sha256"]);
 
-    // The native listener still answers on the same Gateway.
+    // The native listener still answers on the same Control Plane.
     let native = run_json(deployment.native_operator(&["get", "task", &task_id])).await?;
     assert_eq!(native["state"], "TASK_STATE_SUCCEEDED");
 
@@ -748,10 +760,10 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
         let output = run(deployment.operator_at(&public, &["get", "tags"], leaf)).await?;
         ensure!(
             !output.status.success(),
-            "an operator with {case} reached the Gateway through the tunnel"
+            "an operator with {case} reached the Control Plane through the tunnel"
         );
     }
-    let accepted = deployment.gateway_edge.accepted();
+    let accepted = deployment.control_edge.accepted();
     let mut client = OperatorClient::new(deployment.operator_channel(&public).await?);
     let tags = client
         .list_tags(authenticated_request(
@@ -762,10 +774,32 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
         .await?
         .into_inner();
     assert_eq!(tags.tags.len(), 1);
-    ensure!(deployment.gateway_edge.accepted() > accepted);
-    ensure!(deployment.control_edge.accepted() >= 1);
+    ensure!(deployment.control_edge.accepted() > accepted);
+    ensure!(deployment.gateway_link.accepted() >= 1);
 
-    // The Control Plane accepts only the Gateway's certificate inside its tunnel too.
+    // The Gateway's own listener takes the operator's test notification through its tunnel.
+    let mut test = binary(&[
+        "test",
+        "notification",
+        "--gateway",
+        &deployment.gateway_edge.url(),
+    ]);
+    test.env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
+    client_tls(
+        &mut test,
+        &deployment.pki.ca(),
+        Some(&deployment.operator_leaf),
+    );
+    let output = run(test).await?;
+    ensure!(
+        output.status.success() && String::from_utf8_lossy(&output.stdout).starts_with("desktop: "),
+        "test notification through the Gateway tunnel: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    ensure!(deployment.gateway_edge.accepted() >= 1);
+
+    // The Control Plane requires a client certificate inside its tunnel too.
     let anonymous = Endpoint::from_shared(
         tunneled_uri(&deployment.control_edge.url())
             .map_err(|error| anyhow!(error))?
@@ -817,9 +851,9 @@ fn recording_adapter(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok((script, launches))
 }
 
-/// While an Attempt runs, the edge in front of the Gateway severs the Worker Host's
-/// tunnel and refuses reconnects, then the edge in front of the Control Plane severs
-/// the Gateway's tunnel. Both clients classify the dropped tunnel as a retryable
+/// While an Attempt runs, the edge in front of the Control Plane severs the Worker Host's
+/// tunnel and refuses reconnects, then the Gateway's edge to the Control Plane severs the
+/// Gateway's tunnel. Both clients classify the dropped tunnel as a retryable
 /// transport failure, reconnect once the edges recover, and the Attempt finishes
 /// exactly once with the adapter launched once.
 async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: String) -> Result<()> {
@@ -827,7 +861,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     let root = directory.path();
     let mut deployment = Deployment::start(&database, root).await?;
     // The Worker Host has its own edge, so operator checks never cross the partition.
-    let host_edge = Edge::start(deployment.gateway_tunnel, &deployment.edge_leaf).await?;
+    let host_edge = Edge::start(deployment.control_tunnel, &deployment.edge_leaf).await?;
     run_json(deployment.operator(&["tag", "put", "steady", "--instructions", "Answer"])).await?;
     let state = deployment
         .enroll("steady-host", "steady", &host_edge.url())
@@ -890,11 +924,11 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     }
 
     // Sever the Gateway's tunnel to the Control Plane; the Gateway reconnects on demand.
-    deployment.control_edge.partition();
+    deployment.gateway_link.partition();
     sleep(Duration::from_secs(3)).await;
-    let accepted = deployment.control_edge.accepted();
-    deployment.control_edge.restore();
-    sleep(Duration::from_secs(2)).await;
+    let accepted = deployment.gateway_link.accepted();
+    deployment.gateway_link.restore();
+    sleep(Duration::from_secs(4)).await;
 
     std::fs::write(&release, "")?;
     let task = wait_for_task(get, finished, || host.logs()).await?;
@@ -904,7 +938,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
     let launched = std::fs::read_to_string(&launches)?.lines().count();
     assert_eq!(launched, 1, "the adapter ran {launched} times");
     ensure!(
-        deployment.control_edge.accepted() > accepted,
+        deployment.gateway_link.accepted() > accepted,
         "the Gateway never reconnected to the Control Plane"
     );
     ensure!(host.running()? && deployment.running()?);
@@ -915,7 +949,7 @@ async fn severed_tunnels_reconnect_and_the_attempt_completes_once(database: Stri
 // A real HTTP/1.1-only reverse proxy
 
 /// nginx in Docker, terminating TLS and forwarding only WebSocket upgrades over HTTP/1.1
-/// to the Gateway's tunnel listener. It closes a connection that carries nothing for 25
+/// to the Control Plane's tunnel listener. It closes a connection that carries nothing for 25
 /// seconds, as platform proxies do.
 struct Nginx {
     docker: std::ffi::OsString,
@@ -1061,7 +1095,7 @@ async fn tunnel_crosses_an_http1_only_nginx_and_outlives_its_idle_timeout() -> R
         docker,
         root,
         &deployment.edge_leaf,
-        deployment.gateway_tunnel,
+        deployment.control_tunnel,
     )
     .await?;
     let public = nginx.url();

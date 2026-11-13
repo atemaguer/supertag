@@ -1,8 +1,7 @@
 //! `supertag setup deployment`, `check deployment`, and `verify deployment` against the real
-//! service processes, configured from the files setup writes: a private Control Plane that
-//! requires client certificates, a public TLS Gateway whose certificate comes from a separate
-//! authority, and two outbound Worker Hosts placed by label for a two-manager organization
-//! applied through the Gateway.
+//! service processes, configured from the files setup writes: a public TLS Control Plane, a
+//! Gateway that reaches it as a client, and two outbound Worker Hosts placed by label for a
+//! two-manager organization applied through the Control Plane.
 //!
 //! Ports `tests/deployment-setup.test.ts` (setup, check, verify) and the deployed-organization
 //! part of `tests/shared-organization-*.test.ts` without model calls.
@@ -265,12 +264,11 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     std::fs::create_dir(&home)?;
     let path = |name: &str| root.join(name).to_string_lossy().into_owned();
 
-    // The private hop and the public endpoint use separate authorities.
-    let private = Pki::authority(root, "private-ca").await?;
+    // The Control Plane's certificate comes from its own authority; another one does not vouch
+    // for it.
     let public = Pki::authority(root, "public-ca").await?;
-    let control_leaf = private.leaf("control-plane", "serverAuth").await?;
-    let client_leaf = private.leaf("gateway-client", "clientAuth").await?;
-    let gateway_leaf = public.leaf("gateway", "serverAuth").await?;
+    let other = Pki::authority(root, "other-ca").await?;
+    let control_leaf = public.leaf("control-plane", "serverAuth").await?;
 
     // Setup writes private per-role files; secrets come only from the environment.
     let output = root.join("deployment");
@@ -316,7 +314,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         message.contains("Saved compose deployment configuration"),
         "{message}"
     );
-    assert!(message.contains("https://control-plane:3435"), "{message}");
+    assert!(message.contains("https://control-plane:3434"), "{message}");
     assert_eq!(mode(&output)?, 0o700);
     for name in ["control-plane.env", "gateway.env", "operator.env"] {
         assert_eq!(mode(&output.join(name))?, 0o600, "{name}");
@@ -425,38 +423,39 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
             (key_names[1], cert.key.to_string_lossy().into_owned()),
         ]
     }
-    let mut control = command(&home, &["control-plane", "--listen", "127.0.0.1:0"], &[]);
+    let state = root.join("control-state");
+    std::fs::create_dir(&state)?;
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
+    let mut control = command(
+        &home,
+        &[
+            "control-plane",
+            "--listen",
+            "127.0.0.1:0",
+            "--transfer-directory",
+            &path("control-state/transfers"),
+        ],
+        &[],
+    );
     control.envs(&control_env);
     control
         .env("SUPERTAG_DATABASE_URL", &database)
+        .env("SUPERTAG_STATE_DIR", &state)
         .envs(tls(
             &control_leaf,
             ["SUPERTAG_TLS_CERT_FILE", "SUPERTAG_TLS_KEY_FILE"],
         ))
-        .envs(tls(
-            &client_leaf,
-            ["SUPERTAG_CLIENT_CERT_FILE", "SUPERTAG_CLIENT_KEY_FILE"],
-        ))
-        .env("SUPERTAG_TLS_CLIENT_CA_FILE", private.ca())
-        .env("SUPERTAG_SERVER_CA_FILE", private.ca());
+        .env("SUPERTAG_SERVER_CA_FILE", public.ca());
     let (_control, control_address) = service(control, &root.join("control-plane.log")).await?;
-    let private_url = format!("https://{control_address}");
+    let public_url = format!("https://{control_address}");
+    let public_ca = public.ca().to_string_lossy().into_owned();
 
-    // The Control Plane's health probe identity works; a client without one is refused.
-    let health = |identity: bool| {
-        let mut health = command(&home, &["health", "--endpoint", &private_url], &[]);
-        health.env("SUPERTAG_SERVER_CA_FILE", private.ca());
-        if identity {
-            health.envs(tls(
-                &client_leaf,
-                ["SUPERTAG_CLIENT_CERT_FILE", "SUPERTAG_CLIENT_KEY_FILE"],
-            ));
-        }
-        health
-    };
-    succeed(health(true)).await?;
-    fail(health(false)).await?;
+    // The Control Plane's health probe trusts its server CA.
+    let mut health = command(&home, &["health", "--endpoint", &public_url], &[]);
+    health.env("SUPERTAG_SERVER_CA_FILE", public.ca());
+    succeed(health).await?;
 
+    // The Gateway connects to the public Control Plane as an ordinary client.
     let state = root.join("gateway-state");
     std::fs::create_dir(&state)?;
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
@@ -467,27 +466,15 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
             "--listen",
             "127.0.0.1:0",
             "--control-plane",
-            &private_url,
-            "--checkpoint-directory",
-            &path("gateway-state/checkpoints"),
+            &public_url,
         ],
         &[],
     );
     gateway.envs(&gateway_env);
     gateway
         .env("SUPERTAG_STATE_DIR", &state)
-        .envs(tls(
-            &gateway_leaf,
-            ["SUPERTAG_TLS_CERT_FILE", "SUPERTAG_TLS_KEY_FILE"],
-        ))
-        .envs(tls(
-            &client_leaf,
-            ["SUPERTAG_CLIENT_CERT_FILE", "SUPERTAG_CLIENT_KEY_FILE"],
-        ))
-        .env("SUPERTAG_SERVER_CA_FILE", private.ca());
-    let (_gateway, gateway_address) = service(gateway, &root.join("gateway.log")).await?;
-    let public_url = format!("https://{gateway_address}");
-    let public_ca = public.ca().to_string_lossy().into_owned();
+        .env("SUPERTAG_SERVER_CA_FILE", public.ca());
+    let (_gateway, _) = service(gateway, &root.join("gateway.log")).await?;
 
     // Verify the deployment through its public URL only.
     let verify = |url: &str, env: &[(&str, &str)], extra: &[&str]| {
@@ -512,8 +499,8 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         refused.contains("SUPERTAG_OPERATOR_TOKEN is required"),
         "{refused}"
     );
-    // The private CA does not vouch for the public endpoint.
-    let wrong_ca = private.ca().to_string_lossy().into_owned();
+    // Another CA does not vouch for the public endpoint.
+    let wrong_ca = other.ca().to_string_lossy().into_owned();
     fail(verify(
         &public_url,
         &[("SUPERTAG_SERVER_CA_FILE", wrong_ca.as_str())],
@@ -531,8 +518,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ))
     .await?;
     assert!(
-        refused
-            .contains("operator authentication or Control Plane access failed (Unauthenticated)"),
+        refused.contains("Control Plane operator authentication failed (Unauthenticated)"),
         "{refused}"
     );
     let report = succeed(verify(
@@ -542,7 +528,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ))
     .await?;
     assert!(
-        report.contains("operator authentication through the Control Plane passed")
+        report.contains("operator authentication passed")
             && report.contains("Readiness: not ready"),
         "{report}"
     );
@@ -564,14 +550,14 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         "{refused}"
     );
 
-    // A two-manager organization through the public Gateway, with outbound Worker Hosts.
+    // A two-manager organization through the public Control Plane, with outbound Worker Hosts.
     let operator_env = [
         ("SUPERTAG_SERVER_CA_FILE", public_ca.as_str()),
         ("SUPERTAG_OPERATOR_TOKEN", operator_token.as_str()),
     ];
     let operator = |args: &[&str]| {
         let mut args = args.to_vec();
-        args.extend_from_slice(&["--gateway", &public_url]);
+        args.extend_from_slice(&["--control-plane", &public_url]);
         command(&home, &args, &operator_env)
     };
     let manifest = root.join("organization.yaml");
@@ -599,7 +585,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
                 "host",
                 "enroll",
                 host,
-                "--gateway",
+                "--control-plane",
                 &public_url,
                 "--state-directory",
                 &state,
@@ -618,7 +604,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
             &home,
             &[
                 "worker-host",
-                "--gateway",
+                "--control-plane",
                 &public_url,
                 "--state-directory",
                 state,
@@ -682,7 +668,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     // Once the review host is idle, the builder's Task, submitted first, is still unclaimed:
     // no Attempt exists, so the host without the builder label never ran it.
     let grouped = |group: &str, args: &[&str]| {
-        let mut all = vec![group, "--gateway", public_url.as_str()];
+        let mut all = vec![group, "--control-plane", public_url.as_str()];
         all.extend_from_slice(args);
         command(&home, &all, &operator_env)
     };

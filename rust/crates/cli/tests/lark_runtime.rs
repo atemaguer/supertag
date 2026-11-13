@@ -265,7 +265,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -527,8 +527,9 @@ async fn gateway(
         .env("SUPERTAG_LARK_ALLOWED_USERS", "ou_alice")
         .env("SUPERTAG_TEST_LARK_ORIGIN", &mock.origin);
     let mut child = Process::spawn(command, directory, "gateway")?;
-    let public = child.endpoints(1).await?.remove(0);
-    Ok((child, public))
+    child.endpoints(1).await?;
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only Lark.
+    Ok((child, private.to_owned()))
 }
 fn payload(event: &str, message: &str, mention: bool) -> Value {
     let mut message = json!({"message_id":message,"chat_id":CHAT,"chat_type":"group","message_type":"text","content":json!({"text":if mention{"@_user_1 inspect"}else{"follow up"}}).to_string(),"mentions":if mention{json!([{"key":"@_user_1","id":{"open_id":"ou_bot"}}])}else{json!([])}});

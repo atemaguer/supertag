@@ -52,9 +52,10 @@ use crate::{
 /// directory (which also holds the file credential vault).
 #[derive(Args, Clone)]
 pub struct Target {
-    /// Gateway URL or saved Gateway name. Defaults to this machine's running local services.
+    /// Control Plane URL or saved Control Plane name. Defaults to this machine's running local
+    /// services.
     #[arg(long, value_name = "URL|NAME")]
-    gateway: Option<String>,
+    control_plane: Option<String>,
     /// State directory with supertag.yaml and the file credential vault. Defaults to
     /// SUPERTAG_STATE_DIR, then ~/.supertag.
     #[arg(long)]
@@ -309,9 +310,10 @@ impl Local {
         ProtocolChannel,
         String,
     )> {
-        let local = self.target.gateway.is_none() && crate::ROOT_GATEWAY.get().is_none();
+        let local =
+            self.target.control_plane.is_none() && crate::ROOT_CONTROL_PLANE.get().is_none();
         let (channel, token) = crate::connect_operator(Connection {
-            gateway: self.target.gateway.clone(),
+            control_plane: self.target.control_plane.clone(),
             state_directory: local.then(|| self.state.clone()),
         })
         .await?;

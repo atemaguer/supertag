@@ -14,12 +14,12 @@ pub enum HostCommand {
     Drain { host_id: String },
     /// Allow the Worker Host to claim new Tasks again.
     Resume { host_id: String },
-    /// Enroll this installation with a one-time Auth Key. Its own --gateway and --state-directory
-    /// name the Gateway to enroll with and the new Worker Host's state.
+    /// Enroll this installation with a one-time Auth Key. Its own --control-plane and
+    /// --state-directory name the Control Plane to enroll with and the new Worker Host's state.
     Enroll {
-        /// Gateway URL to enroll with.
+        /// Control Plane URL to enroll with.
         #[arg(long)]
-        gateway: String,
+        control_plane: String,
         /// Private directory for this Worker Host's enrollment and execution journal.
         #[arg(long)]
         state_directory: PathBuf,
@@ -70,12 +70,12 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
         HostCommand::Drain { host_id } => set_draining(connection, host_id, true).await?,
         HostCommand::Resume { host_id } => set_draining(connection, host_id, false).await?,
         HostCommand::Enroll {
-            gateway,
+            control_plane,
             state_directory,
             host_id,
             auth_key,
         } => {
-            let gateway = crate::network::endpoint(gateway, false).await?;
+            let control_plane = crate::network::endpoint(control_plane).await?;
             let auth_key = auth_key.or_else(|| std::env::var("SUPERTAG_AUTH_KEY").ok());
             let auth_key = match auth_key {
                 Some(key) if key.starts_with("file:") => {
@@ -88,7 +88,7 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
                 other => other,
             };
             let record = supertag_worker_host::enroll(
-                gateway,
+                control_plane,
                 &state_directory,
                 host_id,
                 auth_key.as_deref(),

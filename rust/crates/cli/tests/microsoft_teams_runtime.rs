@@ -248,7 +248,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -449,7 +449,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_MICROSOFT_TEAMS_ORIGIN", &mock.origin);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload(id: &str) -> Value {
     json!({"type":"message","id":id,"replyToId":ROOT,"serviceUrl":SERVICE,"channelId":"msteams","from":{"id":"29:alice","aadObjectId":USER},"recipient":{"id":format!("28:{APP}")},"conversation":{"id":CONVERSATION,"conversationType":"channel","tenantId":TENANT},"text":"<at>SuperTag</at> inspect","entities":[{"type":"mention","text":"<at>SuperTag</at>","mentioned":{"id":format!("28:{APP}")}}],"channelData":{"tenant":{"id":TENANT},"team":{"id":"19:internal","aadGroupId":TEAM},"channel":{"id":CHANNEL}}})

@@ -2645,6 +2645,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "supertag-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "aws-credential-types",
+ "aws-sigv4",
+ "http 1.5.0",
+ "hyper-util",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "supertag-protocol",
+ "supertag-workspaces",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "supertag-cli"
 version = "0.1.0"
 dependencies = [
@@ -2665,6 +2694,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "supertag-api",
  "supertag-codex-adapter",
  "supertag-control-plane",
  "supertag-gateway",
@@ -2741,8 +2771,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-stream",
- "aws-credential-types",
- "aws-sigv4",
  "axum",
  "base64 0.22.1",
  "chrono",

@@ -1,4 +1,4 @@
-//! Separate Control Plane, Gateway and Worker Host processes stage a read-only
+//! Separate Control Plane and Worker Host processes stage a read-only
 //! Workspace Volume copy for a real Codex Task, then remove it at cleanup.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -52,7 +52,7 @@ impl Credentials {
     }
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--gateway", public]);
+        command.args(["--control-plane", public]);
         command
     }
 }
@@ -177,16 +177,14 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let credentials = Credentials::new();
     let mut plane = credentials.command(&["control-plane"]);
     plane.env("SUPERTAG_DATABASE_URL", database);
-    let (mut plane, private_endpoint) = service(plane).await?;
-    let mut gateway = credentials.command(&["gateway", "--control-plane", &private_endpoint]);
-    gateway
-        .arg("--checkpoint-directory")
-        .arg(directory.join("gateway-artifacts"));
-    let (mut gateway, public) = service(gateway).await?;
+    plane
+        .arg("--transfer-directory")
+        .arg(directory.join("transfers"));
+    let (mut plane, public) = service(plane).await?;
 
     let volume = json_output(credentials.command(&[
         "workspace-volume",
-        "--gateway",
+        "--control-plane",
         &public,
         "put",
         "data",
@@ -261,7 +259,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let worker = || {
         let mut command = credentials.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--harness",
             "codex",
@@ -420,7 +418,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     std::fs::create_dir(&other)?;
     json_output(credentials.command(&[
         "workspace-volume",
-        "--gateway",
+        "--control-plane",
         &public,
         "put",
         "data",
@@ -435,8 +433,6 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(still["state"], "TASK_STATE_QUEUED", "{still}");
     assert_eq!(std::fs::read_dir(&root)?.count(), 0);
 
-    gateway.kill().await?;
-    gateway.wait().await?;
     plane.kill().await?;
     plane.wait().await?;
     Ok(())

@@ -109,14 +109,14 @@ pub struct AdapterOptions {
     /// pinned checkouts. Several Workspace IDs may name the same source.
     #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
     workspace_source: Vec<PathBuf>,
-    /// Retrieve each Workspace's accepted GitHub source from the Gateway.
+    /// Retrieve each Workspace's accepted GitHub source from the Control Plane.
     #[arg(
         long,
         requires = "workspace_id",
         group = "workspace_source_kind",
         conflicts_with = "workspace_source"
     )]
-    workspace_from_gateway: bool,
+    workspace_from_control_plane: bool,
 }
 
 impl AdapterOptions {
@@ -127,17 +127,17 @@ impl AdapterOptions {
         self.adapter.is_some() || self.harness.is_some()
     }
 
-    pub fn uses_gateway_workspace(&self) -> bool {
-        self.workspace_from_gateway
+    pub fn uses_control_plane_workspace(&self) -> bool {
+        self.workspace_from_control_plane
     }
 
     /// The host's Workspace mappings, each `--workspace-id` paired with the
-    /// `--workspace-source` in the same position, or every ID served from the Gateway.
+    /// `--workspace-source` in the same position, or every ID served from the Control Plane.
     pub fn workspace_mappings(&self) -> Result<Vec<WorkspaceMapping>> {
-        if self.workspace_from_gateway {
+        if self.workspace_from_control_plane {
             ensure!(
                 self.workspace_source.is_empty(),
-                "Gateway Workspaces take no --workspace-source"
+                "GitHub Workspaces take no --workspace-source"
             );
         } else {
             ensure!(
@@ -158,7 +158,7 @@ impl AdapterOptions {
                     workspace_id: workspace_id.clone(),
                     source: match self.workspace_source.get(index) {
                         Some(source) => WorkspaceSource::Local(source.clone()),
-                        None => WorkspaceSource::Gateway,
+                        None => WorkspaceSource::ControlPlane,
                     },
                 })
             })
@@ -328,8 +328,8 @@ impl AdapterOptions {
                 ]);
             }
         }
-        if self.workspace_from_gateway {
-            args.push(OsString::from("--workspace-from-gateway"));
+        if self.workspace_from_control_plane {
+            args.push(OsString::from("--workspace-from-control-plane"));
         }
     }
 

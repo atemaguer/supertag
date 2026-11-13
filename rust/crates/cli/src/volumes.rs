@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
-use supertag_gateway::transfers::volumes::ArtifactVolumeMappings;
+use supertag_api::transfers::volumes::ArtifactVolumeMappings;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 
@@ -14,7 +14,7 @@ pub enum VolumeCommand {
     /// Register a file or S3-compatible Volume. Existing metadata requires its exact revision.
     Put {
         volume_id: String,
-        /// Canonical file:///absolute/path or s3://bucket/prefix. The Gateway supplies storage endpoints and credentials.
+        /// Canonical file:///absolute/path or s3://bucket/prefix. The Control Plane supplies storage endpoints and credentials.
         #[arg(long)]
         source: String,
         /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
@@ -24,7 +24,7 @@ pub enum VolumeCommand {
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
     },
-    /// Copy one exact artifact file. The Gateway must separately consent to this Volume's storage.
+    /// Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage.
     Copy {
         volume_id: String,
         artifact_id: String,
@@ -38,7 +38,7 @@ pub enum VolumeCommand {
         #[arg(long)]
         operation_id: String,
     },
-    /// Download and re-verify one recorded copy, including after the Gateway cache is lost.
+    /// Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost.
     Download {
         copy_id: String,
         /// Local file to create with the verified copy. It must not already exist.

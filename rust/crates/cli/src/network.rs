@@ -14,18 +14,10 @@ use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity, Server,
 
 /// A gRPC server builder for a service listening on `listen` and, when set, accepting
 /// WebSocket tunnels on `websocket`. TLS configured here also runs inside each tunnel.
-pub async fn server(
-    listen: SocketAddr,
-    websocket: Option<SocketAddr>,
-    private: bool,
-) -> Result<Server> {
+pub async fn server(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result<Server> {
     let identity = identity("SUPERTAG_TLS_CERT_FILE", "SUPERTAG_TLS_KEY_FILE").await?;
     let client_ca = read_pem("SUPERTAG_TLS_CLIENT_CA_FILE").await?;
     if let Some(identity) = identity {
-        ensure!(
-            !private || client_ca.is_some(),
-            "Control Plane TLS requires a client certificate authority",
-        );
         let mut tls = ServerTlsConfig::new().identity(identity);
         if let Some(ca) = client_ca {
             tls = tls.client_ca_root(Certificate::from_pem(ca));
@@ -43,18 +35,24 @@ pub async fn server(
     Ok(Server::builder())
 }
 
-/// Connects to a Gateway as an operator client and negotiates the protocol
-/// version every later call names; the Gateway refuses calls that skip this.
+/// Connects to a Control Plane as an operator client and negotiates the protocol
+/// version every later call names; the Control Plane refuses calls that skip this.
 pub async fn operator_channel(target: &Target) -> Result<ProtocolChannel> {
+    let channel = target.connect().await?;
+    Ok(connect(channel, ServiceRole::Operator, ServiceRole::ControlPlane).await?)
+}
+
+/// Connects to a Gateway as an operator client, for its test notification.
+pub async fn gateway_operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
     Ok(connect(channel, ServiceRole::Operator, ServiceRole::Gateway).await?)
 }
 
-pub async fn endpoint(uri: String, private: bool) -> Result<Target> {
-    endpoint_with_timeout(uri, private, Duration::from_secs(15)).await
+pub async fn endpoint(uri: String) -> Result<Target> {
+    endpoint_with_timeout(uri, Duration::from_secs(15)).await
 }
 
-/// TLS files saved with a Gateway profile. They replace the TLS environment
+/// TLS files saved with a Control Plane profile. They replace the TLS environment
 /// variables for that connection.
 #[derive(Clone, Debug, Default)]
 pub struct TlsFiles {
@@ -69,15 +67,11 @@ pub async fn operator_endpoint(
     timeout: Duration,
     files: Option<&TlsFiles>,
 ) -> Result<Target> {
-    configured_endpoint(uri, false, timeout, files).await
+    configured_endpoint(uri, timeout, files).await
 }
 
-pub async fn endpoint_with_timeout(
-    uri: String,
-    private: bool,
-    timeout: Duration,
-) -> Result<Target> {
-    configured_endpoint(uri, private, timeout, None).await
+pub async fn endpoint_with_timeout(uri: String, timeout: Duration) -> Result<Target> {
+    configured_endpoint(uri, timeout, None).await
 }
 
 /// `https://` and `http://` dial native gRPC. `wss://` and `ws://` carry the same gRPC
@@ -85,7 +79,6 @@ pub async fn endpoint_with_timeout(
 /// and `ws://` is cleartext and loopback-only, like `http://`.
 async fn configured_endpoint(
     uri: String,
-    private: bool,
     timeout: Duration,
     files: Option<&TlsFiles>,
 ) -> Result<Target> {
@@ -107,8 +100,6 @@ async fn configured_endpoint(
             };
             if let Some(ca) = server_ca.clone() {
                 tls = tls.ca_certificate(Certificate::from_pem(ca));
-            } else if private {
-                bail!("private Control Plane TLS requires SUPERTAG_SERVER_CA_FILE");
             } else {
                 tls = tls.with_native_roots();
             }
@@ -123,10 +114,6 @@ async fn configured_endpoint(
                 },
                 None => identity("SUPERTAG_CLIENT_CERT_FILE", "SUPERTAG_CLIENT_KEY_FILE").await?,
             };
-            ensure!(
-                !private || identity.is_some(),
-                "private Control Plane TLS requires a client identity"
-            );
             if let Some(identity) = identity {
                 tls = tls.identity(identity);
             }

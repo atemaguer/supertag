@@ -69,7 +69,7 @@ type Decode = fn(&[u8]) -> Option<Target>;
 enum Caller {
     /// A Gateway-authenticated operator, recorded by its operator ID.
     Operator,
-    /// A Worker Host presenting an Auth Key through the Gateway. The handler names the key.
+    /// A Worker Host presenting an Auth Key through the API tier. The handler names the key.
     AuthKey,
 }
 
@@ -102,7 +102,7 @@ macro_rules! rule {
     };
 }
 
-/// The audited methods of the private Control Plane API.
+/// The audited methods of the state owner's API.
 fn rule(path: &str) -> Option<Rule> {
     let (service, method) = path
         .strip_prefix("/supertag.runtime.v2.")?

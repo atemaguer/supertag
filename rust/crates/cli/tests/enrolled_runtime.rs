@@ -79,7 +79,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
     let mut command = binary(args);
     command
-        .args(["--gateway", gateway])
+        .args(["--control-plane", gateway])
         .env("SUPERTAG_OPERATOR_TOKEN", token);
     command
 }
@@ -87,7 +87,7 @@ fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
 fn worker(gateway: &str, state: &Path) -> Command {
     let mut command = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         gateway,
         "--adapter",
         ADAPTER,
@@ -112,12 +112,8 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     control
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_DATABASE_URL", database);
-    let (mut control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (mut gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (mut control, public) = service(control).await?;
 
     for tag in ["other-team", "reviewer"] {
         json(operator(
@@ -154,7 +150,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
             "host",
             "enroll",
             "review-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--auth-key",
             &key_argument,
@@ -258,7 +254,6 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         failure.contains("valid Worker Host credential required"),
         "revoked Worker Host failed for an unexpected reason: {failure}"
     );
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }

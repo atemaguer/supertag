@@ -1,7 +1,7 @@
 //! Transport at scale between the shipped Control Plane, Gateway, and Worker Host
 //! processes: injected partitions and reconnects across independently enrolled
-//! Worker Hosts, a stalled event consumer, TLS and mTLS between all three service
-//! roles, and protocol version negotiation.
+//! Worker Hosts, a stalled event consumer, TLS and mTLS between the Control Plane
+//! and every client role, and protocol version negotiation.
 //!
 //! Ports `tests/worklet-transport-adoption-gates.test.ts` (16 hosts, partition,
 //! reconnect, no repeated accepted work) to the Rust services.
@@ -32,11 +32,8 @@ use supertag_protocol::{
     v2::{
         CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListNativeUsageRequest,
         PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent,
-        WatchKind, WatchRequest,
-        operator_client::OperatorClient,
-        operator_events_client::OperatorEventsClient,
-        operator_events_server::{OperatorEvents, OperatorEventsServer},
-        watch_event::Update,
+        WatchKind, WatchRequest, operator_client::OperatorClient,
+        operator_events_client::OperatorEventsClient, watch_event::Update,
     },
 };
 use tokio::{
@@ -46,9 +43,9 @@ use tokio::{
     task::{AbortHandle, JoinHandle},
     time::{sleep, timeout},
 };
-use tokio_stream::{Stream, StreamExt, wrappers::TcpListenerStream};
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
-    Request, Response, Status,
+    Request, Status,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity, Server},
 };
 use uuid::Uuid;
@@ -108,10 +105,6 @@ impl Service {
             self.logs()
         );
         Ok(self.logs())
-    }
-
-    fn pid(&self) -> Option<u32> {
-        self.child.id()
     }
 
     fn running(&mut self) -> Result<bool> {
@@ -187,12 +180,10 @@ impl Tokens {
     }
 }
 
-/// A Control Plane and Gateway in separate processes.
+/// A Control Plane in its own process.
 struct Services {
-    _control_plane: Service,
-    control_plane_address: SocketAddr,
-    gateway: Service,
-    gateway_address: SocketAddr,
+    control_plane: Service,
+    address: SocketAddr,
 }
 
 impl Services {
@@ -200,35 +191,23 @@ impl Services {
         let mut command = binary(&["control-plane"]);
         command
             .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
             .env("SUPERTAG_DATABASE_URL", database);
         let mut control_plane = Service::spawn(command, directory, "control-plane")?;
-        let private = control_plane.address().await?;
-        let mut command = binary(&["gateway", "--control-plane", &format!("http://{private}")]);
-        command
-            .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
-        let mut gateway = Service::spawn(command, directory, "gateway")?;
-        let gateway_address = gateway.address().await?;
+        let address = control_plane.address().await?;
         Ok(Self {
-            _control_plane: control_plane,
-            control_plane_address: private,
-            gateway,
-            gateway_address,
+            control_plane,
+            address,
         })
     }
 
     async fn channel(&self) -> Result<ProtocolChannel> {
-        protocol::negotiated(connect(self.gateway_address).await?).await
-    }
-
-    /// A Gateway channel that has not negotiated.
-    async fn raw_channel(&self) -> Result<Channel> {
-        connect(self.gateway_address).await
+        protocol::negotiated(connect(self.address).await?).await
     }
 
     /// A Control Plane channel that has not negotiated.
-    async fn raw_control_plane_channel(&self) -> Result<Channel> {
-        connect(self.control_plane_address).await
+    async fn raw_channel(&self) -> Result<Channel> {
+        connect(self.address).await
     }
 }
 
@@ -283,7 +262,7 @@ struct ProxyState {
     links: Mutex<Vec<AbortHandle>>,
 }
 
-/// A TCP relay in front of the Gateway for one Worker Host. A partition severs every
+/// A TCP relay in front of the Control Plane for one Worker Host. A partition severs every
 /// open connection and refuses new ones until it is restored.
 struct Proxy {
     address: SocketAddr,
@@ -516,7 +495,7 @@ async fn start_host(
     let key = directory.join(format!("{id}.key"));
     std::fs::write(&key, &secret)?;
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
-    let mut enroll = binary(&["host", "enroll", &id, "--gateway", &proxy.url()]);
+    let mut enroll = binary(&["host", "enroll", &id, "--control-plane", &proxy.url()]);
     enroll
         .arg("--state-directory")
         .arg(&state)
@@ -527,7 +506,7 @@ async fn start_host(
     std::fs::remove_file(key)?;
     let (adapter, launches) = recording_adapter(directory, &id)?;
     let release = directory.join(format!("{id}.release"));
-    let mut command = binary(&["worker-host", "--gateway", &proxy.url()]);
+    let mut command = binary(&["worker-host", "--control-plane", &proxy.url()]);
     command
         .arg("--state-directory")
         .arg(&state)
@@ -663,7 +642,7 @@ async fn partition_round(
     {
         ensure!(
             Instant::now() < deadline,
-            "partitioned Worker Hosts never retried their Gateway connection"
+            "partitioned Worker Hosts never retried their Control Plane connection"
         );
         sleep(Duration::from_millis(20)).await;
     }
@@ -773,7 +752,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
             .await?;
     }
     // A watcher that never reads must not slow the workload or lose changes.
-    let mut stalled_watch = stalled_watch_client(services.gateway_address, &tokens).await?;
+    let mut stalled_watch = stalled_watch_client(services.address, &tokens).await?;
 
     let mut hosts = Vec::new();
     for index in 0..workload.hosts {
@@ -782,7 +761,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
             start_host(
                 &mut operator,
                 &tokens,
-                services.gateway_address,
+                services.address,
                 root,
                 index,
                 &tag,
@@ -801,7 +780,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
         let everyone: Vec<usize> = (0..hosts.len()).collect();
         let mut tasks;
         if wave % 2 == 0 {
-            // Execution partition: every Attempt is running when its host loses the Gateway.
+            // Execution partition: every Attempt is running when its host loses the Control Plane.
             tasks = submit_wave(&mut operator, &tokens, &workload, wave).await?;
             wait_for_all(
                 &mut operator,
@@ -846,7 +825,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
             )
             .await?;
         } else {
-            // Queue partition: work is accepted while no host can reach the Gateway.
+            // Queue partition: work is accepted while no host can reach the Control Plane.
             for host in &hosts {
                 host.proxy.partition();
             }
@@ -990,7 +969,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
         "lost_results": 0,
         "host_partitions": report.partitions,
         "refused_reconnect_attempts": retries,
-        "gateway_connections": connections,
+        "control_plane_connections": connections,
         "max_reconnect_ms": report.reconnects.iter().max(),
         "slowest_operator_read_ms": SLOWEST_READ_MS.load(Ordering::SeqCst),
         "queue_latency_ms": {"p50": percentile(50), "p95": percentile(95), "max": percentile(100)},
@@ -1144,8 +1123,8 @@ async fn wait_for_marker(path: &Path, host: &Host) -> Result<()> {
 }
 
 async fn operator_cli(services: &Services, tokens: &Tokens, args: &[&str]) -> Result<Value> {
-    let gateway = format!("http://{}", services.gateway_address);
-    let mut full = vec![args[0], "--gateway", gateway.as_str()];
+    let gateway = format!("http://{}", services.address);
+    let mut full = vec![args[0], "--control-plane", gateway.as_str()];
     full.extend_from_slice(&args[1..]);
     let mut command = binary(&full);
     command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
@@ -1153,7 +1132,7 @@ async fn operator_cli(services: &Services, tokens: &Tokens, args: &[&str]) -> Re
 }
 
 /// Every adapter-facing call the Worker Host may repeat starts while its host
-/// cannot reach the Gateway: usage, Mailbox read and send, Workstream read and
+/// cannot reach the Control Plane: usage, Mailbox read and send, Workstream read and
 /// post, an Objective question, a Work Session start, and a live-input
 /// settlement. The first partition lasts 18 seconds: longer than a host
 /// channel holds one call (15 seconds) and shorter than the 30-second
@@ -1222,7 +1201,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
     let host = start_host(
         &mut operator,
         &tokens,
-        services.gateway_address,
+        services.address,
         root,
         0,
         tag,
@@ -1231,16 +1210,8 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
     .await?;
     // A Work Session may be delegated only to a Tag with a registered Worker
     // Host. This one holds whatever it claims for the peer and is never released.
-    let _peer_host = start_host(
-        &mut operator,
-        &tokens,
-        services.gateway_address,
-        root,
-        1,
-        peer,
-        &[],
-    )
-    .await?;
+    let _peer_host =
+        start_host(&mut operator, &tokens, services.address, root, 1, peer, &[]).await?;
     std::fs::write(&host.release, "")?;
     let mut input_id = String::new();
     for (index, step) in PARTITION_STEPS.iter().enumerate() {
@@ -1419,53 +1390,15 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+async fn sqlite_adapter_calls_ride_out_a_control_plane_partition() -> Result<()> {
     let directory = tempfile::tempdir()?;
     exercise_adapter_calls_through_partition(sqlite(directory.path())).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
+async fn postgres_adapter_calls_ride_out_a_control_plane_partition() -> Result<()> {
     with_postgres("partition_calls", exercise_adapter_calls_through_partition).await
-}
-
-// ---------------------------------------------------------------------------
-// Backpressure from a stalled event consumer
-
-const WATCH_PAYLOAD_BYTES: usize = 256 * 1024;
-
-/// A Control Plane stand-in whose Watch can produce without end. It counts only
-/// the events a reader actually pulled from it.
-#[derive(Clone)]
-struct EndlessWatch {
-    produced: Arc<AtomicU64>,
-}
-
-#[tonic::async_trait]
-impl OperatorEvents for EndlessWatch {
-    type WatchStream = std::pin::Pin<Box<dyn Stream<Item = Result<WatchEvent, Status>> + Send>>;
-
-    async fn watch(
-        &self,
-        _request: Request<WatchRequest>,
-    ) -> Result<Response<Self::WatchStream>, Status> {
-        let produced = self.produced.clone();
-        let payload = "x".repeat(WATCH_PAYLOAD_BYTES);
-        let events = tokio_stream::iter(1_u64..).map(move |position| {
-            produced.fetch_add(1, Ordering::SeqCst);
-            Ok(WatchEvent {
-                resume_token: format!("v1.{:032x}.{position}", 0),
-                update: Some(Update::Change(WatchChange {
-                    kind: WatchKind::Task as i32,
-                    id: format!("task-{position}"),
-                    conversation: payload.clone(),
-                    ..Default::default()
-                })),
-            })
-        });
-        Ok(Response::new(Box::pin(events)))
-    }
 }
 
 async fn serve_fake(
@@ -1481,113 +1414,8 @@ async fn serve_fake(
     Ok((address, task))
 }
 
-fn resident_kib(pid: u32) -> Result<u64> {
-    let output = std::process::Command::new("/bin/ps")
-        .args(["-o", "rss=", "-p", &pid.to_string()])
-        .output()?;
-    ensure!(output.status.success(), "could not read process memory");
-    Ok(String::from_utf8(output.stdout)?.trim().parse()?)
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn stalled_watch_consumer_keeps_gateway_memory_and_upstream_reads_bounded() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let tokens = Tokens::new();
-    let produced = Arc::new(AtomicU64::new(0));
-    let control_plane = Server::builder()
-        .add_service(Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Gateway]).service())
-        .add_service(
-            OperatorEventsServer::new(EndlessWatch {
-                produced: produced.clone(),
-            })
-            .max_encoding_message_size(1024 * 1024),
-        );
-    let (upstream, server) = serve_fake(control_plane).await?;
-    let mut command = binary(&["gateway", "--control-plane", &format!("http://{upstream}")]);
-    command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
-        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
-    let mut gateway = Service::spawn(command, directory.path(), "gateway")?;
-    let address = gateway.address().await?;
-    let pid = gateway.pid().context("Gateway exited")?;
-    let baseline = resident_kib(pid)?;
-
-    let mut watch = stalled_watch_client(address, &tokens).await?;
-    let first = timeout(STARTUP, watch.message())
-        .await??
-        .context("Watch ended")?;
-    assert!(matches!(first.update, Some(Update::Change(_))));
-
-    // Stop reading. A Gateway that buffered for the stalled reader would keep
-    // pulling ~256 KiB events from the upstream as fast as it could produce them.
-    sleep(Duration::from_secs(2)).await;
-    let stalled = produced.load(Ordering::SeqCst);
-    sleep(Duration::from_secs(2)).await;
-    let still = produced.load(Ordering::SeqCst);
-    let resident = resident_kib(pid)?;
-    assert_eq!(
-        still, stalled,
-        "the Gateway kept reading upstream for a stalled consumer"
-    );
-    assert!(
-        stalled <= 64,
-        "the Gateway pulled {stalled} upstream events (~{} MiB) for a reader that took one",
-        stalled * WATCH_PAYLOAD_BYTES as u64 / (1024 * 1024)
-    );
-    assert!(
-        resident.saturating_sub(baseline) < 64 * 1024,
-        "Gateway memory grew from {baseline} KiB to {resident} KiB behind a stalled consumer"
-    );
-
-    // Other callers are unaffected while the stream is stalled.
-    let health = protocol::negotiated(
-        Endpoint::from_shared(format!("http://{address}"))?
-            .connect()
-            .await?,
-    )
-    .await?;
-    let serving = tonic_health::pb::health_client::HealthClient::new(health)
-        .check(tonic_health::pb::HealthCheckRequest {
-            service: String::new(),
-        })
-        .await?
-        .into_inner();
-    assert_eq!(
-        serving.status(),
-        tonic_health::pb::health_check_response::ServingStatus::Serving
-    );
-
-    // Reading again resumes the same stream in order: the stall was flow control.
-    let mut last = 1;
-    for _ in 0..(stalled + 32) {
-        let event = timeout(STARTUP, watch.message())
-            .await??
-            .context("Watch ended")?;
-        let Some(Update::Change(change)) = event.update else {
-            return Err(anyhow!("unexpected Watch update"));
-        };
-        let position: u64 = change.id.trim_start_matches("task-").parse()?;
-        assert_eq!(position, last + 1);
-        last = position;
-    }
-    assert!(produced.load(Ordering::SeqCst) > stalled);
-    println!(
-        "{}",
-        json!({
-            "event_bytes": WATCH_PAYLOAD_BYTES,
-            "upstream_events_pulled_while_stalled": stalled,
-            "gateway_rss_baseline_kib": baseline,
-            "gateway_rss_stalled_kib": resident,
-        })
-    );
-    drop(watch);
-    drop(gateway);
-    server.abort();
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
-// TLS and mTLS between the Control Plane, Gateway, and Worker Host
+// TLS and mTLS between the Control Plane and its clients
 
 struct Pki {
     directory: PathBuf,
@@ -1728,27 +1556,27 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     let rogue_gateway = rogue.leaf("gateway").await?;
     let rogue_host = rogue.leaf("worker-host").await?;
 
-    // Control Plane: TLS with required client certificates.
+    // Control Plane: the public endpoint, with client certificates required as a network filter.
     let mut command = binary(&["control-plane"]);
     command
         .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_DATABASE_URL", &database);
     server_tls(&mut command, &control_leaf, &pki.ca());
     let mut control_plane = Service::spawn(command, root, "tls-control-plane")?;
-    let private = format!("https://{}", control_plane.address().await?);
+    let public = format!("https://{}", control_plane.address().await?);
 
-    let gateway = |leaf: &Leaf, client: Option<&Leaf>, upstream: &str| {
+    let gateway = |client: Option<&Leaf>, upstream: &str| {
         let mut command = binary(&["gateway", "--control-plane", upstream]);
         command
             .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
-        server_tls(&mut command, leaf, &pki.ca());
         client_tls(&mut command, &pki.ca(), client);
         command
     };
     // A Gateway whose client certificate another authority issued cannot join.
     let refused = Service::spawn(
-        gateway(&gateway_leaf, Some(&rogue_gateway), &private),
+        gateway(Some(&rogue_gateway), &public),
         root,
         "rogue-gateway",
     )?
@@ -1758,10 +1586,10 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         refused.contains("SuperTag protocol negotiation"),
         "rogue Gateway failed for an unexpected reason: {refused}"
     );
-    // Cleartext to the private TLS listener is refused as well.
-    let cleartext = private.replacen("https://", "http://", 1);
+    // Cleartext to the TLS listener is refused as well.
+    let cleartext = public.replacen("https://", "http://", 1);
     let refused = Service::spawn(
-        gateway(&gateway_leaf, Some(&gateway_leaf), &cleartext),
+        gateway(Some(&gateway_leaf), &cleartext),
         root,
         "cleartext-gateway",
     )?
@@ -1773,18 +1601,14 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         "cleartext Gateway failed for an unexpected reason: {refused}"
     );
 
-    // Gateway: mTLS client of the Control Plane, mTLS server for hosts and operators.
-    let mut gateway = Service::spawn(
-        gateway(&gateway_leaf, Some(&gateway_leaf), &private),
-        root,
-        "tls-gateway",
-    )?;
-    let public = format!("https://{}", gateway.address().await?);
+    // Gateway: an ordinary mTLS client of the Control Plane.
+    let mut gateway = Service::spawn(gateway(Some(&gateway_leaf), &public), root, "tls-gateway")?;
+    gateway.address().await?;
 
     let operator = |args: &[&str], leaf: Option<&Leaf>| {
         let mut command = binary(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), leaf);
         command
@@ -1792,7 +1616,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     let unauthenticated = run(operator(&["get", "tags"], None)).await?;
     ensure!(
         !unauthenticated.status.success(),
-        "an operator without a client certificate reached the Gateway"
+        "an operator without a client certificate reached the Control Plane"
     );
     run_json(operator(
         &["tag", "put", "secure", "--instructions", "Answer over TLS"],
@@ -1811,7 +1635,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
     let state = root.join("tls-host");
     let enroll = |leaf: &Leaf, server_ca: &Path| {
-        let mut command = binary(&["host", "enroll", "tls-host", "--gateway", &public]);
+        let mut command = binary(&["host", "enroll", "tls-host", "--control-plane", &public]);
         command
             .arg("--state-directory")
             .arg(&state)
@@ -1823,7 +1647,11 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     // Both failures happen during the TLS handshake, before the Auth Key is used.
     for (leaf, server_ca, case) in [
         (&rogue_host, pki.ca(), "untrusted client certificate"),
-        (&host_leaf, rogue.ca(), "untrusted Gateway certificate"),
+        (
+            &host_leaf,
+            rogue.ca(),
+            "untrusted Control Plane certificate",
+        ),
     ] {
         let output = run(enroll(leaf, &server_ca)).await?;
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1852,7 +1680,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
     let mut host = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &public,
         "--adapter",
         ADAPTER,
@@ -1870,8 +1698,8 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED");
     assert_eq!(task["result"], "Answer over TLS: Check the chain []");
 
-    // A test client with only the CA cannot reach either private or public services.
-    let anonymous = Endpoint::from_shared(private.clone())?
+    // A test client with only the CA cannot reach the Control Plane.
+    let anonymous = Endpoint::from_shared(public.clone())?
         .tls_config(
             ClientTlsConfig::new().ca_certificate(Certificate::from_pem(std::fs::read(pki.ca())?)),
         )?
@@ -1887,7 +1715,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         refused,
         "the Control Plane accepted a client without a certificate"
     );
-    let identified = Endpoint::from_shared(private)?
+    let identified = Endpoint::from_shared(public)?
         .tls_config(
             ClientTlsConfig::new()
                 .ca_certificate(Certificate::from_pem(std::fs::read(pki.ca())?))
@@ -1956,10 +1784,10 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     );
     old_server.abort();
 
-    // A Worker Host refuses an old Gateway, and a peer that cannot negotiate at all.
-    let (old_gateway, old_gateway_server) = serve_fake(
+    // A Worker Host refuses an old Control Plane, and a peer that cannot negotiate at all.
+    let (old_plane, old_plane_server) = serve_fake(
         Server::builder().add_service(
-            Negotiator::new(ServiceRole::Gateway, &[ServiceRole::WorkerHost])
+            Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::WorkerHost])
                 .with_versions(OLD_EPOCH)
                 .service(),
         ),
@@ -1970,17 +1798,17 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         serve_fake(Server::builder().add_service(health_service)).await?;
     for (target, expected) in [
         (
-            old_gateway,
-            "the SuperTag Gateway refused this Worker Host: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting Worker Host (SuperTag 0.1.0) offered [2]",
+            old_plane,
+            "the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting Worker Host (SuperTag 0.1.0) offered [2]",
         ),
         (
             foreign,
-            "incompatible SuperTag protocol: the peer does not offer SuperTag protocol negotiation, so it is not a SuperTag Gateway this Worker Host can use",
+            "incompatible SuperTag protocol: the peer does not offer SuperTag protocol negotiation, so it is not a SuperTag Control Plane this Worker Host can use",
         ),
     ] {
         let mut host = binary(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &format!("http://{target}"),
             "--adapter",
             ADAPTER,
@@ -1999,7 +1827,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
             "host",
             "enroll",
             "old-host",
-            "--gateway",
+            "--control-plane",
             &format!("http://{target}"),
             "--auth-key",
             "unused-auth-key",
@@ -2014,26 +1842,29 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
             "unclear enrollment failure: {stderr}"
         );
     }
-    old_gateway_server.abort();
+    old_plane_server.abort();
     foreign_server.abort();
 
-    // The real services refuse old peers and peers in the wrong role.
-    let services = Services::start(&sqlite(root), root, &tokens).await?;
-    let gateway = services.raw_channel().await?;
-    assert_eq!(
-        negotiate(
-            gateway.clone(),
-            ServiceRole::WorkerHost,
-            ServiceRole::Gateway
-        )
-        .await
-        .map_err(|error| anyhow!("{error}"))?,
-        2
-    );
-    let old_host = negotiate_versions(
-        gateway.clone(),
+    // The real Control Plane accepts Worker Hosts, operators, and Gateways, and refuses old
+    // peers and peers in the wrong role.
+    let mut services = Services::start(&sqlite(root), root, &tokens).await?;
+    let plane = services.raw_channel().await?;
+    for role in [
         ServiceRole::WorkerHost,
+        ServiceRole::Operator,
         ServiceRole::Gateway,
+    ] {
+        assert_eq!(
+            negotiate(plane.clone(), role, ServiceRole::ControlPlane)
+                .await
+                .map_err(|error| anyhow!("{error}"))?,
+            2
+        );
+    }
+    let old_host = negotiate_versions(
+        plane.clone(),
+        ServiceRole::WorkerHost,
+        ServiceRole::ControlPlane,
         OLD_EPOCH,
     )
     .await
@@ -2041,21 +1872,12 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     .to_string();
     assert!(
         old_host.starts_with(
-            "the SuperTag Gateway refused this Worker Host: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Worker Host (SuperTag 0.1.0) offered [1]"
+            "the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Worker Host (SuperTag 0.1.0) offered [1]"
         ),
         "{old_host}"
     );
-    let wrong_role = negotiate(gateway, ServiceRole::Gateway, ServiceRole::Gateway)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert_eq!(
-        wrong_role,
-        "the SuperTag Gateway refused this Gateway: a Gateway cannot connect directly to the SuperTag Gateway"
-    );
-    let private = services.raw_control_plane_channel().await?;
     let old_gateway = negotiate_versions(
-        private.clone(),
+        plane.clone(),
         ServiceRole::Gateway,
         ServiceRole::ControlPlane,
         OLD_EPOCH,
@@ -2067,26 +1889,24 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         old_gateway.contains("this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Gateway (SuperTag 0.1.0) offered [1]"),
         "{old_gateway}"
     );
-    let direct_host = negotiate(private, ServiceRole::WorkerHost, ServiceRole::ControlPlane)
+    let wrong_role = negotiate(plane, ServiceRole::ControlPlane, ServiceRole::ControlPlane)
         .await
         .unwrap_err()
         .to_string();
     assert_eq!(
-        direct_host,
-        "the SuperTag Control Plane refused this Worker Host: a Worker Host cannot connect directly to the SuperTag Control Plane"
+        wrong_role,
+        "the SuperTag Control Plane refused this Control Plane: a Control Plane cannot connect directly to the SuperTag Control Plane"
     );
-    let mut services = services;
     ensure!(
-        services.gateway.running()?,
-        "Gateway stopped after refusing peers"
+        services.control_plane.running()?,
+        "Control Plane stopped after refusing peers"
     );
     Ok(())
 }
 
-/// The Gateway and Control Plane refuse every call that does not name a
-/// negotiated protocol version, so a peer that skipped `Negotiate` reaches only
-/// negotiation and health. Operator clients negotiate: the CLI works against
-/// the real Gateway and refuses one from another protocol epoch.
+/// The Control Plane refuses every call that does not name a negotiated protocol version, so a
+/// peer that skipped `Negotiate` reaches only negotiation and health. Operator clients negotiate:
+/// the CLI works against the real Control Plane and refuses one from another protocol epoch.
 async fn exercise_protocol_fence(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2099,7 +1919,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
             ))
     };
 
-    // A Gateway caller that skipped negotiation is refused before any handler runs.
+    // A caller that skipped negotiation is refused before any handler runs.
     let raw = services.raw_channel().await?;
     let refused = OperatorClient::new(raw.clone())
         .get_task(tokens.request(GetTaskRequest {
@@ -2107,7 +1927,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         })?)
         .await
         .unwrap_err();
-    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    ensure!(skipped(refused.clone(), "Control Plane"), "{refused:?}");
     let refused = supertag_protocol::v2::worker_host_client::WorkerHostClient::new(raw.clone())
         .register_host(authenticated_request(
             supertag_protocol::v2::RegisterHostRequest {
@@ -2118,7 +1938,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         )?)
         .await
         .unwrap_err();
-    ensure!(skipped(refused.clone(), "Gateway"), "{refused:?}");
+    ensure!(skipped(refused.clone(), "Control Plane"), "{refused:?}");
     // A version from another epoch is refused as incompatible.
     let refused = OperatorClient::new(supertag_protocol::negotiation::bind(raw.clone(), 1))
         .get_task(tokens.request(GetTaskRequest {
@@ -2129,7 +1949,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     ensure!(
         refused.code() == tonic::Code::FailedPrecondition
             && refused.message().starts_with(
-                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+                "incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
             ),
         "{refused:?}"
     );
@@ -2152,22 +1972,22 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         .unwrap_err();
     ensure!(missing.code() == tonic::Code::NotFound, "{missing:?}");
 
-    // The Control Plane fences its private callers the same way.
-    let refused = OperatorClient::new(services.raw_control_plane_channel().await?)
-        .get_task(authenticated_request(
-            GetTaskRequest {
-                task_id: "absent".into(),
-            },
-            &tokens.gateway,
-            Some("operator:local"),
-        )?)
-        .await
-        .unwrap_err();
+    // Calls a Gateway relays to the state owner are fenced the same way.
+    let refused = supertag_protocol::v2::connector_client::ConnectorClient::new(
+        services.raw_channel().await?,
+    )
+    .claim_reply(authenticated_request(
+        supertag_protocol::v2::ClaimReplyRequest::default(),
+        &tokens.gateway,
+        Some("connector:absent"),
+    )?)
+    .await
+    .unwrap_err();
     ensure!(skipped(refused.clone(), "Control Plane"), "{refused:?}");
 
     // The CLI negotiates as an operator client.
-    let gateway = format!("http://{}", services.gateway_address);
-    let mut list = binary(&["get", "tags", "--gateway", &gateway]);
+    let gateway = format!("http://{}", services.address);
+    let mut list = binary(&["get", "tags", "--control-plane", &gateway]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let listed = run(list).await?;
     ensure!(
@@ -2175,22 +1995,27 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         "{}",
         String::from_utf8_lossy(&listed.stderr)
     );
-    // ...and refuses a Gateway from another protocol epoch before any call.
-    let (old_gateway, old_server) = serve_fake(
+    // ...and refuses a Control Plane from another protocol epoch before any call.
+    let (old_plane, old_server) = serve_fake(
         Server::builder().add_service(
-            Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Operator])
+            Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Operator])
                 .with_versions(OLD_EPOCH)
                 .service(),
         ),
     )
     .await?;
-    let mut list = binary(&["get", "tags", "--gateway", &format!("http://{old_gateway}")]);
+    let mut list = binary(&[
+        "get",
+        "tags",
+        "--control-plane",
+        &format!("http://{old_plane}"),
+    ]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let refused = run(list).await?;
     let stderr = String::from_utf8_lossy(&refused.stderr);
     ensure!(
         !refused.status.success()
-            && stderr.contains("the SuperTag Gateway refused this operator client: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag 0.1.0) offered [2]"),
+            && stderr.contains("the SuperTag Control Plane refused this operator client: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag 0.1.0) offered [2]"),
         "unclear operator failure: {stderr}"
     );
     old_server.abort();
@@ -2303,7 +2128,7 @@ async fn relay_until_idle(downstream: TcpStream, upstream: TcpStream, idle: Dura
 }
 
 /// Ports `tests/worklet-grpc-proxy-operational.test.ts`: a Worker Host reaches a
-/// TLS Gateway through a TCP proxy that closes links idle for 400 ms. The host
+/// TLS Control Plane through a TCP proxy that closes links idle for 400 ms. The host
 /// stays ready through idle time, reconnects after a partition severs every
 /// link, and then runs a Task exactly once.
 async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
@@ -2311,31 +2136,26 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     let root = directory.path();
     let tokens = Tokens::new();
     let pki = Pki::authority(root, "supertag-proxy-ca").await?;
-    let gateway_leaf = pki.leaf("gateway").await?;
+    let control_leaf = pki.leaf("control-plane").await?;
     let host_leaf = pki.leaf("worker-host").await?;
     let operator_leaf = pki.leaf("operator").await?;
 
     let mut command = binary(&["control-plane"]);
     command
         .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_DATABASE_URL", &database);
+    server_tls(&mut command, &control_leaf, &pki.ca());
     let mut control_plane = Service::spawn(command, root, "proxy-control-plane")?;
-    let private = format!("http://{}", control_plane.address().await?);
-    let mut command = binary(&["gateway", "--control-plane", &private]);
-    command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
-        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
-    server_tls(&mut command, &gateway_leaf, &pki.ca());
-    let mut gateway = Service::spawn(command, root, "proxy-gateway")?;
-    let gateway_address = gateway.address().await?;
-    let public = format!("https://{gateway_address}");
-    let proxy = IdleProxy::start(gateway_address, Duration::from_millis(400)).await?;
+    let address = control_plane.address().await?;
+    let public = format!("https://{address}");
+    let proxy = IdleProxy::start(address, Duration::from_millis(400)).await?;
     let proxied = format!("https://{}", proxy.address);
 
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
         command
@@ -2362,7 +2182,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
     let state = root.join("proxy-host");
-    let mut enroll = binary(&["host", "enroll", "proxy-host", "--gateway", &proxied]);
+    let mut enroll = binary(&["host", "enroll", "proxy-host", "--control-plane", &proxied]);
     enroll
         .arg("--state-directory")
         .arg(&state)
@@ -2372,7 +2192,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     assert_eq!(run_json(enroll).await?["host_id"], "proxy-host");
 
     let (adapter, launches) = recording_adapter(root, "proxy-host")?;
-    let mut command = binary(&["worker-host", "--gateway", &proxied]);
+    let mut command = binary(&["worker-host", "--control-plane", &proxied]);
     command
         .arg("--state-directory")
         .arg(&state)
@@ -2382,10 +2202,10 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     let mut host = Service::spawn(command, root, "proxy-worker-host")?;
 
     // Idle time. The host's claim connection carries traffic often enough to stay
-    // open; its other Gateway channels sit idle, and when the proxy closes them
+    // open; its other Control Plane channels sit idle, and when the proxy closes them
     // they reconnect on their next call. Neither stops the host.
     let host_ready = || {
-        let mut command = binary(&["get", "--gateway", &public, "host", "proxy-host"]);
+        let mut command = binary(&["get", "--control-plane", &public, "host", "proxy-host"]);
         command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
         run_json(command)
@@ -2459,7 +2279,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     );
     let launched = std::fs::read_to_string(&launches)?.lines().count();
     assert_eq!(launched, 1, "the adapter ran {launched} times");
-    ensure!(host.running()? && gateway.running()? && control_plane.running()?);
+    ensure!(host.running()? && control_plane.running()?);
     Ok(())
 }
 

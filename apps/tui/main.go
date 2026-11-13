@@ -1,5 +1,5 @@
 // Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it. When
-// `supertag` resolved a Gateway, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
+// `supertag` resolved a Control Plane, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
 package main
 
 import (
@@ -36,8 +36,8 @@ func main() {
 		targetFile = os.NewFile(3, "supertag-target")
 	}
 	os.Unsetenv(handoverVariable)
-	store, storeErr := defaultGatewayStore()
-	var profiles gatewayProfiles
+	store, storeErr := defaultControlPlaneStore()
+	var profiles controlPlaneProfiles
 	if storeErr == nil {
 		profiles, storeErr = store.load()
 	}
@@ -58,7 +58,7 @@ func main() {
 	launchContexts := append([]client.Target(nil), h.Contexts...)
 	if h.Protocol == "runtime.v2" {
 		connect = dialRuntimeV2(version)
-		h.Contexts = mergeGateways(h.Contexts, profiles.Gateways)
+		h.Contexts = mergeControlPlanes(h.Contexts, profiles.ControlPlanes)
 	}
 	a, err := newApp(ctx, connect, h.Contexts, h.Current)
 	if err != nil {
@@ -67,8 +67,8 @@ func main() {
 	}
 	defer a.stop()
 	if h.Protocol == "runtime.v2" {
-		a.gatewayStore = store
-		a.savedGateways = profiles.Gateways
+		a.controlPlaneStore = store
+		a.savedControlPlanes = profiles.ControlPlanes
 		// Only a real handover is a launch-specific connection. Saved-only startup
 		// must not retain a forgotten connection after switching away.
 		a.launchContexts = launchContexts
@@ -76,8 +76,8 @@ func main() {
 			a.launchContexts = nil
 		}
 		if storeErr != nil {
-			a.inner.notice = note{text: "Saved Gateways could not be read safely. This launch connection is still available.", err: true}
-			a.choiceErr = "Saved Gateways could not be read safely. Check the private profile file and its permissions."
+			a.inner.notice = note{text: "Saved Control Planes could not be read safely. This launch connection is still available.", err: true}
+			a.choiceErr = "Saved Control Planes could not be read safely. Check the private profile file and its permissions."
 		}
 	}
 	if _, err := tea.NewProgram(a).Run(); err != nil {

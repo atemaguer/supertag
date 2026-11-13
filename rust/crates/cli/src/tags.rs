@@ -28,7 +28,7 @@ pub enum TagCommand {
         dry_run: bool,
     },
     /// Change where a Tag works: add or remove its location on a connected surface. Its own
-    /// --gateway, --state-directory, and --file name the local configuration it edits.
+    /// --control-plane, --state-directory, and --file name the local configuration it edits.
     #[command(
         after_help = "The local Gateway serves one location per Surface Account and one per provider; remove a location before adding another."
     )]

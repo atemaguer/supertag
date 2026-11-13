@@ -2,7 +2,7 @@
 //!
 //! An Operator Token is a named credential the admin operator issues to one teammate or machine.
 //! The caller generates the secret and sends only its SHA-256 digest, so the Control Plane never
-//! stores or receives a secret. The Gateway resolves every presented token here on every call, so
+//! stores or receives a secret. The API tier resolves every presented token here on every call, so
 //! revocation and rotation take effect on the next call and on the next check of an open stream.
 
 use sqlx::{Row, any::AnyRow};

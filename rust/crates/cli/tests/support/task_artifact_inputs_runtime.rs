@@ -8,33 +8,14 @@ async fn interrupt_input_receipt(
     worker: impl Fn(&str) -> Command,
 ) -> Result<String> {
     use axum::middleware::{Next, from_fn};
-    use supertag_gateway::{Gateway, transfers::GatewayTransfers};
-    use tonic::{
-        service::Routes,
-        transport::{Endpoint, Server},
-    };
+    use tonic::codegen::Service as _;
+    use tonic::transport::{Endpoint, Server};
 
-    let channel = supertag_protocol::negotiation::connect(
-        Endpoint::from_shared(services.private.clone())?
-            .connect()
-            .await?,
-        supertag_protocol::v2::ServiceRole::Gateway,
-        supertag_protocol::v2::ServiceRole::ControlPlane,
-    )
-    .await?;
-    let gateway = Gateway::new(
-        channel,
-        services.gateway_token.clone(),
-        services.operator_token.clone(),
-        "operator:local".into(),
-    )?;
-    let transfers = GatewayTransfers::new(gateway.clone(), Some(root.join("blobs")))?
-        .with_artifact_volumes(
-            supertag_gateway::transfers::volumes::ArtifactVolumeMappings::new(vec![(
-                "inputs".into(),
-                root.join("volume"),
-            )])?,
-        )?;
+    // A relay in front of the Control Plane that never answers the artifact settlement, so the
+    // host stays at the input-preparation boundary.
+    let upstream = Endpoint::from_shared(services.public.clone())?
+        .connect()
+        .await?;
     let response = Arc::new(tokio::sync::Notify::new());
     let gate = {
         let response = response.clone();
@@ -52,15 +33,27 @@ async fn interrupt_input_receipt(
             }
         })
     };
-    let routes: Routes = Routes::new(gateway.worker_host_service())
-        .add_service(gateway.host_enrollment_service())
-        .add_service(gateway.negotiation_service())
-        .add_service(transfers.attempt_artifacts_service())
-        .add_service(transfers.artifact_transfer_service())
-        .add_service(transfers.service())
-        .into_axum_router()
-        .layer(gate)
-        .into();
+    let relay = axum::Router::new()
+        .fallback(move |request: axum::extract::Request| {
+            let mut upstream = upstream.clone();
+            async move {
+                let (parts, body) = request.into_parts();
+                let request = axum::http::Request::from_parts(parts, tonic::body::Body::new(body));
+                let answered = async {
+                    std::future::poll_fn(|context| upstream.poll_ready(context)).await?;
+                    upstream.call(request).await
+                };
+                match answered.await {
+                    Ok(response) => response.map(axum::body::Body::new),
+                    Err(_) => axum::http::Response::builder()
+                        .status(502)
+                        .body(axum::body::Body::empty())
+                        .expect("static response"),
+                }
+            }
+        })
+        .layer(gate);
+    let routes = tonic::service::Routes::from(relay);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let endpoint = format!("http://{}", listener.local_addr()?);
     let runner = tokio::spawn(
@@ -168,7 +161,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     let worker = |endpoint: &str| {
         let mut host = command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             endpoint,
             "--once",
             "--harness",

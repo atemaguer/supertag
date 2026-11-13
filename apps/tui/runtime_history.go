@@ -86,7 +86,7 @@ func (m model) loadRuntimeHistory(tag, name string) tea.Cmd {
 			if slices.ContainsFunc(page, func(item *operatorv1.Message) bool {
 				return item.GetSessionId() != pageSession
 			}) {
-				msg.err = errors.New("Gateway conversation changed while loading history")
+				msg.err = errors.New("Control Plane conversation changed while loading history")
 				return msg
 			}
 			messages = append(messages, page...)
@@ -102,7 +102,7 @@ func (m model) loadRuntimeHistory(tag, name string) tea.Cmd {
 				return msg
 			}
 			if seen[next] {
-				msg.err = errors.New("Gateway conversation cursor did not advance")
+				msg.err = errors.New("Control Plane conversation cursor did not advance")
 				return msg
 			}
 			seen[next] = true
@@ -154,7 +154,7 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// mergeOrder uses the Gateway's order within the latest page and retains
+// mergeOrder uses the Control Plane's order within the latest page and retains
 // messages already displayed after they fall off that page.
 func (h *runtimeHistory) mergeOrder(items []client.HistoryItem) {
 	page := make([]string, 0, len(items))

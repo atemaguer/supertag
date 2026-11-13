@@ -61,7 +61,7 @@ async fn success(mut command: Command) -> Result<Vec<u8>> {
 
 async fn operator(args: &[&str], gateway: &str, token: &str) -> Result<Value> {
     let (subcommand, args) = args.split_first().context("operator subcommand required")?;
-    let mut command = command(&[subcommand, "--gateway", gateway]);
+    let mut command = command(&[subcommand, "--control-plane", gateway]);
     command.args(args).env("SUPERTAG_OPERATOR_TOKEN", token);
     Ok(serde_json::from_slice(&success(command).await?)?)
 }
@@ -137,12 +137,8 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (mut control, private) = service(control).await?;
-    let mut gateway = command(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (mut gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (mut control, public) = service(control).await?;
 
     let mut tasks = Vec::new();
     for (tag, harness) in [("python", "openai-agents"), ("node", "claude-code")] {
@@ -188,7 +184,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
         let host_state = directory.path().join(harness);
         let mut host = command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &public,
             "--once",
             "--harness",
@@ -232,16 +228,12 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
                 .starts_with("adapter-attempt-")
         }));
     }
-    gateway.kill().await?;
     control.kill().await?;
     Ok(())
 }
 
 struct LanguageServices {
     control: Child,
-    gateway: Child,
-    private: String,
-    gateway_token: String,
     public: String,
     operator_token: String,
     host_token: String,
@@ -262,27 +254,20 @@ impl LanguageServices {
         let host_token = Uuid::new_v4().to_string();
         let mut control = command(&["control-plane"]);
         control
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env("SUPERTAG_DATABASE_URL", database);
-        let (control, private) = service(control).await?;
-        let mut gateway = command(&["gateway", "--control-plane", &private]);
-        gateway
-            .arg("--checkpoint-directory")
+            .arg("--transfer-directory")
             .arg(directory.join("blobs"))
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env("SUPERTAG_DATABASE_URL", database);
         if let Some(volume) = volume {
-            gateway
+            control
                 .arg("--artifact-volume")
                 .arg(format!("inputs={}", volume.display()));
         }
-        let (gateway, public) = service(gateway).await?;
+        let (control, public) = service(control).await?;
         Ok(Self {
             control,
-            gateway,
-            private,
-            gateway_token,
             public,
             operator_token,
             host_token,
@@ -309,7 +294,7 @@ impl LanguageServices {
     ) -> Command {
         let mut host = command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &self.public,
             "--harness",
             harness,
@@ -327,7 +312,6 @@ impl LanguageServices {
     }
 
     async fn stop(mut self) -> Result<()> {
-        self.gateway.kill().await?;
         self.control.kill().await?;
         Ok(())
     }
@@ -356,7 +340,7 @@ async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> 
         "usage",
         task["task_id"].as_str().context("Task ID missing")?,
         task["attempt_id"].as_str().context("Attempt ID missing")?,
-        "--gateway",
+        "--control-plane",
         &services.public,
     ]);
     command.env("SUPERTAG_OPERATOR_TOKEN", &services.operator_token);

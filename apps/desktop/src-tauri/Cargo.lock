@@ -256,13 +256,10 @@ checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core",
  "bytes",
- "form_urlencoded",
  "futures-util",
  "http 1.5.0",
  "http-body 1.1.0",
  "http-body-util",
- "hyper",
- "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -270,15 +267,10 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
  "sync_wrapper",
- "tokio",
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -297,7 +289,6 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -860,12 +851,6 @@ dependencies = [
  "quote",
  "syn 3.0.10",
 ]
-
-[[package]]
-name = "data-encoding"
-version = "2.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dbus"
@@ -3488,18 +3473,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
 dependencies = [
  "libc",
- "rand_chacha 0.3.1",
+ "rand_chacha",
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
-dependencies = [
- "rand_chacha 0.9.0",
- "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -3524,31 +3499,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_chacha"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
-dependencies = [
- "ppv-lite86",
- "rand_core 0.9.5",
-]
-
-[[package]]
 name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
-dependencies = [
- "getrandom 0.3.4",
 ]
 
 [[package]]
@@ -4080,17 +4036,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_path_to_error"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
-dependencies = [
- "itoa",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -4642,6 +4587,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "supertag-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "aws-credential-types",
+ "aws-sigv4",
+ "http 1.5.0",
+ "hyper-util",
+ "libc",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "supertag-protocol",
+ "supertag-workspaces",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "supertag-control-plane"
 version = "0.1.0"
 dependencies = [
@@ -4677,8 +4651,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "supertag-api",
  "supertag-control-plane",
- "supertag-gateway",
  "supertag-protocol",
  "tauri",
  "tauri-build",
@@ -4687,43 +4661,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
-]
-
-[[package]]
-name = "supertag-gateway"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "aws-credential-types",
- "aws-sigv4",
- "axum",
- "base64 0.22.1",
- "chrono",
- "futures-util",
- "hex",
- "hmac 0.12.1",
- "libc",
- "prost",
- "pulldown-cmark",
- "pulldown-cmark-to-cmark",
- "reqwest 0.12.28",
- "ring",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
- "supertag-protocol",
- "supertag-workspaces",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite",
- "tokio-util",
- "tonic",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -5324,22 +5261,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
-dependencies = [
- "futures-util",
- "log",
- "rustls",
- "rustls-native-certs",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls",
- "tungstenite",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5497,6 +5419,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonic-health"
+version = "0.14.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc97d645691d64d96db1afe386d0d2918ac84ab56e2c91e153f22f6349a378cd"
+dependencies = [
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+]
+
+[[package]]
 name = "tonic-prost"
 version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5633,25 +5568,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tungstenite"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
-dependencies = [
- "bytes",
- "data-encoding",
- "http 1.5.0",
- "httparse",
- "log",
- "rand 0.9.5",
- "rustls",
- "rustls-pki-types",
- "sha1",
- "thiserror 2.0.21",
- "utf-8",
-]
-
-[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5732,12 +5648,6 @@ dependencies = [
  "serde",
  "url",
 ]
-
-[[package]]
-name = "utf-8"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "utf8_iter"

@@ -2,7 +2,7 @@ import { ArrowUp, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { Gateway, Tag, TaskEvent, WatchUpdate } from "../gateway";
+import type { ControlPlane, Tag, TaskEvent, WatchUpdate } from "../control-plane";
 import {
   earlierHistory,
   emptyHistory,
@@ -26,7 +26,7 @@ export interface Draft {
 }
 
 interface ConversationProps {
-  gateway: Gateway;
+  controlPlane: ControlPlane;
   watch?: WatchFeed;
   tag: Tag;
   name: string;
@@ -41,7 +41,7 @@ function newOperationId() {
 }
 
 export function ConversationPane({
-  gateway,
+  controlPlane,
   watch,
   tag,
   name,
@@ -80,7 +80,7 @@ export function ConversationPane({
       const started = revision.current;
       try {
         const page = await readHistory(
-          (cursor) => gateway.messages(tagId, name, cursor),
+          (cursor) => controlPlane.messages(tagId, name, cursor),
           currentHistory.current,
           signal,
         );
@@ -98,7 +98,7 @@ export function ConversationPane({
         }
       }
     },
-    [gateway, tagId, name, setHistory],
+    [controlPlane, tagId, name, setHistory],
   );
   const historyChanged = useCallback(
     (update: WatchUpdate) =>
@@ -124,7 +124,7 @@ export function ConversationPane({
     if (!expected.cursor || paging) return;
     setPaging(true);
     try {
-      const page = await gateway.messages(tagId, name, expected.cursor);
+      const page = await controlPlane.messages(tagId, name, expected.cursor);
       if (!active.current) return;
       const previous = currentHistory.current;
       const next = earlierHistory(previous, expected, page);
@@ -148,7 +148,7 @@ export function ConversationPane({
     onWriteChange(1);
     setDraft({ text: draft.text, operationId, sending: true });
     try {
-      const message = await gateway.send(tagId, name, text, operationId);
+      const message = await controlPlane.send(tagId, name, text, operationId);
       setDraft({ text: "" });
       if (active.current) {
         revision.current++;
@@ -215,7 +215,7 @@ export function ConversationPane({
                   message={message}
                   activeTask={activeTask}
                   onActivity={viewActivity}
-                  onSaveArtifact={gateway.saveArtifact}
+                  onSaveArtifact={controlPlane.saveArtifact}
                 />
               ))}
             </div>
@@ -269,7 +269,7 @@ export function ConversationPane({
         {activeTask && (
           <ActivityPane
             key={activeTask}
-            gateway={gateway}
+            controlPlane={controlPlane}
             tagId={tagId}
             taskId={activeTask}
             onClose={() => {
@@ -306,12 +306,12 @@ function EmptyConversation({ tag }: { tag: Tag }) {
 }
 
 function ActivityPane({
-  gateway,
+  controlPlane,
   tagId,
   taskId,
   onClose,
 }: {
-  gateway: Gateway;
+  controlPlane: ControlPlane;
   tagId: string;
   taskId: string;
   onClose(): void;
@@ -327,7 +327,7 @@ function ActivityPane({
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const page = await gateway.events(tagId, taskId, after.current);
+        const page = await controlPlane.events(tagId, taskId, after.current);
         if (signal.aborted) return;
         const next = page.filter((entry) => entry.sequence > after.current);
         const last = next.at(-1);
@@ -342,7 +342,7 @@ function ActivityPane({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [gateway, tagId, taskId],
+    [controlPlane, tagId, taskId],
   );
   usePolling(refresh, interval);
 

@@ -1,4 +1,4 @@
-//! Declarative organization configuration over the authenticated Gateway.
+//! Declarative organization configuration over the authenticated Control Plane API.
 use std::{
     collections::BTreeSet,
     fs,

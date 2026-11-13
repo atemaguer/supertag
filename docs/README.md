@@ -158,6 +158,7 @@ Use these pages when you are implementing an integration, protocol, or Control P
 - [Context resolution](reference/context-resolution.md) — how declared knowledge becomes Worker input
 - [Objective coordination reference](reference/coordination.md) — Objective, Team, Mailbox, Workstream, budget, and completion rules
 - [Worker reference](reference/worker.md) — execution contracts, events, continuity, and failure behavior
+- [Connector contract](reference/connector-contract.md) — how a connector in its own process admits surface events and delivers replies
 - [Devcontainer settings for remote workspaces](reference/devcontainer-subset.md) — supported repository toolchain settings and refusals
 - [Scheduling and interrupted execution](reference/scheduling-and-recovery.md) — Worker Host selection, unknown outcomes, and reclaiming capacity
 - [Artifacts](reference/artifacts.md) — storage, limits, handoff, and custom Worker integration

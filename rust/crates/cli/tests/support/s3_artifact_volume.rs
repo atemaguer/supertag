@@ -131,10 +131,10 @@ async fn object(
     }
 }
 
-fn mapped_gateway(
+fn mapped_plane(
     credentials: &Credentials,
     root: &Path,
-    private: &str,
+    database: &str,
     endpoint: &str,
     source: &str,
 ) -> Result<Command> {
@@ -149,7 +149,7 @@ fn mapped_gateway(
             "credentialEnvPrefix": "VOLUME_TEST"
         }]))?,
     )?;
-    let mut command = gateway(credentials, root, private, false);
+    let mut command = plane(credentials, root, database, false);
     command
         .arg("--artifact-volume")
         .arg(format!("aaa-file={}", root.join("volume").display()))
@@ -207,11 +207,10 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     std::fs::create_dir(&volume_path)?;
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(mapped_gateway(
+    let (mut control, public) = service(mapped_plane(
         &credentials,
         &root,
-        &private,
+        &database,
         &endpoint,
         "s3://evidence-bucket/wrong-prefix",
     )?)
@@ -251,11 +250,11 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
             .is_empty()
     );
 
-    stop(&mut ingress).await?;
-    let (mut ingress, public) = service(mapped_gateway(
+    stop(&mut control).await?;
+    let (mut control, public) = service(mapped_plane(
         &credentials,
         &root,
-        &private,
+        &database,
         &endpoint,
         SOURCE,
     )?)
@@ -333,14 +332,12 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     assert_eq!(object_state.lock().unwrap().reads, 4);
     // A bad first candidate cannot shadow the independently verified later copy.
     std::fs::write(&file_path, &divergence)?;
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(mapped_gateway(
+    let (mut control, public) = service(mapped_plane(
         &credentials,
         &root,
-        &private,
+        &database,
         &endpoint,
         SOURCE,
     )?)
@@ -386,7 +383,6 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
         let state = object_state.lock().unwrap();
         assert_eq!((state.writes, state.invalid_requests), (2, 0));
     }
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     server.abort();
     Ok(())

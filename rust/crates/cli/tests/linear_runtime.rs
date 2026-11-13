@@ -372,7 +372,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_LINEAR_API_URL", &mock.endpoint);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, private.to_owned(), endpoints[1].clone()))
 }
 fn payload() -> Value {
     let timestamp = std::time::SystemTime::now()
@@ -454,7 +455,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         public,
         "--adapter",
         ADAPTER,
@@ -771,7 +772,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "get",
-            "--gateway",
+            "--control-plane",
             &public,
             "replies",
             "--account",
@@ -786,8 +787,11 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
     assert_eq!(list["deliveries"][0]["reply_id"], id);
     assert_eq!(list["deliveries"][0]["state"], "REPLY_STATE_UNCERTAIN");
     assert_eq!(list["next_before_order"], 0);
-    let inspected =
-        operator_cli(&credentials, &["get", "--gateway", &public, "reply", &id]).await?;
+    let inspected = operator_cli(
+        &credentials,
+        &["get", "--control-plane", &public, "reply", &id],
+    )
+    .await?;
     assert_eq!(inspected["audit"][0]["kind"], "claim-expired");
     mock.responses.add_permits(1);
     let decision = ResolveReplyRequest {
@@ -801,7 +805,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "reply",
-            "--gateway",
+            "--control-plane",
             &public,
             "resolve",
             &id,

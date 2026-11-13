@@ -52,7 +52,7 @@ impl Credentials {
     }
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--gateway", public]);
+        command.args(["--control-plane", public]);
         command
     }
     fn worker(&self, public: &str, state: &Path, source: Option<&Path>) -> Command {
@@ -67,7 +67,7 @@ impl Credentials {
     ) -> Command {
         let mut command = self.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             public,
             "--adapter",
             ADAPTER,
@@ -90,10 +90,10 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     delivered_commit_review_survives_restart_and_notifies_owner_once;
     #[tokio::test]
-    artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery;
+    artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspace_delivery;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    workspace_delivery_and_cross_host_continuation_survive_gateway_restart;
+    workspace_delivery_and_cross_host_continuation_survive_control_plane_restart;
 }
 
 async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
@@ -111,21 +111,15 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     let credentials = Credentials::new();
     let plane_command = |listen: &str| {
         let mut plane = credentials.command(&["control-plane", "--listen", listen]);
-        plane.env("SUPERTAG_DATABASE_URL", &database);
+        plane
+            .env("SUPERTAG_DATABASE_URL", &database)
+            .arg("--transfer-directory")
+            .arg(root.join("transfers"));
         plane
     };
-    let (mut plane, private) = service(plane_command("127.0.0.1:0")).await?;
-    let gateway_command = |listen: &str| {
-        let mut gateway =
-            credentials.command(&["gateway", "--control-plane", &private, "--listen", listen]);
-        gateway
-            .arg("--checkpoint-directory")
-            .arg(root.join("gateway-artifacts"));
-        gateway
-    };
-    let (mut gateway, public) = service(gateway_command("127.0.0.1:0")).await?;
+    let (mut plane, public) = service(plane_command("127.0.0.1:0")).await?;
     let cli = |args: &[&str]| {
-        let mut command = credentials.command(&[args[0], "--gateway", &public]);
+        let mut command = credentials.command(&[args[0], "--control-plane", &public]);
         command.args(&args[1..]);
         command
     };
@@ -215,10 +209,8 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     assert_eq!(pending[0]["reviewer_tag_id"], "reviewer");
     assert!(pending[0]["verdict"].is_null());
 
-    gateway.kill().await?;
     plane.kill().await?;
-    (plane, _) = service(plane_command(private.trim_start_matches("http://"))).await?;
-    (gateway, _) = service(gateway_command(public.trim_start_matches("http://"))).await?;
+    (plane, _) = service(plane_command(public.trim_start_matches("http://"))).await?;
     assert_eq!(json(list()).await?["reviews"][0], pending[0]);
     success(credentials.worker_with_mode(
         &public,
@@ -270,7 +262,6 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     assert_eq!(notice["session_id"], session);
     let objective = json(cli(&["get", "objective", "release"])).await?;
     assert_eq!(objective["status"], "OBJECTIVE_STATUS_WORKING");
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }
@@ -344,19 +335,19 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     )?;
 
     let credentials = Credentials::new();
-    let mut plane = credentials.command(&["control-plane"]);
-    plane.env("SUPERTAG_DATABASE_URL", database);
-    let (mut plane, private) = service(plane).await?;
-    let artifact_store = directory.join("gateway-artifacts");
-    let gateway_command = |listen: Option<&str>| {
-        let mut command = credentials.command(&["gateway", "--control-plane", &private]);
-        command.arg("--checkpoint-directory").arg(&artifact_store);
+    let artifact_store = directory.join("transfers");
+    let plane_command = |listen: Option<&str>| {
+        let mut command = credentials.command(&["control-plane"]);
+        command
+            .env("SUPERTAG_DATABASE_URL", database)
+            .arg("--transfer-directory")
+            .arg(&artifact_store);
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
         }
         command
     };
-    let (mut gateway, public) = service(gateway_command(None)).await?;
+    let (mut plane, public) = service(plane_command(None)).await?;
     let tag = json(credentials.operator(
         &[
             "tag",
@@ -412,14 +403,14 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let first_head = field(delivery, "head_commit")?.to_owned();
     assert_ne!(first_head, base);
 
-    // Restart the public artifact service before downloading or continuing.
-    gateway.kill().await?;
-    gateway.wait().await?;
+    // Restart the Control Plane, which serves transfers, before downloading or continuing.
+    plane.kill().await?;
+    plane.wait().await?;
     let listen = public
         .strip_prefix("http://")
         .context("invalid public URL")?;
-    let (restarted, restored_public) = service(gateway_command(Some(listen))).await?;
-    gateway = restarted;
+    let (restarted, restored_public) = service(plane_command(Some(listen))).await?;
+    plane = restarted;
     assert_eq!(restored_public, public);
     let patch = directory.join("review.patch");
     let bundle = directory.join("review.bundle");
@@ -567,21 +558,19 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         "uncommitted private note\n"
     );
     assert!(!source.join("artifact.bin").exists());
-    gateway.kill().await?;
-    gateway.wait().await?;
     plane.kill().await?;
     plane.wait().await?;
     Ok(())
 }
 
-async fn workspace_delivery_and_cross_host_continuation_survive_gateway_restart(
+async fn workspace_delivery_and_cross_host_continuation_survive_control_plane_restart(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     exercise(&database, directory.path()).await
 }
 
-async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery(
+async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspace_delivery(
     database: String,
 ) -> Result<()> {
     let temporary = tempfile::tempdir()?;
@@ -594,20 +583,18 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     git(&source, &["commit", "--quiet", "-m", "base"]).await?;
     let base = git(&source, &["rev-parse", "HEAD"]).await?;
     let credentials = Credentials::new();
-    let mut command = credentials.command(&["control-plane"]);
-    command.env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, private) = service(command).await?;
-    let gateway_command = |listen: Option<&str>| {
-        let mut command = credentials.command(&["gateway", "--control-plane", &private]);
+    let plane_command = |listen: Option<&str>| {
+        let mut command = credentials.command(&["control-plane"]);
         command
-            .arg("--checkpoint-directory")
+            .env("SUPERTAG_DATABASE_URL", &database)
+            .arg("--transfer-directory")
             .arg(root.join("artifacts"));
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
         }
         command
     };
-    let (mut gateway, public) = service(gateway_command(None)).await?;
+    let (mut plane, public) = service(plane_command(None)).await?;
     json(credentials.operator(
         &[
             "tag",
@@ -655,9 +642,14 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
             let produced = field(&result, "result")?
                 .strip_prefix("artifact:")
                 .context("missing produced artifact")?;
-            let metadata =
-                json(credentials.command(&["get", "--gateway", &public, "artifact", produced]))
-                    .await?;
+            let metadata = json(credentials.command(&[
+                "get",
+                "--control-plane",
+                &public,
+                "artifact",
+                produced,
+            ]))
+            .await?;
             assert_eq!(
                 metadata["summary"]["description"]["title"],
                 "Reusable evidence from https://[REDACTED]@git.example/repo.git",
@@ -667,20 +659,23 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
                 metadata["summary"]["description"]["summary"], "auth Basic [REDACTED]",
                 "{metadata}"
             );
-            gateway.kill().await?;
-            gateway.wait().await?;
-            gateway = service(gateway_command(Some(
-                public.strip_prefix("http://").unwrap(),
-            )))
-            .await?
-            .0;
+            plane.kill().await?;
+            plane.wait().await?;
+            plane = service(plane_command(Some(public.strip_prefix("http://").unwrap())))
+                .await?
+                .0;
         } else {
             let derived = field(&result, "result")?
                 .strip_prefix("derived:")
                 .context("missing derived artifact")?;
-            let metadata =
-                json(credentials.command(&["get", "--gateway", &public, "artifact", derived]))
-                    .await?;
+            let metadata = json(credentials.command(&[
+                "get",
+                "--control-plane",
+                &public,
+                "artifact",
+                derived,
+            ]))
+            .await?;
             assert_eq!(metadata["inputs"].as_array().unwrap().len(), 1);
             assert_eq!(
                 metadata["inputs"][0]["paths"],
@@ -760,7 +755,6 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
     assert!(cancelled["workspace_delivery"].is_null());
     assert!(!source.join("evidence.txt").exists() && !source.join("inputs").exists());
-    gateway.kill().await?;
     plane.kill().await?;
     Ok(())
 }

@@ -115,7 +115,7 @@ impl Bridge {
         }
     }
 
-    /// Repeats an idempotent upstream call across a transient Gateway partition
+    /// Repeats an idempotent upstream call across a transient Control Plane partition
     /// until execution authority ends, so the harness does not fail for a
     /// disconnect its Worker Host is still allowed to ride out.
     async fn retry_upstream<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<R, Status>

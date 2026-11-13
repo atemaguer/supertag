@@ -54,9 +54,9 @@ use clap::{Args, Parser, Subcommand};
 use harness::{AdapterOptions, CodexAdapterArgs};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use supertag_control_plane::{ControlPlane, OperatorWatch};
+use supertag_api::{Api, transfers::ApiTransfers};
+use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
-    Gateway, GatewayWatch,
     credential_vault::CredentialVault,
     github::{
         Github, GithubAppConfig, GithubAuthentication, GithubConfig,
@@ -66,7 +66,6 @@ use supertag_gateway::{
     linear::{Linear, LinearConfig},
     microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
     slack::{Slack, SlackConfig},
-    transfers::GatewayTransfers,
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
@@ -76,18 +75,11 @@ use supertag_protocol::{
         artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
-        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
-        attempt_work_sessions_server::AttemptWorkSessionsServer,
-        attempt_workstreams_server::AttemptWorkstreamsServer,
+        attempt_inputs_server::AttemptInputsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
-        host_enrollment_server::HostEnrollmentServer, inbox_server::InboxServer,
-        live_inputs_server::LiveInputsServer, mailbox_server::MailboxServer,
-        objectives_server::ObjectivesServer, operator_client::OperatorClient,
-        operator_events_server::OperatorEventsServer, operator_server::OperatorServer,
-        policy_catalog_server::PolicyCatalogServer,
-        surface_policy_catalog_server::SurfacePolicyCatalogServer, teams_server::TeamsServer,
-        transfers_server::TransfersServer, work_sessions_server::WorkSessionsServer,
+        live_inputs_server::LiveInputsServer, objectives_server::ObjectivesServer,
+        operator_client::OperatorClient, operator_server::OperatorServer,
         worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
@@ -99,22 +91,26 @@ use tonic::Request;
 #[derive(Parser)]
 #[command(name = "supertag", version)]
 struct Cli {
-    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app,
+    /// Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app,
     /// for the operator command that follows.
-    #[arg(long = "gateway", id = "root_gateway", value_name = "URL|NAME")]
-    gateway: Option<String>,
+    #[arg(
+        long = "control-plane",
+        id = "root_control_plane",
+        value_name = "URL|NAME"
+    )]
+    control_plane: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
-/// The Gateway selected before the command name, if any.
-static ROOT_GATEWAY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// The Control Plane selected before the command name, if any.
+static ROOT_CONTROL_PLANE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Where an operator command connects. Both options are global, so a command group accepts them
-/// before or after its subcommand: `supertag get --gateway G tag` or `supertag get tag --gateway G`.
+/// before or after its subcommand: `supertag get --control-plane C tag` or `supertag get tag --control-plane C`.
 #[derive(Args)]
 struct Connection {
-    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app.
+    /// Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app.
     /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
     #[arg(
         long,
@@ -122,8 +118,8 @@ struct Connection {
         value_name = "URL|NAME",
         conflicts_with = "state_directory"
     )]
-    gateway: Option<String>,
-    /// Use the local services in this state directory instead of a Gateway.
+    control_plane: Option<String>,
+    /// Use the local services in this state directory instead of a Control Plane URL.
     #[arg(long, global = true)]
     state_directory: Option<PathBuf>,
 }
@@ -154,14 +150,14 @@ enum Command {
         #[command(subcommand)]
         command: deployment::CheckCommand,
     },
-    /// Check a running deployment through its public Gateway.
+    /// Check a running deployment through its public Control Plane endpoint.
     Verify {
         #[command(subcommand)]
         command: deployment::VerifyCommand,
     },
-    /// Preview an organization manifest through the Gateway.
+    /// Preview an organization manifest through the Control Plane.
     Diff(manifests::ManifestArgs),
-    /// Apply an organization manifest through the Gateway.
+    /// Apply an organization manifest through the Control Plane.
     Apply(manifests::ManifestArgs),
     /// Stop further provider writes of a GitHub publication.
     GithubPublication {
@@ -315,9 +311,9 @@ enum Command {
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
-        /// Address the local Gateway listens on. Port 0 picks a free port.
+        /// Address the local Control Plane listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
-        gateway_listen: SocketAddr,
+        control_plane_listen: SocketAddr,
     },
     /// Stop this machine's SuperTag services, draining local Worker Hosts first.
     Down(lifecycle::DownArgs),
@@ -341,7 +337,8 @@ enum Command {
         #[arg(long)]
         services: bool,
     },
-    /// Run the private service that stores work and schedules execution.
+    /// Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways,
+    /// and the service that stores work and schedules execution.
     ControlPlane {
         /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
@@ -351,10 +348,29 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
+        /// Private directory for files Worker Hosts transfer through the Control Plane: Session
+        /// checkpoints, workspace bundles, and GitHub publication blobs. Replicas of the public
+        /// API must share it.
+        #[arg(long)]
+        transfer_directory: Option<PathBuf>,
+        /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
+        #[arg(long = "artifact-volume")]
+        artifact_volumes: Vec<String>,
+        /// JSON file with explicit S3-compatible Volume mappings and credential environment names.
+        #[arg(
+            long,
+            long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
+        )]
+        artifact_s3_volumes: Option<PathBuf>,
+        /// Private scratch for GitHub source bundles, using the GitHub account in the
+        /// `SUPERTAG_GITHUB_*` variables. Requires the transfer directory.
+        #[arg(long, requires = "transfer_directory")]
+        github_workspace_directory: Option<PathBuf>,
     },
-    /// Run the public gRPC service for operators and Worker Hosts.
+    /// Run a Gateway: collaboration surface webhooks and connections, reply delivery, and
+    /// operator notifications, as a client of the Control Plane.
     Gateway {
-        /// Address this service listens on. Port 0 picks a free port.
+        /// Address for the test notification. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
         /// Also accept gRPC carried in a WebSocket on this address, for hosts that only
@@ -362,21 +378,9 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
-        /// Private Control Plane URL that this Gateway forwards to.
+        /// Control Plane URL this Gateway connects to.
         #[arg(long)]
         control_plane: String,
-        /// Private directory for Session checkpoint archives that Worker Hosts transfer through this Gateway.
-        #[arg(long)]
-        checkpoint_directory: Option<PathBuf>,
-        /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
-        #[arg(long = "artifact-volume")]
-        artifact_volumes: Vec<String>,
-        /// JSON file with explicit S3-compatible Volume mappings and credential environment names.
-        #[arg(
-            long,
-            long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Gateway reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
-        )]
-        artifact_s3_volumes: Option<PathBuf>,
         /// Address for Slack webhooks. Requires the Slack state directory.
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
@@ -389,11 +393,6 @@ enum Command {
         /// Private directory for GitHub connector state and reply receipts.
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
-        /// Private scratch for GitHub source bundles, using the configured GitHub account.
-        /// The GitHub Surface connector reads the same `SUPERTAG_GITHUB_*` variables, so one
-        /// Gateway serves either a GitHub Workspace or a GitHub location, not both.
-        #[arg(long, conflicts_with = "github_listen")]
-        github_workspace_directory: Option<PathBuf>,
         /// Address for Linear webhooks. Requires the Linear state directory.
         #[arg(long, requires = "linear_state_directory")]
         linear_listen: Option<SocketAddr>,
@@ -417,12 +416,12 @@ enum Command {
         )]
         notify: Vec<String>,
     },
-    /// Open the terminal UI for a saved or explicitly configured Gateway.
+    /// Open the terminal UI for a saved or explicitly configured Control Plane.
     Tui {
-        /// Gateway URL or the name of a saved Gateway.
+        /// Control Plane URL or the name of a saved Control Plane.
         #[arg(long, conflicts_with = "state_directory")]
-        gateway: Option<String>,
-        /// Use the local services in this state directory instead of a Gateway.
+        control_plane: Option<String>,
+        /// Use the local services in this state directory instead of a Control Plane URL.
         #[arg(long)]
         state_directory: Option<PathBuf>,
         /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
@@ -434,9 +433,9 @@ enum Command {
     },
     /// Connect a Worker Host and run accepted Tasks through an adapter.
     WorkerHost {
-        /// Gateway URL this Worker Host connects to.
+        /// Control Plane URL this Worker Host connects to.
         #[arg(long)]
-        gateway: String,
+        control_plane: String,
         /// Private directory for this Worker Host's enrollment and execution journal.
         #[arg(long)]
         state_directory: PathBuf,
@@ -539,22 +538,22 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: auth_keys::AuthKeyCommand,
     },
-    /// Check an operator token against a Gateway, then save the Gateway under a name for
-    /// `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
+    /// Check an operator token against a Control Plane, then save the Control Plane under a name
+    /// for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
     /// from standard input when that is not set.
     Connect {
-        /// The Gateway origin, such as https://supertag.example.com.
+        /// The Control Plane origin, such as https://supertag.example.com.
         url: String,
         /// The name to save it under.
         #[arg(long)]
         name: String,
-        /// Replace a Gateway already saved under this name for the same origin.
+        /// Replace a Control Plane already saved under this name for the same origin.
         #[arg(long)]
         replace: bool,
-        /// PEM file of the certificate authority that signed the Gateway's TLS certificate.
+        /// PEM file of the certificate authority that signed the Control Plane's TLS certificate.
         #[arg(long)]
         server_ca_file: Option<PathBuf>,
-        /// PEM client certificate for a Gateway that requires mutual TLS.
+        /// PEM client certificate for a Control Plane that requires mutual TLS.
         #[arg(long, requires = "client_key_file")]
         client_cert_file: Option<PathBuf>,
         /// PEM private key of the client certificate.
@@ -746,13 +745,13 @@ fn dispatch(cli: Cli) -> Result<()> {
     let command = match cli.command {
         Some(command) => command,
         None => Command::Tui {
-            gateway: None,
+            control_plane: None,
             state_directory: None,
             binary: None,
             workspace: None,
         },
     };
-    if let Some(gateway) = cli.gateway {
+    if let Some(control_plane) = cli.control_plane {
         ensure!(
             !matches!(
                 command,
@@ -770,12 +769,13 @@ fn dispatch(cli: Cli) -> Result<()> {
                         command: host_status::HostCommand::Enroll { .. },
                         ..
                     }
+                    | Command::Test { .. }
                     | Command::CodexAdapter(_)
                     | Command::AdapterGuardian { .. }
             ),
-            "--gateway before the command applies only to operator commands"
+            "--control-plane before the command applies only to operator commands"
         );
-        let _ = ROOT_GATEWAY.set(gateway);
+        let _ = ROOT_CONTROL_PLANE.set(control_plane);
     }
     match command {
         Command::AdapterGuardian {
@@ -913,7 +913,7 @@ async fn run(command: Command) -> Result<()> {
             force,
             adapter,
             skill_catalog,
-            gateway_listen,
+            control_plane_listen,
         } => {
             let state_directory = local_config::state_directory(state_directory)?;
             let config = local_config::load(file, &state_directory)?;
@@ -936,7 +936,7 @@ async fn run(command: Command) -> Result<()> {
                 ensure!(
                     !adapter.has_options()
                         && skill_catalog.is_none()
-                        && gateway_listen == "127.0.0.1:0".parse::<SocketAddr>()?,
+                        && control_plane_listen == "127.0.0.1:0".parse::<SocketAddr>()?,
                     "configure adapters and listeners in the services file when using local configuration"
                 );
                 local::configured(config, state_directory, termination_signal()).await?;
@@ -946,7 +946,7 @@ async fn run(command: Command) -> Result<()> {
                         state_directory,
                         adapter,
                         skill_catalog,
-                        gateway_listen,
+                        control_plane_listen,
                         fingerprint: lifecycle::flags_fingerprint(&args),
                     },
                     termination_signal(),
@@ -957,19 +957,31 @@ async fn run(command: Command) -> Result<()> {
         Command::ControlPlane {
             listen,
             websocket_listen,
-        } => control_plane(listen, websocket_listen).await?,
+            transfer_directory,
+            artifact_volumes,
+            artifact_s3_volumes,
+            github_workspace_directory,
+        } => {
+            control_plane(
+                listen,
+                websocket_listen,
+                ControlPlaneOptions {
+                    transfer_directory,
+                    artifact_volumes,
+                    artifact_s3_volumes,
+                    github_workspace: github_workspace_directory,
+                },
+            )
+            .await?
+        }
         Command::Gateway {
             listen,
             websocket_listen,
             control_plane,
-            checkpoint_directory,
-            artifact_volumes,
-            artifact_s3_volumes,
             slack_listen,
             slack_state_directory,
             github_listen,
             github_state_directory,
-            github_workspace_directory,
             linear_listen,
             linear_state_directory,
             lark_state_directory,
@@ -981,13 +993,9 @@ async fn run(command: Command) -> Result<()> {
                 listen,
                 websocket_listen,
                 control_plane,
-                checkpoint_directory,
                 GatewayConnectors {
-                    artifact_volumes,
-                    artifact_s3_volumes,
                     slack: slack_listen.zip(slack_state_directory),
                     github: github_listen.zip(github_state_directory),
-                    github_workspace: github_workspace_directory,
                     linear: linear_listen.zip(linear_state_directory),
                     lark: lark_state_directory,
                     microsoft_teams: microsoft_teams_listen.zip(microsoft_teams_state_directory),
@@ -997,14 +1005,14 @@ async fn run(command: Command) -> Result<()> {
             .await?
         }
         Command::Tui {
-            gateway,
+            control_plane,
             state_directory,
             binary,
             workspace,
         } => {
             tui::launch(
                 Connection {
-                    gateway,
+                    control_plane,
                     state_directory,
                 },
                 binary,
@@ -1013,7 +1021,7 @@ async fn run(command: Command) -> Result<()> {
             .await?;
         }
         Command::WorkerHost {
-            gateway,
+            control_plane,
             state_directory,
             labels,
             supervised_lane,
@@ -1184,7 +1192,7 @@ async fn run(command: Command) -> Result<()> {
             #[cfg(feature = "test-fixtures")]
             let (keep_awake, disk_space) = test_host_environment(disk_space)?;
             let options = HostOptions {
-                gateway: network::endpoint(gateway, false).await?,
+                control_plane: network::endpoint(control_plane).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
                 state_directory,
                 adapter_guardian: std::env::current_exe()?,
@@ -1238,8 +1246,8 @@ async fn run(command: Command) -> Result<()> {
             client_cert_file,
             client_key_file,
         } => {
-            connect_gateway(
-                profiles::NewGateway {
+            connect_control_plane(
+                profiles::NewControlPlane {
                     name,
                     url,
                     token: String::new(),
@@ -1296,11 +1304,27 @@ async fn run(command: Command) -> Result<()> {
     Ok(())
 }
 
-async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result<()> {
-    let builder = network::server(listen, websocket, true).await?;
+/// What the Control Plane serves beyond its listeners.
+struct ControlPlaneOptions {
+    transfer_directory: Option<PathBuf>,
+    artifact_volumes: Vec<String>,
+    artifact_s3_volumes: Option<PathBuf>,
+    github_workspace: Option<PathBuf>,
+}
+
+/// Runs the Control Plane: the state owner and its controllers, and in front of them the public
+/// API tier that operator clients, Worker Hosts, and Gateways call. The API tier reaches the state
+/// owner over an in-process connection, so only the public listener has a network address.
+async fn control_plane(
+    listen: SocketAddr,
+    websocket: Option<SocketAddr>,
+    options: ControlPlaneOptions,
+) -> Result<()> {
+    let builder = network::server(listen, websocket).await?;
+    let service_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
     let plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
-        required_env("SUPERTAG_GATEWAY_TOKEN")?,
+        service_token.clone(),
     )
     .await?;
     if let Ok(token) = std::env::var("SUPERTAG_BOOTSTRAP_HOST_TOKEN") {
@@ -1312,68 +1336,45 @@ async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Res
             .seed_host("local", &Sha256::digest(token.as_bytes()))
             .await?;
     }
-    let (health, health_service) = tonic_health::server::health_reporter();
-    health.set_serving::<OperatorServer<ControlPlane>>().await;
-    health
-        .set_serving::<supertag_protocol::v2::operator_access_server::OperatorAccessServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<ConversationsServer<ControlPlane>>()
-        .await;
-    health.set_serving::<WorkerHostServer<ControlPlane>>().await;
-    health
-        .set_serving::<HostDirectoryServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<CheckpointDirectoryServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<WorkspaceDirectoryServer<ControlPlane>>()
-        .await;
-    health.set_serving::<LiveInputsServer<ControlPlane>>().await;
-    health
-        .set_serving::<AttemptInputsServer<ControlPlane>>()
-        .await;
-    health.set_serving::<ConnectorServer<ControlPlane>>().await;
-    health.set_serving::<ObjectivesServer<ControlPlane>>().await;
-    health
-        .set_serving::<ArtifactPublicationsServer<ControlPlane>>()
-        .await;
-    health.set_serving::<TeamsServer<ControlPlane>>().await;
-    health
-        .set_serving::<AttemptWorkstreamsServer<ControlPlane>>()
-        .await;
-    health.set_serving::<MailboxServer<ControlPlane>>().await;
-    health.set_serving::<InboxServer<ControlPlane>>().await;
-    health
-        .set_serving::<PolicyCatalogServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<SurfacePolicyCatalogServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<WorkSessionsServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<AttemptWorkSessionsServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<AttemptMailboxServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<OperatorEventsServer<OperatorWatch>>()
-        .await;
-    health
-        .set_serving::<supertag_protocol::v2::spend_server::SpendServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<ControlPlane>>()
-        .await;
-    health
-        .set_serving::<
-            supertag_protocol::v2::objective_overviews_server::ObjectiveOverviewsServer<ControlPlane>,
-        >()
-        .await;
+    let (connector, incoming) = supertag_api::in_process::pair();
+    let owner_shutdown = CancellationToken::new();
+    let owner = tokio::spawn(state_owner(plane.clone(), incoming, owner_shutdown.clone()));
+    let internal = connector.channel();
+    let channel = connect(
+        internal.clone(),
+        ServiceRole::Gateway,
+        ServiceRole::ControlPlane,
+    )
+    .await?;
+    let operator_principal =
+        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
+    let api = Api::new(
+        channel.clone(),
+        service_token.clone(),
+        required_env("SUPERTAG_OPERATOR_TOKEN")?,
+        operator_principal,
+    )?;
+    let mut transfers =
+        ApiTransfers::new(api.clone(), options.transfer_directory.clone())?.with_artifact_volumes(
+            volumes::mappings(options.artifact_volumes, options.artifact_s3_volumes)?,
+        )?;
+    let mut source_reader = None;
+    let publication = if let Some(directory) = options.github_workspace {
+        let sources = github_workspace_sources(directory.clone()).await?;
+        transfers =
+            transfers.with_github_sources(std::sync::Arc::new(GithubSources(sources.clone())));
+        source_reader = Some(sources);
+        let blobs = options
+            .transfer_directory
+            .as_ref()
+            .context("GitHub Workspace publication requires --transfer-directory")?;
+        Some(
+            github_workspace_publisher(directory, blobs, channel.clone(), service_token.clone())
+                .await?,
+        )
+    } else {
+        None
+    };
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
@@ -1388,13 +1389,109 @@ async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Res
             }
         }
     });
-    let watch_shutdown = CancellationToken::new();
+    let shutdown = CancellationToken::new();
+    let routes = api.routes(transfers, internal, shutdown.clone()).await;
+    // Refuse every call from a peer that skipped protocol negotiation. An authorization layer
+    // for the whole public API goes beside this fence.
+    let grpc = async {
+        let result = builder
+            .layer(fence(ServiceRole::ControlPlane))
+            .add_routes(routes)
+            .serve_with_incoming_shutdown(
+                supertag_transport::incoming(listener, tunnel),
+                shutdown.clone().cancelled_owned(),
+            )
+            .await
+            .map_err(anyhow::Error::from);
+        shutdown.cancel();
+        result
+    };
+    let publication_loop = async {
+        if let Some(publication) = publication {
+            let result = publication.run(shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
+    let source_loop = async {
+        if let Some(sources) = source_reader {
+            let result = sources
+                .run_resolver(channel.clone(), service_token.clone(), shutdown.clone())
+                .await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
+    let services = async {
+        let (grpc, publication, source) = tokio::join!(grpc, publication_loop, source_loop);
+        grpc?;
+        publication?;
+        source
+    };
+    tokio::pin!(services);
+    let result = tokio::select! {
+        result = &mut services => result,
+        _ = termination_signal() => {
+            shutdown.cancel();
+            tokio::time::timeout(Duration::from_secs(15), services)
+                .await
+                .context("Control Plane shutdown timed out")
+                .and_then(|result| result)
+        }
+    };
+    owner_shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), owner).await;
+    sweep.abort();
+    let _ = sweep.await;
+    result
+}
+
+/// GitHub Workspace sources, read with this Control Plane's GitHub account, for transfers.
+struct GithubSources(GithubWorkspaceSources);
+
+#[tonic::async_trait]
+impl supertag_api::transfers::WorkspaceSources for GithubSources {
+    async fn fetch(
+        &self,
+        workspace: &supertag_protocol::v2::GithubWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<supertag_api::transfers::FetchedSource> {
+        let fetched = self.0.fetch(workspace, cancel).await?;
+        Ok(supertag_api::transfers::FetchedSource {
+            bundle: fetched.bundle,
+            keep: Box::new(fetched._directory),
+        })
+    }
+
+    async fn advertised_output_remote(
+        &self,
+        workspace: &supertag_protocol::v2::GithubWorkspace,
+        commit: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<String>> {
+        self.0
+            .advertised_output_remote(workspace, commit, cancel)
+            .await
+    }
+}
+
+/// Serves the state owner to the API tier until `shutdown`.
+async fn state_owner(
+    plane: ControlPlane,
+    incoming: supertag_api::in_process::Incoming,
+    shutdown: CancellationToken,
+) -> Result<()> {
     // Refuse every call from a peer that skipped protocol negotiation.
-    let mut builder = builder
+    let mut builder = tonic::transport::Server::builder()
         .layer(fence(ServiceRole::ControlPlane))
         .layer(plane.audit_layer());
-    let served = builder
-        .add_service(health_service)
+    builder
         .add_service(plane.operator_access_service())
         .add_service(plane.operator_directory_service())
         .add_service(
@@ -1487,30 +1584,15 @@ async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Res
         .add_service(plane.spend_service())
         .add_service(plane.metrics_service())
         .add_service(plane.objective_overview_service())
-        .add_service(plane.operator_events_service(watch_shutdown.clone()))
+        .add_service(plane.operator_events_service(shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
-        .serve_with_incoming_shutdown(
-            supertag_transport::incoming(listener, tunnel),
-            watch_shutdown.clone().cancelled_owned(),
-        );
-    tokio::pin!(served);
-    let result = tokio::select! {
-        result = &mut served => result.map_err(anyhow::Error::from),
-        _ = termination_signal() => {
-            watch_shutdown.cancel();
-            tokio::time::timeout(Duration::from_secs(15), served)
-                .await
-                .context("Control Plane shutdown timed out")
-                .and_then(|result| result.map_err(anyhow::Error::from))
-        }
-    };
-    sweep.abort();
-    let _ = sweep.await;
-    result
+        .serve_with_incoming_shutdown(incoming, shutdown.cancelled_owned())
+        .await?;
+    Ok(())
 }
 
 /// Binds the optional WebSocket tunnel listener and reports its address.
@@ -1524,32 +1606,27 @@ async fn bind_websocket(address: Option<SocketAddr>) -> Result<Option<TcpListene
 }
 
 struct GatewayConnectors {
-    artifact_volumes: Vec<String>,
-    artifact_s3_volumes: Option<PathBuf>,
     slack: Option<(SocketAddr, PathBuf)>,
     github: Option<(SocketAddr, PathBuf)>,
-    github_workspace: Option<PathBuf>,
     linear: Option<(SocketAddr, PathBuf)>,
     lark: Option<PathBuf>,
     microsoft_teams: Option<(SocketAddr, PathBuf)>,
     notify: Vec<String>,
 }
 
+/// Runs a Gateway: surface ingress, delivery, and operator notifications, as a client of the
+/// Control Plane at `control_plane`. Its own listener serves only the test notification.
 async fn gateway(
     listen: SocketAddr,
     websocket: Option<SocketAddr>,
     control_plane: String,
-    checkpoint_directory: Option<PathBuf>,
     connectors: GatewayConnectors,
 ) -> Result<()> {
     // Refuse every call from a peer that skipped protocol negotiation.
-    let mut builder = network::server(listen, websocket, false)
+    let mut builder = network::server(listen, websocket)
         .await?
         .layer(fence(ServiceRole::Gateway));
-    let channel = network::endpoint(control_plane, true)
-        .await?
-        .connect()
-        .await?;
+    let channel = network::endpoint(control_plane).await?.connect().await?;
     // Refuse an incompatible Control Plane before accepting any public traffic,
     // and name the selected version on every call to it.
     let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
@@ -1609,8 +1686,6 @@ async fn gateway(
         }
         None => None,
     };
-    let publication_channel = channel.clone();
-    let publication_token = gateway_token.clone();
     let operator_principal =
         std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
     let notifier = operator_notifier(
@@ -1618,86 +1693,16 @@ async fn gateway(
         slack.as_ref().map(|(slack, _)| slack.operator_sender()),
         channel.clone(),
         gateway_token.clone(),
-        operator_principal.clone(),
-    )?;
-    let gateway = Gateway::new(
-        channel,
-        gateway_token,
-        required_env("SUPERTAG_OPERATOR_TOKEN")?,
         operator_principal,
     )?;
+    let auth = supertag_gateway::operator_auth::OperatorAuth::new(
+        &required_env("SUPERTAG_OPERATOR_TOKEN")?,
+        channel,
+        gateway_token,
+    )?;
     let (health, health_service) = tonic_health::server::health_reporter();
-    health.set_serving::<OperatorServer<Gateway>>().await;
-    health
-        .set_serving::<supertag_protocol::v2::operator_access_server::OperatorAccessServer<Gateway>>()
-        .await;
-    health.set_serving::<ConversationsServer<Gateway>>().await;
-    health.set_serving::<WorkerHostServer<Gateway>>().await;
-    health.set_serving::<HostEnrollmentServer<Gateway>>().await;
-    health
-        .set_serving::<TransfersServer<GatewayTransfers>>()
-        .await;
-    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?
-        .with_artifact_volumes(volumes::mappings(
-            connectors.artifact_volumes,
-            connectors.artifact_s3_volumes,
-        )?)?;
-    let mut source_reader = None;
-    let publication = if let Some(directory) = connectors.github_workspace {
-        let sources = github_workspace_sources(directory.clone()).await?;
-        transfers = transfers.with_github_sources(sources.clone());
-        source_reader = Some((
-            sources,
-            publication_channel.clone(),
-            publication_token.clone(),
-        ));
-        let blobs = checkpoint_directory
-            .as_ref()
-            .context("GitHub Workspace publication requires Gateway artifact storage")?;
-        Some(
-            github_workspace_publisher(directory, blobs, publication_channel, publication_token)
-                .await?,
-        )
-    } else {
-        None
-    };
-    health.set_serving::<ObjectivesServer<Gateway>>().await;
-    health.set_serving::<LiveInputsServer<Gateway>>().await;
-    health.set_serving::<AttemptInputsServer<Gateway>>().await;
-    health.set_serving::<TeamsServer<Gateway>>().await;
-    health
-        .set_serving::<AttemptWorkstreamsServer<Gateway>>()
-        .await;
-    health.set_serving::<MailboxServer<Gateway>>().await;
-    health.set_serving::<InboxServer<Gateway>>().await;
-    health
-        .set_serving::<ArtifactPublicationsServer<Gateway>>()
-        .await;
-    health.set_serving::<PolicyCatalogServer<Gateway>>().await;
-    health
-        .set_serving::<SurfacePolicyCatalogServer<Gateway>>()
-        .await;
-    health.set_serving::<WorkSessionsServer<Gateway>>().await;
-    health
-        .set_serving::<AttemptWorkSessionsServer<Gateway>>()
-        .await;
-    health.set_serving::<AttemptMailboxServer<Gateway>>().await;
-    health
-        .set_serving::<OperatorEventsServer<GatewayWatch>>()
-        .await;
-    health
-        .set_serving::<supertag_protocol::v2::spend_server::SpendServer<Gateway>>()
-        .await;
-    health
-        .set_serving::<supertag_protocol::v2::metrics_server::MetricsServer<Gateway>>()
-        .await;
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
-        .await;
-    health
-        .set_serving::<
-            supertag_protocol::v2::objective_overviews_server::ObjectiveOverviewsServer<Gateway>,
-        >()
         .await;
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
@@ -1717,46 +1722,8 @@ async fn gateway(
     let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
-        .add_service(gateway.negotiation_service())
-        .add_service(gateway.operator_service())
-        .add_service(gateway.operator_access_service())
-        .add_service(gateway.conversations_service())
-        .add_service(gateway.worker_host_service())
-        .add_service(gateway.host_enrollment_service())
-        .add_service(transfers.artifact_catalog_service())
-        .add_service(transfers.artifact_volumes_service())
-        .add_service(gateway.workspace_volumes_service())
-        .add_service(gateway.placement_service())
-        .add_service(gateway.auth_keys_service())
-        .add_service(gateway.host_credentials_service())
-        .add_service(gateway.attempt_workspace_mounts_service())
-        .add_service(transfers.attempt_artifacts_service())
-        .add_service(transfers.artifact_transfer_service())
-        .add_service(transfers.service())
-        .add_service(gateway.objectives_service())
-        .add_service(gateway.live_inputs_service())
-        .add_service(gateway.attempt_inputs_service())
-        .add_service(gateway.teams_service())
-        .add_service(gateway.attempt_workstreams_service())
-        .add_service(gateway.mailbox_service())
-        .add_service(gateway.inbox_service())
-        .add_service(gateway.github_workspaces_service())
-        .add_service(gateway.github_publications_service())
-        .add_service(gateway.artifact_publications_service())
-        .add_service(gateway.policy_service())
-        .add_service(gateway.manifest_relationships_service())
-        .add_service(gateway.surface_policy_service())
-        .add_service(gateway.work_sessions_service())
-        .add_service(gateway.attempt_work_sessions_service())
-        .add_service(gateway.attempt_mailbox_service())
-        .add_service(gateway.attempt_mcp_effects_service())
-        .add_service(gateway.attempt_changed_paths_service())
-        .add_service(gateway.attempt_effects_service())
-        .add_service(gateway.spend_service())
-        .add_service(gateway.metrics_service())
-        .add_service(notifier.test_service(gateway.clone()))
-        .add_service(gateway.objective_overview_service())
-        .add_service(gateway.operator_events_service(shutdown.clone()));
+        .add_service(Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Operator]).service())
+        .add_service(notifier.test_service(auth));
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
@@ -1817,47 +1784,24 @@ async fn gateway(
             Ok(())
         }
     };
-    let publication_loop = async {
-        if let Some(publication) = publication {
-            let result = publication.run(shutdown.clone()).await;
-            shutdown.cancel();
-            result
-        } else {
-            shutdown.cancelled().await;
-            Ok(())
-        }
-    };
-    let source_loop = async {
-        if let Some((sources, channel, token)) = source_reader {
-            let result = sources.run_resolver(channel, token, shutdown.clone()).await;
-            shutdown.cancel();
-            result
-        } else {
-            shutdown.cancelled().await;
-            Ok(())
-        }
-    };
     let notification_loop = notifier.run(shutdown.clone());
     let services = async {
-        let (grpc, slack, github, linear, lark, teams, publication, (source, notifications)) = tokio::join!(
+        let (grpc, slack, github, linear, lark, teams, notifications) = tokio::join!(
             grpc,
             webhook,
             github_webhook,
             linear_webhook,
             lark_connection,
             microsoft_teams_webhook,
-            publication_loop,
-            async { tokio::join!(source_loop, notification_loop) }
+            notification_loop,
         );
-        notifications?;
         grpc?;
         slack?;
         github?;
         linear?;
         lark?;
         teams?;
-        publication?;
-        source
+        notifications
     };
     tokio::pin!(services);
     tokio::select! {
@@ -2331,7 +2275,7 @@ async fn operator(connection: Connection) -> Result<(OperatorClient<ProtocolChan
     ))
 }
 
-/// Connects to the Gateway as an operator client. The Gateway refuses every
+/// Connects to the Control Plane as an operator client. It refuses every
 /// call from a client that did not negotiate a protocol version first.
 async fn connect_operator(connection: Connection) -> Result<(ProtocolChannel, String)> {
     connect_operator_with_timeout(connection, Duration::from_secs(15)).await
@@ -2351,7 +2295,7 @@ async fn connect_operator_with_timeout(
 struct OperatorTarget {
     url: String,
     token: String,
-    /// Present for a saved Gateway; otherwise TLS comes from the environment.
+    /// Present for a saved Control Plane; otherwise TLS comes from the environment.
     tls: Option<network::TlsFiles>,
 }
 
@@ -2393,16 +2337,16 @@ fn test_host_environment(
 }
 
 fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
-    let root = ROOT_GATEWAY.get().cloned();
+    let root = ROOT_CONTROL_PLANE.get().cloned();
     ensure!(
-        connection.gateway.is_none() || root.is_none(),
-        "pass --gateway once"
+        connection.control_plane.is_none() || root.is_none(),
+        "pass --control-plane once"
     );
-    let gateway = connection.gateway.or(root);
+    let control_plane = connection.control_plane.or(root);
     if let Some(directory) = connection.state_directory {
         ensure!(
-            gateway.is_none(),
-            "--gateway cannot be combined with --state-directory"
+            control_plane.is_none(),
+            "--control-plane cannot be combined with --state-directory"
         );
         let (url, token) = local::connection(&directory)?;
         return Ok(OperatorTarget {
@@ -2411,16 +2355,17 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
             tls: None,
         });
     }
-    let gateway = gateway
-        .context("pass --gateway URL, --gateway NAME of a saved Gateway, or --state-directory")?;
-    if profiles::is_url(&gateway) {
+    let control_plane = control_plane.context(
+        "pass --control-plane URL, --control-plane NAME of a saved Control Plane, or --state-directory",
+    )?;
+    if profiles::is_url(&control_plane) {
         return Ok(OperatorTarget {
-            url: gateway,
+            url: control_plane,
             token: required_env("SUPERTAG_OPERATOR_TOKEN")?,
             tls: None,
         });
     }
-    let saved = profiles::resolve(&gateway)?;
+    let saved = profiles::resolve(&control_plane)?;
     Ok(OperatorTarget {
         url: saved.url,
         token: saved.token,
@@ -2432,9 +2377,9 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
     })
 }
 
-/// Reads the operator token, proves it against the Gateway, and saves the Gateway by name.
-async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Result<()> {
-    gateway.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
+/// Reads the operator token, proves it against the Control Plane, and saves it by name.
+async fn connect_control_plane(mut saved: profiles::NewControlPlane, replace: bool) -> Result<()> {
+    saved.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
         Ok(token) => token,
         Err(_) => {
             let mut line = String::new();
@@ -2447,23 +2392,23 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
     .trim()
     .to_owned();
     ensure!(
-        !gateway.token.is_empty(),
+        !saved.token.is_empty(),
         "the operator token must not be empty"
     );
     // The token goes only to the origin that would be saved.
-    gateway.url = profiles::checked_origin(&gateway)?;
+    saved.url = profiles::checked_origin(&saved)?;
     let target = OperatorTarget {
-        url: gateway.url.clone(),
-        token: gateway.token.clone(),
+        url: saved.url.clone(),
+        token: saved.token.clone(),
         tls: Some(network::TlsFiles {
-            server_ca: gateway.server_ca_file.clone(),
-            client_cert: gateway.client_cert_file.clone(),
-            client_key: gateway.client_key_file.clone(),
+            server_ca: saved.server_ca_file.clone(),
+            client_cert: saved.client_cert_file.clone(),
+            client_key: saved.client_key_file.clone(),
         }),
     };
     let channel = network::operator_channel(&target.endpoint(Duration::from_secs(15)).await?)
         .await
-        .with_context(|| format!("could not reach the Gateway at {}", gateway.url))?;
+        .with_context(|| format!("could not reach the Control Plane at {}", saved.url))?;
     OperatorClient::new(channel)
         .list_tags(request(
             ListTagsRequest {
@@ -2473,10 +2418,10 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
             &target.token,
         )?)
         .await
-        .context("the Gateway refused the operator token")?;
-    let store = profiles::save(&gateway, replace)?;
+        .context("the Control Plane refused the operator token")?;
+    let store = profiles::save(&saved, replace)?;
     crate::terminal::print_json(
-        &json!({"name": gateway.name, "saved_in": store.display().to_string(), "active": true}),
+        &json!({"name": saved.name, "saved_in": store.display().to_string(), "active": true}),
     )?;
     Ok(())
 }
@@ -2659,7 +2604,7 @@ mod tests {
     const LOCAL_GROUPS: [&str; 2] = ["mcp", "gateway-credential"];
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
-    /// resource kind. `connect` is the one verb: it saves a Gateway on this machine.
+    /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
     const OPERATIONS: [&str; 19] = [
         "health",
         "init",
@@ -3047,10 +2992,17 @@ mod tests {
                 "builder",
                 "--provider",
                 "slack",
-                "--gateway",
+                "--control-plane",
                 "g",
             ],
-            &["supertag", "get", "surface-location", "l", "--gateway", "g"],
+            &[
+                "supertag",
+                "get",
+                "surface-location",
+                "l",
+                "--control-plane",
+                "g",
+            ],
             &["supertag", "get", "surface-locations", "--account", "slack"],
             &[
                 "supertag",
@@ -3101,25 +3053,60 @@ mod tests {
     fn kinds_accept_plurals_and_connection_options_follow_the_subcommand() {
         for arguments in [
             ["supertag", "get", "tags", "--state-directory", "/tmp/x"].as_slice(),
-            &["supertag", "get", "--gateway", "local", "tag", "builder"],
-            &["supertag", "get", "tag", "builder", "--gateway", "local"],
+            &[
+                "supertag",
+                "get",
+                "--control-plane",
+                "local",
+                "tag",
+                "builder",
+            ],
+            &[
+                "supertag",
+                "get",
+                "tag",
+                "builder",
+                "--control-plane",
+                "local",
+            ],
             &["supertag", "describe", "hosts", "laptop"],
-            &["supertag", "delete", "teams", "release", "--gateway", "g"],
+            &[
+                "supertag",
+                "delete",
+                "teams",
+                "release",
+                "--control-plane",
+                "g",
+            ],
             &["supertag", "watch", "tasks", "objective"],
-            &["supertag", "task", "cancel", "task-1", "--gateway", "g"],
-            &["supertag", "host", "drain", "laptop", "--gateway", "g"],
+            &[
+                "supertag",
+                "task",
+                "cancel",
+                "task-1",
+                "--control-plane",
+                "g",
+            ],
+            &[
+                "supertag",
+                "host",
+                "drain",
+                "laptop",
+                "--control-plane",
+                "g",
+            ],
         ] {
             Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{arguments:?}: {error}"));
         }
-        // host enroll names the Gateway and state directory of the host it enrolls with its own
+        // host enroll names the Control Plane and state directory of the host it enrolls with its own
         // options, which shadow the group's connection options.
         let enroll = Cli::try_parse_from([
             "supertag",
             "host",
             "enroll",
             "laptop",
-            "--gateway",
-            "https://gateway.example",
+            "--control-plane",
+            "https://control-plane.example",
             "--state-directory",
             "/tmp/host",
         ])
@@ -3128,18 +3115,21 @@ mod tests {
             Some(super::Command::Host {
                 command:
                     crate::host_status::HostCommand::Enroll {
-                        gateway,
+                        control_plane,
                         state_directory,
                         ..
                     },
                 ..
             }) => {
-                assert_eq!(gateway, "https://gateway.example");
+                assert_eq!(control_plane, "https://control-plane.example");
                 assert_eq!(state_directory, std::path::Path::new("/tmp/host"));
             }
             _ => panic!("host enroll parses as host enroll"),
         }
-        assert!(enroll.gateway.is_none(), "no root --gateway was given");
+        assert!(
+            enroll.control_plane.is_none(),
+            "no root --control-plane was given"
+        );
         for arguments in [
             ["supertag", "get", "task"].as_slice(),
             &["supertag", "get", "tag", "builder", "--include-retired"],

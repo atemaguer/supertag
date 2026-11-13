@@ -246,8 +246,39 @@ impl Drop for Process {
     }
 }
 
+/// Relays TCP connections to `upstream` until dropped, which closes every relayed connection.
+struct Relay {
+    address: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Relay {
+    async fn start(listen: std::net::SocketAddr, upstream: std::net::SocketAddr) -> Result<Self> {
+        let listener = TcpListener::bind(listen).await?;
+        let address = listener.local_addr()?;
+        let task = tokio::spawn(async move {
+            let mut connections = tokio::task::JoinSet::new();
+            while let Ok((mut inbound, _)) = listener.accept().await {
+                connections.spawn(async move {
+                    if let Ok(mut outbound) = TcpStream::connect(upstream).await {
+                        let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+                    }
+                });
+            }
+        });
+        Ok(Self { address, task })
+    }
+}
+
+impl Drop for Relay {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 struct Services {
-    gateway: Process,
+    /// A Gateway runs only for the surfaces and notifications a scenario uses.
+    gateway: Option<Process>,
     control_plane: Process,
     endpoint: String,
 }
@@ -259,22 +290,26 @@ impl Services {
             .arg("control-plane")
             .env("SUPERTAG_DATABASE_URL", database);
         let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
-        let private = control_plane.endpoint().await?;
-        let mut command = credentials.command();
-        command.args(["gateway", "--control-plane", &private]);
-        let mut gateway = Process::spawn(command, directory, "gateway", true)?;
-        let endpoint = gateway.endpoint().await?;
+        let endpoint = control_plane.endpoint().await?;
         Ok(Self {
-            gateway,
+            gateway: None,
             control_plane,
             endpoint,
         })
     }
 
     fn crash(&mut self) -> Result<()> {
-        self.gateway.crash()?;
+        if let Some(gateway) = &mut self.gateway {
+            gateway.crash()?;
+        }
         self.control_plane.crash()?;
         Ok(())
+    }
+
+    fn gateway(&mut self) -> Result<&mut Process> {
+        self.gateway
+            .as_mut()
+            .context("this scenario runs no Gateway")
     }
 
     async fn client(&self) -> Result<OperatorClient<ProtocolChannel>> {
@@ -305,7 +340,7 @@ fn worker(
     command
         .args([
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &services.endpoint,
             "--adapter",
             ADAPTER,
@@ -378,7 +413,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         &[
             "tag",
             "put",
-            "--gateway",
+            "--control-plane",
             &services.endpoint,
             "engineer",
             "--instructions",
@@ -394,7 +429,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         &[
             "task",
             "submit",
-            "--gateway",
+            "--control-plane",
             &services.endpoint,
             "--tag",
             "engineer",
@@ -581,7 +616,7 @@ database_tests! {
     native_codex_plan_replaces_the_slack_acknowledgement_in_place;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "exercises the real 30-second execution authority deadline"]
-    gateway_partition_expires_execution_and_requires_audited_retry_before_replay;
+    control_plane_partition_expires_execution_and_requires_audited_retry_before_replay;
 }
 
 async fn separate_processes_preserve_work_and_cancel_execution(database: String) -> Result<()> {
@@ -795,7 +830,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
         command
             .args([
                 "worker-host",
-                "--gateway",
+                "--control-plane",
                 &services.endpoint,
                 "--once",
                 "--state-directory",
@@ -1498,12 +1533,12 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         .env("SUPERTAG_DATABASE_URL", &database);
     let mut control_plane = Process::spawn(command, directory.path(), "control-plane", true)?;
     let private_endpoint = control_plane.endpoint().await?;
-    let (gateway, endpoint, http) =
+    let (gateway, _, http) =
         slack_gateway(&credentials, &private_endpoint, directory.path(), &mock).await?;
     let mut services = Services {
-        gateway,
+        gateway: Some(gateway),
         control_plane,
-        endpoint,
+        endpoint: private_endpoint.clone(),
     };
     let mut operator = services.client().await?;
     operator
@@ -1663,7 +1698,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         pending["entry"]["outcome"]["provider_receipt"],
         SLACK_RECEIPT
     );
-    services.gateway.crash()?;
+    services.gateway()?.crash()?;
 
     let address = private_endpoint.trim_start_matches("http://");
     let mut command = credentials.command();
@@ -1673,10 +1708,9 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     services.control_plane =
         Process::spawn(command, directory.path(), "restarted-control-plane", true)?;
     assert_eq!(services.control_plane.endpoint().await?, private_endpoint);
-    let (gateway, endpoint, http) =
+    let (gateway, _, http) =
         slack_gateway(&credentials, &private_endpoint, directory.path(), &mock).await?;
-    services.gateway = gateway;
-    services.endpoint = endpoint;
+    services.gateway = Some(gateway);
     let deadline = Instant::now() + WAIT;
     loop {
         match std::fs::read(&journal) {
@@ -1900,12 +1934,12 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
         .env("SUPERTAG_DATABASE_URL", database);
     let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
     let private_endpoint = control_plane.endpoint().await?;
-    let (gateway, endpoint, http) =
+    let (gateway, _, http) =
         slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
     let mut services = Services {
-        gateway,
+        gateway: Some(gateway),
         control_plane,
-        endpoint,
+        endpoint: private_endpoint.clone(),
     };
     configure_slack_surface(&services, &credentials).await?;
     let body = |method: &str, target: (&str, &str), text: &str| {
@@ -1937,7 +1971,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     command
         .args([
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &services.endpoint,
             "--adapter",
             ADAPTER,
@@ -1989,12 +2023,11 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     mock.wait_for_requests(4).await?;
     let progress_journal = directory.join("slack/progress/reply.json");
     wait_for_reply_journal(&progress_journal, "sending").await?;
-    services.gateway.crash()?;
+    services.gateway()?.crash()?;
     mock.responses.add_permits(1);
-    let (gateway, endpoint, http) =
+    let (gateway, _, http) =
         slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
-    services.gateway = gateway;
-    services.endpoint = endpoint;
+    services.gateway = Some(gateway);
     let mut host = worker(&services, directory, &credentials, false)?;
     mock.wait_for_requests(5).await?;
     mock.responses.add_permits(1);
@@ -2036,7 +2069,7 @@ async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Res
     command
         .args([
             "worker-host",
-            "--gateway",
+            "--control-plane",
             &services.endpoint,
             "--adapter",
             ADAPTER,
@@ -2382,7 +2415,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     Ok(())
 }
 
-async fn gateway_partition_expires_execution_and_requires_audited_retry_before_replay(
+async fn control_plane_partition_expires_execution_and_requires_audited_retry_before_replay(
     database: String,
 ) -> Result<()> {
     let directory = TempDir::new()?;
@@ -2394,19 +2427,20 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let mut control_plane =
         Process::spawn(command, directory.path(), "partition-control-plane", true)?;
     let private_endpoint = control_plane.endpoint().await?;
-    let mut command = credentials.command();
-    command.args(["gateway", "--control-plane", &private_endpoint]);
-    let mut gateway = Process::spawn(command, directory.path(), "partition-gateway", true)?;
-    let public_endpoint = gateway.endpoint().await?;
-    let mut services = Services {
+    // The host reaches the Control Plane only through this relay, so dropping it partitions the
+    // host while operators still reach the Control Plane directly.
+    let upstream: std::net::SocketAddr = private_endpoint.trim_start_matches("http://").parse()?;
+    let relay = Relay::start("127.0.0.1:0".parse()?, upstream).await?;
+    let public_endpoint = format!("http://{}", relay.address);
+    let services = Services {
         control_plane,
-        gateway,
-        endpoint: public_endpoint.clone(),
+        gateway: None,
+        endpoint: private_endpoint.clone(),
     };
     let mut operator = services
         .client()
         .await
-        .context("connect to initial Gateway")?;
+        .context("connect to the Control Plane")?;
     operator
         .put_tag(credentials.request(PutTagRequest {
             name: None,
@@ -2451,7 +2485,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         command
             .args([
                 "worker-host",
-                "--gateway",
+                "--control-plane",
                 &public_endpoint,
                 "--once",
                 "--state-directory",
@@ -2511,28 +2545,16 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     // Keep the Control Plane alive but make the host's only authority route
     // unavailable. This uses the real monotonic deadline and never advances a clock.
     let partitioned_at = Instant::now();
-    services.gateway.crash()?;
-    drop(operator);
-    let private_channel = protocol::negotiated(
-        Channel::from_shared(private_endpoint.clone())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
-            .connect()
-            .await?,
-    )
-    .await?;
-    let mut private_operator = OperatorClient::new(private_channel);
+    let relay_address = relay.address;
+    drop(relay);
+    let mut private_operator = operator.clone();
     let deadline = partitioned_at + Duration::from_secs(45);
     let mut last_state = running.state();
     loop {
         match private_operator
-            .get_task(authenticated_request(
-                GetTaskRequest {
-                    task_id: accepted.task_id.clone(),
-                },
-                &credentials.gateway,
-                Some("operator:local"),
-            )?)
+            .get_task(credentials.request(GetTaskRequest {
+                task_id: accepted.task_id.clone(),
+            })?)
             .await
         {
             Ok(response) => last_state = response.into_inner().state(),
@@ -2540,7 +2562,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
                 if Instant::now() < deadline
                     && (matches!(error.code(), Code::Unavailable | Code::DeadlineExceeded)
                         || error.code() == Code::Cancelled && error.source().is_some()) => {}
-            Err(error) => return Err(error).context("poll Task state during Gateway partition"),
+            Err(error) => return Err(error).context("poll Task state during the partition"),
         }
         let mut alive = false;
         for pid in &cleanup.0 {
@@ -2577,11 +2599,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         confirmed_stopped: false,
     };
     let refused = private_operator
-        .resolve_attempt(authenticated_request(
-            resolution_input.clone(),
-            &credentials.gateway,
-            Some("operator:local"),
-        )?)
+        .resolve_attempt(credentials.request(resolution_input.clone())?)
         .await
         .unwrap_err();
     assert_eq!(
@@ -2592,21 +2610,8 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
 
     // Rebind the original route. The surviving host can now deliver its saved
     // cleanup receipt, which leaves the Task uncertain and the Session blocked.
-    let mut command = credentials.command();
-    command.args([
-        "gateway",
-        "--control-plane",
-        &private_endpoint,
-        "--listen",
-        public_endpoint.trim_start_matches("http://"),
-    ]);
-    services.gateway = Process::spawn(command, directory.path(), "restored-gateway", true)?;
-    assert_eq!(services.gateway.endpoint().await?, public_endpoint);
+    let _relay = Relay::start(relay_address, upstream).await?;
     host.successful_exit().await?;
-    let mut operator = services
-        .client()
-        .await
-        .context("connect to replacement Gateway")?;
     let uncertain = task(&mut operator, &credentials, &accepted.task_id).await?;
     assert_eq!(uncertain.state(), TaskState::Uncertain);
     assert_eq!(uncertain.attempt_id, running.attempt_id);
@@ -2627,7 +2632,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let receipt = host_client
         .get_attempt_resolution(credentials.host_request(old_attempt.clone())?)
         .await
-        .context("inspect cleanup receipt through replacement Gateway")?
+        .context("inspect cleanup receipt through the restored route")?
         .into_inner();
     assert!(receipt.resolution.is_none());
     let mut no_replay =
@@ -2779,11 +2784,11 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         Process::spawn(command, directory, "notify-gateway", true)
     };
     let mut gateway = start_gateway()?;
-    let endpoint = gateway.endpoints(2).await?.remove(0);
+    let mut gateway_endpoint = gateway.endpoints(2).await?.remove(0);
     let mut services = Services {
-        gateway,
+        gateway: Some(gateway),
         control_plane,
-        endpoint,
+        endpoint: private.clone(),
     };
 
     // The sample goes through every destination at once, outside the outbox.
@@ -2792,7 +2797,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         "test",
         "notification",
         "--gateway",
-        &services.endpoint,
+        &gateway_endpoint,
         "--objective",
         "release",
     ]);
@@ -2804,7 +2809,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     );
     // Samples are throttled per Gateway.
     let mut again = credentials.command();
-    again.args(["test", "notification", "--gateway", &services.endpoint]);
+    again.args(["test", "notification", "--gateway", &gateway_endpoint]);
     let mut process = Process::spawn(again, directory, "test-notification-again", false)?;
     ensure!(
         !process.exited().await?.success(),
@@ -2856,7 +2861,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         let mut command = credentials.command();
         command
             .arg(args[0])
-            .args(["--gateway", &services.endpoint])
+            .args(["--control-plane", &services.endpoint])
             .args(&args[1..]);
         command
     };
@@ -2888,7 +2893,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     let mut host = credentials.command();
     host.args([
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &services.endpoint,
         "--adapter",
         ADAPTER,
@@ -2927,10 +2932,10 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     );
 
     // A restarted Gateway resumes from the durable outbox and never repeats a message.
-    services.gateway.crash()?;
+    services.gateway()?.crash()?;
     let mut gateway = start_gateway()?;
-    services.endpoint = gateway.endpoints(2).await?.remove(0);
-    services.gateway = gateway;
+    gateway_endpoint = gateway.endpoints(2).await?.remove(0);
+    services.gateway = Some(gateway);
     sleep(Duration::from_millis(4_500)).await;
     assert_eq!(slack.requests.lock().await.len(), 2);
     assert_eq!(hook.requests.lock().await.len(), 2);
@@ -2945,7 +2950,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         "test",
         "notification",
         "--gateway",
-        &services.endpoint,
+        &gateway_endpoint,
         "--objective",
         "<!channel> `<@U0OTHER>`",
     ]);
@@ -2969,7 +2974,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     let mut create = credentials.command();
     create
         .arg("objective")
-        .args(["--gateway", &services.endpoint])
+        .args(["--control-plane", &services.endpoint])
         .args([
             "create",
             "hotfix",
@@ -2981,7 +2986,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     let mut host = credentials.command();
     host.args([
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &services.endpoint,
         "--adapter",
         ADAPTER,
@@ -3001,17 +3006,17 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
         );
         sleep(Duration::from_millis(20)).await;
     }
-    services.gateway.terminate()?;
+    services.gateway()?.terminate()?;
     sleep(Duration::from_millis(1_000)).await;
     ensure!(
-        services.gateway.child.try_wait()?.is_none(),
+        services.gateway()?.child.try_wait()?.is_none(),
         "the Gateway stopped before its delivery finished"
     );
     hook.responses.add_permits(1_000);
-    services.gateway.successful_exit().await?;
+    services.gateway()?.successful_exit().await?;
     let mut gateway = start_gateway()?;
-    services.endpoint = gateway.endpoints(2).await?.remove(0);
-    services.gateway = gateway;
+    gateway.endpoints(2).await?;
+    services.gateway = Some(gateway);
     sleep(Duration::from_millis(4_500)).await;
     let hotfix: Vec<_> = hook
         .requests
@@ -3038,23 +3043,18 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     let mut command = credentials.command();
     command
         .arg("control-plane")
+        // Codex Session checkpoints are stored through the Control Plane.
+        .arg("--transfer-directory")
+        .arg(directory.join("checkpoints"))
         .env("SUPERTAG_DATABASE_URL", &database);
     let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
     let private = control_plane.endpoint().await?;
-    // Codex Session checkpoints are stored through the Gateway.
-    let checkpoints = directory.join("checkpoints");
-    let (gateway, endpoint, http) = slack_gateway_with(
-        &credentials,
-        &private,
-        directory,
-        &mock,
-        &["--checkpoint-directory".as_ref(), checkpoints.as_os_str()],
-    )
-    .await?;
+    let (gateway, _, http) =
+        slack_gateway_with(&credentials, &private, directory, &mock, &[]).await?;
     let services = Services {
-        gateway,
+        gateway: Some(gateway),
         control_plane,
-        endpoint,
+        endpoint: private.clone(),
     };
     configure_slack_surface(&services, &credentials).await?;
     let home = directory.join("fixture-home");
@@ -3088,7 +3088,12 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     mock.responses.add_permits(1);
     let mut command = credentials.command();
     command
-        .args(["worker-host", "--gateway", &services.endpoint, "--once"])
+        .args([
+            "worker-host",
+            "--control-plane",
+            &services.endpoint,
+            "--once",
+        ])
         .args(["--harness", "codex", "--codex-model", "fixture-model"])
         .arg("--codex-path")
         .arg(&fake)

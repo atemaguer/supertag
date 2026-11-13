@@ -1,4 +1,4 @@
-//! `supertag metrics` through separate Control Plane, Gateway, and Worker Host processes
+//! `supertag metrics` through separate Control Plane and Worker Host processes
 //! (`packages/store/coordination-metrics.test.ts`): every figure is an aggregate, so it counts
 //! past any list page limit, and a claimed Attempt is counted as `supertag spend` counts it.
 #[path = "../../../test-support/prerequisites.rs"]
@@ -79,16 +79,12 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
-    let (_control, private) = service(control).await?;
-    let mut gateway = binary(&["gateway", "--control-plane", &private]);
-    gateway
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-    let (_gateway, public) = service(gateway).await?;
+    control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_control, public) = service(control).await?;
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--gateway", &public])
+            .args(["--control-plane", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };
@@ -137,7 +133,7 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     .await?;
     let mut worker = binary(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         &public,
         "--adapter",
         ADAPTER,

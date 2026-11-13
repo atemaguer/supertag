@@ -1,6 +1,6 @@
-//! Operator access through separate Control Plane and Gateway processes: an audit entry commits
+//! Operator access through a Control Plane process: an audit entry commits
 //! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
-//! and `supertag connect` saves a proven operator token for `--gateway NAME`.
+//! and `supertag connect` saves a proven operator token for `--control-plane NAME`.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -51,12 +51,11 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
     Ok((child, format!("http://{address}")))
 }
 
-/// Separate Control Plane and Gateway processes sharing one database and credentials.
+/// A Control Plane process and the credentials it shares across restarts.
 struct Services {
     gateway_token: String,
     operator_token: String,
     control: Child,
-    gateway: Child,
     public: String,
 }
 
@@ -80,23 +79,18 @@ impl Services {
         let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
         control
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_DATABASE_URL", database);
         if let Some((point, marker)) = crash {
             control
                 .env("SUPERTAG_TEST_CRASH_POINT", point)
                 .env("SUPERTAG_TEST_CRASH_MARKER", marker);
         }
-        let (control, private) = service(control).await?;
-        let mut gateway = binary(&["gateway", "--control-plane", &private]);
-        gateway
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
-        let (gateway, public) = service(gateway).await?;
+        let (control, public) = service(control).await?;
         Ok(Self {
             gateway_token,
             operator_token,
             control,
-            gateway,
             public,
         })
     }
@@ -104,7 +98,7 @@ impl Services {
     fn operator(&self, args: &[&str]) -> Command {
         let mut command = binary(args);
         command
-            .args(["--gateway", &self.public])
+            .args(["--control-plane", &self.public])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
         command
     }
@@ -141,7 +135,6 @@ impl Services {
     }
 
     async fn stop(mut self) -> Result<(String, String)> {
-        self.gateway.kill().await?;
         self.control.kill().await?;
         Ok((self.gateway_token, self.operator_token))
     }
@@ -157,7 +150,7 @@ database_tests! {
     #[tokio::test]
     worker_host_joins_are_recorded_under_their_auth_key;
     #[tokio::test]
-    connect_gateway_saves_a_proven_token_for_later_commands;
+    connect_saves_a_proven_token_for_later_commands;
 }
 
 /// The Control Plane dies after committing an audited change and before answering. The change
@@ -320,9 +313,9 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     Ok(())
 }
 
-/// `supertag connect` checks the token first, saves the Gateway owner-only in the
+/// `supertag connect` checks the token first, saves the Control Plane owner-only in the
 /// terminal UI's store as the active one, and later commands use it by name.
-async fn connect_gateway_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
+async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     let home = tempfile::tempdir()?;
     let connect = |token: &str, name: &str, url: &str, replace: bool| {
@@ -343,9 +336,9 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     };
     let store = if cfg!(target_os = "macos") {
         home.path()
-            .join("Library/Application Support/supertag/tui-gateways.json")
+            .join("Library/Application Support/supertag/tui-control-planes.json")
     } else {
-        home.path().join(".config/supertag/tui-gateways.json")
+        home.path().join(".config/supertag/tui-control-planes.json")
     };
 
     let (saved, stderr) = connect("not-the-token", "prod", &services.public, false).await?;
@@ -371,12 +364,15 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["version"], 1);
     assert_eq!(profiles["active"], "prod");
-    assert_eq!(profiles["gateways"][0]["name"], "prod");
-    assert_eq!(profiles["gateways"][0]["url"], services.public.as_str());
-    assert_eq!(profiles["gateways"][0]["token"], token.as_str());
+    assert_eq!(profiles["control_planes"][0]["name"], "prod");
+    assert_eq!(
+        profiles["control_planes"][0]["url"],
+        services.public.as_str()
+    );
+    assert_eq!(profiles["control_planes"][0]["token"], token.as_str());
 
-    // A later command names the saved Gateway and needs no token in its environment.
-    let mut listed = binary(&["get", "tags", "--gateway", "prod"]);
+    // A later command names the saved Control Plane and needs no token in its environment.
+    let mut listed = binary(&["get", "tags", "--control-plane", "prod"]);
     listed.env("HOME", home.path());
     let output = timeout(WAIT, listed.output()).await??;
     ensure!(
@@ -389,12 +385,12 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     ensure!(!saved && stderr.contains("--replace"), "{stderr}");
     // Replacing a connection keeps the Workspace the terminal UI chose for it.
     let mut profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    profiles["gateways"][0]["workspace"] = "project".into();
+    profiles["control_planes"][0]["workspace"] = "project".into();
     std::fs::write(&store, serde_json::to_vec(&profiles)?)?;
     let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
     ensure!(saved, "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["gateways"][0]["workspace"], "project");
+    assert_eq!(profiles["control_planes"][0]["workspace"], "project");
     // A URL that cannot be saved is refused before the token is sent anywhere.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
@@ -419,7 +415,7 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     let (saved, stderr) = connect(&token, "prod", "http://127.0.0.2:1", true).await?;
     ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
+    assert_eq!(profiles["control_planes"].as_array().map(Vec::len), Some(1));
     services.stop().await?;
     Ok(())
 }

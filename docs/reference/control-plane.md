@@ -15,9 +15,11 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Worklet API](glossary.md#worklet-api), [Worklet](glossary.md#worklet), and
 [Worker](glossary.md#worker).
 
-The API Server and Gateway are subsystems inside the Control Plane. The API Server is the
-authenticated management, resource, and Worklet API boundary. The Gateway connects collaboration
-surfaces to the Control Plane. The first deployment remains one process and listener, but these
+The API Server is the Control Plane's public endpoint: the authenticated management, resource, and
+Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state, so
+more API Server replicas can run in front of one set of controllers. By default the API Server and
+the controllers run as one process. The Gateway connects collaboration surfaces to the Control
+Plane. It runs as a separate, optional process and is an ordinary client of the API Server. These
 boundaries keep resource semantics and admission separate from collaboration transport and from
 reconciliation.
 

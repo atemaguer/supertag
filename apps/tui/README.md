@@ -5,7 +5,7 @@ and Glamour.
 
 ## Runtime v2
 
-The Rust CLI launches the Go TUI with a Gateway URL and an operator credential over file
+The Rust CLI launches the Go TUI with a Control Plane URL and an operator credential over file
 descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`. The TUI reads descriptor 3 only when that variable
 is set, so a plain launch with no handover never touches a descriptor it does not own. The handover identifies the protocol as `runtime.v2` and can include a trusted
 server certificate authority and client certificate and key paths. The TUI uses the generated
@@ -16,19 +16,19 @@ follows replies. Watch keeps the rail and open conversation current across clien
 resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
 Task event sequence.
 
-Ctrl-P opens **Gateways**, including when only one connection exists. Press `a` to add a
-Gateway, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
+Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a
+Control Plane, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
 to verify access and save it. Optional certificate fields support private TLS authorities and
 client identities. `s` saves the current launch connection; `e` edits a selected saved
-connection's credential without moving it to a different Gateway URL. Enter switches, and
-`d` forgets the selected saved connection. Switching cancels the previous Gateway's requests
-and subscriptions and loads only the selected Gateway's Tags and conversations.
+connection's credential without moving it to a different Control Plane URL. Enter switches, and
+`d` forgets the selected saved connection. Switching cancels the previous Control Plane's
+requests and subscriptions and loads only the selected Control Plane's Tags and conversations.
 
-Saved connections use a private native file, `supertag/tui-gateways.json` under the operating
+Saved connections use a private native file, `supertag/tui-control-planes.json` under the operating
 system's user configuration directory, with owner-only permissions. It is separate from the
 local service credentials and the desktop app's store. A launch handover keeps its selected
-Gateway and credentials; saved connections add to the chooser. Without a launch handover,
-`supertag-tui` reopens the last selected saved Gateway or shows the empty chooser for adding
+Control Plane and credentials; saved connections add to the chooser. Without a launch handover,
+`supertag-tui` reopens the last selected saved Control Plane or shows the empty chooser for adding
 the first one. The token never appears in command arguments or the terminal display.
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to

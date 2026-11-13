@@ -69,7 +69,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	return c
 }
 
-// testNegotiation answers ProtocolNegotiation.Negotiate as a Gateway speaking versions.
+// testNegotiation answers ProtocolNegotiation.Negotiate as a Control Plane speaking versions.
 func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 	mux := http.NewServeMux()
 	testRPC(mux, rpc.ProtocolNegotiationNegotiateProcedure, func(_ context.Context, req *v2.NegotiateProtocolRequest) (*v2.NegotiateProtocolResponse, error) {
@@ -78,15 +78,15 @@ func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 		}
 		for _, version := range versions {
 			if slices.Contains(req.GetProtocolVersions(), version) {
-				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
+				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
 			}
 		}
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]"))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]"))
 	})
 	return mux
 }
 
-func TestRuntimeV2RefusesAGatewayFromAnotherProtocolEpoch(t *testing.T) {
+func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
@@ -108,11 +108,11 @@ func TestRuntimeV2RefusesAGatewayFromAnotherProtocolEpoch(t *testing.T) {
 	_, err = c.ListTags(t.Context())
 	var refused *APIError
 	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition ||
-		refused.Message != "the SuperTag Gateway refused this operator client: incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]" {
-		t.Fatalf("ListTags against an old Gateway = %v", err)
+		refused.Message != "the SuperTag Control Plane refused this operator client: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]" {
+		t.Fatalf("ListTags against an old Control Plane = %v", err)
 	}
 	if calls.Load() != 0 {
-		t.Fatalf("an operator call reached a Gateway that refused negotiation")
+		t.Fatalf("an operator call reached a Control Plane that refused negotiation")
 	}
 }
 
@@ -243,7 +243,7 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 			return &v2.ListEventsResponse{Events: events}, nil
 		case 2:
 			settled.Store(true)
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("Gateway restarted"))
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("Control Plane restarted"))
 		case 3:
 			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last piece"}}}, nil
 		default:
@@ -461,7 +461,7 @@ func TestRuntimeV2CancelsInFlightFollow(t *testing.T) {
 	select {
 	case <-called:
 	case <-ctx.Done():
-		t.Fatal("the Gateway never received the follow")
+		t.Fatal("the Control Plane never received the follow")
 	}
 	cancel()
 	expect(t, collect(t, follow))
@@ -500,6 +500,6 @@ func TestRuntimeV2RefusesRedirect(t *testing.T) {
 	})
 	c := testRuntime(t, mux, false)
 	if _, err := c.ListTags(context.Background()); err == nil || redirected.Load() {
-		t.Fatal("Gateway redirect must fail without a second request")
+		t.Fatal("Control Plane redirect must fail without a second request")
 	}
 }

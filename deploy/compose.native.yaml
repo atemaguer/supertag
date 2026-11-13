@@ -1,7 +1,8 @@
 # Native split services, separate from the legacy compose.yaml entry point.
 # Supply per-role env files and TLS directories; no credentials belong in this file.
-# The internal network intentionally publishes no ports. A deployment may add an
-# explicit Gateway port or ingress in an override after configuring its own TLS.
+# The internal network intentionally publishes no ports. deploy/compose.native.ingress.yaml
+# publishes the Control Plane, the public endpoint for operators, Worker Hosts, and Gateways.
+# The Gateway, for collaboration surfaces, runs only with `--profile gateway`.
 services:
   postgres:
     image: ${SUPERTAG_POSTGRES_IMAGE:-postgres:17-alpine}
@@ -21,7 +22,7 @@ services:
 
   control-plane:
     image: ${SUPERTAG_CONTROL_IMAGE:?provide the verified native Control Plane image}
-    command: ["control-plane", "--listen", "0.0.0.0:3435"]
+    command: ["control-plane", "--listen", "0.0.0.0:3434", "--transfer-directory", "/var/lib/supertag/transfers"]
     env_file: ${SUPERTAG_CONTROL_ENV_FILE:?provide the private Control Plane env file}
     volumes:
       - control-state:/var/lib/supertag
@@ -39,7 +40,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "https://control-plane:3435"]
+      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "https://control-plane:3434"]
       interval: 2s
       timeout: 8s
       retries: 30
@@ -47,8 +48,9 @@ services:
     stop_grace_period: 15s
 
   gateway:
+    profiles: [gateway]
     image: ${SUPERTAG_GATEWAY_IMAGE:?provide the verified native Gateway image}
-    command: ["gateway", "--listen", "0.0.0.0:3434", "--control-plane", "https://control-plane:3435", "--checkpoint-directory", "/var/lib/supertag/checkpoints"]
+    command: ["gateway", "--listen", "127.0.0.1:3436", "--control-plane", "https://control-plane:3434"]
     env_file: ${SUPERTAG_GATEWAY_ENV_FILE:?provide the private Gateway env file}
     volumes:
       - gateway-state:/var/lib/supertag
@@ -66,7 +68,7 @@ services:
       control-plane:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "https://gateway:3434"]
+      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "http://127.0.0.1:3436", "--service", "supertag.runtime.v2.OperatorNotificationTest"]
       interval: 2s
       timeout: 8s
       retries: 30

@@ -1,7 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "startCommand": "/usr/local/bin/supertag-hosted-entrypoint gateway --listen [::]:3434 --control-plane https://supertag-control-plane.railway.internal:3435 --checkpoint-directory /var/lib/supertag/checkpoints",
+    "startCommand": "/usr/local/bin/supertag-hosted-entrypoint gateway --listen 127.0.0.1:3436 --control-plane https://supertag-control-plane.railway.internal:3434",
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10

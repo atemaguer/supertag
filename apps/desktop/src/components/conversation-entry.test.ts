@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import type { Message } from "../gateway";
+import type { Message } from "../control-plane";
 import { ConversationEntry } from "./conversation-entry";
 
 const task: Message["task"] = {

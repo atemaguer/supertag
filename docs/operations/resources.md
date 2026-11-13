@@ -117,9 +117,9 @@ the [CLI operator guide](cli.md) for a complete local run.
 
 ## Apply configuration
 
-On a Rust deployment, the CLI reads the same manifest envelope and connects through the
-Gateway. Use the `--gateway` option for a remote Gateway and supply the operator token through
-`SUPERTAG_OPERATOR_TOKEN`. Use `--state-directory` for a local deployment started by the Rust CLI.
+On a Rust deployment, the CLI reads the same manifest envelope and connects to the Control
+Plane. Use the `--control-plane` option for a remote Control Plane and supply the operator token
+through `SUPERTAG_OPERATOR_TOKEN`. Use `--state-directory` for a local deployment started by the Rust CLI.
 Preview shows the planned resource and relationship changes before writing. The Rust CLI
 supports files, directories, and standard input.
 

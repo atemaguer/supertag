@@ -82,8 +82,8 @@ whole system rather than another first-class resource.
 - <a id="surface-account"></a>**Surface Account** — one enrolled external workspace or account; its credentials remain in a
   vault. Set it up interactively or declare it in a SurfaceAccount manifest whose secrets are
   references.
-- <a id="gateway"></a>**Gateway** — the Control Plane subsystem that carries collaboration surface traffic to and from external
-  work tools.
+- <a id="gateway"></a>**Gateway** — the service that carries collaboration surface traffic to and from external work
+  tools. It is a client of the Control Plane.
 - <a id="worker-host"></a>**Worker Host** — a machine, container, VM, or sandbox that provides execution capacity. See
   [Worker Host selection](scheduling-and-recovery.md#worker-host-selection).
 - <a id="host-service"></a>**host service** — a `host` entry in `supertag.yaml` that connects its machine as a

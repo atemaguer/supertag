@@ -505,7 +505,7 @@ impl<'a> System<'a> {
 
     async fn operator(&self) -> Result<OperatorClient<ProtocolChannel>> {
         let channel = protocol::negotiated(
-            Channel::from_shared(format!("http://{}", self.public))?
+            Channel::from_shared(format!("http://{}", self.private))?
                 .connect_timeout(Duration::from_secs(2))
                 .timeout(Duration::from_secs(3))
                 .connect()
@@ -531,7 +531,7 @@ impl<'a> System<'a> {
             })?)
             .await?;
         let mut policy = SurfacePolicyCatalogClient::new(
-            protocol::dial(format!("http://{}", self.public)).await?,
+            protocol::dial(format!("http://{}", self.private)).await?,
         );
         policy
             .put_surface_account(self.credentials.request(PutSurfaceAccountRequest {
@@ -583,8 +583,8 @@ impl<'a> System<'a> {
     fn start_host(&mut self) -> Result<()> {
         let mut command = self.credentials.command();
         command
-            .args(["worker-host", "--gateway"])
-            .arg(format!("http://{}", self.public))
+            .args(["worker-host", "--control-plane"])
+            .arg(format!("http://{}", self.private))
             .args(["--once", "--state-directory"])
             .arg(self.directory.join("host"))
             .arg("--adapter")
@@ -1186,10 +1186,10 @@ crash_matrix! {
         case(ControlPlane, "control-plane.submit.before-commit", Operator, Succeeded);
     control_plane_operator_admission_after_commit =>
         case(ControlPlane, "control-plane.submit.after-commit", Operator, Succeeded);
-    gateway_operator_admission_before_forward =>
-        case(Gateway, "gateway.submit.before-forward", Operator, Succeeded);
-    gateway_operator_admission_after_forward =>
-        case(Gateway, "gateway.submit.after-forward", Operator, Succeeded);
+    api_operator_admission_before_forward =>
+        case(ControlPlane, "api.submit.before-forward", Operator, Succeeded);
+    api_operator_admission_after_forward =>
+        case(ControlPlane, "api.submit.after-forward", Operator, Succeeded);
     control_plane_slack_admission_before_commit =>
         case(ControlPlane, "control-plane.slack-admission.before-commit", Slack, Delivered);
     control_plane_slack_admission_after_commit =>
@@ -1204,10 +1204,10 @@ crash_matrix! {
         case(ControlPlane, "control-plane.claim.before-commit", Slack, Delivered);
     control_plane_claim_after_commit =>
         case(ControlPlane, "control-plane.claim.after-commit", Slack, Delivered);
-    gateway_claim_before_forward =>
-        case(Gateway, "gateway.claim.before-forward", Slack, Delivered);
-    gateway_claim_after_forward =>
-        case(Gateway, "gateway.claim.after-forward", Slack, Delivered);
+    api_claim_before_forward =>
+        case(ControlPlane, "api.claim.before-forward", Slack, Delivered);
+    api_claim_after_forward =>
+        case(ControlPlane, "api.claim.after-forward", Slack, Delivered);
     worker_host_claim_journaled =>
         case(WorkerHost, "worker-host.claim.journaled", Slack, Delivered);
     worker_host_claim_assigned =>
@@ -1220,10 +1220,10 @@ crash_matrix! {
         case(ControlPlane, "control-plane.start.before-commit", Slack, Delivered);
     control_plane_start_after_commit =>
         case(ControlPlane, "control-plane.start.after-commit", Slack, Delivered);
-    gateway_start_before_forward =>
-        case(Gateway, "gateway.start.before-forward", Slack, Delivered);
-    gateway_start_after_forward =>
-        case(Gateway, "gateway.start.after-forward", Slack, Delivered);
+    api_start_before_forward =>
+        case(ControlPlane, "api.start.before-forward", Slack, Delivered);
+    api_start_after_forward =>
+        case(ControlPlane, "api.start.after-forward", Slack, Delivered);
     worker_host_start_answered =>
         case(WorkerHost, "worker-host.start.answered", Slack, Delivered);
     worker_host_execute_journaled =>
@@ -1238,10 +1238,10 @@ crash_matrix! {
         case(ControlPlane, "control-plane.append-event.before-commit", Slack, Delivered);
     control_plane_event_after_commit =>
         case(ControlPlane, "control-plane.append-event.after-commit", Slack, Delivered);
-    gateway_event_before_forward =>
-        case(Gateway, "gateway.append-event.before-forward", Slack, Delivered);
-    gateway_event_after_forward =>
-        case(Gateway, "gateway.append-event.after-forward", Slack, Delivered);
+    api_event_before_forward =>
+        case(ControlPlane, "api.append-event.before-forward", Slack, Delivered);
+    api_event_after_forward =>
+        case(ControlPlane, "api.append-event.after-forward", Slack, Delivered);
     worker_host_event_answered =>
         case(WorkerHost, "worker-host.append-event.answered", Slack,
             ExecutionUncertain { launches: 1, events: 1 });
@@ -1259,10 +1259,10 @@ crash_matrix! {
         case(ControlPlane, "control-plane.finish.before-commit", Slack, Delivered);
     control_plane_finish_after_commit =>
         case(ControlPlane, "control-plane.finish.after-commit", Slack, Delivered);
-    gateway_finish_before_forward =>
-        case(Gateway, "gateway.finish.before-forward", Slack, Delivered);
-    gateway_finish_after_forward =>
-        case(Gateway, "gateway.finish.after-forward", Slack, Delivered);
+    api_finish_before_forward =>
+        case(ControlPlane, "api.finish.before-forward", Slack, Delivered);
+    api_finish_after_forward =>
+        case(ControlPlane, "api.finish.after-forward", Slack, Delivered);
     worker_host_finish_answered =>
         case(WorkerHost, "worker-host.finish.answered", Slack, Delivered);
 

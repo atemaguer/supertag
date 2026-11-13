@@ -289,7 +289,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> 
         let file = state.join("hosts").join(name).join("enrollment.json");
         assert_eq!(fs::metadata(file)?.permissions().mode() & 0o777, 0o600);
     }
-    // Discover the default file from state, and reuse exactly the enrolled Gateway origin.
+    // Discover the default file from state, and reuse exactly the enrolled Control Plane origin.
     fs::copy(&file, state.join("supertag.yaml"))?;
     let mut restarted = Process::spawn(&state, None, &[])?;
     assert_eq!(restarted.ready()?, endpoint);
@@ -620,7 +620,7 @@ async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -
         assert!(!status.success());
         assert!(!state.join("hosts").exists());
         assert!(!state.join("endpoint").exists());
-        let address = fs::read_to_string(state.join("gateway-address"))?;
+        let address = fs::read_to_string(state.join("control-plane-address"))?;
         assert!(
             tokio::net::TcpStream::connect(address.trim())
                 .await
@@ -768,7 +768,11 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     };
     assert_eq!(
         names(&roles["control-plane"]),
-        expected(&["SUPERTAG_DATABASE_URL", "SUPERTAG_GATEWAY_TOKEN"])
+        expected(&[
+            "SUPERTAG_DATABASE_URL",
+            "SUPERTAG_GATEWAY_TOKEN",
+            "SUPERTAG_OPERATOR_TOKEN"
+        ])
     );
     assert_eq!(
         names(&roles["gateway"]),
@@ -886,7 +890,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     Ok(())
 }
 
-/// A Control Plane and Gateway outside the supervisor, so one Host test runs on either database.
+/// A Control Plane outside the supervisor, so one Host test runs on either database.
 struct Central {
     services: Vec<Child>,
     public: String,
@@ -907,32 +911,17 @@ impl Central {
         };
         let mut plane = Command::new(BIN)
             .args(["control-plane", "--listen", "127.0.0.1:0"])
-            .env_clear()
-            .env("SUPERTAG_DATABASE_URL", database)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .spawn()?;
-        let private = listen(&mut plane)?;
-        let mut services = vec![plane];
-        let mut gateway = Command::new(BIN)
-            .args([
-                "gateway",
-                "--control-plane",
-                &private,
-                "--listen",
-                "127.0.0.1:0",
-            ])
-            .arg("--checkpoint-directory")
+            .arg("--transfer-directory")
             .arg(checkpoints.path().join("checkpoints"))
             .env_clear()
+            .env("SUPERTAG_DATABASE_URL", database)
             .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .spawn()?;
-        let public = listen(&mut gateway);
-        services.push(gateway);
+        let public = listen(&mut plane);
+        let services = vec![plane];
         let mut central = Self {
             services,
             public: String::new(),

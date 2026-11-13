@@ -84,26 +84,22 @@ async fn stop(child: &mut Child) -> Result<()> {
     child.wait().await?;
     Ok(())
 }
-fn plane(credentials: &Credentials, database: &str, listen: &str) -> Command {
+fn plane(credentials: &Credentials, root: &Path, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
-    c.env("SUPERTAG_DATABASE_URL", database);
-    c
-}
-fn gateway(credentials: &Credentials, root: &Path, private: &str) -> Command {
-    let mut c = credentials.command(&["gateway", "--control-plane", private]);
-    c.arg("--checkpoint-directory")
+    c.env("SUPERTAG_DATABASE_URL", database)
+        .arg("--transfer-directory")
         .arg(root.join("cas"))
         .arg("--artifact-volume")
         .arg(format!("published={}", root.join("volume").display()));
     c
 }
 fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["artifact-publication", "--gateway", public]);
+    let mut c = credentials.command(&["artifact-publication", "--control-plane", public]);
     c.args(args);
     c
 }
 fn consumption(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["artifact-consumption", "--gateway", public]);
+    let mut c = credentials.command(&["artifact-consumption", "--control-plane", public]);
     c.args(args);
     c
 }
@@ -114,8 +110,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     std::fs::create_dir(&volume)?;
     std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
-    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
+    let (mut control, public) =
+        service(plane(&credentials, &root, &database, "127.0.0.1:0")).await?;
     let channel =
         protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -306,7 +302,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     assert_eq!(consent["revision"], 1);
-    let mut list = credentials.command(&["get", "--gateway", &public, "artifact-publications"]);
+    let mut list =
+        credentials.command(&["get", "--control-plane", &public, "artifact-publications"]);
     list.args(["--objective", &destination.objective_id]);
     let audience = json(list).await?;
     assert_eq!(audience["publications"][0]["artifact_id"], artifact_id);
@@ -323,7 +320,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     let admitted = json(credentials.command(&[
         "task",
         "submit",
-        "--gateway",
+        "--control-plane",
         &public,
         "--tag",
         "consumer",
@@ -344,7 +341,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     );
     json(credentials.command(&[
         "volume",
-        "--gateway",
+        "--control-plane",
         &public,
         "put",
         "published",
@@ -356,7 +353,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     .await?;
     json(credentials.command(&[
         "volume",
-        "--gateway",
+        "--control-plane",
         &public,
         "copy",
         "published",
@@ -369,11 +366,10 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         "copy-volume",
     ]))
     .await?;
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
-    let (mut control, private) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    let (mut ingress, public) = service(gateway(&credentials, &root, &private)).await?;
+    let (mut control, public) =
+        service(plane(&credentials, &root, &database, "127.0.0.1:0")).await?;
     let replay = json(publication(
         &credentials,
         &public,
@@ -503,7 +499,6 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     );
     let audit = json(consumption(&credentials, &public, &["audit", "consent"])).await?;
     assert_eq!(audit["events"].as_array().unwrap().len(), 2);
-    stop(&mut ingress).await?;
     stop(&mut control).await?;
     Ok(())
 }

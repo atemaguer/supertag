@@ -348,7 +348,8 @@ async fn gateway(
         .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint);
     let mut process = Process::spawn(command, directory, state)?;
     let endpoints = process.endpoints(2).await?;
-    Ok((process, endpoints[0].clone(), endpoints[1].clone()))
+    // Operators and Worker Hosts use the Control Plane; the Gateway serves only its surface.
+    Ok((process, cp.to_owned(), endpoints[1].clone()))
 }
 
 fn payload(id: &str, ts: &str, mention: bool, prompt: &str) -> Value {
@@ -422,7 +423,7 @@ async fn execute(
 ) -> Result<()> {
     let mut command = credentials.command(&[
         "worker-host",
-        "--gateway",
+        "--control-plane",
         gateway,
         "--adapter",
         ADAPTER,
@@ -678,7 +679,10 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     let credentials = Credentials::new();
     let mock = MockSlack::start().await?;
     let mut command = credentials.command(&["control-plane"]);
-    command.env("SUPERTAG_DATABASE_URL", &database);
+    command
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .arg("--transfer-directory")
+        .arg(directory.path().join("cas"));
     let mut cp = Process::spawn(command, directory.path(), "context-cp")?;
     let private = cp.endpoints(1).await?.remove(0);
     let mut command = credentials.command(&[
@@ -691,8 +695,6 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     ]);
     command
         .arg(directory.path().join("slack"))
-        .arg("--checkpoint-directory")
-        .arg(directory.path().join("cas"))
         .env("SUPERTAG_SLACK_ACCOUNT_ID", ACCOUNT)
         .env("SUPERTAG_SLACK_TEAM_ID", TEAM)
         .env("SUPERTAG_SLACK_CHANNEL_ID", CHANNEL)
@@ -703,7 +705,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         .env("SUPERTAG_TEST_SLACK_API_URL", &mock.endpoint);
     let mut gateway = Process::spawn(command, directory.path(), "context-gateway")?;
     let endpoints = gateway.endpoints(2).await?;
-    let (public, http) = (&endpoints[0], &endpoints[1]);
+    let (public, http) = (&private, &endpoints[1]);
     let channel =
         protocol::negotiated(Channel::from_shared(public.clone())?.connect().await?).await?;
     let mut operator = OperatorClient::new(channel.clone());
@@ -1059,7 +1061,7 @@ async fn run_host(
     for _ in 0..4 {
         let mut command = credentials.command(&[
             "worker-host",
-            "--gateway",
+            "--control-plane",
             gateway,
             "--adapter",
             ADAPTER,

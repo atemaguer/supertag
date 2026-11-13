@@ -43,7 +43,7 @@ struct SourceClient {
     directory: PathBuf,
 }
 
-pub(crate) struct FetchedSource {
+pub struct FetchedSource {
     pub bundle: TransferArtifact,
     // Keep private source state alive until its stream is complete or dropped.
     pub _directory: TempDir,
@@ -110,7 +110,7 @@ impl GithubWorkspaceSources {
         Ok(self)
     }
 
-    pub(crate) async fn advertised_output_remote(
+    pub async fn advertised_output_remote(
         &self,
         workspace: &GithubWorkspace,
         commit: &str,
@@ -159,7 +159,7 @@ impl GithubWorkspaceSources {
             input.account_id == self.0.account
                 && input.repository_id == self.0.repository_id
                 && input.repository == self.0.repository,
-            "accepted GitHub source is not configured on this Gateway"
+            "accepted GitHub source is not configured on this Control Plane"
         );
         Ok(input)
     }
@@ -206,7 +206,7 @@ impl GithubWorkspaceSources {
         Ok(())
     }
 
-    pub(crate) async fn fetch(
+    pub async fn fetch(
         &self,
         workspace: &GithubWorkspace,
         cancel: &CancellationToken,

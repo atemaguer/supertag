@@ -29,6 +29,20 @@ pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;
 pub const HOST_GENERATION_HEADER: &str = "x-supertag-host-generation";
 pub const PRINCIPAL_HEADER: &str = "x-supertag-principal";
+/// Every Operator Token secret starts with this prefix.
+pub const OPERATOR_TOKEN_SECRET_PREFIX: &str = "stop_";
+
+/// True when the text has the shape of an Operator Token secret: `stop_` and 64 lowercase hex.
+pub fn is_operator_token_secret(value: &str) -> bool {
+    value
+        .strip_prefix(OPERATOR_TOKEN_SECRET_PREFIX)
+        .is_some_and(|rest| {
+            rest.len() == 64
+                && rest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
+}
 
 pub fn host_generation<T>(request: &Request<T>) -> Result<u64, Status> {
     let mut values = request.metadata().get_all(HOST_GENERATION_HEADER).iter();

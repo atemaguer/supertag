@@ -36,7 +36,7 @@ impl WorkspaceMapping {
     pub(crate) fn local_root(&self) -> Option<&Path> {
         match &self.source {
             WorkspaceSource::Local(path) => Some(path),
-            WorkspaceSource::Gateway => None,
+            WorkspaceSource::ControlPlane => None,
         }
     }
 }
@@ -44,7 +44,8 @@ impl WorkspaceMapping {
 #[derive(Clone, Debug)]
 pub enum WorkspaceSource {
     Local(PathBuf),
-    Gateway,
+    /// A GitHub Workspace whose source the Control Plane serves.
+    ControlPlane,
 }
 
 /// Passed only to the adapter; it never contains the operator's source path.
@@ -121,16 +122,16 @@ impl Workspaces {
             .iter()
             .filter(|mapping| match &mapping.source {
                 WorkspaceSource::Local(source) => source.is_dir(),
-                WorkspaceSource::Gateway => false,
+                WorkspaceSource::ControlPlane => false,
             })
             .map(|mapping| mapping.workspace_id.clone())
             .collect()
     }
 
-    pub fn gateway_ids(&self) -> Vec<String> {
+    pub fn control_plane_ids(&self) -> Vec<String> {
         self.mappings
             .iter()
-            .filter(|mapping| matches!(mapping.source, WorkspaceSource::Gateway))
+            .filter(|mapping| matches!(mapping.source, WorkspaceSource::ControlPlane))
             .map(|mapping| mapping.workspace_id.clone())
             .collect()
     }
@@ -147,7 +148,7 @@ impl Workspaces {
             state_dir: self.directory.join(identity),
             source: match &mapping.source {
                 WorkspaceSource::Local(source) => source.clone(),
-                WorkspaceSource::Gateway => self
+                WorkspaceSource::ControlPlane => self
                     .source_directory(workspace_id, base_commit)
                     .join("repository.git"),
             },
@@ -179,7 +180,7 @@ impl Workspaces {
             .mapping(&spec.workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;
         match (&mapping.source, &spec.github_source) {
-            (WorkspaceSource::Gateway, Some(expected)) => {
+            (WorkspaceSource::ControlPlane, Some(expected)) => {
                 let (reference, bytes) = tokio::select! {
                     result = transfers.download_source(attempt, token) => result?,
                     _ = cancel.cancelled() => return Err(Status::cancelled("source download cancelled").into()),
@@ -191,7 +192,7 @@ impl Workspaces {
                             .source
                             .as_ref()
                             .is_some_and(|source| source.commit_sha == spec.base_commit),
-                    "Gateway returned a different Workspace source"
+                    "Control Plane returned a different Workspace source"
                 );
                 fs::DirBuilder::new()
                     .recursive(true)
@@ -324,7 +325,7 @@ impl Workspaces {
             .await
             .ok()
             .flatten(),
-            WorkspaceSource::Gateway => {
+            WorkspaceSource::ControlPlane => {
                 let (transfers, attempt, token) = authority;
                 tokio::select! {
                     remote = transfers.verify_output_remote(attempt, token, commit) => remote.ok().flatten(),
@@ -589,7 +590,7 @@ impl Transfers {
                 .into_inner();
         if received != reference {
             return Err(Status::data_loss(
-                "Gateway returned a different workspace receipt",
+                "Control Plane returned a different workspace receipt",
             ));
         }
         Ok(received)

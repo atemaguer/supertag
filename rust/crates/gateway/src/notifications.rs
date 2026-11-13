@@ -45,7 +45,7 @@ use tokio::{process::Command, time};
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
-use crate::{Gateway, operator_access::OperatorCredential};
+use crate::operator_auth::OperatorAuth;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -596,10 +596,10 @@ impl OperatorNotifier {
     /// The public operator service that sends a sample through every destination.
     pub fn test_service(
         &self,
-        gateway: Gateway,
+        auth: OperatorAuth,
     ) -> OperatorNotificationTestServer<TestNotifications> {
         OperatorNotificationTestServer::new(TestNotifications {
-            gateway,
+            auth,
             notifier: self.clone(),
         })
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -608,7 +608,7 @@ impl OperatorNotifier {
 }
 
 pub struct TestNotifications {
-    gateway: Gateway,
+    auth: OperatorAuth,
     notifier: OperatorNotifier,
 }
 
@@ -619,13 +619,7 @@ impl OperatorNotificationTest for TestNotifications {
         request: Request<SendTestNotificationRequest>,
     ) -> Result<Response<SendTestNotificationResponse>, Status> {
         // Any authenticated operator may send the harmless sample.
-        if let OperatorCredential::Token(digest) =
-            self.gateway.credentials.presented_operator(&request)?
-        {
-            self.gateway
-                .authenticate_operator(digest, CALL_TIMEOUT)
-                .await?;
-        }
+        self.auth.authenticate(&request, CALL_TIMEOUT).await?;
         let objective = request.into_inner().objective_id.trim().to_owned();
         if objective.len() > 256 || objective.chars().any(char::is_control) {
             return Err(Status::invalid_argument(

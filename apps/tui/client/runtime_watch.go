@@ -21,7 +21,7 @@ func (w *Watcher) watchRuntime(ctx context.Context, token *string, send func(Wat
 		}
 	}
 	if len(w.Kinds) > 0 && len(kinds) == 0 {
-		return false, connect.NewError(connect.CodeInvalidArgument, errors.New("none of the requested Watch kinds is available on this Gateway"))
+		return false, connect.NewError(connect.CodeInvalidArgument, errors.New("none of the requested Watch kinds is available on this Control Plane"))
 	}
 	return watchStream(ctx, w.IdleTimeout, token, send, func(ctx context.Context) (*connect.ServerStreamForClient[v2.WatchEvent], error) {
 		return w.Client.runtime.events.Watch(ctx, connect.NewRequest(&v2.WatchRequest{ResumeToken: *token, Kinds: kinds}))
