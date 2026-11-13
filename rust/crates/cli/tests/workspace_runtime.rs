@@ -1,15 +1,18 @@
 //! Independent CLI processes exercise repository routing, delivery, and continuation.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 #[path = "support/direct_artifact_runtime.rs"]
 mod direct_artifact_runtime;
-use std::{net::SocketAddr, path::Path, process::Stdio, str::FromStr, time::Duration};
+use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{
-    ConnectOptions, Connection, Executor, PgConnection, SqliteConnection,
-    postgres::PgConnectOptions,
-};
+
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -83,8 +86,19 @@ impl Credentials {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn delivered_commit_review_survives_restart_and_notifies_owner_once() -> Result<()> {
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    delivered_commit_review_survives_restart_and_notifies_owner_once;
+    #[tokio::test]
+    artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    workspace_delivery_and_cross_host_continuation_survive_gateway_restart;
+}
+
+async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let source = root.join("source");
@@ -95,10 +109,6 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once() -> R
     git(&source, &["commit", "--quiet", "-m", "Initial source"]).await?;
     let base = git(&source, &["rev-parse", "HEAD"]).await?;
     let credentials = Credentials::new();
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        root.join("control.sqlite").display()
-    );
     let plane_command = |listen: &str| {
         let mut plane = credentials.command(&["control-plane", "--listen", listen]);
         plane.env("SUPERTAG_DATABASE_URL", &database);
@@ -228,7 +238,7 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once() -> R
 
     // Observe the durable internal notice without treating Objective Sessions as
     // direct operator conversations. Execute it on the owner through the Host.
-    let mut db = SqliteConnection::connect(&database).await?;
+    let mut db = database::connect(&database).await?;
     let notices: Vec<String> = timeout(WAIT, async {
         loop {
             let ids: Vec<String> = sqlx::query_scalar(
@@ -554,44 +564,16 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_workspace_delivery_and_cross_host_continuation_survive_gateway_restart()
--> Result<()> {
+async fn workspace_delivery_and_cross_host_continuation_survive_gateway_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("runtime.sqlite3").display()
-    );
     exercise(&database, directory.path()).await
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_workspace_delivery_and_cross_host_continuation_survive_gateway_restart()
--> Result<()> {
-    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
-        .context("PostgreSQL URL file required")?;
-    let options = PgConnectOptions::from_str(std::fs::read_to_string(path)?.trim())?;
-    let mut admin = PgConnection::connect_with(&options).await?;
-    let name = format!("supertag_workspace_process_{}", Uuid::new_v4().simple());
-    admin
-        .execute(format!("CREATE DATABASE {name}").as_str())
-        .await?;
-    let database = options.database(&name).to_url_lossy().to_string();
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().to_owned();
-    let result = tokio::spawn(async move { exercise(&database, &path).await }).await;
-    let cleanup = admin
-        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-        .await;
-    admin.close().await?;
-    cleanup?;
-    result.context("workspace process test panicked")?
-}
-
-#[tokio::test]
-async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery() -> Result<()>
-{
+async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery(
+    database: String,
+) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path();
     let source = root.join("source");
@@ -603,10 +585,7 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     let base = git(&source, &["rev-parse", "HEAD"]).await?;
     let credentials = Credentials::new();
     let mut command = credentials.command(&["control-plane"]);
-    command.env(
-        "SUPERTAG_DATABASE_URL",
-        format!("sqlite://{}?mode=rwc", root.join("state.sqlite").display()),
-    );
+    command.env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(command).await?;
     let gateway_command = |listen: Option<&str>| {
         let mut command = credentials.command(&["gateway", "--control-plane", &private]);

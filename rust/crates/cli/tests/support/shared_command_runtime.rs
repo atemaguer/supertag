@@ -15,10 +15,8 @@ async fn cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle(
     if crate::prerequisites::linux_root()?.is_none() {
         return Ok(());
     }
-    let Some(binary) = crate::prerequisites::env(
-        "linux-root",
-        "SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY",
-    )?
+    let Some(binary) =
+        crate::prerequisites::env("linux-root", "SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY")?
     else {
         return Ok(());
     };

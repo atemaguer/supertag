@@ -53,9 +53,14 @@ async fn peer_certificate(root: &Path) -> Result<(std::path::PathBuf, std::path:
     Ok((cert, key))
 }
 
-#[tokio::test]
-async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_producer_restart()
--> Result<()> {
+database_tests! {
+    #[tokio::test]
+    enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_producer_restart;
+}
+
+async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_producer_restart(
+    database: String,
+) -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().canonicalize()?;
     let repository = root.join("source");
@@ -67,13 +72,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     let base = git(&repository, &["rev-parse", "HEAD"]).await?;
     let credentials = Credentials::new();
     let mut control = credentials.command(&["control-plane"]);
-    control.env(
-        "SUPERTAG_DATABASE_URL",
-        format!(
-            "sqlite://{}?mode=rwc",
-            root.join("control.sqlite").display()
-        ),
-    );
+    control.env("SUPERTAG_DATABASE_URL", &database);
     let (mut control, private) = service(control).await?;
     let cas = root.join("cas");
     let mut gateway = credentials.command(&["gateway", "--control-plane", &private]);
