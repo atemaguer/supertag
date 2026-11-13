@@ -313,6 +313,84 @@ behavior when the last fixture closes. Always close fixtures in test cleanup.
 
 ### Execution lifecycle conformance
 
+#### Rust Worker and harness adapter interoperability spike
+
+This isolated experiment tests a Rust Worker, the process that supervises execution, with
+TypeScript and Python harness adapters running as its child processes. The default matrix
+produces deterministic text through real gRPC calls. A separate opt-in runner invokes Codex.
+The experiment does not replace the current Worker runtime.
+
+On macOS or Linux, install Rust/Cargo, the [supported Node.js runtime](docs/operations/requirements.md#system-and-tools)
+with npm, and `uv`, then run from the checkout:
+
+```sh
+bash tests/fixtures/rust-harness-interop/run.sh
+```
+
+The script installs locked dependencies inside the fixture, generates protobuf bindings,
+typechecks the TypeScript adapter, and builds and runs the Rust supervisor. It uses Python
+3.13 by default; `SUPERTAG_SPIKE_PYTHON` selects another interpreter available to `uv`.
+Node runs the TypeScript adapters with native type stripping, without a compiler subprocess.
+The first run needs network access to obtain dependencies. No SuperTag database or provider
+credentials are required.
+
+The matrix covers both languages over Unix sockets and loopback TCP: streamed output and
+a final result, cancellation while an event acknowledgement is withheld, both orderings
+of cancellation versus a final result, invalid credentials, incompatible protocol versions,
+stale execution generations, invalid event sequences, and an adapter crash. Each run checks
+the observed result and reaps its child process. Successful completion prints 36 JSON result
+lines followed by `PASS 36 Rust Worker / harness adapter interoperability cases`.
+
+The experimental [protobuf contract](tests/fixtures/rust-harness-interop/harness.proto) uses
+separate control and event streams so a blocked event acknowledgement cannot block
+cancellation. The spike keeps results in memory; it does not establish durable recovery,
+Gateway session persistence, production sandboxing, or compatibility with existing Workers.
+
+##### Real Codex Tasks
+
+The live runner gives each language adapter a Task, one turn of work, in a new disposable Node
+repository. Codex implements a duration parser, adds tests, runs `npm test` and `npm run check`,
+and commits the change. TypeScript uses the official Codex SDK's streaming execution API;
+Python uses the official asynchronous Codex SDK and app-server. Rust owns both adapter
+processes and receives their events and results through the same gRPC contract.
+
+Install Codex CLI and sign in with `codex login`, then run:
+
+```sh
+bash tests/fixtures/rust-harness-interop/run-live.sh /tmp/supertag-rust-live
+```
+
+This consumes real Codex usage with `gpt-6.1-sol` at `medium` reasoning. It requires file-backed
+native authentication in `$CODEX_HOME/auth.json` or `~/.codex/auth.json`. Set
+`SUPERTAG_SPIKE_CODEX` to an absolute executable path to override `codex` on `PATH`.
+The verified CLI version is 0.163.0. Pass `typescript` or `python` as the second argument
+to select one adapter; choose a new output directory for each repeat.
+
+Rust passes the requested model, effort, Task identity, workspace, and prompt in its offer.
+It copies only Codex authentication into a private temporary home, clears the adapter's
+inherited environment, and removes that temporary home after execution. Each native harness
+uses workspace write access with explicit access to the disposable repository's `.git`
+directory. No database or surface credentials are supplied.
+
+The runner records streamed command evidence and independently reruns the project's checks
+and 37 behavioral cases outside the model-controlled repository. It requires exactly one
+commit on the expected branch, both implementation and tests changed, no other changed files,
+and a clean working tree. It also checks Codex's native execution record for the actual model
+and effort. A successful adapter result alone cannot pass these checks.
+
+Each language's output directory retains `workspace/`, `commit.patch`, `task.json`, `events.jsonl`,
+`result.md`, and `result.json` for review. The result includes the full commit hash and check output;
+native credentials and reasoning are not copied into these artifacts. The runner reaps each
+adapter and fails if native children remain after successful shutdown. These live Tasks are
+started by the experimental Rust runner; they are not yet admitted or scheduled by the
+production Control Plane, which stores and coordinates the organization's work.
+
+The independent verifier's regression tests require no model calls:
+
+```sh
+python3 -m unittest discover -s tests/fixtures/rust-harness-interop -p test_live_project.py -v
+```
+
 #### Automatic artifact collection and recovery
 
 For automatic artifact collection and transfer recovery, run:

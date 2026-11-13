@@ -10,6 +10,49 @@ permissions:
   contents: read
 
 jobs:
+  rust-harness-interop:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: tests/fixtures/rust-harness-interop
+    env:
+      PROTOC: ${{ github.workspace }}/tests/fixtures/rust-harness-interop/protoc.sh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/fixtures/rust-harness-interop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install uv==0.9.5
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tests/fixtures/rust-harness-interop/target
+          key: rust-harness-${{ runner.os }}-${{ runner.arch }}-1.93.1-${{ hashFiles('tests/fixtures/rust-harness-interop/Cargo.lock') }}
+      # Deterministic adapters exercise the real process and gRPC boundary without credentials.
+      # Live Codex runs remain an explicit local opt-in and never run in PR CI.
+      - run: bash run.sh
+      - run: cargo fmt --check
+      - run: cargo clippy --locked -- -D warnings
+      - run: cargo test --locked
+      - run: .venv/bin/python -c "import codex_adapter"
+      - run: .venv/bin/python -m unittest discover -p test_live_project.py -v
+
   protocol-conformance:
     runs-on: ubuntu-latest
     steps:
