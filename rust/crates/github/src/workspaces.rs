@@ -17,7 +17,7 @@ use tempfile::TempDir;
 use tokio::{io::AsyncReadExt, process::Command, time};
 use tokio_util::sync::CancellationToken;
 
-use super::{GithubAuthentication, auth::Authentication, valid_id, valid_repository};
+use crate::{GithubAuthentication, auth::Authentication, valid_id, valid_repository};
 
 mod refs;
 #[cfg(test)]
@@ -311,7 +311,7 @@ impl GithubWorkspaceSources {
     }
 }
 
-pub(super) fn git_command(directory: &Path) -> Command {
+pub(crate) fn git_command(directory: &Path) -> Command {
     let mut command = Command::new("/usr/bin/git");
     command
         .current_dir(directory)
@@ -351,7 +351,7 @@ impl Drop for ProcessGroup {
     }
 }
 
-pub(super) async fn run_git(
+pub(crate) async fn run_git(
     command: Command,
     directory: &Path,
     cancel: &CancellationToken,

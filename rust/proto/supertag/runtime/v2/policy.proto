@@ -19,7 +19,7 @@ service PolicyCatalog {
   rpc DeactivateRoleAssignment(DeactivateRoleAssignmentRequest) returns (RoleAssignment);
 }
 
-// Operator-managed policy bindings. Provider credentials stay at the Gateway.
+// Operator-managed policy bindings. Surface credentials stay at the Gateway.
 service SurfacePolicyCatalog {
   rpc PutSurfaceAccount(PutSurfaceAccountRequest) returns (SurfaceAccount);
   rpc GetSurfaceAccount(GetSurfaceAccountRequest) returns (SurfaceAccount);

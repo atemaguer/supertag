@@ -1,4 +1,4 @@
-"""Operator clients for the SuperTag Gateway's gRPC API."""
+"""Operator clients for the SuperTag Control Plane's gRPC API."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ try:
     import grpc
 except ImportError as error:
     raise ImportError(
-        "The Gateway API client needs the runtime extra: pip install 'supertag[runtime]'"
+        "The Control Plane client needs the runtime extra: pip install 'supertag[runtime]'"
     ) from error
 
 from ._runtime_v2 import artifact_pb2 as artifacts
@@ -32,9 +32,9 @@ from ._runtime_v2 import policy_pb2 as policy
 from ._runtime_v2 import runtime_pb2 as runtime
 
 __all__ = [
-    "GatewayClient",
-    "GatewayClientSync",
-    "GatewayProtocolError",
+    "ControlPlaneClient",
+    "ControlPlaneClientSync",
+    "ControlPlaneProtocolError",
     "artifacts",
     "github_publications",
     "github_workspaces",
@@ -51,20 +51,20 @@ _CHANNEL_OPTIONS = (
 
 def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes, bytes] | None):
     if not re.fullmatch(r"https?://[^/?#@\\\s]+/?", url):
-        raise ValueError("Gateway URL must be an HTTP or HTTPS origin")
+        raise ValueError("Control Plane URL must be an HTTP or HTTPS origin")
     try:
         parts = urlsplit(url)
         host, port = parts.hostname, parts.port
     except ValueError:
-        raise ValueError("Gateway URL must be an HTTP or HTTPS origin") from None
+        raise ValueError("Control Plane URL must be an HTTP or HTTPS origin") from None
     if (
         host is None
         or port == 0
         or not re.fullmatch(r"(?:\[[0-9a-fA-F:.]+\]|[^:\[\]]+)(?::[0-9]{1,5})?", parts.netloc)
     ):
-        raise ValueError("Gateway URL must be an HTTP or HTTPS origin")
+        raise ValueError("Control Plane URL must be an HTTP or HTTPS origin")
     if len(token) > 512 or not re.fullmatch(r"[A-Za-z0-9._~+/\-]+=*", token):
-        raise ValueError("Invalid Gateway operator token")
+        raise ValueError("Invalid operator token")
 
     options = _CHANNEL_OPTIONS
     if parts.scheme == "http":
@@ -73,9 +73,9 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
         except ValueError:
             loopback = False
         if not loopback:
-            raise ValueError("Cleartext Gateway URL must use a loopback IP address")
+            raise ValueError("Cleartext Control Plane URL must use a loopback IP address")
         if ca is not None or identity is not None:
-            raise ValueError("Gateway TLS options require HTTPS")
+            raise ValueError("Control Plane TLS options require HTTPS")
         transport = grpc.local_channel_credentials()
         options += (("grpc.enable_http_proxy", 0),)
     else:
@@ -84,7 +84,7 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
 
     address = f"[{host}]" if ":" in host else host.encode("idna").decode("ascii")
     if ":" not in host and not re.fullmatch(r"[A-Za-z0-9._-]+", address):
-        raise ValueError("Gateway URL has an invalid host")
+        raise ValueError("Control Plane URL has an invalid host")
     target = f"{address}:{port or (443 if parts.scheme == 'https' else 80)}"
     credentials = grpc.composite_channel_credentials(
         transport, grpc.access_token_call_credentials(token)
@@ -92,15 +92,15 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
     return target, transport, credentials, options
 
 
-# Every call names the protocol version this client negotiated with the Gateway; the Gateway
+# Every call names the protocol version this client negotiated with the Control Plane, which
 # refuses a call without it.
 _PROTOCOL_HEADER = "x-supertag-protocol"
 _PROTOCOL_VERSIONS = (2,)
 _NEGOTIATION_TIMEOUT = 5.0
 
 
-class GatewayProtocolError(RuntimeError):
-    """The Gateway runs an incompatible SuperTag release or refused this client's role."""
+class ControlPlaneProtocolError(RuntimeError):
+    """The Control Plane runs an incompatible SuperTag release or refused this client's role."""
 
 
 def _negotiation_request() -> negotiation_pb2.NegotiateProtocolRequest:
@@ -114,8 +114,8 @@ def _negotiation_request() -> negotiation_pb2.NegotiateProtocolRequest:
 def _refusal(error: grpc.RpcError) -> Exception:
     code, details = error.code(), error.details() or ""
     if code == grpc.StatusCode.UNIMPLEMENTED:
-        return GatewayProtocolError(
-            "incompatible SuperTag protocol: the Gateway does not offer SuperTag protocol "
+        return ControlPlaneProtocolError(
+            "incompatible SuperTag protocol: the Control Plane does not offer SuperTag protocol "
             "negotiation"
         )
     if code in (
@@ -123,12 +123,14 @@ def _refusal(error: grpc.RpcError) -> Exception:
         grpc.StatusCode.PERMISSION_DENIED,
         grpc.StatusCode.INVALID_ARGUMENT,
     ):
-        return GatewayProtocolError(f"the SuperTag Gateway refused this operator client: {details}")
+        return ControlPlaneProtocolError(
+            f"the SuperTag Control Plane refused this operator client: {details}"
+        )
     return error
 
 
 def _protocol_refusal(code: grpc.StatusCode | None, details: str | None) -> bool:
-    """A Gateway replaced by another release refuses the version this client holds."""
+    """A Control Plane replaced by another release refuses the version this client holds."""
     details = details or ""
     return code == grpc.StatusCode.FAILED_PRECONDITION and (
         details.startswith("incompatible SuperTag protocol")
@@ -137,15 +139,15 @@ def _protocol_refusal(code: grpc.StatusCode | None, details: str | None) -> bool
 
 
 def _selected(answer: negotiation_pb2.NegotiateProtocolResponse) -> int:
-    if answer.role != negotiation_pb2.SERVICE_ROLE_GATEWAY:
-        raise GatewayProtocolError(
-            "this operator client expected a SuperTag Gateway but reached another service"
+    if answer.role != negotiation_pb2.SERVICE_ROLE_CONTROL_PLANE:
+        raise ControlPlaneProtocolError(
+            "this operator client expected a SuperTag Control Plane but reached another service"
         )
     version = answer.protocol_version
     if version not in _PROTOCOL_VERSIONS or version not in answer.protocol_versions:
-        raise GatewayProtocolError(
-            f"incompatible SuperTag protocol: the Gateway selected protocol {version}; run the "
-            "same SuperTag release on the Gateway and this client"
+        raise ControlPlaneProtocolError(
+            "incompatible SuperTag protocol: the Control Plane selected protocol "
+            f"{version}; run the same SuperTag release on the Control Plane and this client"
         )
     return version
 
@@ -345,12 +347,12 @@ class _Services:
         self.download_review_artifact = workspaces.DownloadReviewArtifact
 
 
-class GatewayClient(_Services):
-    """Async Gateway client. Create it in the event loop that will use it.
+class ControlPlaneClient(_Services):
+    """Async Control Plane client. Create it in the event loop that will use it.
 
     Pass a PEM CA for private TLS and a (PEM certificate chain, PEM key) tuple for mutual TLS.
-    The first call negotiates the SuperTag protocol version and raises GatewayProtocolError
-    for a Gateway from another release.
+    The first call negotiates the SuperTag protocol version and raises ControlPlaneProtocolError
+    for a Control Plane from another release.
     """
 
     def __init__(
@@ -379,16 +381,16 @@ class GatewayClient(_Services):
     async def close(self) -> None:
         await self._channel.close()
 
-    async def __aenter__(self) -> GatewayClient:
+    async def __aenter__(self) -> ControlPlaneClient:
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         await self.close()
 
 
-class GatewayClientSync(_Services):
-    """Blocking Gateway client with the same services, TLS options, and protocol negotiation as
-    GatewayClient."""
+class ControlPlaneClientSync(_Services):
+    """Blocking Control Plane client with the same services, TLS options, and protocol
+    negotiation as ControlPlaneClient."""
 
     def __init__(
         self,
@@ -407,7 +409,7 @@ class GatewayClientSync(_Services):
     def close(self) -> None:
         self._channel.close()
 
-    def __enter__(self) -> GatewayClientSync:
+    def __enter__(self) -> ControlPlaneClientSync:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:

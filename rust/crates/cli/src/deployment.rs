@@ -57,16 +57,32 @@ const TLS_KEYS: [&str; 6] = [
     "SUPERTAG_CLIENT_CERT_FILE",
     "SUPERTAG_CLIENT_KEY_FILE",
 ];
-const CONTROL_PLANE_KEYS: [&str; 5] = [
+/// The GitHub Workspace account (`--github-workspace-directory`) and the credential vault it may
+/// read its secret from are optional Control Plane settings.
+const CONTROL_PLANE_KEYS: [&str; 18] = [
     "SUPERTAG_DATABASE_URL",
     "SUPERTAG_GATEWAY_TOKEN",
     "SUPERTAG_OPERATOR_TOKEN",
     "SUPERTAG_OPERATOR_PRINCIPAL",
     "SUPERTAG_STATE_DIR",
+    "SUPERTAG_GITHUB_ACCOUNT_ID",
+    "SUPERTAG_GITHUB_REPOSITORY_ID",
+    "SUPERTAG_GITHUB_REPOSITORY",
+    "SUPERTAG_GITHUB_TOKEN",
+    "SUPERTAG_GITHUB_APP_ID",
+    "SUPERTAG_GITHUB_INSTALLATION_ID",
+    "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+    "SUPERTAG_CREDENTIAL_VAULT",
+    "VAULT_ADDR",
+    "VAULT_TOKEN",
+    "VAULT_NAMESPACE",
+    "SUPERTAG_VAULT_MOUNT",
+    "SUPERTAG_VAULT_PATH_PREFIX",
 ];
-const GATEWAY_KEYS: [&str; 10] = [
+/// The Gateway holds no operator credential: it reads Inbox notifications for
+/// `SUPERTAG_OPERATOR_PRINCIPAL` with the Gateway credential.
+const GATEWAY_KEYS: [&str; 9] = [
     "SUPERTAG_GATEWAY_TOKEN",
-    "SUPERTAG_OPERATOR_TOKEN",
     "SUPERTAG_OPERATOR_PRINCIPAL",
     "SUPERTAG_STATE_DIR",
     "SUPERTAG_CREDENTIAL_VAULT",
@@ -226,7 +242,7 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
     out!(
         "Saved {platform} deployment configuration to {} (contains secrets; keep private).\n\
          The Control Plane serves TLS itself on container port {CONTROL_PLANE_PORT}; its certificate must name the public host operators and Worker Hosts use.\n\
-         A Gateway reaches the Control Plane at https://{host}:{CONTROL_PLANE_PORT}, so the certificate must also name {host}.\n\
+         A Gateway reaches the Control Plane at https://{host}:{CONTROL_PLANE_PORT}, so the certificate must also name {host}. It presents a client certificate, so a Control Plane serving a Gateway requires client certificates.\n\
          {}\n",
         directory.display(),
         args.platform.next_steps(),
@@ -284,7 +300,6 @@ pub fn configure(
     ]);
     let mut gateway = Environment::from([
         ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token),
-        ("SUPERTAG_OPERATOR_TOKEN".into(), operator_token.clone()),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
     ]);
     if let Some(principal) = supplied("SUPERTAG_OPERATOR_PRINCIPAL") {
@@ -385,11 +400,6 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
             "SUPERTAG_GATEWAY_TOKEN",
             gateway("SUPERTAG_GATEWAY_TOKEN"),
         ),
-        (
-            GATEWAY_FILE,
-            "SUPERTAG_OPERATOR_TOKEN",
-            gateway("SUPERTAG_OPERATOR_TOKEN"),
-        ),
     ] {
         match value {
             None => issues.push(format!("{file}: Missing {key}")),
@@ -401,9 +411,6 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
     }
     if control("SUPERTAG_GATEWAY_TOKEN") != gateway("SUPERTAG_GATEWAY_TOKEN") {
         issues.push("SUPERTAG_GATEWAY_TOKEN differs between the Control Plane and Gateway".into());
-    }
-    if control("SUPERTAG_OPERATOR_TOKEN") != gateway("SUPERTAG_OPERATOR_TOKEN") {
-        issues.push("SUPERTAG_OPERATOR_TOKEN differs between the Control Plane and Gateway".into());
     }
     if control("SUPERTAG_OPERATOR_PRINCIPAL") != gateway("SUPERTAG_OPERATOR_PRINCIPAL") {
         issues.push(
@@ -939,14 +946,12 @@ mod tests {
                 files.operator["SUPERTAG_OPERATOR_TOKEN"],
                 files.control_plane["SUPERTAG_OPERATOR_TOKEN"]
             );
-            assert_eq!(
-                files.operator["SUPERTAG_OPERATOR_TOKEN"],
-                files.gateway["SUPERTAG_OPERATOR_TOKEN"]
-            );
             assert_ne!(
-                files.gateway["SUPERTAG_OPERATOR_TOKEN"],
-                files.gateway["SUPERTAG_GATEWAY_TOKEN"]
+                files.control_plane["SUPERTAG_OPERATOR_TOKEN"],
+                files.control_plane["SUPERTAG_GATEWAY_TOKEN"]
             );
+            // A Gateway never holds an operator credential.
+            assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_TOKEN"));
             assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "file");
             assert_eq!(files.gateway["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             assert_eq!(files.control_plane["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
@@ -1490,6 +1495,37 @@ mod tests {
         }
         assert!(entrypoint.contains(TLS_DIRECTORY));
         assert!(dockerfile.contains("AS hosted"));
+        // The image's default commands are the Compose commands: a public Control Plane and a
+        // Gateway that only dials it.
+        for (stage, command) in [
+            (
+                "AS control-plane",
+                format!(
+                    "[\"control-plane\", \"--listen\", \"0.0.0.0:{CONTROL_PLANE_PORT}\", \"--transfer-directory\", \"{STATE_DIRECTORY}/transfers\"]"
+                ),
+            ),
+            (
+                "AS gateway",
+                format!(
+                    "[\"gateway\", \"--listen\", \"{GATEWAY_LISTEN}\", \"--control-plane\", \"https://control-plane:{CONTROL_PLANE_PORT}\"]"
+                ),
+            ),
+        ] {
+            let stage = &dockerfile[dockerfile.find(stage).expect(stage)..];
+            let stage = &stage[..stage[1..]
+                .find("\nFROM ")
+                .map_or(stage.len(), |end| end + 1)];
+            assert!(stage.contains(&format!("CMD {command}")), "{stage}");
+            assert!(
+                compose.contains(&format!("command: {command}")),
+                "{command}"
+            );
+        }
+        let gateway_stage = &dockerfile[dockerfile.find("AS gateway").expect("gateway stage")..];
+        assert!(
+            !gateway_stage[..gateway_stage.find("\nFROM ").unwrap_or(gateway_stage.len())]
+                .contains("EXPOSE")
+        );
         // Compose: the private network publishes nothing; only the ingress override does. The
         // Gateway runs only with its profile.
         assert!(compose.contains(&format!("target: {TLS_DIRECTORY}")));

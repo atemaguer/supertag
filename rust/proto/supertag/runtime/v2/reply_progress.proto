@@ -2,7 +2,7 @@ syntax = "proto3";
 package supertag.runtime.v2;
 import "supertag/runtime/v2/runtime.proto";
 
-// Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+// Gateway-to-Control Plane service for a reply shown while its Task runs: an
 // acknowledgement, then progress updated in place, until the final Reply replaces it.
 // The Control Plane keeps only the newest revision and paces updates per message.
 service ReplyProgress {

@@ -774,9 +774,10 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
             "SUPERTAG_OPERATOR_TOKEN"
         ])
     );
+    // The Gateway holds no operator credential.
     assert_eq!(
         names(&roles["gateway"]),
-        expected(&["SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_OPERATOR_TOKEN"])
+        expected(&["SUPERTAG_GATEWAY_TOKEN"])
     );
     // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
     // Each lane presents its Host credential; the guardian never passes it to a harness.

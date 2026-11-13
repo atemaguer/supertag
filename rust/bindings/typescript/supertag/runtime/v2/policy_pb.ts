@@ -1723,7 +1723,7 @@ export const PolicyCatalog: GenService<{
   serviceDesc(file_supertag_runtime_v2_policy, 0);
 
 /**
- * Operator-managed policy bindings. Provider credentials stay at the Gateway.
+ * Operator-managed policy bindings. Surface credentials stay at the Gateway.
  *
  * @generated from service supertag.runtime.v2.SurfacePolicyCatalog
  */

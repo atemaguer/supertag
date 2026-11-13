@@ -49,23 +49,24 @@ mod workspace_mounts;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Args, Parser, Subcommand};
 use harness::{AdapterOptions, CodexAdapterArgs};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use supertag_api::{Api, transfers::ApiTransfers};
 use supertag_control_plane::ControlPlane;
+use supertag_credential_vault::CredentialVault;
 use supertag_gateway::{
-    credential_vault::CredentialVault,
-    github::{
-        Github, GithubAppConfig, GithubAuthentication, GithubConfig,
-        workspaces::{GithubWorkspaceAccount, GithubWorkspaceSources},
-    },
+    github::{Github, GithubConfig},
     lark::{Lark, LarkConfig},
     linear::{Linear, LinearConfig},
     microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
     slack::{Slack, SlackConfig},
+};
+use supertag_github::{
+    GithubAppConfig, GithubAuthentication,
+    workspaces::{GithubWorkspaceAccount, GithubWorkspaceSources},
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
@@ -349,8 +350,7 @@ enum Command {
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
         /// Private directory for files Worker Hosts transfer through the Control Plane: Session
-        /// checkpoints, workspace bundles, and GitHub publication blobs. Replicas of the public
-        /// API must share it.
+        /// checkpoints, workspace bundles, and GitHub publication blobs.
         #[arg(long)]
         transfer_directory: Option<PathBuf>,
         /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
@@ -1338,7 +1338,7 @@ async fn control_plane(
     }
     let (connector, incoming) = supertag_api::in_process::pair();
     let owner_shutdown = CancellationToken::new();
-    let owner = tokio::spawn(state_owner(plane.clone(), incoming, owner_shutdown.clone()));
+    let mut owner = tokio::spawn(state_owner(plane.clone(), incoming, owner_shutdown.clone()));
     let internal = connector.channel();
     let channel = connect(
         internal.clone(),
@@ -1435,8 +1435,20 @@ async fn control_plane(
         source
     };
     tokio::pin!(services);
+    let mut owner_stopped = false;
     let result = tokio::select! {
         result = &mut services => result,
+        // The API tier is useless without the state owner, so the process stops with it.
+        stopped = &mut owner => {
+            owner_stopped = true;
+            shutdown.cancel();
+            let _ = tokio::time::timeout(Duration::from_secs(15), services).await;
+            Err(match stopped {
+                Ok(Ok(())) => anyhow!("Control Plane state owner stopped"),
+                Ok(Err(error)) => error.context("Control Plane state owner failed"),
+                Err(error) => anyhow!(error).context("Control Plane state owner failed"),
+            })
+        }
         _ = termination_signal() => {
             shutdown.cancel();
             tokio::time::timeout(Duration::from_secs(15), services)
@@ -1446,7 +1458,9 @@ async fn control_plane(
         }
     };
     owner_shutdown.cancel();
-    let _ = tokio::time::timeout(Duration::from_secs(5), owner).await;
+    if !owner_stopped {
+        let _ = tokio::time::timeout(Duration::from_secs(5), owner).await;
+    }
     sweep.abort();
     let _ = sweep.await;
     result
@@ -1695,11 +1709,7 @@ async fn gateway(
         gateway_token.clone(),
         operator_principal,
     )?;
-    let auth = supertag_gateway::operator_auth::OperatorAuth::new(
-        &required_env("SUPERTAG_OPERATOR_TOKEN")?,
-        channel,
-        gateway_token,
-    )?;
+    let auth = supertag_gateway::operator_auth::OperatorAuth::new(channel, gateway_token);
     let (health, health_service) = tonic_health::server::health_reporter();
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
@@ -1870,7 +1880,7 @@ pub(crate) fn notify_secret_variable(name: &str) -> String {
 struct SurfaceSecrets {
     label: &'static str,
     id: String,
-    vault: Option<Option<supertag_gateway::credential_vault::CredentialValue>>,
+    vault: Option<Option<supertag_credential_vault::CredentialValue>>,
 }
 
 impl SurfaceSecrets {
@@ -1989,8 +1999,8 @@ async fn github_workspace_publisher(
     blobs: &std::path::Path,
     channel: ProtocolChannel,
     token: String,
-) -> Result<supertag_gateway::github::publication::GithubPublisher> {
-    let publisher = supertag_gateway::github::publication::GithubPublisher::new(
+) -> Result<supertag_github::publication::GithubPublisher> {
+    let publisher = supertag_github::publication::GithubPublisher::new(
         github_workspace_account().await?,
         &directory,
         blobs,

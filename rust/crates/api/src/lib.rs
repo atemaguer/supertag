@@ -3,17 +3,19 @@
 //! This tier holds no durable state. It authenticates operator clients and Worker Hosts, serves
 //! Watch fan-out and transfers (checkpoints, workspace bundles, artifacts), and forwards every call
 //! to the state owner over a [`ProtocolChannel`]. The state owner and its controllers live in
-//! `supertag-control-plane`. One process serves both by default, over an in-process channel
-//! ([`in_process`]); because this tier keeps nothing but transfer files, more replicas may run in
-//! front of one state owner when they share the transfer directory.
+//! `supertag-control-plane`. One process serves both, over an in-process channel ([`in_process`]).
+//! This tier keeps nothing but transfer files, so it could later run as replicas in front of one
+//! state owner that share the transfer directory; no process runs it alone yet.
 //!
 //! [`Api::routes`] lists every public service. The process serving them puts its layers, the
 //! protocol fence first, in front of all of them at once, which is where one authorization layer
-//! covers the whole public surface.
+//! covers the whole public surface. Until that layer exists, each service authenticates its own
+//! callers here: operators and Worker Hosts in this module, and Gateways in [`gateway_access`].
 
 mod artifact_publications;
 mod attempt_safety;
 mod conversations;
+mod gateway_access;
 mod github_publications;
 mod github_workspaces;
 pub mod in_process;
@@ -24,7 +26,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod metrics;
 mod operator_access;
-pub mod passthrough;
+mod passthrough;
 mod placement;
 mod policy;
 #[cfg(test)]
@@ -79,6 +81,9 @@ pub struct Api {
 struct Credentials {
     service: MetadataValue<Ascii>,
     operator: Principal,
+    /// SHA-256 of the admin operator token, for Gateways resolving a presented credential.
+    operator_digest: Vec<u8>,
+    gateway: Arc<gateway_access::GatewayAccess>,
 }
 
 struct Principal {
@@ -103,12 +108,15 @@ impl Api {
             !operator_principal.starts_with("operator:token:"),
             "the admin operator principal must not name an Operator Token"
         );
+        let service = bearer(&service_token).context("invalid service credential")?;
         Ok(Self {
             control_plane,
             credentials: Arc::new(Credentials {
-                service: bearer(&service_token).context("invalid service credential")?,
+                gateway: Arc::new(gateway_access::GatewayAccess::new(service.clone())),
+                service,
                 operator: Principal::new(&operator_token, &operator_principal, "operator:")
                     .context("invalid operator configuration")?,
+                operator_digest: Sha256::digest(operator_token.as_bytes()).to_vec(),
             }),
         })
     }
@@ -145,8 +153,8 @@ impl Api {
     }
 
     /// Every service of the public listener: the operator and Worker Host API, transfers, Watch
-    /// fan-out, health, and the Gateway services relayed unchanged to the state owner over
-    /// `state_owner`. `shutdown` ends open Watch streams.
+    /// fan-out, health, and the Gateway services. Gateway calls are admitted here and relayed to
+    /// the state owner over `state_owner`. `shutdown` ends open Watch streams.
     pub async fn routes(
         &self,
         transfers: transfers::ApiTransfers,
@@ -155,6 +163,7 @@ impl Api {
     ) -> tonic::service::Routes {
         use passthrough::Passthrough;
         use tonic::server::NamedService;
+        let gateway = self.credentials.gateway.clone();
         let (health, health_service) = tonic_health::server::health_reporter();
         let mut names = Vec::new();
         let mut routes = tonic::service::Routes::builder();
@@ -208,12 +217,19 @@ impl Api {
             self.metrics_service(),
             self.objective_overview_service(),
             self.operator_events_service(shutdown),
-            Passthrough::<connector_server::ConnectorServer<()>>::new(state_owner.clone()),
-            Passthrough::<reply_progress_server::ReplyProgressServer<()>>::new(state_owner.clone()),
-            Passthrough::<operator_notifications_server::OperatorNotificationsServer<()>>::new(
-                state_owner.clone()
+            self.operator_directory_service(),
+            Passthrough::<connector_server::ConnectorServer<()>>::new(
+                state_owner.clone(),
+                gateway.clone()
             ),
-            Passthrough::<operator_directory_server::OperatorDirectoryServer<()>>::new(state_owner),
+            Passthrough::<reply_progress_server::ReplyProgressServer<()>>::new(
+                state_owner.clone(),
+                gateway.clone()
+            ),
+            Passthrough::<operator_notifications_server::OperatorNotificationsServer<()>>::new(
+                state_owner,
+                gateway
+            ),
         );
         for name in names {
             health

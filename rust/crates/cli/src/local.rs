@@ -343,8 +343,7 @@ impl Children {
         let mut gateway = command(executable, "gateway");
         gateway
             .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
-            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
         let mut needed = !self.notify.0.is_empty();
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);

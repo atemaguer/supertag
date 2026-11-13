@@ -7,7 +7,6 @@
 //! Control Plane's public endpoint. It serves no operator or Worker Host API; its only gRPC
 //! service is the operator's test notification.
 
-pub mod credential_vault;
 mod delivery_journal;
 pub mod github;
 pub mod lark;

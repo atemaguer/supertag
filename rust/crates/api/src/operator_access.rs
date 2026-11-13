@@ -246,3 +246,44 @@ impl operator_access_server::OperatorAccess for Api {
         .await
     }
 }
+
+impl Api {
+    pub fn operator_directory_service(
+        &self,
+    ) -> operator_directory_server::OperatorDirectoryServer<Self> {
+        operator_directory_server::OperatorDirectoryServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+}
+
+/// Gateways resolve the credential an operator presented to them (for the test notification), so
+/// a Gateway never holds the admin operator token. The digest of the admin token resolves to the
+/// admin operator; any other digest is looked up as an Operator Token.
+#[tonic::async_trait]
+impl operator_directory_server::OperatorDirectory for Api {
+    async fn authenticate(
+        &self,
+        request: Request<AuthenticateOperatorRequest>,
+    ) -> Result<Response<OperatorIdentity>, Status> {
+        self.credentials
+            .gateway
+            .authorize(request.metadata().as_ref(), request.extensions())?;
+        let timeout = request_budget(&request)?;
+        let digest = request.into_inner().token_digest;
+        let identity = if bool::from(digest.ct_eq(&self.credentials.operator_digest)) {
+            self.credentials.operator.identity.clone()
+        } else {
+            tokio::time::timeout(timeout, self.authenticate_operator(digest, timeout))
+                .await
+                .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))??
+        };
+        let operator_id = identity
+            .to_str()
+            .ok()
+            .and_then(|identity| identity.strip_prefix("operator:"))
+            .ok_or_else(|| Status::internal("invalid operator identity"))?
+            .to_owned();
+        Ok(Response::new(OperatorIdentity { operator_id }))
+    }
+}

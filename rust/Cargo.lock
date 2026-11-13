@@ -2697,7 +2697,9 @@ dependencies = [
  "supertag-api",
  "supertag-codex-adapter",
  "supertag-control-plane",
+ "supertag-credential-vault",
  "supertag-gateway",
+ "supertag-github",
  "supertag-protocol",
  "supertag-shared-execution",
  "supertag-transport",
@@ -2766,6 +2768,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "supertag-credential-vault"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "supertag-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2787,16 +2803,37 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "subtle",
+ "supertag-credential-vault",
+ "supertag-github",
  "supertag-protocol",
- "supertag-workspaces",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
  "tonic",
- "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "supertag-github"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "libc",
+ "reqwest",
+ "ring",
+ "rustls-pki-types",
+ "serde_json",
+ "supertag-protocol",
+ "supertag-workspaces",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tonic",
  "uuid",
 ]
 

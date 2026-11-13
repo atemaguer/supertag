@@ -18,15 +18,22 @@ through the [WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) instea
 
 Inside, the Control Plane is a stateless API tier in front of the state owner and its
 controllers, in one process. The API tier keeps only transfer files (Session checkpoints,
-workspace bundles, and GitHub publication blobs) in `--transfer-directory`. Run more API replicas
-only with that directory on storage they all share. Artifact bytes are never stored in the
-database: they stay on Worker Hosts and shared Volumes.
+workspace bundles, and GitHub publication blobs) in `--transfer-directory`. Run exactly one
+Control Plane per database: every process also runs the controllers, and API replicas without
+them are not supported yet. Artifact bytes are never stored in the database: they stay on Worker
+Hosts and shared Volumes.
 
 The Gateway runs collaboration surfaces: Slack, GitHub, Linear, Lark, and Microsoft Teams
 ingress, reply delivery, and operator notifications. Deploy it only when you use a surface or
 notification. Its webhook listeners are loopback only, so put a reverse proxy for them in the
 same container or host. Its own gRPC listener serves only `supertag test notification`, on
-loopback inside its container.
+loopback inside its container. It holds no operator credential.
+
+A Gateway needs a Control Plane that requires client certificates. Gateways share one Gateway
+token that can act for any surface account and any operator's notifications, so the Control Plane
+accepts that token over TLS only from a client whose certificate it verifies. Set the Control
+Plane's client CA and give the Gateway a client certificate whenever you deploy a Gateway. Then
+operators and Worker Hosts present client certificates too.
 
 | Platform | Definitions | Public Control Plane path | Gateway to Control Plane |
 | --- | --- | --- | --- |
@@ -53,7 +60,7 @@ Setup writes a new private directory and never replaces one. Each file is mode 0
 | File | For | Holds |
 | --- | --- | --- |
 | `control-plane.env` | Control Plane | Database URL, Gateway token, operator token, state directory |
-| `gateway.env` | Gateway | Gateway token, operator token, state directory, credential vault settings |
+| `gateway.env` | Gateway | Gateway token, state directory, credential vault settings |
 | `operator.env` | Your machine | Operator token, for `verify deployment` and operator commands |
 | `postgres.env` | Compose PostgreSQL | Generated database password (Compose only, when no database URL is supplied) |
 
@@ -77,7 +84,8 @@ Worker Hosts are not part of setup. Create an Auth Key with `supertag auth-key c
 `supertag host enroll` and `supertag worker-host` on each host against the Control Plane's URL.
 
 To check a deployed Gateway's notification destinations, run `supertag test notification
---gateway http://127.0.0.1:3436` inside its container, where `SUPERTAG_OPERATOR_TOKEN` is set.
+--gateway http://127.0.0.1:3436` inside its container with your operator token in
+`SUPERTAG_OPERATOR_TOKEN`. The Gateway asks the Control Plane whether that token is valid.
 
 ## TLS files
 
@@ -86,12 +94,13 @@ Every container reads its TLS files from `/run/supertag-tls`:
 | File | Control Plane | Gateway |
 | --- | --- | --- |
 | `server.pem`, `server.key` | Certificate naming its public host and the private host Gateways use | Not used |
-| `client-ca.pem` | Optional: require client certificates from every caller | Not used |
+| `client-ca.pem` | Require client certificates from every caller. Required when a Gateway runs | Not used |
 | `server-ca.pem` | CA for its own health probe | CA that issued the Control Plane's certificate |
-| `client.pem`, `client.key` | Identity for its own health probe when client certificates are required | Identity it presents when client certificates are required |
+| `client.pem`, `client.key` | Identity for its own health probe when client certificates are required | Required: the identity it presents to the Control Plane |
 
-Client certificates are only a network filter in front of authentication: every call still
-presents its bearer credential.
+Client certificates are a network filter in front of authentication: every call still presents
+its bearer credential. The one exception is the Gateway token, which the Control Plane accepts over
+TLS only together with a verified client certificate.
 
 Compose mounts one directory per role there. Compose's Control Plane health probe connects to
 `https://control-plane:3434` and trusts `server-ca.pem`, so with Compose the certificate must also
@@ -107,9 +116,9 @@ as UID 10001 with no capabilities. Set these secrets per role:
 | Secret | Control Plane | Gateway |
 | --- | --- | --- |
 | `SUPERTAG_TLS_CERT_PEM`, `SUPERTAG_TLS_KEY_PEM` | Required | Not used |
-| `SUPERTAG_TLS_CLIENT_CA_PEM` | Optional | Not used |
+| `SUPERTAG_TLS_CLIENT_CA_PEM` | Required when a Gateway runs | Not used |
 | `SUPERTAG_SERVER_CA_PEM` | Optional | When the Control Plane's CA is private |
-| `SUPERTAG_CLIENT_CERT_PEM`, `SUPERTAG_CLIENT_KEY_PEM` | Optional | When the Control Plane requires client certificates |
+| `SUPERTAG_CLIENT_CERT_PEM`, `SUPERTAG_CLIENT_KEY_PEM` | Optional | Required |
 
 ## Docker Compose
 
@@ -124,7 +133,12 @@ export SUPERTAG_CONTROL_PLANE_PUBLISH=0.0.0.0:443
 docker compose -f deploy/compose.native.yaml -f deploy/compose.native.ingress.yaml up -d --wait
 ```
 
-Add `--profile gateway` to also run the Gateway. Without the ingress file nothing is published.
+Add `--profile gateway` to also run the Gateway. Its certificate files go in the Gateway's TLS
+directory, and the Control Plane then needs `SUPERTAG_TLS_CLIENT_CA_FILE`, plus
+`SUPERTAG_CLIENT_CERT_FILE` and `SUPERTAG_CLIENT_KEY_FILE` for its health probe, added to
+`control-plane.env`, and the Gateway needs `SUPERTAG_CLIENT_CERT_FILE` and
+`SUPERTAG_CLIENT_KEY_FILE` in `gateway.env` (see [TLS files](#tls-files)). Without the ingress
+file nothing is published.
 
 ## Fly.io
 
@@ -145,7 +159,9 @@ For surfaces, create the app `supertag-gateway` in the same organization with th
 `supertag_gateway_state` and no public IP, then:
 
 ```sh
+fly secrets set --app supertag-control-plane SUPERTAG_TLS_CLIENT_CA_PEM="$(cat client-ca.pem)"
 fly secrets import --app supertag-gateway < supertag-deployment/gateway.env
+fly secrets set --app supertag-gateway SUPERTAG_CLIENT_CERT_PEM="$(cat gateway.pem)" ...
 fly deploy --config deploy/native/fly/gateway.toml --image IMAGE@sha256:DIGEST
 ```
 
@@ -162,8 +178,9 @@ must name that host or a custom domain that points to it. The definition's start
 the image entrypoint, so it names the entrypoint itself.
 
 For surfaces, add a `supertag-gateway` service in the same environment configured by
-[`railway/gateway.json`](railway/gateway.json), with `gateway.env` and a volume at
-`/var/lib/supertag`. It needs no public networking.
+[`railway/gateway.json`](railway/gateway.json), with `gateway.env`, its client certificate PEM
+variables, and a volume at `/var/lib/supertag`, and give the Control Plane
+`SUPERTAG_TLS_CLIENT_CA_PEM`. It needs no public networking.
 
 ## WebSocket tunnel for HTTP-only platforms
 
@@ -222,5 +239,6 @@ to come. Their TypeScript definitions stay until the cutover.
 ## Rehearsal
 
 [`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)
-rehearsed the earlier topology, with a private Control Plane behind a public Gateway, and has not
-been updated for the public Control Plane yet. Fly.io and Railway themselves are not exercised.
+rehearses this topology on disposable containers: setup's files, the published Control Plane with
+client certificates, the Gateway profile, two outbound Worker Hosts, a full restart, and every Fly
+and Railway service command in the `hosted` image. Fly.io and Railway themselves are not exercised.

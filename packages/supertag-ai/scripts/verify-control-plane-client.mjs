@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Code, createGatewayClient } from "supertag-ai/gateway";
+import { Code, createControlPlaneClient } from "supertag-ai/control-plane-client";
 import { openHarness, TaskState } from "supertag-ai/harness";
 
 const token = "fixture-operator-token";
@@ -15,24 +15,30 @@ const hostToken = "fixture-worker-host-credential-12345";
 const execute = promisify(execFile);
 const loopback = "http://127.0.0.1:3434";
 for (const url of [
-  "https://user:pass@gateway.invalid",
-  "https://gateway.invalid/path",
+  "https://user:pass@control-plane.invalid",
+  "https://control-plane.invalid/path",
   `${loopback}\n`,
 ]) {
-  assert.throws(() => createGatewayClient({ url, token }), /origin/);
+  assert.throws(() => createControlPlaneClient({ url, token }), /origin/);
 }
-assert.throws(() => createGatewayClient({ url: "http://gateway.invalid", token }), /loopback/);
-assert.throws(() => createGatewayClient({ url: loopback, token: `${token}\n` }), /operator token/);
-const closed = createGatewayClient({ url: loopback, token });
+assert.throws(
+  () => createControlPlaneClient({ url: "http://control-plane.invalid", token }),
+  /loopback/,
+);
+assert.throws(
+  () => createControlPlaneClient({ url: loopback, token: `${token}\n` }),
+  /operator token/,
+);
+const closed = createControlPlaneClient({ url: loopback, token });
 assert.equal(typeof closed.operator.listTags, "function");
 assert.equal(typeof closed.events.watch, "function");
 closed.close();
 await assert.rejects(async () => closed.operator.listTags({}), /closed/);
 await assert.rejects(openHarness((async function* () {})()), /bootstrap/);
-console.log("Gateway public package import passed.");
+console.log("Control Plane client public package import passed.");
 
 async function verifyRuntime(binary) {
-  const root = await mkdtemp(join(tmpdir(), "supertag-gateway-client-"));
+  const root = await mkdtemp(join(tmpdir(), "supertag-control-plane-client-"));
   const children = [];
   const env = {
     SUPERTAG_DATABASE_URL: `sqlite://${join(root, "control.sqlite")}?mode=rwc`,
@@ -51,9 +57,8 @@ async function verifyRuntime(binary) {
       assert.match(endpoint, /^127\.0\.0\.1:[1-9][0-9]*$/u);
       return `http://${endpoint}`;
     }
-    const control = await start(["control-plane"]);
-    const url = await start(["gateway", "--control-plane", control]);
-    const wrong = createGatewayClient({ url, token: "invalid-fixture-token" });
+    const url = await start(["control-plane"]);
+    const wrong = createControlPlaneClient({ url, token: "invalid-fixture-token" });
     try {
       await assert.rejects(wrong.operator.listTags({}, { timeoutMs: 3000 }), {
         code: Code.Unauthenticated,
@@ -62,7 +67,7 @@ async function verifyRuntime(binary) {
       wrong.close();
     }
 
-    client = createGatewayClient({ url, token });
+    client = createControlPlaneClient({ url, token });
     await assert.rejects(
       client.artifactPublications.listPublications({ objectiveId: "unknown" }, { timeoutMs: 3000 }),
       { code: Code.NotFound },
@@ -84,7 +89,7 @@ async function verifyRuntime(binary) {
       tagId: tag.tagId,
       sessionId: "fixture",
       operationId: "sdk-conformance",
-      prompt: "Verify the installed Gateway client.",
+      prompt: "Verify the installed Control Plane client.",
     };
     const accepted = await client.operator.submitTask(submission, { timeoutMs: 3000 });
     const replay = await client.operator.submitTask(submission, { timeoutMs: 3000 });
@@ -97,7 +102,7 @@ async function verifyRuntime(binary) {
     await assert.rejects(async () => missing[Symbol.asyncIterator]().next(), {
       code: Code.NotFound,
     });
-    console.log("Gateway authorization, Task replay, and streaming passed.");
+    console.log("Control Plane authorization, Task replay, and streaming passed.");
 
     const adapter = join(root, "adapter.mjs");
     const harnessImport = import.meta.resolve("supertag-ai/harness");
@@ -134,7 +139,7 @@ try {
       binary,
       [
         "worker-host",
-        "--gateway",
+        "--control-plane",
         url,
         "--state-directory",
         join(root, "host"),

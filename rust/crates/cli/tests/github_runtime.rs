@@ -50,7 +50,7 @@ const SIGNING: &str = "synthetic-github-webhook-secret";
 const TOKEN: &str = "synthetic-github-api-token";
 const APP_TOKEN: &str = "ghs_synthetic-github-installation-token";
 // An intentionally public test credential, never registered with a provider.
-const APP_KEY: &str = include_str!("../../gateway/src/github/auth/fixtures/app-test-key.pem");
+const APP_KEY: &str = include_str!("../../gateway/src/github/fixtures/app-test-key.pem");
 
 struct Credentials {
     gateway: String,

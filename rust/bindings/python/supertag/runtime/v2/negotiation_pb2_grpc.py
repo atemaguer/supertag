@@ -32,8 +32,8 @@ class ProtocolNegotiationStub:
     exchange carries no credentials.
 
     After negotiating, the client sends the selected version in the
-    `x-supertag-protocol` metadata header on every other call. The Gateway and
-    Control Plane refuse a call without it, or naming a version they do not
+    `x-supertag-protocol` metadata header on every other call. The Control Plane
+    and Gateway refuse a call without it, or naming a version they do not
     speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
     health service are exempt.
     """
@@ -58,8 +58,8 @@ class ProtocolNegotiationServicer:
     exchange carries no credentials.
 
     After negotiating, the client sends the selected version in the
-    `x-supertag-protocol` metadata header on every other call. The Gateway and
-    Control Plane refuse a call without it, or naming a version they do not
+    `x-supertag-protocol` metadata header on every other call. The Control Plane
+    and Gateway refuse a call without it, or naming a version they do not
     speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
     health service are exempt.
     """
@@ -93,8 +93,8 @@ class ProtocolNegotiation:
     exchange carries no credentials.
 
     After negotiating, the client sends the selected version in the
-    `x-supertag-protocol` metadata header on every other call. The Gateway and
-    Control Plane refuse a call without it, or naming a version they do not
+    `x-supertag-protocol` metadata header on every other call. The Control Plane
+    and Gateway refuse a call without it, or naming a version they do not
     speak, with FAILED_PRECONDITION. Only this service and the standard gRPC
     health service are exempt.
     """

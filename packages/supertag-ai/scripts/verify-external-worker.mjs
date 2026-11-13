@@ -45,13 +45,17 @@ try {
   process.stdout.write(workerVerification.stdout);
   process.stdout.write(verification.stdout);
   await copyFile(
-    new URL("./verify-gateway.mjs", import.meta.url),
-    join(temporaryDirectory, "verify-gateway.mjs"),
+    new URL("./verify-control-plane-client.mjs", import.meta.url),
+    join(temporaryDirectory, "verify-control-plane-client.mjs"),
   );
-  const gatewayVerification = await execute(process.execPath, ["verify-gateway.mjs"], {
-    cwd: temporaryDirectory,
-  });
-  process.stdout.write(gatewayVerification.stdout);
+  const controlPlaneVerification = await execute(
+    process.execPath,
+    ["verify-control-plane-client.mjs"],
+    {
+      cwd: temporaryDirectory,
+    },
+  );
+  process.stdout.write(controlPlaneVerification.stdout);
   // Reuse the isolated installation to check the organization example's public
   // imports. Help must not create state, launch services, or call native models.
   const organizationDirectory = join(temporaryDirectory, "shared-organization");

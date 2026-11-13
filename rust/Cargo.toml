@@ -36,7 +36,9 @@ supertag-protocol = { path = "crates/protocol" }
 supertag-control-plane = { path = "crates/control-plane" }
 supertag-codex-adapter = { path = "crates/codex-adapter" }
 supertag-api = { path = "crates/api" }
+supertag-credential-vault = { path = "crates/credential-vault" }
 supertag-gateway = { path = "crates/gateway" }
+supertag-github = { path = "crates/github" }
 supertag-transport = { path = "crates/transport" }
 supertag-worker-host = { path = "crates/worker-host" }
 supertag-workspaces = { path = "crates/workspaces" }

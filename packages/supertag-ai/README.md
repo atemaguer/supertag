@@ -129,7 +129,7 @@ Use explicit entry points for integrations and lower-level contracts:
 | `supertag-ai/transport` | Worklet transport and protocol contracts |
 | `supertag-ai/messaging` | Tag messaging, Team channels, and custom Worker consumers |
 | `supertag-ai/coordination` | Typed client for the operator inbox |
-| `supertag-ai/gateway` | Node.js gRPC client for the Rust Gateway |
+| `supertag-ai/control-plane-client` | Node.js gRPC client for the Rust Control Plane |
 | `supertag-ai/harness` | Connect a Node.js harness adapter to its Worker Host |
 | `supertag-ai/testing` | Extension conformance probes |
 | `supertag-ai/surfaces` | Custom collaboration surfaces |
@@ -144,14 +144,14 @@ Use explicit entry points for integrations and lower-level contracts:
 | `supertag-ai/resources/github` | GitHub workspace and permission-derived resource integrations |
 | `supertag-ai/spec/*` | Language-neutral wire schemas |
 
-With a Rust SuperTag deployment, use the Gateway client to list Tags, the persistent AI
+With a Rust SuperTag deployment, use the Control Plane client to list Tags, the persistent AI
 actors in your organization.
 
 ```ts
-import { createGatewayClient } from "supertag-ai/gateway";
+import { createControlPlaneClient } from "supertag-ai/control-plane-client";
 
-const client = createGatewayClient({
-  url: process.env.SUPERTAG_GATEWAY_URL!,
+const client = createControlPlaneClient({
+  url: process.env.SUPERTAG_CONTROL_PLANE_URL!,
   token: process.env.SUPERTAG_OPERATOR_TOKEN!,
 });
 try {
@@ -162,12 +162,13 @@ try {
 }
 ```
 
-Use an HTTPS origin for a remote Gateway. Local cleartext connections use a loopback IP
-address. Pass `ca` for private TLS and `identity` when the Gateway requires a client certificate.
+Use an HTTPS origin for a remote Control Plane. Local cleartext connections use a loopback IP
+address. Pass `ca` for private TLS and `identity` when the Control Plane requires a client
+certificate.
 Each service exposes typed protobuf requests and responses. `client.events.watch` returns an
 async iterable and accepts an `AbortSignal`. Resume a watch with its last `resumeToken`. The
-first call negotiates the SuperTag protocol version with the Gateway; a Gateway from an
-incompatible release fails it with `Code.FailedPrecondition`.
+first call negotiates the SuperTag protocol version with the Control Plane; a Control Plane from
+an incompatible release fails it with `Code.FailedPrecondition`.
 
 In a Rust deployment, a Worker Host is the machine or sandbox that provides execution.
 It launches a harness adapter to run one Task Attempt, which is a single try at completing

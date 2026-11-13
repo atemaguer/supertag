@@ -33,39 +33,39 @@ import {
 
 export { Code, ConnectError } from "@connectrpc/connect";
 
-export interface GatewayClientOptions {
+export interface ControlPlaneClientOptions {
   readonly url: string;
   readonly token: string;
-  /** PEM certificate authority for a Gateway with a private TLS certificate. */
+  /** PEM certificate authority for a Control Plane with a private TLS certificate. */
   readonly ca?: string | Buffer;
-  /** PEM client identity for a Gateway that requires mutual TLS. */
+  /** PEM client identity for a Control Plane that requires mutual TLS. */
   readonly identity?: { readonly cert: string | Buffer; readonly key: string | Buffer };
 }
 
-function gatewayOrigin(value: string): URL {
+function controlPlaneOrigin(value: string): URL {
   if (!/^https?:\/\/[^/?#@\\\s]+\/?$/u.test(value) || /\s/u.test(value)) {
-    throw new Error("Gateway URL must be an HTTP or HTTPS origin");
+    throw new Error("Control Plane URL must be an HTTP or HTTPS origin");
   }
   const url = new URL(value);
-  if (url.port === "0") throw new Error("Gateway URL must use a valid port");
+  if (url.port === "0") throw new Error("Control Plane URL must use a valid port");
   const host = url.hostname.replace(/^\[|\]$/gu, "");
   const loopback = (isIP(host) === 4 && host.startsWith("127.")) || host === "::1";
   if (url.protocol === "http:" && !loopback) {
-    throw new Error("Cleartext Gateway URL must use a loopback IP address");
+    throw new Error("Cleartext Control Plane URL must use a loopback IP address");
   }
   return url;
 }
 
-/** Names, on every call, the protocol version this client negotiated with the Gateway. */
+/** Names, on every call, the protocol version this client negotiated with the Control Plane. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
 const PROTOCOL_VERSIONS = [2];
 
-function refusedByGateway(error: unknown): ConnectError {
+function refusedByControlPlane(error: unknown): ConnectError {
   const status = ConnectError.from(error);
   if (status.code === Code.Unimplemented) {
     return new ConnectError(
-      "incompatible SuperTag protocol: the Gateway does not offer SuperTag protocol negotiation",
+      "incompatible SuperTag protocol: the Control Plane does not offer SuperTag protocol negotiation",
       Code.FailedPrecondition,
     );
   }
@@ -75,7 +75,7 @@ function refusedByGateway(error: unknown): ConnectError {
     status.code === Code.InvalidArgument
   ) {
     return new ConnectError(
-      `the SuperTag Gateway refused this operator client: ${status.rawMessage}`,
+      `the SuperTag Control Plane refused this operator client: ${status.rawMessage}`,
       Code.FailedPrecondition,
     );
   }
@@ -92,20 +92,20 @@ function protocolRefusal(error: unknown): boolean {
 }
 
 /**
- * Connect operator applications to the SuperTag Gateway over gRPC. The first call negotiates the
- * SuperTag protocol version, which every call then names; the Gateway refuses calls without it.
+ * Connect operator applications to the SuperTag Control Plane over gRPC. The first call negotiates the
+ * SuperTag protocol version, which every call then names; the Control Plane refuses calls without it.
  */
-export function createGatewayClient(options: GatewayClientOptions) {
-  const url = gatewayOrigin(options.url);
+export function createControlPlaneClient(options: ControlPlaneClientOptions) {
+  const url = controlPlaneOrigin(options.url);
   if (
     options.token.length > 512 ||
     !/^[A-Za-z0-9._~+/-]+=*$/u.test(options.token) ||
     /\s/u.test(options.token)
   ) {
-    throw new Error("Invalid Gateway operator token");
+    throw new Error("Invalid operator token");
   }
   if (url.protocol === "http:" && (options.ca !== undefined || options.identity !== undefined)) {
-    throw new Error("Gateway TLS options require HTTPS");
+    throw new Error("Control Plane TLS options require HTTPS");
   }
 
   const session = new Http2SessionManager(
@@ -144,11 +144,11 @@ export function createGatewayClient(options: GatewayClientOptions) {
           { timeoutMs: 5_000 },
         );
       } catch (error) {
-        throw refusedByGateway(error);
+        throw refusedByControlPlane(error);
       }
-      if (answer.role !== ServiceRole.GATEWAY) {
+      if (answer.role !== ServiceRole.CONTROL_PLANE) {
         throw new ConnectError(
-          "this operator client expected a SuperTag Gateway but reached another service",
+          "this operator client expected a SuperTag Control Plane but reached another service",
           Code.FailedPrecondition,
         );
       }
@@ -157,7 +157,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
         !answer.protocolVersions.includes(answer.protocolVersion)
       ) {
         throw new ConnectError(
-          `incompatible SuperTag protocol: the Gateway selected protocol ${answer.protocolVersion}; run the same SuperTag release on the Gateway and this client`,
+          `incompatible SuperTag protocol: the Control Plane selected protocol ${answer.protocolVersion}; run the same SuperTag release on the Control Plane and this client`,
           Code.FailedPrecondition,
         );
       }
@@ -175,13 +175,13 @@ export function createGatewayClient(options: GatewayClientOptions) {
     writeMaxBytes: 1024 * 1024,
     interceptors: [
       (next) => async (request) => {
-        if (closed) throw new Error("Gateway client is closed");
+        if (closed) throw new Error("Control Plane client is closed");
         request.header.set("authorization", authorization);
         request.header.set(PROTOCOL_HEADER, String(await protocolVersion()));
         try {
           return await next(request);
         } catch (error) {
-          // A Gateway replaced by another release refuses the held version; negotiate again.
+          // A Control Plane replaced by another release refuses the held version; negotiate again.
           if (protocolRefusal(error)) negotiated = undefined;
           throw error;
         }
@@ -218,4 +218,4 @@ export function createGatewayClient(options: GatewayClientOptions) {
   };
 }
 
-export type GatewayClient = ReturnType<typeof createGatewayClient>;
+export type ControlPlaneClient = ReturnType<typeof createControlPlaneClient>;

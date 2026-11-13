@@ -404,7 +404,7 @@ export const GithubWorkspaces: GenService<{
   serviceDesc(file_supertag_runtime_v2_github_workspaces, 0);
 
 /**
- * Private Control Plane API used only by configured Gateway source readers.
+ * Internal Control Plane API used only by its configured GitHub source reader.
  *
  * @generated from service supertag.runtime.v2.GithubSourceResolver
  */

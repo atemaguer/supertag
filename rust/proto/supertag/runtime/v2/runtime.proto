@@ -6,8 +6,9 @@ import "supertag/runtime/v2/policy.proto";
 import "supertag/runtime/v2/github_workspaces.proto";
 import "supertag/runtime/v2/mcp.proto";
 
-// The Gateway exposes these services to operators and enrolled hosts. The
-// Control Plane serves the same messages on a private authenticated listener.
+// The Control Plane's public endpoint serves these services to operators and
+// enrolled hosts. Its API tier authenticates them and calls the state owner
+// with the same messages.
 service Operator {
   rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
   rpc RevokeHost(RevokeHostRequest) returns (HostRecord);
@@ -757,14 +758,16 @@ service HostEnrollment {
   rpc EnrollHost(EnrollHostRequest) returns (HostRecord);
 }
 
-// Private Gateway-to-Control-Plane service for enrollment and authentication.
+// Internal to the Control Plane: its API tier enrolls and authenticates Worker
+// Hosts with the state owner.
 service HostDirectory {
   rpc Enroll(PrivateEnrollHostRequest) returns (HostRecord);
   rpc Authenticate(AuthenticateHostRequest) returns (HostRecord);
 }
 
-// Private Gateway-to-Control-Plane operations. The authenticated connector
-// principal identifies the account. Provider request bodies cannot select it.
+// Gateway and connector calls to the Control Plane. The connector principal
+// identifies the account; provider request bodies cannot select it. See
+// docs/reference/connector-contract.md.
 service Connector {
   rpc AcceptEvent(AcceptEventRequest) returns (Task);
   rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
@@ -795,14 +798,14 @@ service Transfers {
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }
 
-// Private authorization and commit for bytes stored by the Gateway.
+// Internal authorization and commit for bytes the API tier stores.
 service CheckpointDirectory {
   rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
   rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
   rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
 }
 
-// Private authorization and commit for work product stored by the Gateway.
+// Internal authorization and commit for work product the API tier stores.
 service WorkspaceDirectory {
   rpc GetSource(InspectAttemptRequest) returns (GithubWorkspace);
   rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);

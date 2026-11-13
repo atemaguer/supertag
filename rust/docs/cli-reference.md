@@ -1917,7 +1917,7 @@ Options:
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
 
       --transfer-directory <TRANSFER_DIRECTORY>
-          Private directory for files Worker Hosts transfer through the Control Plane: Session checkpoints, workspace bundles, and GitHub publication blobs. Replicas of the public API must share it
+          Private directory for files Worker Hosts transfer through the Control Plane: Session checkpoints, workspace bundles, and GitHub publication blobs
 
       --artifact-volume <ARTIFACT_VOLUMES>
           Explicit storage-host consent: VOLUME_ID=/absolute/private/directory

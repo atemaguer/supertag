@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class OperatorAccessStub:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
@@ -74,7 +74,7 @@ class OperatorAccessStub:
 
 
 class OperatorAccessServicer:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
@@ -168,7 +168,7 @@ def add_OperatorAccessServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class OperatorAccess:
-    """Operator Tokens and the audit log, reached through the Gateway.
+    """Operator Tokens and the audit log, on the Control Plane's public endpoint.
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
@@ -341,7 +341,9 @@ class OperatorAccess:
 
 
 class OperatorDirectoryStub:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
+    """Gateway resolution of an operator credential presented to it: the admin
+    operator token or an Operator Token, sent as the SHA-256 of its secret. The
+    Gateway holds no operator credential itself.
     """
 
     def __init__(self, channel):
@@ -358,7 +360,9 @@ class OperatorDirectoryStub:
 
 
 class OperatorDirectoryServicer:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
+    """Gateway resolution of an operator credential presented to it: the admin
+    operator token or an Operator Token, sent as the SHA-256 of its secret. The
+    Gateway holds no operator credential itself.
     """
 
     def Authenticate(self, request, context):
@@ -384,7 +388,9 @@ def add_OperatorDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class OperatorDirectory:
-    """Private Gateway-to-Control Plane resolution of a presented Operator Token.
+    """Gateway resolution of an operator credential presented to it: the admin
+    operator token or an Operator Token, sent as the SHA-256 of its secret. The
+    Gateway holds no operator credential itself.
     """
 
     @staticmethod

@@ -132,7 +132,7 @@ export const SettleReplyProgressRequestSchema: GenMessage<SettleReplyProgressReq
   messageDesc(file_supertag_runtime_v2_reply_progress, 3);
 
 /**
- * Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+ * Gateway-to-Control Plane service for a reply shown while its Task runs: an
  * acknowledgement, then progress updated in place, until the final Reply replaces it.
  * The Control Plane keeps only the newest revision and paces updates per message.
  *

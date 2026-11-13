@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class ReplyProgressStub:
-    """Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+    """Gateway-to-Control Plane service for a reply shown while its Task runs: an
     acknowledgement, then progress updated in place, until the final Reply replaces it.
     The Control Plane keeps only the newest revision and paces updates per message.
     """
@@ -50,7 +50,7 @@ class ReplyProgressStub:
 
 
 class ReplyProgressServicer:
-    """Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+    """Gateway-to-Control Plane service for a reply shown while its Task runs: an
     acknowledgement, then progress updated in place, until the final Reply replaces it.
     The Control Plane keeps only the newest revision and paces updates per message.
     """
@@ -89,7 +89,7 @@ def add_ReplyProgressServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ReplyProgress:
-    """Private Gateway-to-Control-Plane service for a reply shown while its Task runs: an
+    """Gateway-to-Control Plane service for a reply shown while its Task runs: an
     acknowledgement, then progress updated in place, until the final Reply replaces it.
     The Control Plane keeps only the newest revision and paces updates per message.
     """

@@ -214,7 +214,7 @@ class HarnessEffects:
 
 
 class AttemptEffectsStub:
-    """Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+    """Worker Host to Control Plane, with the Attempt's execution authority.
     """
 
     def __init__(self, channel):
@@ -241,7 +241,7 @@ class AttemptEffectsStub:
 
 
 class AttemptEffectsServicer:
-    """Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+    """Worker Host to Control Plane, with the Attempt's execution authority.
     """
 
     def Begin(self, request, context):
@@ -289,7 +289,7 @@ def add_AttemptEffectsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AttemptEffects:
-    """Worker Host to Control Plane, through the Gateway, with the Attempt's execution authority.
+    """Worker Host to Control Plane, with the Attempt's execution authority.
     """
 
     @staticmethod

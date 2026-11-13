@@ -1244,7 +1244,7 @@ export const ListArtifactVolumeCopiesResponseSchema: GenMessage<ListArtifactVolu
   messageDesc(file_supertag_runtime_v2_artifact, 38);
 
 /**
- * Private Gateway lookup. The target carries the original download authority.
+ * Internal API tier lookup. The target carries the original download authority.
  *
  * @generated from message supertag.runtime.v2.LocateArtifactVolumeCopiesRequest
  */
@@ -2053,8 +2053,9 @@ export const ArtifactCatalog: GenService<{
   serviceDesc(file_supertag_runtime_v2_artifact, 0);
 
 /**
- * Only the Gateway serves bytes. The Control Plane verifies authority and
- * records provenance and metadata after the Gateway verifies durable storage.
+ * Internal to the Control Plane. Only its API tier serves bytes; the state
+ * owner verifies authority and records provenance and metadata after the API
+ * tier verifies durable storage.
  *
  * @generated from service supertag.runtime.v2.ArtifactDirectory
  */
@@ -2167,7 +2168,7 @@ export const ArtifactDirectory: GenService<{
   serviceDesc(file_supertag_runtime_v2_artifact, 1);
 
 /**
- * Gateway facade. Identity and generation come from the authenticated Worker Host.
+ * Public Worker Host API. Identity and generation come from the authenticated Worker Host.
  *
  * @generated from service supertag.runtime.v2.AttemptArtifacts
  */
@@ -2313,7 +2314,8 @@ export const HarnessArtifacts: GenService<{
 
 /**
  * File Volumes are registered storage locations. Registration alone authorizes
- * no write: the Gateway must explicitly map the exact Volume and source.
+ * no write: the Control Plane must explicitly map the exact Volume and source
+ * (`--artifact-volume`).
  *
  * @generated from service supertag.runtime.v2.ArtifactVolumes
  */
@@ -2386,7 +2388,8 @@ export const ArtifactVolumes: GenService<{
   serviceDesc(file_supertag_runtime_v2_artifact, 5);
 
 /**
- * Private metadata authority. Only the Gateway verifies and carries copy bytes.
+ * Internal metadata authority. Only the Control Plane's API tier verifies and
+ * carries copy bytes.
  *
  * @generated from service supertag.runtime.v2.ArtifactVolumeDirectory
  */
@@ -2459,7 +2462,7 @@ export const ArtifactVolumeDirectory: GenService<{
   serviceDesc(file_supertag_runtime_v2_artifact, 6);
 
 /**
- * Private peer listener. A bearer grant from the Gateway authorizes this read.
+ * Private peer listener. A bearer grant from the Control Plane authorizes this read.
  *
  * @generated from service supertag.runtime.v2.WorkerArtifactTransfers
  */

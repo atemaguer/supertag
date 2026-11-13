@@ -7,8 +7,9 @@
 # Deploy the hosted image by digest:
 #   fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
 # Secrets: control-plane.env from `supertag setup deployment fly`, plus SUPERTAG_TLS_CERT_PEM and
-# SUPERTAG_TLS_KEY_PEM, and SUPERTAG_TLS_CLIENT_CA_PEM to require client certificates. Run
-# exactly one Machine: its volume holds the transfer directory.
+# SUPERTAG_TLS_KEY_PEM, and SUPERTAG_TLS_CLIENT_CA_PEM to require client certificates, which a
+# Gateway needs. Run exactly one Machine: its volume holds the transfer directory, and every
+# Control Plane process runs the controllers.
 app = "supertag-control-plane"
 primary_region = "iad"
 kill_signal = "SIGTERM"

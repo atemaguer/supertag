@@ -13,14 +13,16 @@ WORKDIR /var/lib/supertag
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/supertag"]
 
+# The public Control Plane. Compose and the hosted platforms name the same command.
 FROM runtime AS control-plane
 ENV SUPERTAG_DATABASE_URL=sqlite:///var/lib/supertag/control-plane.sqlite?mode=rwc
-EXPOSE 3435/tcp
-CMD ["control-plane", "--listen", "0.0.0.0:3435"]
-
-FROM runtime AS gateway
 EXPOSE 3434/tcp
-CMD ["gateway", "--listen", "0.0.0.0:3434", "--control-plane", "https://control-plane:3435", "--checkpoint-directory", "/var/lib/supertag/checkpoints"]
+CMD ["control-plane", "--listen", "0.0.0.0:3434", "--transfer-directory", "/var/lib/supertag/transfers"]
+
+# The optional surfaces-only Gateway: a client of the Control Plane with no public listener.
+# Its gRPC listener (the test notification) stays on loopback inside the container.
+FROM runtime AS gateway
+CMD ["gateway", "--listen", "127.0.0.1:3436", "--control-plane", "https://control-plane:3434"]
 
 # For platforms that mount root-owned volumes and pass TLS material as secrets (Fly.io,
 # Railway). Starts as root only to prepare /var/lib/supertag and /run/supertag-tls, then runs

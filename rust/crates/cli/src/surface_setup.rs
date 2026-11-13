@@ -17,10 +17,8 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, Subcommand, ValueEnum};
-use supertag_gateway::{
-    credential_vault::CredentialVault,
-    surface_setup::{self, Endpoints, Verified},
-};
+use supertag_credential_vault::CredentialVault;
+use supertag_gateway::surface_setup::{self, Endpoints, Verified};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,

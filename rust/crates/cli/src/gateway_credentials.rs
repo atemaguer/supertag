@@ -6,7 +6,7 @@ use std::io::Read as _;
 use anyhow::{Context, Result, ensure};
 use clap::Subcommand;
 use serde_json::json;
-use supertag_gateway::credential_vault::{CredentialValue, CredentialVault};
+use supertag_credential_vault::{CredentialValue, CredentialVault};
 
 #[derive(Subcommand)]
 pub enum GatewayCredentialCommand {

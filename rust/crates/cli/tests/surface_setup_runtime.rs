@@ -31,7 +31,7 @@ use axum::{
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use supertag_gateway::credential_vault::{CredentialVault, FileCredentialVault};
+use supertag_credential_vault::{CredentialVault, FileCredentialVault};
 use supertag_protocol::{
     authenticated_request,
     v2::{

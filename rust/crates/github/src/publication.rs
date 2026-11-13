@@ -2,7 +2,7 @@
 pub mod plan;
 mod provider;
 
-use super::workspaces::GithubWorkspaceAccount;
+use crate::workspaces::GithubWorkspaceAccount;
 use anyhow::{Context, Result, ensure};
 use provider::{Provider, receipt, target};
 use std::{path::Path, time::Duration};

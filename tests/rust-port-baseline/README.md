@@ -6,7 +6,7 @@ Rust rewrite. The assertions consume semantic JSON results. Two drivers produce 
 | `SUPERTAG_BASELINE_DRIVER` | Driver | What it runs |
 | --- | --- | --- |
 | `old` (default) | `old-system-driver.ts` | The frozen TypeScript Control Plane, store, and runtime in one process. Only this file imports the old implementation. |
-| `rust` | `rust-driver.ts` | The built Rust `supertag` binary as separate Control Plane, Gateway, and Worker Host processes. |
+| `rust` | `rust-driver.ts` | The built Rust `supertag` binary as separate Control Plane and Worker Host processes. |
 
 Any other value is an error. Run from the repository root after installing dependencies:
 
@@ -58,7 +58,7 @@ is a small behavioral baseline, not complete product parity.
 `rust-driver.ts` starts each service from the built binary with a private temporary state
 directory, `127.0.0.1:0` listeners, generated Gateway, operator, and host tokens, and an
 environment containing only those tokens, a minimal `PATH`, and a private `HOME`. It drives the
-services only through public operations: the `supertag-ai/gateway` gRPC client, the `supertag`
+services only through public operations: the `supertag-ai/control-plane-client` gRPC client, the `supertag`
 CLI for workspace artifact downloads, and `rust-baseline-adapter.mjs`, a deterministic harness
 built on the public `supertag-ai/harness` entry point. It imports no TypeScript Control Plane,
 store, or runtime code. Each SQL scenario creates its own PostgreSQL database and drops it with
@@ -74,10 +74,10 @@ The following are differences in how a fact is observed, not in the behavior bei
 | Task count for a Tag | `store.listTasks` | Messages across the Tag's conversations; Rust has no operator Task listing |
 | Execution count | Specs received by the scripted Worklet | `started` records written by the baseline adapter after it attaches to a Task |
 | Permission change | Remove one Permission Set grant and add another | Replace the Permission Set with a revision-fenced `PutPermissionSet` |
-| Restart | New `ControlPlane` object over the same store | `SIGKILL` the Control Plane and Gateway, then start new processes on the same database |
+| Restart | New `ControlPlane` object over the same store | `SIGKILL` the Control Plane, then start a new process on the same database |
 | Objective sweep | Explicit `sweepObjectiveLimits(true)` call | The Control Plane's one-second maintenance sweep; the driver waits 3.5 seconds inside the grace window |
 | Task abort | Scripted Worklet saw its abort signal | The adapter process for that Task ended without recording completion |
-| `durable-event-replay` backend `filesystem` | `FileAttemptJournal` under a durable local Worklet | The Worker Host's Attempt journal in its state directory. After the adapter publishes its three events, the driver stops the Control Plane and Gateway, lets the adapter finish, waits until the host journals the `finish` stage, and `SIGKILL`s the host. Only that journal then holds the outcome. A new host on the same state directory reports it without starting the adapter again; a host with an empty state directory leaves the Task running and the scenario fails. Control Plane state is a private SQLite file in the disposable directory |
+| `durable-event-replay` backend `filesystem` | `FileAttemptJournal` under a durable local Worklet | The Worker Host's Attempt journal in its state directory. After the adapter publishes its three events, the driver stops the Control Plane, lets the adapter finish, waits until the host journals the `finish` stage, and `SIGKILL`s the host. Only that journal then holds the outcome. A new host on the same state directory reports it without starting the adapter again; a host with an empty state directory leaves the Task running and the scenario fails. Control Plane state is a private SQLite file in the disposable directory |
 | Durable receipt | Attempt `specDigest` | The Task returned by a repeated `SubmitTask` equals the completed Task |
 | Conflicting retry | Same Attempt ID, different Task ID | Same operation ID, different prompt, rejected with `ALREADY_EXISTS` |
 | Workspace isolation | Local execution environments mounting a cloned seed | Worker Hosts with `--workspace-source`, each preparing its own pinned checkout |

@@ -113,7 +113,7 @@ Each `supertag-ai` import path has its own stability level:
 | `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
 | `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
 | `supertag-ai/coordination` | Experimental | `CoordinationClient`, which lists the operator inbox through `InboxService`, and the inbox messages it returns |
-| `supertag-ai/gateway` | Experimental | `createGatewayClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
+| `supertag-ai/control-plane-client` | Experimental | `createControlPlaneClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
 | `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), and execution-scoped `supertag.runtime.v2` clients |
 | `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
 | `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |
@@ -140,9 +140,9 @@ Experimental: `OperatorClient`, `OperatorClientSync`, `error_detail`, `ErrorDeta
 `ConnectError`, `OPERATOR_API_VERSION`, and the generated `supertag.operator.v1` modules. They
 follow the operator protos and change with them.
 
-The Python SDK's `supertag.gateway` module, installed with the `runtime` extra, is Experimental.
-`GatewayClient` and `GatewayClientSync` connect to a Rust Gateway over gRPC and expose its
-operator services and matching protobuf messages.
+The Python SDK's `supertag.control_plane_client` module, installed with the `runtime` extra, is
+Experimental. `ControlPlaneClient` and `ControlPlaneClientSync` connect to a Rust Control Plane
+over gRPC and expose its operator services and matching protobuf messages.
 
 The Python SDK's `supertag.harness_adapter` module uses the same `runtime` extra. The
 Experimental `open_harness` context manager opens a Worker Host's execution-scoped

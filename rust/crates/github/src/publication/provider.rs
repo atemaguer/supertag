@@ -1,5 +1,5 @@
 use super::plan::{PullRequest, Target};
-use crate::github::{
+use crate::{
     auth::{AccessToken, Authentication},
     valid_id, valid_repository,
     workspaces::{GithubWorkspaceAccount, git_command, run_git},

@@ -1,3 +1,4 @@
+//! The GitHub connector with GitHub App authentication against a fake GitHub API.
 use super::*;
 use crate::{
     delivery_journal::{Claim, Entry, Outcome},
@@ -11,7 +12,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::DateTime;
+use reqwest::{Client, Url};
 use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+use serde_json::{Value, json};
+use std::time::Duration;
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -19,8 +25,10 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
+use supertag_github::auth::{Authentication, MAX_RESPONSE_BYTES, now};
 use supertag_protocol::v2::{Reply, ReplyDestination, ReplyState};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tonic::transport::Endpoint;
 
 // Generated solely for these fixtures. This key is never used with GitHub or another provider.
@@ -203,24 +211,31 @@ async fn signs_bounded_app_jwt_and_reuses_only_scoped_unexpired_tokens() -> Resu
     let auth = Authentication::new(&app(), 123, "acme/project")?;
     let client = client();
     assert_eq!(
-        auth.access_token_at(&client, &base, now).await?.expose(),
+        auth.access_token_at_for_test(&client, &base, now)
+            .await?
+            .expose(),
         "ghs_fixture-installation-token"
     );
-    auth.access_token_at(&client, &base, now + 300).await?;
+    auth.access_token_at_for_test(&client, &base, now + 300)
+        .await?;
     assert_eq!(api.mints.load(Ordering::SeqCst), 1);
     *api.response.lock().await = token_response(now + 3550);
-    auth.access_token_at(&client, &base, now + 3550).await?;
+    auth.access_token_at_for_test(&client, &base, now + 3550)
+        .await?;
     assert_eq!(api.mints.load(Ordering::SeqCst), 2);
     auth.invalidate().await;
-    auth.access_token_at(&client, &base, now + 3550).await?;
+    auth.access_token_at_for_test(&client, &base, now + 3550)
+        .await?;
     assert_eq!(api.mints.load(Ordering::SeqCst), 3);
     // Neither another configured account nor another API origin can borrow this cache.
     let second = Authentication::new(&app(), 123, "acme/project")?;
-    second.access_token_at(&client, &base, now + 3550).await?;
+    second
+        .access_token_at_for_test(&client, &base, now + 3550)
+        .await?;
     assert_eq!(api.mints.load(Ordering::SeqCst), 4);
     let other = Arc::new(FakeApi::new(now + 3550));
     let (other_base, other_task) = serve(other.clone()).await?;
-    auth.access_token_at(&client, &other_base, now + 3550)
+    auth.access_token_at_for_test(&client, &other_base, now + 3550)
         .await?;
     assert_eq!(other.mints.load(Ordering::SeqCst), 1);
     other_task.abort();

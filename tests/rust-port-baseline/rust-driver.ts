@@ -1,8 +1,8 @@
 /**
  * Test-only driver for the Rust services. It launches the built `supertag` binary as separate
- * Control Plane, Gateway, and Worker Host processes with private temporary state, ephemeral
- * loopback ports, and generated credentials. It observes them only through public operations:
- * the `supertag-ai/gateway` gRPC client, the `supertag` CLI, and the `supertag-ai/harness`
+ * Control Plane and Worker Host processes with private temporary state, ephemeral loopback
+ * ports, and generated credentials. It observes them only through public operations: the
+ * `supertag-ai/control-plane-client` gRPC client, the `supertag` CLI, and the `supertag-ai/harness`
  * adapter entry point used by `rust-baseline-adapter.mjs`. It imports no TypeScript Control
  * Plane, store, or runtime implementation.
  */
@@ -15,10 +15,14 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Code, ConnectError, createGatewayClient } from "../../packages/supertag-ai/src/gateway.ts";
+import {
+  Code,
+  ConnectError,
+  createControlPlaneClient,
+} from "../../packages/supertag-ai/src/control-plane-client.ts";
 
-type Gateway = ReturnType<typeof createGatewayClient>;
-type Task = Awaited<ReturnType<Gateway["operator"]["getTask"]>>;
+type Client = ReturnType<typeof createControlPlaneClient>;
+type Task = Awaited<ReturnType<Client["operator"]["getTask"]>>;
 
 const root = resolve(import.meta.dirname, "../..");
 const binary =
@@ -188,20 +192,15 @@ async function fixture(directory: string, databaseUrl: string) {
   await writeFile(adapter, `#!/bin/sh\nexec '${process.execPath}' '${adapterSource}' "$@"\n`);
   await chmod(adapter, 0o700);
   let plane: Awaited<ReturnType<typeof service>>;
-  let gateway: Awaited<ReturnType<typeof service>>;
-  let client: Gateway;
+  let client: Client;
   const start = async () => {
-    plane = await service(directory, "control-plane", ["control-plane"], {
-      SUPERTAG_DATABASE_URL: databaseUrl,
-    });
-    gateway = await service(directory, "gateway", [
-      "gateway",
-      "--control-plane",
-      plane.url,
-      "--checkpoint-directory",
-      join(directory, "gateway-artifacts"),
-    ]);
-    client = createGatewayClient({ url: gateway.url, token: credentials.operator });
+    plane = await service(
+      directory,
+      "control-plane",
+      ["control-plane", "--transfer-directory", join(directory, "transfers")],
+      { SUPERTAG_DATABASE_URL: databaseUrl },
+    );
+    client = createControlPlaneClient({ url: plane.url, token: credentials.operator });
   };
   await start();
   const records = async (): Promise<AdapterRecord[]> =>
@@ -215,18 +214,14 @@ async function fixture(directory: string, databaseUrl: string) {
     get client() {
       return client;
     },
-    get gatewayUrl() {
-      return gateway.url;
-    },
     records,
-    /** Hard-stop both services; their durable SQL state stays in place. */
+    /** Hard-stop the Control Plane; its durable SQL state stays in place. */
     async stop() {
       client.close();
-      await crash(gateway);
       await crash(plane);
     },
     start,
-    /** Hard-stop both services, then reopen the same durable SQL state on new ports. */
+    /** Hard-stop the Control Plane, then reopen the same durable SQL state on a new port. */
     async restart() {
       await this.stop();
       await start();
@@ -236,8 +231,8 @@ async function fixture(directory: string, databaseUrl: string) {
     host(name: string, mode: string, extra: string[] = []) {
       return launch(directory, `worker-host-${name}`, [
         "worker-host",
-        "--gateway",
-        gateway.url,
+        "--control-plane",
+        plane.url,
         "--state-directory",
         join(directory, "hosts", name),
         "--adapter",
@@ -249,7 +244,7 @@ async function fixture(directory: string, databaseUrl: string) {
       ]);
     },
     async cli(args: string[]) {
-      const { stdout } = await execute(binary, [...args, "--gateway", gateway.url], {
+      const { stdout } = await execute(binary, [...args, "--control-plane", plane.url], {
         cwd: directory,
         env: environment(directory),
         timeout: WAIT_MS,

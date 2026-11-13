@@ -1,15 +1,12 @@
 //! Signed GitHub events and journaled issue/PR comments. No credentials reach Tasks.
-mod auth;
+#[cfg(test)]
+mod auth_tests;
 mod delivery;
-pub mod publication;
 #[cfg(test)]
 mod tests;
-pub mod workspaces;
 
 use crate::delivery_journal::Journal;
 use anyhow::{Context, Result, ensure};
-pub(crate) use auth::setup_app_jwt;
-pub use auth::{GithubAppConfig, GithubAuthentication};
 use axum::{
     Router,
     body::Bytes,
@@ -23,6 +20,9 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use std::{path::PathBuf, sync::Arc, time::Duration};
+pub(crate) use supertag_github::setup_app_jwt;
+pub use supertag_github::{GithubAppConfig, GithubAuthentication};
+use supertag_github::{REQUEST_TIMEOUT as DELIVERY_TIMEOUT, auth, valid_id, valid_repository};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
@@ -36,7 +36,6 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(2);
-const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_WEBHOOK_BYTES: usize = 128 * 1024;
 
 pub struct GithubConfig {
@@ -396,20 +395,4 @@ fn mentioned(text: &str) -> bool {
         part.trim_end_matches([')', ',', '.', ':', ';', '!', '?'])
             .eq_ignore_ascii_case("@supertag")
     })
-}
-fn valid_id(id: u64) -> bool {
-    id > 0 && id <= i64::MAX as u64
-}
-fn valid_repository(value: &str) -> bool {
-    let parts: Vec<_> = value.split('/').collect();
-    parts.len() == 2
-        && parts.iter().all(|part| {
-            !part.is_empty()
-                && part.len() <= 100
-                && *part != "."
-                && *part != ".."
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
-        })
 }

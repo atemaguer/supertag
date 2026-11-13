@@ -16,12 +16,13 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Worker](glossary.md#worker).
 
 The API Server is the Control Plane's public endpoint: the authenticated management, resource, and
-Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state, so
-more API Server replicas can run in front of one set of controllers. By default the API Server and
-the controllers run as one process. The Gateway connects collaboration surfaces to the Control
-Plane. It runs as a separate, optional process and is an ordinary client of the API Server. These
-boundaries keep resource semantics and admission separate from collaboration transport and from
-reconciliation.
+Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state
+apart from transfer files, and the API Server and the controllers run as one process. Running API
+Server replicas apart from the controllers is not supported yet: every Control Plane process also
+runs its own controllers, so run exactly one per database. The Gateway connects collaboration
+surfaces to the Control Plane. It runs as a separate, optional process and is an ordinary client
+of the API Server. These boundaries keep resource semantics and admission separate from
+collaboration transport and from reconciliation.
 
 ## System boundary
 

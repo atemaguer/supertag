@@ -27,8 +27,9 @@ if _version_not_supported:
 
 
 class OperatorStub:
-    """The Gateway exposes these services to operators and enrolled hosts. The
-    Control Plane serves the same messages on a private authenticated listener.
+    """The Control Plane's public endpoint serves these services to operators and
+    enrolled hosts. Its API tier authenticates them and calls the state owner
+    with the same messages.
     """
 
     def __init__(self, channel):
@@ -135,8 +136,9 @@ class OperatorStub:
 
 
 class OperatorServicer:
-    """The Gateway exposes these services to operators and enrolled hosts. The
-    Control Plane serves the same messages on a private authenticated listener.
+    """The Control Plane's public endpoint serves these services to operators and
+    enrolled hosts. Its API tier authenticates them and calls the state owner
+    with the same messages.
     """
 
     def CreateAuthKey(self, request, context):
@@ -360,8 +362,9 @@ def add_OperatorServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Operator:
-    """The Gateway exposes these services to operators and enrolled hosts. The
-    Control Plane serves the same messages on a private authenticated listener.
+    """The Control Plane's public endpoint serves these services to operators and
+    enrolled hosts. Its API tier authenticates them and calls the state owner
+    with the same messages.
     """
 
     @staticmethod
@@ -4133,7 +4136,8 @@ class HostEnrollment:
 
 
 class HostDirectoryStub:
-    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
+    Hosts with the state owner.
     """
 
     def __init__(self, channel):
@@ -4155,7 +4159,8 @@ class HostDirectoryStub:
 
 
 class HostDirectoryServicer:
-    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
+    Hosts with the state owner.
     """
 
     def Enroll(self, request, context):
@@ -4192,7 +4197,8 @@ def add_HostDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class HostDirectory:
-    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
+    Hosts with the state owner.
     """
 
     @staticmethod
@@ -4251,8 +4257,9 @@ class HostDirectory:
 
 
 class ConnectorStub:
-    """Private Gateway-to-Control-Plane operations. The authenticated connector
-    principal identifies the account. Provider request bodies cannot select it.
+    """Gateway and connector calls to the Control Plane. The connector principal
+    identifies the account; provider request bodies cannot select it. See
+    docs/reference/connector-contract.md.
     """
 
     def __init__(self, channel):
@@ -4329,8 +4336,9 @@ class ConnectorStub:
 
 
 class ConnectorServicer:
-    """Private Gateway-to-Control-Plane operations. The authenticated connector
-    principal identifies the account. Provider request bodies cannot select it.
+    """Gateway and connector calls to the Control Plane. The connector principal
+    identifies the account; provider request bodies cannot select it. See
+    docs/reference/connector-contract.md.
     """
 
     def AcceptEvent(self, request, context):
@@ -4490,8 +4498,9 @@ def add_ConnectorServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Connector:
-    """Private Gateway-to-Control-Plane operations. The authenticated connector
-    principal identifies the account. Provider request bodies cannot select it.
+    """Gateway and connector calls to the Control Plane. The connector principal
+    identifies the account; provider request bodies cannot select it. See
+    docs/reference/connector-contract.md.
     """
 
     @staticmethod
@@ -5223,7 +5232,7 @@ class Transfers:
 
 
 class CheckpointDirectoryStub:
-    """Private authorization and commit for bytes stored by the Gateway.
+    """Internal authorization and commit for bytes the API tier stores.
     """
 
     def __init__(self, channel):
@@ -5250,7 +5259,7 @@ class CheckpointDirectoryStub:
 
 
 class CheckpointDirectoryServicer:
-    """Private authorization and commit for bytes stored by the Gateway.
+    """Internal authorization and commit for bytes the API tier stores.
     """
 
     def GetCheckpoint(self, request, context):
@@ -5298,7 +5307,7 @@ def add_CheckpointDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class CheckpointDirectory:
-    """Private authorization and commit for bytes stored by the Gateway.
+    """Internal authorization and commit for bytes the API tier stores.
     """
 
     @staticmethod
@@ -5384,7 +5393,7 @@ class CheckpointDirectory:
 
 
 class WorkspaceDirectoryStub:
-    """Private authorization and commit for work product stored by the Gateway.
+    """Internal authorization and commit for work product the API tier stores.
     """
 
     def __init__(self, channel):
@@ -5426,7 +5435,7 @@ class WorkspaceDirectoryStub:
 
 
 class WorkspaceDirectoryServicer:
-    """Private authorization and commit for work product stored by the Gateway.
+    """Internal authorization and commit for work product the API tier stores.
     """
 
     def GetSource(self, request, context):
@@ -5507,7 +5516,7 @@ def add_WorkspaceDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class WorkspaceDirectory:
-    """Private authorization and commit for work product stored by the Gateway.
+    """Internal authorization and commit for work product the API tier stores.
     """
 
     @staticmethod

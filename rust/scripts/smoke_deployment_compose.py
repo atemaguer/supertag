@@ -1,15 +1,17 @@
 """Rehearse a deployment made with `supertag setup deployment compose` on disposable containers.
 
-The Control Plane, Gateway, and PostgreSQL run from deploy/compose.native.yaml plus
-deploy/compose.native.ingress.yaml, configured only by the files setup wrote and a disposable
-TLS authority. Two Worker Hosts run outside Compose with the credential-free fixture adapter and
-connect outbound to the published Gateway. PostgreSQL's first-start initialization is slowed so
-the Control Plane would race it if the PostgreSQL healthcheck reported healthy too early. The
-rehearsal then replaces the Compose Control Plane with the hosted image (Fly.io and Railway) and
-runs every hosted service command from deploy/native/fly and deploy/native/railway: TLS secrets
-arrive as PEM environment values, volumes are root-owned, and a Control Plane without a client CA
-refuses to start. No cloud resource, model call, or real credential is used. Everything the
-rehearsal creates is removed, and the removal is checked.
+The Control Plane, the Gateway (profile `gateway`), and PostgreSQL run from
+deploy/compose.native.yaml plus deploy/compose.native.ingress.yaml, configured by the files setup
+wrote, a disposable TLS authority, and the client CA a Gateway needs (documented in
+deploy/native/README.md). Only the Control Plane is published. Two Worker Hosts run outside
+Compose with the credential-free fixture adapter and connect outbound to it. The Gateway, which
+holds no operator credential, resolves an operator's credential through the Control Plane for its
+test notification. PostgreSQL's first-start initialization is slowed so the Control Plane would
+race it if the PostgreSQL healthcheck reported healthy too early. The rehearsal then replaces the
+Compose Control Plane with the hosted image (Fly.io and Railway) and runs every hosted service
+command from deploy/native/fly and deploy/native/railway: TLS secrets arrive as PEM environment
+values and volumes are root-owned. No cloud resource, model call, or real credential is used.
+Everything the rehearsal creates is removed, and the removal is checked.
 
 Usage:
   python3 rust/scripts/smoke_deployment_compose.py --linux-binary PATH --cli PATH \
@@ -124,12 +126,13 @@ def authority(root):
     openssl("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "1",
             "-subj", "/CN=SuperTag disposable deployment CA", "-addext", "basicConstraints=critical,CA:TRUE",
             "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-keyout", "ca.key", "-out", "ca.pem")
-    # The Control Plane's names cover Compose and the Fly.io and Railway private names, so the
-    # hosted rehearsal runs the platform definitions' commands unchanged.
-    control_names = "DNS:control-plane,DNS:supertag-control-plane.internal,DNS:supertag-control-plane.railway.internal"
+    # The Control Plane's names cover its published address, Compose, and the Fly.io and Railway
+    # private names, so the hosted rehearsal runs the platform definitions' commands unchanged.
+    control_names = ("DNS:localhost,IP:127.0.0.1,DNS:control-plane,DNS:supertag-control-plane.internal,"
+                     "DNS:supertag-control-plane.railway.internal")
     for name, names, usage in (("control-plane", control_names, "serverAuth"),
-                               ("gateway", "DNS:gateway,DNS:localhost,IP:127.0.0.1", "serverAuth"),
-                               ("gateway-client", "DNS:gateway-client", "clientAuth")):
+                               ("gateway-client", "DNS:gateway-client", "clientAuth"),
+                               ("operator-client", "DNS:operator-client", "clientAuth")):
         (root / f"{name}.ext").write_text(f"subjectAltName={names}\nbasicConstraints=critical,CA:FALSE\n"
                                           f"keyUsage=critical,digitalSignature\nextendedKeyUsage={usage}\n")
         openssl("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-subj", f"/CN={name}",
@@ -138,9 +141,9 @@ def authority(root):
                 "-days", "1", "-extfile", f"{name}.ext", "-out", f"{name}.pem")
     layouts = {
         "control": {"server.pem": "control-plane.pem", "server.key": "control-plane.key", "client-ca.pem": "ca.pem",
-                    "server-ca.pem": "ca.pem", "client.pem": "gateway-client.pem", "client.key": "gateway-client.key"},
-        "gateway": {"server.pem": "gateway.pem", "server.key": "gateway.key", "server-ca.pem": "ca.pem",
-                    "client.pem": "gateway-client.pem", "client.key": "gateway-client.key"},
+                    "server-ca.pem": "ca.pem", "client.pem": "operator-client.pem", "client.key": "operator-client.key"},
+        "gateway": {"server-ca.pem": "ca.pem", "client.pem": "gateway-client.pem", "client.key": "gateway-client.key"},
+        "operator": {"client.pem": "operator-client.pem", "client.key": "operator-client.key"},
     }
     for role, files in layouts.items():
         directory = root / role
@@ -203,6 +206,17 @@ def rehearse(args):
                     if key.endswith(("_TOKEN", "_PASSWORD", "_URL")):
                         require(value not in setup.stdout, f"setup printed {key}")
             supertag("check", "deployment", "compose", "--directory", str(deployment))
+            # A Gateway needs a Control Plane that requires client certificates; its own health
+            # probe then presents one, as does the Gateway.
+            tls_file = "/run/supertag-tls/"
+            for name, values in (("control-plane.env", {"SUPERTAG_TLS_CLIENT_CA_FILE": tls_file + "client-ca.pem",
+                                                        "SUPERTAG_CLIENT_CERT_FILE": tls_file + "client.pem",
+                                                        "SUPERTAG_CLIENT_KEY_FILE": tls_file + "client.key"}),
+                                 ("gateway.env", {"SUPERTAG_CLIENT_CERT_FILE": tls_file + "client.pem",
+                                                  "SUPERTAG_CLIENT_KEY_FILE": tls_file + "client.key"})):
+                with open(deployment / name, "a") as output:
+                    output.writelines(f"{key}={value}\n" for key, value in values.items())
+            supertag("check", "deployment", "compose", "--directory", str(deployment))
             ca = authority(root / "tls")
             port = free_port()
             compose_env = {name: value for name, value in os.environ.items()
@@ -215,7 +229,7 @@ def rehearse(args):
                 "SUPERTAG_GATEWAY_ENV_FILE": str(deployment / "gateway.env"),
                 "SUPERTAG_CONTROL_TLS_DIRECTORY": str(root / "tls/control"),
                 "SUPERTAG_GATEWAY_TLS_DIRECTORY": str(root / "tls/gateway"),
-                "SUPERTAG_GATEWAY_PUBLISH": f"127.0.0.1:{port}",
+                "SUPERTAG_CONTROL_PLANE_PUBLISH": f"127.0.0.1:{port}",
             })
             # A slow first-start init: the image's temporary init server listens only on its Unix
             # socket, so a healthcheck that passes during init starts the Control Plane, whose
@@ -261,7 +275,7 @@ def rehearse(args):
                     and not (root / "refused-deployment").exists(), "setup wrote a value Compose would change")
             receipt["env_files_literal"] = True
 
-            compose("up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
+            compose("--profile", "gateway", "up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
             logs = run([*prefix, "logs", "--no-color", "postgres"], env=compose_env).stdout
             require("rehearsal: slow init" in logs, "the slow PostgreSQL init did not run")
             for service in ("control-plane", "gateway"):
@@ -272,15 +286,17 @@ def rehearse(args):
                 bindings = json.loads(run(["docker", "inspect", "--format", "{{json .HostConfig.PortBindings}}",
                                            container(service)]).stdout or "null") or {}
                 published = [binding for entries in bindings.values() for binding in entries or []]
-                if service == "gateway":
+                if service == "control-plane":
                     require(published == [{"HostIp": "127.0.0.1", "HostPort": str(port)}],
-                            f"Gateway publishes {published}")
+                            f"Control Plane publishes {published}")
                 else:
                     require(not published, f"{service} publishes a port")
-            receipt["published"] = {"gateway": f"127.0.0.1:{port}", "control-plane": None, "postgres": None}
+            receipt["published"] = {"control-plane": f"127.0.0.1:{port}", "gateway": None, "postgres": None}
 
             url = f"https://localhost:{port}"
-            trust = {"SUPERTAG_SERVER_CA_FILE": str(ca)}
+            trust = {"SUPERTAG_SERVER_CA_FILE": str(ca),
+                     "SUPERTAG_CLIENT_CERT_FILE": str(root / "tls/operator/client.pem"),
+                     "SUPERTAG_CLIENT_KEY_FILE": str(root / "tls/operator/client.key")}
             operator_file = str(deployment / "operator.env")
             operator_env = {**trust, **env_file(deployment / "operator.env")}
 
@@ -296,14 +312,32 @@ def rehearse(args):
             require(refused.returncode != 0, "verification trusted an unknown authority")
 
             def operator(*arguments):
-                return json.loads(supertag(*arguments, "--gateway", url, env=operator_env).stdout)
+                return json.loads(supertag(*arguments, "--control-plane", url, env=operator_env).stdout)
 
             def grouped(group, *arguments):
-                return json.loads(supertag(group, "--gateway", url, *arguments, env=operator_env).stdout)
+                return json.loads(supertag(group, "--control-plane", url, *arguments, env=operator_env).stdout)
+
+            # The Gateway holds no operator credential: its test notification resolves the one an
+            # operator presents through the Control Plane, over the Gateway's mutual TLS.
+            operator_token = env_file(deployment / "operator.env")["SUPERTAG_OPERATOR_TOKEN"]
+            require("SUPERTAG_OPERATOR_TOKEN" not in env_file(deployment / "gateway.env"),
+                    "setup gave the Gateway an operator credential")
+
+            def test_notification(service, token, runner=None):
+                command = runner or [*prefix, "exec", "-T"]
+                return run([*command, "--env", f"SUPERTAG_OPERATOR_TOKEN={token}", service, "/usr/local/bin/supertag",
+                            "test", "notification", "--gateway", "http://127.0.0.1:3436"],
+                           env=compose_env, check=False)
+
+            accepted = test_notification("gateway", operator_token)
+            require(accepted.returncode == 0, f"the Gateway refused the operator token: {accepted.stderr[-500:]}")
+            refused = test_notification("gateway", "x" * 43)
+            require(refused.returncode != 0, "the Gateway accepted an unknown operator credential")
+            receipt["gateway_resolves_operator_credentials"] = True
 
             manifest = root / "organization.yaml"
             manifest.write_text(ORGANIZATION)
-            applied = supertag("apply", "-f", str(manifest), "--gateway", url, env=operator_env).stdout
+            applied = supertag("apply", "-f", str(manifest), "--control-plane", url, env=operator_env).stdout
             require("Team/csv" in applied, applied)
             hosts = {}
             for host, tag in (("review-host", "review-manager"), ("builder-host", "builder-manager")):
@@ -312,14 +346,14 @@ def rehearse(args):
                 key.write_text(issued["auth_key"])
                 key.chmod(0o600)
                 state = root / host
-                enrolled = json.loads(supertag("host", "enroll", host, "--gateway", url, "--state-directory", str(state),
+                enrolled = json.loads(supertag("host", "enroll", host, "--control-plane", url, "--state-directory", str(state),
                                                "--auth-key", f"file:{key}", env=trust).stdout)
                 require(enrolled["host_id"] == host, "unexpected host ID")
                 hosts[host] = state
 
             def start_host(host):
                 log = open(root / f"{host}.log", "w")
-                child = subprocess.Popen([cli, "worker-host", "--gateway", url, "--state-directory", str(hosts[host]),
+                child = subprocess.Popen([cli, "worker-host", "--control-plane", url, "--state-directory", str(hosts[host]),
                                           "--adapter", adapter], env={**base_env, **trust}, stdin=subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=log)
                 children.append((child, log))
@@ -351,14 +385,14 @@ def rehearse(args):
             receipt["tasks"] = {"review-manager": review["task_id"], "builder-manager": builder["task_id"]}
 
             # Restart every service, including the database; work and history survive.
-            events = supertag("task", "events", "--gateway", url, builder["task_id"], env=operator_env).stdout
+            events = supertag("task", "events", "--control-plane", url, builder["task_id"], env=operator_env).stdout
             for service in ("gateway", "control-plane", "postgres"):
                 compose("stop", service)
                 exit_code = run(["docker", "inspect", "--format", "{{.State.ExitCode}}", container(service)]).stdout
                 require(exit_code.strip() == "0", f"{service} did not stop cleanly")
-            compose("up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
+            compose("--profile", "gateway", "up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
             require(operator("get", "task", builder["task_id"]) == builder, "Task changed across restart")
-            require(supertag("task", "events", "--gateway", url, builder["task_id"], env=operator_env).stdout == events,
+            require(supertag("task", "events", "--control-plane", url, builder["task_id"], env=operator_env).stdout == events,
                     "Task history changed across restart")
             wait_until(lambda: "Readiness: ready (2 Worker Hosts)" in (verify("--require-ready", check=False).stdout),
                        "Worker Hosts to reconnect after the restart")
@@ -380,17 +414,16 @@ def rehearse(args):
 
             control_pem = pem("control", (("TLS_CERT", "server.pem"), ("TLS_KEY", "server.key"),
                                           ("TLS_CLIENT_CA", "client-ca.pem")))
-            gateway_pem = pem("gateway", (("TLS_CERT", "server.pem"), ("TLS_KEY", "server.key"),
-                                          ("SERVER_CA", "server-ca.pem"), ("CLIENT_CERT", "client.pem"),
+            gateway_pem = pem("gateway", (("SERVER_CA", "server-ca.pem"), ("CLIENT_CERT", "client.pem"),
                                           ("CLIENT_KEY", "client.key")))
             # Hosted env files come from setup for Fly.io, reusing this deployment's database and
             # tokens so the hosted services join the same deployment.
-            compose_gateway = env_file(deployment / "gateway.env")
+            compose_control = env_file(deployment / "control-plane.env")
             hosted = root / "hosted-deployment"
             supertag("setup", "deployment", "fly", "--non-interactive", "--output", str(hosted), env={
-                "SUPERTAG_DATABASE_URL": env_file(deployment / "control-plane.env")["SUPERTAG_DATABASE_URL"],
-                "SUPERTAG_GATEWAY_TOKEN": compose_gateway["SUPERTAG_GATEWAY_TOKEN"],
-                "SUPERTAG_OPERATOR_TOKEN": compose_gateway["SUPERTAG_OPERATOR_TOKEN"],
+                "SUPERTAG_DATABASE_URL": compose_control["SUPERTAG_DATABASE_URL"],
+                "SUPERTAG_GATEWAY_TOKEN": compose_control["SUPERTAG_GATEWAY_TOKEN"],
+                "SUPERTAG_OPERATOR_TOKEN": compose_control["SUPERTAG_OPERATOR_TOKEN"],
             })
             supertag("check", "deployment", "fly", "--directory", str(hosted))
             control_env = {**control_pem, **env_file(hosted / "control-plane.env")}
@@ -410,29 +443,23 @@ def rehearse(args):
                         *[flag for key in environment for flag in ("--env", key)], *entrypoint,
                         images["hosted"], *command]
 
-            # Without a client CA the hosted Control Plane refuses to start (Railway's command).
-            refused = run(["docker", "run", "--rm", *hosted_args(
-                identifier + "-hosted-refused",
-                {key: value for key, value in control_env.items() if key != "SUPERTAG_TLS_CLIENT_CA_PEM"},
-                railway_control)], env={**os.environ, **control_env}, check=False)
-            require(refused.returncode != 0
-                    and "Control Plane TLS requires a client certificate authority" in refused.stderr,
-                    f"the hosted Control Plane started without a client CA: {refused.stderr[-500:]}")
-
             compose("stop", "control-plane")
             hosted_control = identifier + "-hosted-control-plane"
+            hosted_port = free_port()
             run(["docker", "create", *hosted_args(
-                hosted_control, control_env, fly_control, *[flag for alias in (
-                    "control-plane", "supertag-control-plane.internal", "supertag-control-plane.railway.internal")
+                hosted_control, control_env, fly_control, "--publish", f"127.0.0.1:{hosted_port}:3434", *[
+                    flag for alias in (
+                        "control-plane", "supertag-control-plane.internal", "supertag-control-plane.railway.internal")
                     for flag in ("--network-alias", alias)])], env={**os.environ, **control_env})
             hosted_containers.append(hosted_control)
+            run(["docker", "network", "connect", f"{identifier}_ingress", hosted_control])
             run(["docker", "start", hosted_control])
 
-            # The private hop refuses a client without a certificate and accepts the Gateway's.
+            # With its client CA, the hosted Control Plane refuses a client without a certificate.
             probe = ["docker", "run", "--rm", "--label", f"supertag.rehearsal={identifier}", "--network",
                      f"{identifier}_runtime", "--volume", f"{root / 'tls/gateway'}:/tls:ro", "--entrypoint",
                      "/usr/local/bin/supertag", "--env", "SUPERTAG_SERVER_CA_FILE=/tls/server-ca.pem"]
-            health = ["health", "--endpoint", "https://supertag-control-plane.internal:3435"]
+            health = ["health", "--endpoint", "https://supertag-control-plane.internal:3434"]
             wait_until(lambda: run([*probe, "--env", "SUPERTAG_CLIENT_CERT_FILE=/tls/client.pem", "--env",
                                     "SUPERTAG_CLIENT_KEY_FILE=/tls/client.key", images["control-plane"], *health],
                                    check=False).returncode == 0, "the hosted Control Plane")
@@ -453,41 +480,44 @@ def rehearse(args):
                 # Read as the service user: root in this container has no ptrace capability.
                 environment = run(["docker", "exec", "--user", "10001:10001", name, "cat",
                                    f"/proc/{child}/environ"]).stdout
-                require("SUPERTAG_TLS_CERT_FILE=/run/supertag-tls/server.pem" in environment
-                        and "PEM=" not in environment, f"the {role} environment is not as expected")
+                expected = ("SUPERTAG_TLS_CERT_FILE=/run/supertag-tls/server.pem" if role == "control-plane"
+                            else "SUPERTAG_CLIENT_CERT_FILE=/run/supertag-tls/client.pem")
+                require(expected in environment and "PEM=" not in environment,
+                        f"the {role} environment is not as expected")
 
             check_privileges(hosted_control, "control-plane")
+            hosted_url = f"https://localhost:{hosted_port}"
+            # Through the hosted Control Plane, with both Worker Hosts.
+            wait_until(lambda: "Readiness: ready (2 Worker Hosts)" in supertag(
+                "verify", "deployment", hosted_url, "--env-file", operator_file, "--require-ready", env=trust,
+                check=False).stdout, "the hosted Control Plane")
             gateways = {}
             for platform, command in (("fly", fly_gateway), ("railway", railway_gateway)):
                 name = f"{identifier}-hosted-{platform}-gateway"
                 volume = name + "-state"
                 run(["docker", "volume", "create", "--label", f"supertag.rehearsal={identifier}", volume])
                 hosted_volumes.append(volume)
-                hosted_port = free_port()
-                run(["docker", "create", *hosted_args(name, gateway_env, command, "--publish",
-                                                      f"127.0.0.1:{hosted_port}:3434", "--volume",
+                run(["docker", "create", *hosted_args(name, gateway_env, command, "--volume",
                                                       f"{volume}:/var/lib/supertag")],
                     env={**os.environ, **gateway_env})
                 hosted_containers.append(name)
-                run(["docker", "network", "connect", f"{identifier}_ingress", name])
                 run(["docker", "start", name])
-                hosted_url = f"https://localhost:{hosted_port}"
-                # Through the hosted Gateway and the hosted Control Plane, with both Worker Hosts.
-                wait_until(lambda: "Readiness: ready (2 Worker Hosts)" in supertag(
-                    "verify", "deployment", hosted_url, "--env-file", operator_file, "--require-ready", env=trust,
-                    check=False).stdout, f"the hosted {platform} Gateway")
+                # The hosted Gateway reaches the hosted Control Plane with its client certificate
+                # and resolves the operator's credential there.
+                wait_until(lambda: test_notification(name, operator_token, ["docker", "exec", "--user", "10001:10001"]).returncode == 0,
+                           f"the hosted {platform} Gateway")
                 check_privileges(name, "gateway")
                 ownership = run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/stat",
-                                 "--volume", f"{volume}:/state", images["control-plane"], "-c", "%u %a", "/state",
-                                 "/state/checkpoints"], check=False).stdout.split("\n")
+                                 "--volume", f"{volume}:/state", images["control-plane"], "-c", "%u %a", "/state"],
+                                check=False).stdout.split("\n")
                 require(ownership[0] == "10001 700", f"hosted volume ownership {ownership}")
                 gateways[platform] = {"volume_owner": ownership[0]}
             receipt["hosted_image"] = {
                 "tls_from_pem_secrets": True, "uid": 10001, "gateways": gateways,
-                "control_plane_refuses_without_client_ca": True, "private_hop_refuses_anonymous_clients": True,
+                "control_plane_refuses_anonymous_clients": True,
                 "commands_from": ["deploy/native/fly/control-plane.toml", "deploy/native/fly/gateway.toml",
                                   "deploy/native/railway/control-plane.json", "deploy/native/railway/gateway.json"]}
-            receipt.update({"postgresql": True, "private_mtls": True, "public_tls": True, "verify_deployment": True,
+            receipt.update({"postgresql": True, "mtls": True, "public_tls": True, "verify_deployment": True,
                             "outbound_worker_hosts": 2, "label_placement": True, "restart_preserved_work": True})
             return receipt
         finally:
@@ -512,7 +542,8 @@ def rehearse(args):
             for name in hosted_containers:
                 subprocess.run(["docker", "rm", "--force", name], capture_output=True, timeout=60)
             if prefix:
-                result = subprocess.run([*prefix, "down", "--volumes", "--remove-orphans", "--timeout", "15"],
+                result = subprocess.run([*prefix, "--profile", "gateway", "down", "--volumes", "--remove-orphans",
+                                         "--timeout", "15"],
                                         env=compose_env, capture_output=True, text=True, timeout=120)
                 if result.returncode:
                     problems.append("compose down failed: " + result.stderr[-500:])

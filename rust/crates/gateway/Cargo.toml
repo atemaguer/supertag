@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-test-fixtures = []
+test-fixtures = ["supertag-github/test-fixtures"]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,13 +29,15 @@ rustls-pki-types = { version = "1", features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-subtle.workspace = true
+supertag-credential-vault.workspace = true
+supertag-github.workspace = true
 supertag-protocol.workspace = true
-supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
-tracing = "0.1"
 uuid.workspace = true
+
+[dev-dependencies]
+supertag-github = { workspace = true, features = ["test-fixtures"] }

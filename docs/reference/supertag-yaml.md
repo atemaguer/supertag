@@ -797,7 +797,7 @@ Each service process starts with an empty environment. It gets `PATH`, `HOME`, `
 | Process | Also receives |
 | --- | --- |
 | Control Plane | Its database URL, the service token, and the operator token. It gets `SUPERTAG_GITHUB_*` only when a host serves a GitHub Workspace from the Control Plane. |
-| Gateway | The service token and the operator token, plus each connected surface's settings. It runs only when the file connects a surface or names a `notify` destination. |
+| Gateway | The service token, plus each connected surface's settings. It holds no operator token. It runs only when the file connects a surface or names a `notify` destination. |
 | Worker Host | The provider credentials for its harness only, such as `CODEX_API_KEY`, `OPENAI_API_KEY`, and `CODEX_HOME` for `codex`, or `CURSOR_API_KEY` for `cursor`. Every host also gets the TLS file paths set in the shell. |
 
 A Worker Host never receives a service token or another harness's credential. Its harness

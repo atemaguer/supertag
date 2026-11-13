@@ -123,32 +123,32 @@ responsibilities and permissions. The
 [operator API reference](../../docs/reference/operator-api/README.md) lists
 every RPC.
 
-### Rust Gateway
+### Rust Control Plane
 
-Use `supertag.gateway` with a Rust deployment. The `runtime` extra installs gRPC and protobuf.
+Use `supertag.control_plane_client` with a Rust deployment. The `runtime` extra installs gRPC and protobuf.
 This example lists Tags, the persistent AI actors in your organization.
 
 ```python
 import os
 
-from supertag.gateway import GatewayClientSync, runtime
+from supertag.control_plane_client import ControlPlaneClientSync, runtime
 
-with GatewayClientSync(
-    os.environ["SUPERTAG_GATEWAY_URL"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
+with ControlPlaneClientSync(
+    os.environ["SUPERTAG_CONTROL_PLANE_URL"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
 ) as client:
     response = client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
     for tag in response.tags:
         print(tag.name)
 ```
 
-`GatewayClient` exposes the same services with `async with` and awaitable unary calls.
+`ControlPlaneClient` exposes the same services with `async with` and awaitable unary calls.
 The generated gRPC methods use the protobuf RPC names, such as `ListTags` and `Watch`.
 Pass a `timeout` in seconds to bound a call. Watch streams can resume from their last
-`resume_token`. Use HTTPS for a remote Gateway and a loopback IP address for local
+`resume_token`. Use HTTPS for a remote Control Plane and a loopback IP address for local
 cleartext. Pass a PEM `ca` for private TLS and a PEM certificate chain and key as
-`identity=(cert, key)` if the Gateway requires mutual TLS. The first call negotiates the
-SuperTag protocol version with the Gateway and raises `GatewayProtocolError` when the Gateway
-runs an incompatible release.
+`identity=(cert, key)` if the Control Plane requires mutual TLS. The first call negotiates the
+SuperTag protocol version with the Control Plane and raises `ControlPlaneProtocolError` when the
+Control Plane runs an incompatible release.
 
 ### Connect operator API
 

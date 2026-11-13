@@ -12,7 +12,7 @@ use reqwest::Client;
 pub use reqwest::Url;
 use serde_json::{Value, json};
 
-use crate::credential_vault::CredentialValue;
+use supertag_credential_vault::CredentialValue;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;

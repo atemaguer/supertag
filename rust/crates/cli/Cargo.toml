@@ -7,7 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-protocol/crash-points"]
+test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points"]
 
 [[bin]]
 name = "supertag"
@@ -37,7 +37,9 @@ sha2.workspace = true
 supertag-control-plane.workspace = true
 supertag-codex-adapter.workspace = true
 supertag-api.workspace = true
+supertag-credential-vault.workspace = true
 supertag-gateway.workspace = true
+supertag-github.workspace = true
 supertag-protocol.workspace = true
 supertag-transport.workspace = true
 supertag-worker-host.workspace = true

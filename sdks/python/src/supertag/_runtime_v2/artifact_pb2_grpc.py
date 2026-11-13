@@ -144,8 +144,9 @@ class ArtifactCatalog:
 
 
 class ArtifactDirectoryStub:
-    """Only the Gateway serves bytes. The Control Plane verifies authority and
-    records provenance and metadata after the Gateway verifies durable storage.
+    """Internal to the Control Plane. Only its API tier serves bytes; the state
+    owner verifies authority and records provenance and metadata after the API
+    tier verifies durable storage.
     """
 
     def __init__(self, channel):
@@ -222,8 +223,9 @@ class ArtifactDirectoryStub:
 
 
 class ArtifactDirectoryServicer:
-    """Only the Gateway serves bytes. The Control Plane verifies authority and
-    records provenance and metadata after the Gateway verifies durable storage.
+    """Internal to the Control Plane. Only its API tier serves bytes; the state
+    owner verifies authority and records provenance and metadata after the API
+    tier verifies durable storage.
     """
 
     def ReserveCapture(self, request, context):
@@ -381,8 +383,9 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactDirectory:
-    """Only the Gateway serves bytes. The Control Plane verifies authority and
-    records provenance and metadata after the Gateway verifies durable storage.
+    """Internal to the Control Plane. Only its API tier serves bytes; the state
+    owner verifies authority and records provenance and metadata after the API
+    tier verifies durable storage.
     """
 
     @staticmethod
@@ -738,7 +741,7 @@ class ArtifactDirectory:
 
 
 class AttemptArtifactsStub:
-    """Gateway facade. Identity and generation come from the authenticated Worker Host.
+    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
 
     def __init__(self, channel):
@@ -785,7 +788,7 @@ class AttemptArtifactsStub:
 
 
 class AttemptArtifactsServicer:
-    """Gateway facade. Identity and generation come from the authenticated Worker Host.
+    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
 
     def Find(self, request, context):
@@ -877,7 +880,7 @@ def add_AttemptArtifactsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AttemptArtifacts:
-    """Gateway facade. Identity and generation come from the authenticated Worker Host.
+    """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
 
     @staticmethod
@@ -1477,7 +1480,8 @@ class HarnessArtifacts:
 
 class ArtifactVolumesStub:
     """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Gateway must explicitly map the exact Volume and source.
+    no write: the Control Plane must explicitly map the exact Volume and source
+    (`--artifact-volume`).
     """
 
     def __init__(self, channel):
@@ -1530,7 +1534,8 @@ class ArtifactVolumesStub:
 
 class ArtifactVolumesServicer:
     """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Gateway must explicitly map the exact Volume and source.
+    no write: the Control Plane must explicitly map the exact Volume and source
+    (`--artifact-volume`).
     """
 
     def Put(self, request, context):
@@ -1634,7 +1639,8 @@ def add_ArtifactVolumesServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class ArtifactVolumes:
     """File Volumes are registered storage locations. Registration alone authorizes
-    no write: the Gateway must explicitly map the exact Volume and source.
+    no write: the Control Plane must explicitly map the exact Volume and source
+    (`--artifact-volume`).
     """
 
     @staticmethod
@@ -1855,7 +1861,8 @@ class ArtifactVolumes:
 
 
 class ArtifactVolumeDirectoryStub:
-    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """Internal metadata authority. Only the Control Plane's API tier verifies and
+    carries copy bytes.
     """
 
     def __init__(self, channel):
@@ -1907,7 +1914,8 @@ class ArtifactVolumeDirectoryStub:
 
 
 class ArtifactVolumeDirectoryServicer:
-    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """Internal metadata authority. Only the Control Plane's API tier verifies and
+    carries copy bytes.
     """
 
     def Put(self, request, context):
@@ -2010,7 +2018,8 @@ def add_ArtifactVolumeDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactVolumeDirectory:
-    """Private metadata authority. Only the Gateway verifies and carries copy bytes.
+    """Internal metadata authority. Only the Control Plane's API tier verifies and
+    carries copy bytes.
     """
 
     @staticmethod
@@ -2231,7 +2240,7 @@ class ArtifactVolumeDirectory:
 
 
 class WorkerArtifactTransfersStub:
-    """Private peer listener. A bearer grant from the Gateway authorizes this read.
+    """Private peer listener. A bearer grant from the Control Plane authorizes this read.
     """
 
     def __init__(self, channel):
@@ -2248,7 +2257,7 @@ class WorkerArtifactTransfersStub:
 
 
 class WorkerArtifactTransfersServicer:
-    """Private peer listener. A bearer grant from the Gateway authorizes this read.
+    """Private peer listener. A bearer grant from the Control Plane authorizes this read.
     """
 
     def Download(self, request, context):
@@ -2274,7 +2283,7 @@ def add_WorkerArtifactTransfersServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class WorkerArtifactTransfers:
-    """Private peer listener. A bearer grant from the Gateway authorizes this read.
+    """Private peer listener. A bearer grant from the Control Plane authorizes this read.
     """
 
     @staticmethod

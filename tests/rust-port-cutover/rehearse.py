@@ -167,12 +167,11 @@ def fresh_runtime(cli, fixture, root, env, old, pg=None):
         else:
             name = pg.create()
             gateway_token, operator_token, host_token = (str(uuid.uuid4()) for _ in range(3))
-            control = stack.enter_context(Service([cli, 'control-plane'], {**fresh_env, 'SUPERTAG_DATABASE_URL': pg.binding(name), 'SUPERTAG_GATEWAY_TOKEN': gateway_token, 'SUPERTAG_BOOTSTRAP_HOST_TOKEN': host_token}, root / 'control.log'))
-            gateway = stack.enter_context(Service([cli, 'gateway', '--control-plane', endpoint(control.ready)], {**fresh_env, 'SUPERTAG_GATEWAY_TOKEN': gateway_token, 'SUPERTAG_OPERATOR_TOKEN': operator_token, 'SUPERTAG_HOST_TOKEN': host_token}, root / 'gateway.log'))
-            public = endpoint(gateway.ready)
-            host = stack.enter_context(Service([cli, 'worker-host', '--gateway', public, '--state-directory', state, '--adapter', fixture], {**fresh_env, 'SUPERTAG_HOST_TOKEN': host_token}, root / 'host.log'))
+            control = stack.enter_context(Service([cli, 'control-plane', '--transfer-directory', root / 'transfers'], {**fresh_env, 'SUPERTAG_DATABASE_URL': pg.binding(name), 'SUPERTAG_GATEWAY_TOKEN': gateway_token, 'SUPERTAG_OPERATOR_TOKEN': operator_token, 'SUPERTAG_BOOTSTRAP_HOST_TOKEN': host_token}, root / 'control.log'))
+            public = endpoint(control.ready)
+            host = stack.enter_context(Service([cli, 'worker-host', '--control-plane', public, '--state-directory', state, '--adapter', fixture], {**fresh_env, 'SUPERTAG_HOST_TOKEN': host_token}, root / 'host.log'))
             require(host.ready == 'ready', 'fresh Worker Host did not report readiness')
-            connection = ['--gateway', public]
+            connection = ['--control-plane', public]
             fresh_env['SUPERTAG_OPERATOR_TOKEN'] = operator_token
         def invoke(*args, check=True):
             response = run([cli, *args, *connection], fresh_env, check=check)

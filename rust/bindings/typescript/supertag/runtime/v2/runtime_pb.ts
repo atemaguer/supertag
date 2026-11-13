@@ -9959,8 +9959,9 @@ export const ReplyStateSchema: GenEnum<ReplyState> = /*@__PURE__*/
   enumDesc(file_supertag_runtime_v2_runtime, 31);
 
 /**
- * The Gateway exposes these services to operators and enrolled hosts. The
- * Control Plane serves the same messages on a private authenticated listener.
+ * The Control Plane's public endpoint serves these services to operators and
+ * enrolled hosts. Its API tier authenticates them and calls the state owner
+ * with the same messages.
  *
  * @generated from service supertag.runtime.v2.Operator
  */
@@ -10765,7 +10766,8 @@ export const HostEnrollment: GenService<{
   serviceDesc(file_supertag_runtime_v2_runtime, 15);
 
 /**
- * Private Gateway-to-Control-Plane service for enrollment and authentication.
+ * Internal to the Control Plane: its API tier enrolls and authenticates Worker
+ * Hosts with the state owner.
  *
  * @generated from service supertag.runtime.v2.HostDirectory
  */
@@ -10790,8 +10792,9 @@ export const HostDirectory: GenService<{
   serviceDesc(file_supertag_runtime_v2_runtime, 16);
 
 /**
- * Private Gateway-to-Control-Plane operations. The authenticated connector
- * principal identifies the account. Provider request bodies cannot select it.
+ * Gateway and connector calls to the Control Plane. The connector principal
+ * identifies the account; provider request bodies cannot select it. See
+ * docs/reference/connector-contract.md.
  *
  * @generated from service supertag.runtime.v2.Connector
  */
@@ -10980,7 +10983,7 @@ export const Transfers: GenService<{
   serviceDesc(file_supertag_runtime_v2_runtime, 18);
 
 /**
- * Private authorization and commit for bytes stored by the Gateway.
+ * Internal authorization and commit for bytes the API tier stores.
  *
  * @generated from service supertag.runtime.v2.CheckpointDirectory
  */
@@ -11013,7 +11016,7 @@ export const CheckpointDirectory: GenService<{
   serviceDesc(file_supertag_runtime_v2_runtime, 19);
 
 /**
- * Private authorization and commit for work product stored by the Gateway.
+ * Internal authorization and commit for work product the API tier stores.
  *
  * @generated from service supertag.runtime.v2.WorkspaceDirectory
  */

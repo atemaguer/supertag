@@ -120,7 +120,8 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
     let task_id = accepted["task_id"].as_str().context("task_id")?.to_owned();
     assert_eq!(json(accept()).await?["task_id"], task_id.as_str());
 
-    // A connector cannot act for another account.
+    // A connector without the Gateway credential is refused. Whoever holds that credential may
+    // name any account (see docs/reference/connector-contract.md), so it is no account boundary.
     let mut forged = command(
         CONNECTOR,
         &[

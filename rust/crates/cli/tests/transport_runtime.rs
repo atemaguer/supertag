@@ -30,10 +30,13 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
-        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListNativeUsageRequest,
-        PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent,
-        WatchKind, WatchRequest, operator_client::OperatorClient,
-        operator_events_client::OperatorEventsClient, watch_event::Update,
+        AcceptEventRequest, AuthenticateOperatorRequest, ClaimOperatorNotificationRequest,
+        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListHostsRequest,
+        ListNativeUsageRequest, PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState,
+        WatchChange, WatchEvent, WatchKind, WatchRequest, connector_client::ConnectorClient,
+        operator_client::OperatorClient, operator_directory_client::OperatorDirectoryClient,
+        operator_events_client::OperatorEventsClient,
+        operator_notifications_client::OperatorNotificationsClient, watch_event::Update,
     },
 };
 use tokio::{
@@ -45,7 +48,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
-    Request, Status,
+    Code, Request, Status,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity, Server},
 };
 use uuid::Uuid;
@@ -175,6 +178,13 @@ impl Tokens {
 
     fn request<T>(&self, message: T) -> Result<Request<T>> {
         let mut request = authenticated_request(message, &self.operator, None)?;
+        request.set_timeout(Duration::from_secs(15));
+        Ok(request)
+    }
+
+    /// A call with the shared Gateway credential, acting for `principal`.
+    fn gateway_request<T>(&self, message: T, principal: &str) -> Result<Request<T>> {
+        let mut request = authenticated_request(message, &self.gateway, Some(principal))?;
         request.set_timeout(Duration::from_secs(15));
         Ok(request)
     }
@@ -1566,11 +1576,10 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     let mut control_plane = Service::spawn(command, root, "tls-control-plane")?;
     let public = format!("https://{}", control_plane.address().await?);
 
+    // A Gateway holds no operator credential.
     let gateway = |client: Option<&Leaf>, upstream: &str| {
         let mut command = binary(&["gateway", "--control-plane", upstream]);
-        command
-            .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
+        command.env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway);
         client_tls(&mut command, &pki.ca(), client);
         command
     };
@@ -1727,13 +1736,139 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         .connect()
         .await?;
     assert_eq!(
-        negotiate(identified, ServiceRole::Gateway, ServiceRole::ControlPlane)
-            .await
-            .map_err(|error| anyhow!("{error}"))?,
+        negotiate(
+            identified.clone(),
+            ServiceRole::Gateway,
+            ServiceRole::ControlPlane
+        )
+        .await
+        .map_err(|error| anyhow!("{error}"))?,
         2
     );
+    // With its certificate, a Gateway resolves an operator credential presented to it, the admin
+    // token included, without holding one.
+    let identified = supertag_protocol::negotiation::connect(
+        identified,
+        ServiceRole::Gateway,
+        ServiceRole::ControlPlane,
+    )
+    .await?;
+    let mut directory = OperatorDirectoryClient::new(identified);
+    let admin = directory
+        .authenticate(tokens.gateway_request(
+            AuthenticateOperatorRequest {
+                token_digest: Sha256::digest(tokens.operator.as_bytes()).to_vec(),
+            },
+            "service:gateway",
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(admin.operator_id, "local");
+    let unknown = directory
+        .authenticate(tokens.gateway_request(
+            AuthenticateOperatorRequest {
+                token_digest: Sha256::digest(b"not an operator credential").to_vec(),
+            },
+            "service:gateway",
+        )?)
+        .await
+        .unwrap_err();
+    assert_eq!(unknown.code(), Code::Unauthenticated, "{unknown:?}");
     ensure!(gateway.running()? && control_plane.running()?);
     Ok(())
+}
+
+/// The shared Gateway credential names any account or operator, so over TLS the Control Plane
+/// accepts it only from a client whose certificate it verified. A Control Plane without a client
+/// CA refuses it on every Gateway service and still serves operators.
+async fn exercise_gateway_credential_needs_a_client_certificate(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let pki = Pki::authority(root, "supertag-test-ca").await?;
+    let control_leaf = pki.leaf("control-plane").await?;
+    let mut command = binary(&["control-plane"]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .env("SUPERTAG_TLS_CERT_FILE", &control_leaf.cert)
+        .env("SUPERTAG_TLS_KEY_FILE", &control_leaf.key);
+    let mut control_plane = Service::spawn(command, root, "tls-without-client-ca")?;
+    let public = format!("https://{}", control_plane.address().await?);
+    let channel = Endpoint::from_shared(public)?
+        .tls_config(
+            ClientTlsConfig::new().ca_certificate(Certificate::from_pem(std::fs::read(pki.ca())?)),
+        )?
+        .connect()
+        .await?;
+    let channel = supertag_protocol::negotiation::connect(
+        channel,
+        ServiceRole::Gateway,
+        ServiceRole::ControlPlane,
+    )
+    .await?;
+
+    let accepted = ConnectorClient::new(channel.clone())
+        .accept_event(tokens.gateway_request(
+            AcceptEventRequest {
+                account_id: "example/victim".into(),
+                event_id: "event-1".into(),
+                tag_id: "helper".into(),
+                session_id: "session-1".into(),
+                prompt: "Not yours".into(),
+                ..Default::default()
+            },
+            "connector:example/victim",
+        )?)
+        .await;
+    let claimed = OperatorNotificationsClient::new(channel.clone())
+        .claim(tokens.gateway_request(
+            ClaimOperatorNotificationRequest::default(),
+            "operator:local",
+        )?)
+        .await;
+    let resolved = OperatorDirectoryClient::new(channel.clone())
+        .authenticate(tokens.gateway_request(
+            AuthenticateOperatorRequest {
+                token_digest: Sha256::digest(tokens.operator.as_bytes()).to_vec(),
+            },
+            "service:gateway",
+        )?)
+        .await;
+    for (call, error) in [
+        ("AcceptEvent", accepted.err()),
+        ("Claim", claimed.err()),
+        ("Authenticate", resolved.err()),
+    ] {
+        let error = error.with_context(|| format!("{call} accepted the Gateway credential"))?;
+        assert_eq!(error.code(), Code::PermissionDenied, "{call}: {error:?}");
+        assert!(
+            error.message().contains("client certificate"),
+            "{call}: {error:?}"
+        );
+    }
+    OperatorClient::new(channel)
+        .list_hosts(tokens.request(ListHostsRequest::default())?)
+        .await?;
+    ensure!(control_plane.running()?);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_gateway_credential_needs_a_client_certificate() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_gateway_credential_needs_a_client_certificate(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_gateway_credential_needs_a_client_certificate() -> Result<()> {
+    with_postgres(
+        "gateway_credential_tls",
+        exercise_gateway_credential_needs_a_client_certificate,
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

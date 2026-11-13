@@ -21,8 +21,11 @@ Plane's public endpoint, the same URL operators and Worker Hosts use:
 | `wss://HOST[:PORT][/PATH]` | gRPC inside a WebSocket tunnel; the Control Plane's TLS runs end to end inside it |
 | `http://127.0.0.1:PORT` | Cleartext, loopback only |
 
-When the Control Plane requires client certificates, the connector presents one. Certificates are
-only a network filter; every call still carries the bearer credential below.
+Over TLS, the connector must present a client certificate that the Control Plane verifies, so a
+Control Plane that serves connectors or Gateways requires client certificates
+(`SUPERTAG_TLS_CLIENT_CA_FILE`). Without one, the Control Plane refuses the Gateway token with
+`PERMISSION_DENIED`. Over loopback cleartext, no certificate is needed. Every call also carries
+the bearer credential below.
 
 ## Protocol negotiation
 
@@ -40,9 +43,12 @@ Every call carries two headers:
 | `authorization` | `Bearer` and the deployment's Gateway token (`SUPERTAG_GATEWAY_TOKEN`) |
 | `x-supertag-principal` | `connector:ACCOUNT`, where `ACCOUNT` is the account the call acts for |
 
-A call acts only for its own account: `AcceptEvent` refuses an `account_id` that differs from the
-principal's account with `PERMISSION_DENIED`. The Gateway token is shared by every Gateway and
-connector of a deployment, so keep it as private as the Control Plane's database credential.
+The Control Plane takes the principal as the connector names it. `AcceptEvent` refuses an
+`account_id` that differs from the principal's account with `PERMISSION_DENIED`, but that only
+checks the request against its own header: whoever holds the Gateway token can name any account,
+and any operator for the operator notification calls. The Gateway token is shared by every Gateway
+and connector of a deployment. Give it only to processes you trust with every account, and keep it
+as private as the Control Plane's database credential.
 
 ## Admitting an event
 
@@ -93,7 +99,10 @@ is a complete connector in one file. It depends only on the protocol crate.
 Control Plane on SQLite and PostgreSQL: it admits an event, replays it, delivers the reply once,
 and releases the account.
 
+The example dials cleartext, so it reaches only a Control Plane on loopback. A connector for a
+remote Control Plane adds TLS with a client certificate, as described above.
+
 ```text
-supertag-example-connector accept https://supertag.example.com discord/acme EVENT TAG SESSION CHANNEL "text"
-supertag-example-connector deliver https://supertag.example.com discord/acme
+supertag-example-connector accept http://127.0.0.1:3434 discord/acme EVENT TAG SESSION CHANNEL "text"
+supertag-example-connector deliver http://127.0.0.1:3434 discord/acme
 ```

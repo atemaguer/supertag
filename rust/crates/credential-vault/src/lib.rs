@@ -1,4 +1,4 @@
-//! Durable Gateway collaboration credentials, kept apart from the Control Plane database.
+//! Durable collaboration and GitHub credentials, kept apart from the Control Plane database.
 //!
 //! Matches the TypeScript `GatewayCredentialVault` contract
 //! (`packages/store/src/index.ts` `FileGatewayCredentialVault`,

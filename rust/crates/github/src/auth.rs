@@ -1,5 +1,5 @@
-//! GitHub App credentials remain in Gateway memory. Tokens never enter delivery journals.
-use super::{DELIVERY_TIMEOUT, valid_id};
+//! GitHub App credentials remain in process memory. Tokens are never persisted.
+use crate::{REQUEST_TIMEOUT, valid_id};
 use anyhow::{Result, anyhow, ensure};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::DateTime;
@@ -36,7 +36,7 @@ enum Credential {
     },
 }
 
-pub(super) struct Authentication {
+pub struct Authentication {
     credential: Credential,
     repository_id: u64,
     repository: String,
@@ -68,19 +68,19 @@ struct CachedToken {
 }
 
 /// Intentionally has neither Debug nor Serialize.
-pub(super) struct AccessToken(String);
+pub struct AccessToken(String);
 impl AccessToken {
-    pub(super) fn expose(&self) -> &str {
+    pub fn expose(&self) -> &str {
         &self.0
     }
 }
 
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
-const MAX_RESPONSE_BYTES: usize = 128 * 1024;
+pub const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 const REFRESH_MARGIN: i64 = 60;
 
 impl Authentication {
-    pub(super) fn new(
+    pub fn new(
         configuration: &GithubAuthentication,
         repository_id: u64,
         repository: &str,
@@ -112,7 +112,7 @@ impl Authentication {
         })
     }
 
-    pub(super) fn source_reader(
+    pub fn source_reader(
         configuration: &GithubAuthentication,
         repository_id: u64,
         repository: &str,
@@ -122,7 +122,7 @@ impl Authentication {
         Ok(value)
     }
 
-    pub(super) fn publisher(
+    pub fn publisher(
         configuration: &GithubAuthentication,
         repository_id: u64,
         repository: &str,
@@ -132,8 +132,19 @@ impl Authentication {
         Ok(value)
     }
 
-    pub(super) async fn access_token(&self, client: &Client, api: &Url) -> Result<AccessToken> {
+    pub async fn access_token(&self, client: &Client, api: &Url) -> Result<AccessToken> {
         self.access_token_at(client, api, now()?).await
+    }
+
+    /// A token as at `now`, Unix seconds, for tests of expiry and reuse.
+    #[cfg(feature = "test-fixtures")]
+    pub async fn access_token_at_for_test(
+        &self,
+        client: &Client,
+        api: &Url,
+        now: i64,
+    ) -> Result<AccessToken> {
+        self.access_token_at(client, api, now).await
     }
 
     async fn access_token_at(&self, client: &Client, api: &Url, now: i64) -> Result<AccessToken> {
@@ -222,7 +233,7 @@ impl Authentication {
         Ok(result)
     }
 
-    pub(super) async fn invalidate(&self) {
+    pub async fn invalidate(&self) {
         *self.cached.lock().await = None;
     }
 }
@@ -248,7 +259,7 @@ fn rsa_key(pem: &str) -> Result<RsaKeyPair> {
 }
 
 /// A short-lived App JWT for verifying an installation during `supertag setup surface github`.
-pub(crate) fn setup_app_jwt(private_key_pem: &str, app_id: u64) -> Result<String> {
+pub fn setup_app_jwt(private_key_pem: &str, app_id: u64) -> Result<String> {
     ensure!(valid_id(app_id), "invalid GitHub App ID");
     app_jwt(&rsa_key(private_key_pem)?, app_id, now()?)
 }
@@ -299,7 +310,7 @@ fn validate_scoped_token_response<'a>(
         .map(|expiry| expiry.timestamp())
         .ok_or_else(|| anyhow!("invalid GitHub installation token expiry"))?;
     ensure!(
-        expiry > now.saturating_add(REFRESH_MARGIN + DELIVERY_TIMEOUT.as_secs() as i64)
+        expiry > now.saturating_add(REFRESH_MARGIN + REQUEST_TIMEOUT.as_secs() as i64)
             && expiry <= now.saturating_add(3600 + 60),
         "GitHub installation token expiry is outside its bounds"
     );
@@ -370,10 +381,8 @@ async fn response_json(mut response: reqwest::Response, expected: StatusCode) ->
     serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid GitHub authentication response"))
 }
 
-fn now() -> Result<i64> {
+/// The current time in Unix seconds.
+pub fn now() -> Result<i64> {
     i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
         .map_err(|_| anyhow!("invalid GitHub App clock"))
 }
-
-#[cfg(test)]
-mod tests;

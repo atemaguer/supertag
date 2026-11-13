@@ -455,7 +455,12 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     health.env("SUPERTAG_SERVER_CA_FILE", public.ca());
     succeed(health).await?;
 
-    // The Gateway connects to the public Control Plane as an ordinary client.
+    // The Gateway connects to the public Control Plane as an ordinary client and holds no
+    // operator credential. This Control Plane requires no client certificates, so it refuses
+    // the Gateway credential (deploy/native/README.md: a Gateway needs client certificates);
+    // the Gateway's test notification, which resolves the operator's token through the Control
+    // Plane, says so.
+    assert!(!gateway_env.contains_key("SUPERTAG_OPERATOR_TOKEN"));
     let state = root.join("gateway-state");
     std::fs::create_dir(&state)?;
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
@@ -474,7 +479,19 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     gateway
         .env("SUPERTAG_STATE_DIR", &state)
         .env("SUPERTAG_SERVER_CA_FILE", public.ca());
-    let (_gateway, _) = service(gateway, &root.join("gateway.log")).await?;
+    let (_gateway, gateway_address) = service(gateway, &root.join("gateway.log")).await?;
+    let refused = fail(command(
+        &home,
+        &[
+            "test",
+            "notification",
+            "--gateway",
+            &format!("http://{gateway_address}"),
+        ],
+        &[("SUPERTAG_OPERATOR_TOKEN", operator_token.as_str())],
+    ))
+    .await?;
+    assert!(refused.contains("client certificate"), "{refused}");
 
     // Verify the deployment through its public URL only.
     let verify = |url: &str, env: &[(&str, &str)], extra: &[&str]| {

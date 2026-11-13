@@ -454,7 +454,7 @@ export const AuditOutcomeSchema: GenEnum<AuditOutcome> = /*@__PURE__*/
   enumDesc(file_supertag_runtime_v2_access, 1);
 
 /**
- * Operator Tokens and the audit log, reached through the Gateway.
+ * Operator Tokens and the audit log, on the Control Plane's public endpoint.
  *
  * An Operator Token is a named, revocable credential that one teammate or
  * machine presents instead of the admin operator token. Calls made with it act
@@ -528,7 +528,9 @@ export const OperatorAccess: GenService<{
   serviceDesc(file_supertag_runtime_v2_access, 0);
 
 /**
- * Private Gateway-to-Control Plane resolution of a presented Operator Token.
+ * Gateway resolution of an operator credential presented to it: the admin
+ * operator token or an Operator Token, sent as the SHA-256 of its secret. The
+ * Gateway holds no operator credential itself.
  *
  * @generated from service supertag.runtime.v2.OperatorDirectory
  */

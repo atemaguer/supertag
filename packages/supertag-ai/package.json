@@ -45,9 +45,9 @@
       "types": "./dist/coordination.d.ts",
       "import": "./dist/coordination.js"
     },
-    "./gateway": {
-      "types": "./dist/gateway.d.ts",
-      "import": "./dist/gateway.js"
+    "./control-plane-client": {
+      "types": "./dist/control-plane-client.d.ts",
+      "import": "./dist/control-plane-client.js"
     },
     "./harness": {
       "types": "./dist/harness.d.ts",
