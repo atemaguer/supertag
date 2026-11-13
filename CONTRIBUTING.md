@@ -131,9 +131,19 @@ cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
 
 For PostgreSQL coverage, put the disposable test server URL in a private file and set
 `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
-`-- --include-ignored` to require the PostgreSQL cases. Each case creates a separate database.
-The process tests also use temporary state directories and a local HTTP provider fixture. The
-partition case waits for the production 30-second execution lease to expire.
+`-- --include-ignored` to run the PostgreSQL cases. Stateful process tests run once per backend,
+as `NAME::sqlite` and `NAME::postgres`; each PostgreSQL case creates its own database and drops
+it afterwards. The process tests also use temporary state directories and a local HTTP provider
+fixture. The partition case waits for the production 30-second execution lease to expire.
+
+Ignored tests that need a local fixture report `SKIPPED` on stderr and pass when it is missing.
+Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,
+or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
+`postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
+`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`), `tui` (`SUPERTAG_RUST_TEST_TUI` and tmux),
+and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
+container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
+`supertag-shared-execution`. The `linux-root` job in `.github/workflows/rust-port.yml` runs them.
 
 For a live read-only smoke test, use the built-in Codex adapter with an installed Codex CLI
 version 0.163.0 or newer. Start the services with a separate development state directory.

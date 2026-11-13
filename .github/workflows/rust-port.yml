@@ -8,6 +8,7 @@ on:
       - 'packages/core/**'
       - 'packages/operator-api/go/**'
       - 'apps/tui/**'
+      - 'apps/desktop/**'
       - 'sdks/python/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -22,6 +23,7 @@ on:
       - 'packages/core/**'
       - 'packages/operator-api/go/**'
       - 'apps/tui/**'
+      - 'apps/desktop/**'
       - 'sdks/python/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -54,6 +56,9 @@ jobs:
         working-directory: rust
     env:
       SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
+      # Required lane: a missing PostgreSQL, Node, Python agents, or terminal UI fixture fails the
+      # gated test instead of skipping it. Linux-root cases run in the linux-root job below.
+      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -108,9 +113,88 @@ jobs:
           export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
           printf '%s' "$SUPERTAG_RUST_TEST_DATABASE_URL" > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
           # Ignored database/language/tmux fixtures run here; real provider calls stay opt-in.
+          # Split-process tests run as NAME::sqlite and NAME::postgres; each PostgreSQL case
+          # creates and drops its own database through the URL file.
           cargo test --locked --workspace --all-features -- --include-ignored \
             --skip installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint \
             --skip installed_native_objective_question_and_pinned_tool_resume
+
+  # Shared execution switches workloads to a distinct UID, so these cases need real root. The
+  # job runs as root inside a disposable container; nothing else on the runner is touched.
+  # Locally: run the same two cargo commands as root in a throwaway Linux VM or container with
+  # SUPERTAG_RUST_TEST_REQUIRE=linux-root,postgres and the variables below.
+  linux-root:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.93.1-bookworm
+      options: --user 0
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: supertag_test
+          POSTGRES_USER: supertag
+          POSTGRES_PASSWORD: rust-port-ci-database
+        options: >-
+          --health-cmd "pg_isready -U supertag -d supertag_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      SUPERTAG_RUST_TEST_REQUIRE: linux-root,postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build the Cursor bridge used by the shared command case
+        working-directory: .
+        run: |
+          apt-get update
+          apt-get install -y util-linux
+          pnpm install --frozen-lockfile
+          pnpm --filter @supertag/worker-cursor build
+      - name: Run the Linux-root shared execution cases on SQLite and PostgreSQL
+        run: |
+          test "$(id -u)" = 0
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
+          printf '%s' 'postgresql://supertag:rust-port-ci-database@postgres:5432/supertag_test' > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          cargo build --locked -p supertag-shared-execution --bin supertag-shared-execution
+          export SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY="$PWD/target/debug/supertag-shared-execution"
+          cargo test --locked -p supertag-shared-execution --test service_contract -- --include-ignored process_contract::
+          cargo test --locked -p supertag-cli --all-features --test cursor_runtime -- --include-ignored shared_command_runtime::
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install Tauri system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+      - run: pnpm install --frozen-lockfile
+      # The Tauri build script embeds the built frontend, so it must exist before cargo runs.
+      - run: pnpm --filter @supertag/desktop build
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
 
   bindings:
     runs-on: ubuntu-latest
