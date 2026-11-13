@@ -542,6 +542,77 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
+
+    // In a terminal the token is read from a masked prompt: the terminal never shows it.
+    let (terminal, input) = pseudo_terminal()?;
+    let mut prompted = binary(&["connect", &services.public, "--name", "typed"]);
+    prompted
+        .env("HOME", home.path())
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = prompted.spawn()?;
+    let mut stderr = child.stderr.take().context("stderr")?;
+    let mut prompt = Vec::new();
+    timeout(WAIT, async {
+        use tokio::io::AsyncReadExt;
+        while !String::from_utf8_lossy(&prompt).contains("Operator token: ") {
+            let mut byte = [0; 1];
+            ensure!(stderr.read(&mut byte).await? == 1, "no prompt");
+            prompt.push(byte[0]);
+        }
+        anyhow::Ok(())
+    })
+    .await??;
+    // The prompt turns echo off before reading, so typing after it shows nothing.
+    let mut writer = std::fs::File::from(terminal.try_clone()?);
+    std::io::Write::write_all(&mut writer, format!("{token}\n").as_bytes())?;
+    let status = timeout(WAIT, child.wait()).await??;
+    ensure!(status.success(), "the prompted connect failed");
+    let mut shown = Vec::new();
+    let mut reader = std::fs::File::from(terminal);
+    // SAFETY: sets O_NONBLOCK on a descriptor this test owns.
+    unsafe {
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&reader);
+        libc::fcntl(
+            fd,
+            libc::F_SETFL,
+            libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK,
+        );
+    }
+    let _ = std::io::Read::read_to_end(&mut reader, &mut shown);
+    ensure!(
+        !String::from_utf8_lossy(&shown).contains(&token),
+        "the terminal echoed the token"
+    );
+    let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
+    assert_eq!(profiles["gateways"][1]["name"], "typed");
+    assert_eq!(profiles["gateways"][1]["token"], token.as_str());
     services.stop().await?;
     Ok(())
+}
+
+/// A pseudo-terminal: the controlling side the test types into, and the terminal a child reads.
+fn pseudo_terminal() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
+    use std::os::fd::FromRawFd;
+    let (mut controller, mut terminal) = (0, 0);
+    // SAFETY: openpty writes two new descriptors that this function then owns.
+    let opened = unsafe {
+        libc::openpty(
+            &mut controller,
+            &mut terminal,
+            std::ptr::null_mut(),
+            // Mutable on macOS and const on Linux; a null mutable pointer suits both.
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    ensure!(opened == 0, "openpty failed");
+    // SAFETY: both descriptors were just opened and are owned by nothing else.
+    Ok(unsafe {
+        (
+            std::os::fd::OwnedFd::from_raw_fd(controller),
+            std::os::fd::OwnedFd::from_raw_fd(terminal),
+        )
+    })
 }

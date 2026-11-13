@@ -545,7 +545,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
     /// Check an operator token against a Gateway, then save the Gateway under a name for
     /// `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
-    /// from standard input when that is not set.
+    /// from standard input when that is not set, with a masked prompt in a terminal.
     Connect {
         /// The Gateway origin, such as https://supertag.example.com.
         url: String,
@@ -2448,13 +2448,7 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
 async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Result<()> {
     gateway.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
         Ok(token) => token,
-        Err(_) => {
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .context("read the operator token from standard input")?;
-            line
-        }
+        Err(_) => read_operator_token()?,
     }
     .trim()
     .to_owned();
@@ -2491,6 +2485,25 @@ async fn connect_gateway(mut gateway: profiles::NewGateway, replace: bool) -> Re
         &json!({"name": gateway.name, "saved_in": store.display().to_string(), "active": true}),
     )?;
     Ok(())
+}
+
+/// Reads the operator token from standard input: a masked prompt in a terminal, as TypeScript's
+/// `connect control-plane` did, and otherwise one line.
+fn read_operator_token() -> Result<String> {
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    // Echo is off before the prompt appears, so nothing typed after it is shown.
+    let echo = terminal.then(surface_setup::hide_input).flatten();
+    if terminal {
+        crate::terminal::write_stderr("Operator token: ");
+    }
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if let Some(saved) = echo {
+        surface_setup::restore_input(saved);
+        errln!("");
+    }
+    read.context("read the operator token from standard input")?;
+    Ok(line)
 }
 
 fn required_env(name: &str) -> Result<String> {
