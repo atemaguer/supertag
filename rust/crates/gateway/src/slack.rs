@@ -214,8 +214,12 @@ async fn webhook(State(slack): State<Slack>, headers: HeaderMap, body: Bytes) ->
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
             };
             let mut control_plane = connector.control_plane.clone();
+            supertag_protocol::crash_point("gateway.slack-admission", "before-forward");
             match time::timeout(ACCEPT_TIMEOUT, control_plane.accept_slack_event(request)).await {
-                Ok(Ok(_)) => StatusCode::OK.into_response(),
+                Ok(Ok(_)) => {
+                    supertag_protocol::crash_point("gateway.slack-admission", "after-forward");
+                    StatusCode::OK.into_response()
+                }
                 Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => {
                     StatusCode::CONFLICT.into_response()
                 }

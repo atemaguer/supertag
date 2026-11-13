@@ -7,7 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-test-fixtures = ["supertag-gateway/test-fixtures"]
+test-fixtures = ["supertag-gateway/test-fixtures", "supertag-protocol/crash-points"]
 
 [[bin]]
 name = "supertag"
@@ -51,6 +51,11 @@ sqlx.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
 tokio-tungstenite = "0.28"
 url = "2"
+
+[[test]]
+name = "crash_durability"
+path = "tests/crash_durability.rs"
+required-features = ["test-fixtures"]
 
 [[test]]
 name = "split_runtime"

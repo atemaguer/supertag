@@ -42,6 +42,7 @@ impl Store {
             reply: Some(reply_row(&reply_in(&mut tx, account, &id).await?)?),
             lease_token: lease,
         };
+        supertag_protocol::crash_point("control-plane.claim-reply", "before-commit");
         tx.commit().await?;
         Ok(result)
     }
@@ -150,6 +151,7 @@ impl Store {
         )
         .await?;
         let reply = reply_row(&reply_in(&mut tx, account, &input.reply_id).await?)?;
+        supertag_protocol::crash_point("control-plane.settle-reply", "before-commit");
         tx.commit().await?;
         Ok(reply)
     }

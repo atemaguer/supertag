@@ -2764,6 +2764,7 @@ name = "supertag-protocol"
 version = "0.1.0"
 dependencies = [
  "icu_properties",
+ "libc",
  "prost",
  "protoc-bin-vendored",
  "regex",

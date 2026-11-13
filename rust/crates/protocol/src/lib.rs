@@ -4,6 +4,10 @@ use subtle::ConstantTimeEq;
 use tonic::{Request, Status, metadata::MetadataValue};
 
 pub mod artifacts;
+mod crash_points;
+#[cfg(feature = "crash-points")]
+pub use crash_points::crash_now;
+pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};
 pub mod git_outputs;
 pub mod output_policy;
 pub mod task_artifact_inputs;
