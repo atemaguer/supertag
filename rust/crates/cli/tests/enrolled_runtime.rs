@@ -1,3 +1,9 @@
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     net::SocketAddr,
     os::unix::fs::PermissionsExt,
@@ -89,14 +95,15 @@ fn worker(gateway: &str, state: &Path) -> Command {
     command
 }
 
-#[tokio::test]
-async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_revocation()
--> Result<()> {
+database_tests! {
+    #[tokio::test]
+    cli_enrollment_replays_pending_credential_and_limits_assignment_until_revocation;
+}
+
+async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_revocation(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let database = format!(
-        "sqlite://{}?mode=rwc",
-        directory.path().join("control.db").display()
-    );
     let gateway_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
     let mut control = binary(&["control-plane"]);

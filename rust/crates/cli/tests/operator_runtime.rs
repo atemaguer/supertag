@@ -1,3 +1,9 @@
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{
     net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
 };
@@ -62,19 +68,22 @@ async fn channel(address: &str) -> Result<Channel> {
         .await?)
 }
 
-#[tokio::test]
-async fn retirement_removes_tag_from_roster_and_preserves_identity() -> Result<()> {
-    let directory = tempfile::tempdir()?;
+database_tests! {
+    #[tokio::test]
+    retirement_removes_tag_from_roster_and_preserves_identity;
+    #[tokio::test]
+    conversation_scope_survives_gateway_forwards_and_task_reads;
+    #[tokio::test]
+    watch_replays_private_conversations_after_services_restart;
+}
+
+async fn retirement_removes_tag_from_roster_and_preserves_identity(database: String) -> Result<()> {
     let secret = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let mut control = command(&["control-plane"]);
-    control.env("SUPERTAG_GATEWAY_TOKEN", &secret).env(
-        "SUPERTAG_DATABASE_URL",
-        format!(
-            "sqlite://{}?mode=rwc",
-            directory.path().join("tags.db").display()
-        ),
-    );
+    control
+        .env("SUPERTAG_GATEWAY_TOKEN", &secret)
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut control, private) = service(control).await?;
     let (mut gateway, public) =
         service(gateway(&private, &secret, &token, "operator:alice")).await?;
@@ -483,8 +492,9 @@ fn artifact_host_request<T>(input: T, token: &str, generation: u64) -> Result<to
     Ok(request)
 }
 
-#[tokio::test]
-async fn conversation_scope_survives_gateway_forwards_and_task_reads() -> Result<()> {
+async fn conversation_scope_survives_gateway_forwards_and_task_reads(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let secret = Uuid::new_v4().to_string();
     let alice_token = Uuid::new_v4().to_string();
@@ -494,13 +504,7 @@ async fn conversation_scope_survives_gateway_forwards_and_task_reads() -> Result
     control
         .env("SUPERTAG_GATEWAY_TOKEN", &secret)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut control, private) = service(control).await?;
     let (mut alice_gateway, alice_url) =
         service(gateway(&private, &secret, &alice_token, "operator:alice")).await?;
@@ -1247,8 +1251,9 @@ async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result
     Ok(())
 }
 
-#[tokio::test]
-async fn watch_replays_private_conversations_after_services_restart() -> Result<()> {
+async fn watch_replays_private_conversations_after_services_restart(
+    database: String,
+) -> Result<()> {
     use operator_events_client::OperatorEventsClient;
     use watch_event::Update;
 
@@ -1304,19 +1309,14 @@ async fn watch_replays_private_conversations_after_services_restart() -> Result<
         Ok(())
     }
 
-    let directory = tempfile::tempdir()?;
     let secret = Uuid::new_v4().to_string();
     let alice_token = Uuid::new_v4().to_string();
     let bob_token = Uuid::new_v4().to_string();
     let control_command = || {
         let mut control = command(&["control-plane"]);
-        control.env("SUPERTAG_GATEWAY_TOKEN", &secret).env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("watch.db").display()
-            ),
-        );
+        control
+            .env("SUPERTAG_GATEWAY_TOKEN", &secret)
+            .env("SUPERTAG_DATABASE_URL", &database);
         control
     };
     let (mut plane, private) = service(control_command()).await?;

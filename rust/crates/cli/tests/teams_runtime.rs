@@ -1,3 +1,9 @@
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+
 use std::{net::SocketAddr, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -62,9 +68,15 @@ fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>>
 }
 
 #[cfg(feature = "test-fixtures")]
-#[tokio::test]
-async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart() -> Result<()>
-{
+database_tests! {
+    #[tokio::test]
+    direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart;
+}
+
+#[cfg(feature = "test-fixtures")]
+async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -73,13 +85,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     plane_command
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("mailbox.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(plane_command).await?;
     let gateway_command = || {
         let mut cmd = command(&["gateway", "--control-plane", &private]);
@@ -432,8 +438,18 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     Ok(())
 }
 
-#[tokio::test]
-async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway;
+    #[tokio::test]
+    operator_teams_and_attempt_workstreams_run_across_the_gateway;
+    #[tokio::test]
+    objective_questions_survive_gateway_restart_and_answer_once;
+}
+
+async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let gateway_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -442,13 +458,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway()
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (_plane, private) = service(plane).await?;
     let mut gateway = command(&["gateway", "--control-plane", &private]);
     gateway
@@ -593,8 +603,15 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway()
 }
 
 #[cfg(feature = "test-fixtures")]
-#[tokio::test]
-async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_write() -> Result<()> {
+database_tests! {
+    #[tokio::test]
+    workstream_approval_reaches_the_same_session_and_is_consumed_by_the_write;
+}
+
+#[cfg(feature = "test-fixtures")]
+async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_write(
+    database: String,
+) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let gateway_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
@@ -603,13 +620,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (_plane, private) = service(plane).await?;
     let mut gateway = command(&["gateway", "--control-plane", &private]);
     gateway
@@ -875,9 +886,9 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     Ok(())
 }
 
-#[tokio::test]
-async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Result<()> {
-    let directory = tempfile::tempdir()?;
+async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
+    database: String,
+) -> Result<()> {
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
     let host_token = Uuid::new_v4().to_string();
@@ -885,13 +896,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     plane
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("control.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(plane).await?;
     let mut gateway = command(&["gateway", "--control-plane", &private]);
     gateway
@@ -1237,9 +1242,9 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     Ok(())
 }
 
-#[tokio::test]
-async fn objective_questions_survive_gateway_restart_and_answer_once() -> Result<()> {
-    let directory = tempfile::tempdir()?;
+async fn objective_questions_survive_gateway_restart_and_answer_once(
+    database: String,
+) -> Result<()> {
     let service_token = Uuid::new_v4().to_string();
     let operator_token = Uuid::new_v4().to_string();
     let host_token = Uuid::new_v4().to_string();
@@ -1247,13 +1252,7 @@ async fn objective_questions_survive_gateway_restart_and_answer_once() -> Result
     plane_command
         .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-        .env(
-            "SUPERTAG_DATABASE_URL",
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join("questions.db").display()
-            ),
-        );
+        .env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, private) = service(plane_command).await?;
     let gateway_command = || {
         let mut cmd = command(&["gateway", "--control-plane", &private]);
