@@ -6,16 +6,21 @@
 //! and other access from an existing database and any live WAL and shared-memory files. A path
 //! through a symbolic link changes the files SQLite actually uses, which sit beside the target; a
 //! link whose target is missing gets its target created owner-only.
+//!
+//! SQLite serves one Control Plane process. An exclusive lock on a private `.lock` file beside the
+//! database refuses a second process; Store handles within one process share that lock.
 
 use std::{
-    fs::{self, OpenOptions},
+    collections::HashMap,
+    fs::{self, File, OpenOptions, TryLockError},
     io::ErrorKind,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     str::FromStr,
+    sync::{Arc, LazyLock, Mutex, PoisonError, Weak},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::sqlite::SqliteConnectOptions;
 
 /// The database file a SQLite URL opens, or `None` for an in-memory database.
@@ -111,6 +116,48 @@ pub(crate) fn make_private(url: &str) -> Result<()> {
         tighten(Path::new(&companion))?;
     }
     Ok(())
+}
+
+/// Process-wide holders of each database's lock file, so every Store in this process shares it.
+static HELD: LazyLock<Mutex<HashMap<PathBuf, Weak<File>>>> = LazyLock::new(Mutex::default);
+
+/// Takes the exclusive lock that makes this process the only one using a file database. The
+/// lock lasts while any returned handle lives. Call it after SQLite has opened the file.
+pub(crate) fn lock_single_process(url: &str) -> Result<Option<Arc<File>>> {
+    let Some((path, _)) = database_file(url)? else {
+        return Ok(None);
+    };
+    let target = fs::canonicalize(&path).with_context(|| format!("resolve {}", path.display()))?;
+    let mut lock = target.clone().into_os_string();
+    lock.push(".lock");
+    let lock = PathBuf::from(lock);
+    let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+    held.retain(|_, file| file.strong_count() > 0);
+    if let Some(file) = held.get(&lock).and_then(Weak::upgrade) {
+        return Ok(Some(file));
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(&lock)
+        .with_context(|| format!("open {}", lock.display()))?;
+    tighten(&lock)?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => bail!(
+            "another Control Plane process is using the SQLite database {}; SQLite serves one Control Plane process, so use PostgreSQL to run several Control Plane replicas",
+            target.display()
+        ),
+        Err(TryLockError::Error(error)) => {
+            return Err(error).with_context(|| format!("lock {}", lock.display()));
+        }
+    }
+    let file = Arc::new(file);
+    held.insert(lock, Arc::downgrade(&file));
+    Ok(Some(file))
 }
 
 #[cfg(test)]

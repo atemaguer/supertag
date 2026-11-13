@@ -76,9 +76,12 @@ impl Store {
         if destinations.is_empty() {
             return Ok(ClaimOperatorNotificationResponse::default());
         }
-        let (inbox, complete) = self.inbox_for_notifications(principal).await?;
-        let (mut tx, _) = self.write().await?;
+        operator(principal)?;
+        // The Inbox read shares the claim's write lock. A read taken before it could predate an
+        // item another Control Plane replica just recorded and settle that message unsent.
+        let (mut tx, order) = self.write().await?;
         let now = self.execution_now_ms();
+        let (inbox, complete) = inbox_in(&mut tx, order, now, principal).await?;
         let items = items_in(&mut tx, inbox).await?;
         record_in(&mut tx, principal, &destinations, &items, now).await?;
         // A lease that lapsed on the last attempt is never claimed again.
@@ -216,32 +219,39 @@ impl Store {
         tx.rollback().await?;
         Ok(Some(notification))
     }
+}
 
-    /// Every Inbox item this operator sees. False when the read stopped at its page bound.
-    async fn inbox_for_notifications(&self, principal: &str) -> Result<(Vec<InboxItem>, bool)> {
-        operator(principal)?;
-        let mut items = Vec::new();
-        let mut cursor = String::new();
-        for _ in 0..INBOX_PAGES {
-            let page = self
-                .list_inbox_items(
-                    principal,
-                    &ListInboxItemsRequest {
-                        objective_id: String::new(),
-                        kind: InboxItemKind::Unspecified as i32,
-                        page_size: INBOX_PAGE,
-                        cursor,
-                    },
-                )
-                .await?;
-            items.extend(page.items);
-            if page.next_cursor.is_empty() {
-                return Ok((items, page.truncated_kinds.is_empty()));
-            }
-            cursor = page.next_cursor;
+/// Every Inbox item this operator sees, read in the caller's write-locked transaction. False when
+/// the read stopped at its page bound.
+async fn inbox_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    now: i64,
+    principal: &str,
+) -> Result<(Vec<InboxItem>, bool)> {
+    let mut items = Vec::new();
+    let mut cursor = String::new();
+    for _ in 0..INBOX_PAGES {
+        let page = crate::inbox::inbox_page_in(
+            tx,
+            order,
+            now,
+            principal,
+            &ListInboxItemsRequest {
+                objective_id: String::new(),
+                kind: InboxItemKind::Unspecified as i32,
+                page_size: INBOX_PAGE,
+                cursor,
+            },
+        )
+        .await?;
+        items.extend(page.items);
+        if page.next_cursor.is_empty() {
+            return Ok((items, page.truncated_kinds.is_empty()));
         }
-        Ok((items, false))
+        cursor = page.next_cursor;
     }
+    Ok((items, false))
 }
 
 fn operator(principal: &str) -> Result<()> {

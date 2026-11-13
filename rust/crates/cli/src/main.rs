@@ -1383,7 +1383,7 @@ async fn control_plane(listen: SocketAddr, websocket: Option<SocketAddr>) -> Res
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            if let Err(error) = maintenance.sweep().await {
+            if let Err(error) = maintenance.maintain(Duration::from_secs(1)).await {
                 errln!("Control Plane maintenance failed: {error}");
             }
         }
