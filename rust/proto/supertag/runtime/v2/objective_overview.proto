@@ -149,10 +149,13 @@ message ObjectiveSessionView {
   string latest_task_id = 9;
   // The Session's latest Workspace delivery. Absent when none was recorded.
   ObjectiveSessionDelivery delivery = 5400;
-  // Why the latest turn did not succeed. Absent unless it failed or is uncertain.
+  // Why the latest turn did not succeed. Absent unless it failed, is uncertain, or was
+  // cancelled before its execution cleanup was confirmed.
   ObjectiveSessionFailure failure = 5401;
   // When the latest turn finished. Absent while it runs or when not recorded.
   optional int64 latest_completed_at_ms = 5402;
+  // When the Session's first turn was accepted. Absent when not recorded.
+  optional int64 started_at_ms = 5403;
 }
 
 message ObjectiveSessionDelivery {
@@ -187,6 +190,8 @@ message ObjectiveTurn {
   string prompt = 6;
   string result = 7;
   optional int64 completed_at_ms = 8;
+  // Why the turn did not succeed, as `ObjectiveSessionView.failure` explains a latest turn.
+  ObjectiveSessionFailure failure = 5400;
 }
 
 message ObjectiveTeamPost {

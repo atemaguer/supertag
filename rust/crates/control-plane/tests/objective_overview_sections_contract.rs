@@ -130,6 +130,83 @@ async fn contract(url: String) {
             patch: true,
         })
     );
+    assert!(owner.started_at_ms.is_some(), "the first turn's acceptance");
+
+    // The recovery command matches `supertag ps`: the host's own report that execution
+    // stopped stands in for `--confirmed-stopped`, and a cancelled Task can only be failed.
+    let attempt = &claim.attempt_id;
+    let resolve = |decision: &str, confirm: &str| {
+        format!(
+            "supertag task resolve-attempt {} {attempt} --decision {decision} --evidence TEXT{confirm}",
+            task.task_id
+        )
+    };
+    let events = format!("supertag task events {}", task.task_id);
+    /// State, cleanup pending, cleanup observed, lease end, and the expected commands.
+    type Case = (TaskState, i64, i64, i64, Option<Vec<String>>);
+    let cases: [Case; 5] = [
+        (
+            TaskState::Uncertain,
+            0,
+            0,
+            NOW - 1,
+            Some(vec![
+                events.clone(),
+                resolve("retry", " --confirmed-stopped"),
+            ]),
+        ),
+        (
+            TaskState::Uncertain,
+            0,
+            1,
+            NOW - 1,
+            Some(vec![events.clone(), resolve("retry", "")]),
+        ),
+        (
+            TaskState::Cancelled,
+            1,
+            0,
+            NOW - 1,
+            Some(vec![
+                events.clone(),
+                resolve("failed", " --confirmed-stopped"),
+            ]),
+        ),
+        // Still within its lease: the host may yet confirm cleanup, so no decision is due.
+        (
+            TaskState::Cancelled,
+            1,
+            0,
+            NOW + 1_000,
+            Some(vec![events.clone()]),
+        ),
+        (TaskState::Cancelled, 0, 1, NOW - 1, None),
+    ];
+    for (state, pending, observed, lease, expected) in cases {
+        let mut database = AnyConnection::connect(&url).await.unwrap();
+        sqlx::query("UPDATE supertag_v2_tasks SET state=$1, cleanup_pending=$2, cleanup_observed=$3, lease_expires_at_ms=$4, result=NULL WHERE task_id=$5")
+            .bind(state as i64)
+            .bind(pending)
+            .bind(observed)
+            .bind(lease)
+            .bind(&task.task_id)
+            .execute(&mut database)
+            .await
+            .unwrap();
+        database.close().await.unwrap();
+        let view = overview(&store).await;
+        let failure = view.sessions[0].failure.clone();
+        assert_eq!(
+            failure.as_ref().map(|failure| failure.next_actions.clone()),
+            expected,
+            "{state:?} pending={pending} observed={observed}"
+        );
+        if state == TaskState::Cancelled
+            && let Some(failure) = failure
+        {
+            assert!(failure.message.contains("Cancelled"), "{}", failure.message);
+        }
+    }
     store.close().await;
 }
 

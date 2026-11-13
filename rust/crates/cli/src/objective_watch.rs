@@ -1,9 +1,12 @@
 //! `supertag watch objective ID`: one Objective's progress as a timeline, one line per event
 //! with its time and actor, until the Objective closes (`tests/objective-watch.test.ts`).
 //!
-//! Each event is the difference between two reads of the Control Plane's Objective overview.
-//! Change notices wake the next read; a periodic read covers a dropped notice stream. Times are
-//! the recorded time where the overview has one, else the time the change was read.
+//! Each event is the difference between two reads of the Control Plane's Objective overview,
+//! with every Task of the Objective not yet settled and every Team post after the last one
+//! printed, each read a page at a time. Change notices wake the next read; a periodic read
+//! covers a dropped notice stream, and a failed read is retried. Times are the recorded time
+//! where there is one, else the time the change was read; each read's events print in time
+//! order.
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -15,10 +18,14 @@ use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
+    negotiation::ProtocolChannel,
     v2::{
-        GetObjectiveOverviewRequest, ObjectiveOverview, ObjectiveSessionStatus, ObjectiveStatus,
-        WatchKind, WatchRequest, objective_overviews_client::ObjectiveOverviewsClient,
-        operator_events_client::OperatorEventsClient, watch_event::Update,
+        GetObjectiveOverviewRequest, ListWorkstreamPostsRequest, ListWorkstreamPostsResponse,
+        ObjectiveOverview, ObjectiveSessionFailure, ObjectiveSessionStatus, ObjectiveStatus,
+        ObjectiveTeamPost, TaskState, WatchKind, WatchRequest,
+        objective_overviews_client::ObjectiveOverviewsClient,
+        operator_events_client::OperatorEventsClient, teams_client::TeamsClient,
+        watch_event::Update,
     },
 };
 
@@ -32,6 +39,8 @@ use crate::{
 
 /// Rereads the overview at least this often when no change notice arrives.
 const POLL: Duration = Duration::from_secs(2);
+/// Tasks per overview read; the largest page the overview returns.
+const TASK_PAGE: u32 = 50;
 const ACTOR_WIDTH: usize = 12;
 
 /// One timeline entry.
@@ -64,6 +73,10 @@ pub(crate) struct Timeline {
     last_post: u64,
     pending_approvals: u32,
     notices: BTreeSet<String>,
+    /// Leading Tasks, in acceptance order, that are settled and reported; reads start after.
+    task_offset: u32,
+    /// What was last reported for each Task.
+    reported: BTreeMap<String, &'static str>,
 }
 
 fn status_words(status: ObjectiveStatus) -> String {
@@ -85,6 +98,31 @@ fn session_words(status: ObjectiveSessionStatus) -> &'static str {
         ObjectiveSessionStatus::Uncertain => "is uncertain",
         ObjectiveSessionStatus::NotStarted | ObjectiveSessionStatus::Unspecified => "is pending",
     }
+}
+
+/// How a turn that is no longer a Session's latest ended; `None` while it may still change.
+fn turn_words(state: TaskState) -> Option<&'static str> {
+    match state {
+        TaskState::Succeeded => Some("finished"),
+        TaskState::Failed => Some("failed"),
+        TaskState::Cancelled => Some("was cancelled"),
+        TaskState::Uncertain => Some("is uncertain"),
+        _ => None,
+    }
+}
+
+/// Explain a turn that did not succeed under its headline and in its JSON line.
+fn explain(entry: &mut Event, failure: &ObjectiveSessionFailure) {
+    if !failure.message.trim().is_empty() {
+        entry.detail = Some(failure.message.trim().to_owned());
+        entry.fields.insert("failure", json!(failure.message));
+    }
+    entry
+        .fields
+        .insert("harness_kind", json!(failure.harness_kind().as_str_name()));
+    entry
+        .fields
+        .insert("next_actions", json!(failure.next_actions));
 }
 
 fn first_line(text: &str) -> String {
@@ -112,8 +150,26 @@ pub(crate) fn closed(view: &ObjectiveOverview) -> bool {
 }
 
 impl Timeline {
-    /// The events between the previous read and this one, oldest first.
+    /// The Task offset the next overview read starts at.
+    pub(crate) fn task_offset(&self) -> u32 {
+        self.task_offset
+    }
+
+    /// The newest Team post already reported.
+    pub(crate) fn last_post(&self) -> u64 {
+        self.last_post
+    }
+
+    /// The events between the previous read and this one, oldest first. `view.tasks` starts at
+    /// [`Timeline::task_offset`] and `view.posts` holds the posts after [`Timeline::last_post`].
     pub(crate) fn events(&mut self, view: &ObjectiveOverview) -> Vec<Event> {
+        let mut events = self.changes(view);
+        // Closing comes last: the turns it cancels are recorded just after it.
+        events.sort_by_key(|event| (event.kind == "objective.closed", event.at_ms));
+        events
+    }
+
+    fn changes(&mut self, view: &ObjectiveOverview) -> Vec<Event> {
         let Some(objective) = &view.objective else {
             return vec![];
         };
@@ -148,7 +204,7 @@ impl Timeline {
             if seen.is_none() && !session.owner {
                 events.push(event(
                     "session.started",
-                    now,
+                    session.started_at_ms.unwrap_or(now),
                     &session.tag_id,
                     format!("Started {label}"),
                 ));
@@ -190,18 +246,11 @@ impl Timeline {
                     .as_ref()
                     .filter(|failure| failure.task_id == session.latest_task_id)
                 {
-                    if !failure.message.trim().is_empty() {
-                        entry.detail = Some(failure.message.trim().to_owned());
-                        entry.fields.insert("failure", json!(failure.message));
-                    }
-                    entry
-                        .fields
-                        .insert("harness_kind", json!(failure.harness_kind().as_str_name()));
-                    entry
-                        .fields
-                        .insert("next_actions", json!(failure.next_actions));
+                    explain(&mut entry, failure);
                 }
                 events.push(entry);
+                self.reported
+                    .insert(session.latest_task_id.clone(), session_words(status));
             }
             let delivered = session
                 .delivery
@@ -242,6 +291,64 @@ impl Timeline {
                     delivered_task_id: delivered,
                 },
             );
+        }
+        // Earlier turns that ended between two reads, each once in the way it ended.
+        let latest: BTreeSet<&str> = view
+            .sessions
+            .iter()
+            .map(|session| session.latest_task_id.as_str())
+            .collect();
+        for turn in &view.tasks {
+            let state = turn.state();
+            let Some(words) = turn_words(state) else {
+                continue;
+            };
+            if latest.contains(turn.task_id.as_str())
+                || self.reported.get(&turn.task_id) == Some(&words)
+            {
+                continue;
+            }
+            let label = view
+                .sessions
+                .iter()
+                .find(|session| {
+                    session.session_id == turn.session_id && session.tag_id == turn.tag_id
+                })
+                .map_or_else(|| format!("Session {}", turn.session_id), session_label);
+            let mut entry = event(
+                "task.status",
+                turn.completed_at_ms.unwrap_or(now),
+                &turn.tag_id,
+                format!("{label}: Task {} {words}", turn.task_id),
+            );
+            entry.fields.insert("task_id", json!(turn.task_id));
+            entry.fields.insert("session_id", json!(turn.session_id));
+            entry.fields.insert(
+                "status",
+                json!(match state {
+                    TaskState::Succeeded => "succeeded",
+                    TaskState::Failed => "failed",
+                    TaskState::Cancelled => "cancelled",
+                    _ => "uncertain",
+                }),
+            );
+            if let Some(failure) = &turn.failure {
+                explain(&mut entry, failure);
+            }
+            events.push(entry);
+            self.reported.insert(turn.task_id.clone(), words);
+        }
+        // Reads start after the leading Tasks that ended and were reported as they ended.
+        for turn in &view.tasks {
+            let settled = matches!(
+                turn.state(),
+                TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+            ) && self.reported.get(&turn.task_id).copied()
+                == turn_words(turn.state());
+            if !settled {
+                break;
+            }
+            self.task_offset += 1;
         }
         let after = self.last_post;
         for post in view.posts.iter().filter(|post| post.sequence > after) {
@@ -420,6 +527,104 @@ pub(crate) fn summary(view: &ObjectiveOverview) -> String {
         .join("\n")
 }
 
+/// Every post one read returns, following its cursor a page at a time.
+async fn all_posts(
+    mut page: impl AsyncFnMut(String) -> Result<ListWorkstreamPostsResponse>,
+) -> Result<Vec<ObjectiveTeamPost>> {
+    let mut posts = vec![];
+    let mut cursor = String::new();
+    loop {
+        let next = page(cursor).await?;
+        posts.extend(next.posts.into_iter().map(|post| ObjectiveTeamPost {
+            sequence: post.sequence,
+            author_tag_id: post.author_tag_id,
+            to_tag_ids: post.to_tag_ids,
+            body: post.body,
+            created_at_ms: post.created_at_ms,
+        }));
+        if next.next_cursor.is_empty() {
+            return Ok(posts);
+        }
+        cursor = next.next_cursor;
+    }
+}
+
+/// Wait, then read, until a read succeeds. A failed read is reported once per run of
+/// failures and read again after the next wait instead of ending the watch.
+async fn reread<T>(
+    mut wait: impl AsyncFnMut(),
+    mut read: impl AsyncFnMut() -> Result<T>,
+    mut failed: impl FnMut(&anyhow::Error),
+) -> T {
+    let mut reported = false;
+    loop {
+        wait().await;
+        match read().await {
+            Ok(value) => return value,
+            Err(error) => {
+                if !std::mem::replace(&mut reported, true) {
+                    failed(&error);
+                }
+            }
+        }
+    }
+}
+
+/// Read the overview with every Task from `task_offset` on and every Team post after
+/// `after_post`, each a page at a time.
+async fn read(
+    overviews: &mut ObjectiveOverviewsClient<ProtocolChannel>,
+    teams: &mut TeamsClient<ProtocolChannel>,
+    token: &str,
+    objective_id: &str,
+    task_offset: u32,
+    after_post: u64,
+) -> Result<ObjectiveOverview> {
+    let mut page = async |offset: u32| -> Result<ObjectiveOverview> {
+        Ok(overviews
+            .get_objective_overview(authenticated_request(
+                GetObjectiveOverviewRequest {
+                    objective_id: objective_id.to_owned(),
+                    limit: TASK_PAGE,
+                    offset,
+                },
+                token,
+                None,
+            )?)
+            .await?
+            .into_inner())
+    };
+    let mut view = page(task_offset).await?;
+    let mut next = view.next_offset;
+    while let Some(offset) = next {
+        let more = page(offset).await?;
+        view.tasks.extend(more.tasks);
+        next = more.next_offset.filter(|next| *next > offset);
+    }
+    view.posts = match view.team.as_ref().map(|team| team.team_id.clone()) {
+        Some(team) => {
+            all_posts(async |cursor| {
+                Ok(teams
+                    .list_workstream_posts(authenticated_request(
+                        ListWorkstreamPostsRequest {
+                            team: team.clone(),
+                            after_sequence: Some(after_post),
+                            limit: 0,
+                            cursor,
+                        },
+                        token,
+                        None,
+                    )?)
+                    .await?
+                    .into_inner())
+            })
+            .await?
+        }
+        None => vec![],
+    };
+    Ok(view)
+}
+
 /// Follows one Objective until it closes and every running Session has recorded its turn, or
 /// until `settle` passes after it closed.
 pub(crate) async fn watch(
@@ -430,32 +635,29 @@ pub(crate) async fn watch(
 ) -> Result<()> {
     let target = resolve_target(connection)?;
     let channel = crate::network::operator_channel(&target.endpoint(POLL * 5).await?).await?;
-    let mut overviews = ObjectiveOverviewsClient::new(channel)
+    let mut overviews = ObjectiveOverviewsClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let read = async |overviews: &mut ObjectiveOverviewsClient<_>| -> Result<ObjectiveOverview> {
-        Ok(overviews
-            .get_objective_overview(authenticated_request(
-                GetObjectiveOverviewRequest {
-                    objective_id: objective_id.clone(),
-                    limit: 1,
-                    offset: 0,
-                },
-                &target.token,
-                None,
-            )?)
-            .await?
-            .into_inner())
-    };
+    let mut teams = TeamsClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut timeline = Timeline::default();
     // An Objective that cannot be read fails at once, before any stream opens.
-    let mut view = read(&mut overviews).await?;
+    let mut view = read(
+        &mut overviews,
+        &mut teams,
+        &target.token,
+        &objective_id,
+        0,
+        0,
+    )
+    .await?;
     let changed = Arc::new(tokio::sync::Notify::new());
     let notices = tokio::spawn(follow_changes(
         target.clone(),
         objective_id.clone(),
         changed.clone(),
     ));
-    let mut timeline = Timeline::default();
     let mut closed_at: Option<tokio::time::Instant> = None;
     let outcome = async {
         loop {
@@ -474,11 +676,30 @@ pub(crate) async fn watch(
                     return Ok(());
                 }
             }
-            tokio::select! {
-                () = changed.notified() => {}
-                () = tokio::time::sleep(POLL) => {}
-            }
-            view = read(&mut overviews).await?;
+            // A failed read is read again after the next notice or tick, so a Control Plane
+            // restart or a network outage does not end the watch.
+            let (task_offset, after_post) = (timeline.task_offset(), timeline.last_post());
+            view = reread(
+                async || {
+                    tokio::select! {
+                        () = changed.notified() => {}
+                        () = tokio::time::sleep(POLL) => {}
+                    }
+                },
+                async || {
+                    read(
+                        &mut overviews,
+                        &mut teams,
+                        &target.token,
+                        &objective_id,
+                        task_offset,
+                        after_post,
+                    )
+                    .await
+                },
+                |error| errln!("Could not read Objective {objective_id}; retrying: {error:#}"),
+            )
+            .await;
         }
     }
     .await;
@@ -547,8 +768,7 @@ async fn follow_changes(
 mod tests {
     use super::*;
     use supertag_protocol::v2::{
-        HarnessKind, Objective, ObjectiveSessionDelivery, ObjectiveSessionFailure,
-        ObjectiveSessionView, ObjectiveTeamPost, TaskState,
+        HarnessKind, Objective, ObjectiveSessionDelivery, ObjectiveSessionView, ObjectiveTurn,
     };
 
     const AT: i64 = 1_794_009_600_000; // 2026-11-07T00:00:00Z
@@ -762,6 +982,176 @@ mod tests {
             "2026-11-07 00:02:00Z  operator      Objective cancelled: Superseded"
         );
         assert!(!summary(&cancelled).contains("Delivered:"));
+    }
+
+    #[test]
+    fn prints_turns_that_ended_between_two_reads_in_time_order() {
+        let mut timeline = Timeline::default();
+        let mut started = build(ObjectiveSessionStatus::Running);
+        started.started_at_ms = Some(AT + 12_000);
+        lines(
+            &mut timeline,
+            &view(
+                ObjectiveStatus::Working,
+                vec![owner(ObjectiveSessionStatus::Succeeded), started.clone()],
+            ),
+        );
+        // Between two reads the build turn failed and the next turn started.
+        let mut next = started;
+        next.latest_task_id = "task-build-2".into();
+        let mut later = view(
+            ObjectiveStatus::Working,
+            vec![owner(ObjectiveSessionStatus::Succeeded), next],
+        );
+        later.as_of_ms = AT + 30_000;
+        let turn = |task_id: &str, state: TaskState, at: i64| ObjectiveTurn {
+            task_id: task_id.into(),
+            tag_id: "builder".into(),
+            session_id: "session-build".into(),
+            state: state as i32,
+            completed_at_ms: Some(at),
+            ..Default::default()
+        };
+        let mut failed = turn("task-build", TaskState::Failed, AT + 25_000);
+        failed.failure = Some(ObjectiveSessionFailure {
+            task_id: "task-build".into(),
+            state: TaskState::Failed as i32,
+            message: "Tests failed.".into(),
+            next_actions: vec!["supertag task events task-build".into()],
+            ..Default::default()
+        });
+        later.tasks = vec![
+            turn("task-start", TaskState::Succeeded, AT + 10_000),
+            failed,
+            turn("task-build-2", TaskState::Running, 0),
+        ];
+        let text = lines(&mut timeline, &later).join("\n");
+        assert_eq!(
+            text,
+            format!(
+                "2026-11-07 00:00:25Z  builder       Build the exporter: Task task-build failed\n\
+                 {:38}Tests failed.\n\
+                 2026-11-07 00:00:30Z  builder       Build the exporter: Task task-build-2 is running",
+                ""
+            )
+        );
+        // Settled turns are not read again, and nothing repeats.
+        assert_eq!(timeline.task_offset(), 2);
+        later.tasks.drain(..2);
+        assert!(timeline.events(&later).is_empty());
+    }
+
+    #[test]
+    fn a_session_starts_at_its_recorded_time() {
+        let mut timeline = Timeline::default();
+        let mut started = build(ObjectiveSessionStatus::Running);
+        started.started_at_ms = Some(AT + 5_000);
+        let mut replay = view(
+            ObjectiveStatus::Working,
+            vec![owner(ObjectiveSessionStatus::Succeeded), started],
+        );
+        replay.as_of_ms = AT + 86_400_000;
+        let text = lines(&mut timeline, &replay);
+        assert_eq!(
+            text[1],
+            "2026-11-07 00:00:05Z  builder       Started Build the exporter"
+        );
+        assert!(text[2].contains("Objective conversation: Task task-start finished"));
+    }
+
+    fn post(sequence: u64) -> supertag_protocol::v2::WorkstreamPost {
+        supertag_protocol::v2::WorkstreamPost {
+            sequence,
+            author_tag_id: "builder".into(),
+            body: format!("Update {sequence}"),
+            created_at_ms: AT + sequence as i64 * 1_000,
+            ..Default::default()
+        }
+    }
+
+    /// A Team's posts after `after`, 16 to a page, as `ListWorkstreamPosts` pages them.
+    fn page(all: &[u64], after: u64, cursor: &str) -> ListWorkstreamPostsResponse {
+        let after = cursor
+            .strip_prefix('s')
+            .map_or(after, |value| value.parse().unwrap());
+        let rest: Vec<_> = all
+            .iter()
+            .copied()
+            .filter(|sequence| *sequence > after)
+            .collect();
+        let posts: Vec<_> = rest.iter().take(16).copied().map(post).collect();
+        ListWorkstreamPostsResponse {
+            next_cursor: if rest.len() > 16 {
+                format!("s{}", posts.last().unwrap().sequence)
+            } else {
+                String::new()
+            },
+            posts,
+        }
+    }
+
+    #[tokio::test]
+    async fn replays_every_team_post_a_page_at_a_time_and_prints_each_burst_in_full() {
+        let mut timeline = Timeline::default();
+        let mut sequences: Vec<u64> = (1..=120).collect();
+        let mut printed = vec![];
+        for burst in [120, 250] {
+            sequences.extend(sequences.len() as u64 + 1..=burst);
+            let after = timeline.last_post();
+            let mut reads = 0;
+            let posts = all_posts(async |cursor| {
+                reads += 1;
+                Ok(page(&sequences, after, &cursor))
+            })
+            .await
+            .unwrap();
+            assert!(reads > 1, "one page holds 16 posts");
+            let mut read = view(ObjectiveStatus::Working, vec![]);
+            read.posts = posts;
+            printed.extend(
+                timeline
+                    .events(&read)
+                    .into_iter()
+                    .filter(|event| event.kind == "team.post")
+                    .map(|event| event.message),
+            );
+        }
+        assert_eq!(printed.len(), 250);
+        for sequence in [1, 50, 120, 121, 250] {
+            assert_eq!(
+                printed
+                    .iter()
+                    .filter(|message| **message == format!("Posted to the Team: Update {sequence}"))
+                    .count(),
+                1
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rereads_after_a_failed_read_instead_of_ending() {
+        let mut reads = 0;
+        let mut waits = 0;
+        let mut failures = vec![];
+        let value = reread(
+            async || waits += 1,
+            async || {
+                reads += 1;
+                if reads < 3 {
+                    anyhow::bail!("unavailable")
+                }
+                Ok(reads)
+            },
+            |error| failures.push(error.to_string()),
+        )
+        .await;
+        assert_eq!(value, 3);
+        assert_eq!(waits, 3, "each read waits for a notice or the next tick");
+        assert_eq!(
+            failures,
+            ["unavailable"],
+            "a run of failures is reported once"
+        );
     }
 
     #[test]

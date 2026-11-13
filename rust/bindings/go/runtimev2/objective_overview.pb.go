@@ -873,12 +873,15 @@ type ObjectiveSessionView struct {
 	LatestTaskId string `protobuf:"bytes,9,opt,name=latest_task_id,json=latestTaskId,proto3" json:"latest_task_id,omitempty"`
 	// The Session's latest Workspace delivery. Absent when none was recorded.
 	Delivery *ObjectiveSessionDelivery `protobuf:"bytes,5400,opt,name=delivery,proto3" json:"delivery,omitempty"`
-	// Why the latest turn did not succeed. Absent unless it failed or is uncertain.
+	// Why the latest turn did not succeed. Absent unless it failed, is uncertain, or was
+	// cancelled before its execution cleanup was confirmed.
 	Failure *ObjectiveSessionFailure `protobuf:"bytes,5401,opt,name=failure,proto3" json:"failure,omitempty"`
 	// When the latest turn finished. Absent while it runs or when not recorded.
 	LatestCompletedAtMs *int64 `protobuf:"varint,5402,opt,name=latest_completed_at_ms,json=latestCompletedAtMs,proto3,oneof" json:"latest_completed_at_ms,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// When the Session's first turn was accepted. Absent when not recorded.
+	StartedAtMs   *int64 `protobuf:"varint,5403,opt,name=started_at_ms,json=startedAtMs,proto3,oneof" json:"started_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ObjectiveSessionView) Reset() {
@@ -991,6 +994,13 @@ func (x *ObjectiveSessionView) GetFailure() *ObjectiveSessionFailure {
 func (x *ObjectiveSessionView) GetLatestCompletedAtMs() int64 {
 	if x != nil && x.LatestCompletedAtMs != nil {
 		return *x.LatestCompletedAtMs
+	}
+	return 0
+}
+
+func (x *ObjectiveSessionView) GetStartedAtMs() int64 {
+	if x != nil && x.StartedAtMs != nil {
+		return *x.StartedAtMs
 	}
 	return 0
 }
@@ -1178,6 +1188,8 @@ type ObjectiveTurn struct {
 	Prompt        string `protobuf:"bytes,6,opt,name=prompt,proto3" json:"prompt,omitempty"`
 	Result        string `protobuf:"bytes,7,opt,name=result,proto3" json:"result,omitempty"`
 	CompletedAtMs *int64 `protobuf:"varint,8,opt,name=completed_at_ms,json=completedAtMs,proto3,oneof" json:"completed_at_ms,omitempty"`
+	// Why the turn did not succeed, as `ObjectiveSessionView.failure` explains a latest turn.
+	Failure       *ObjectiveSessionFailure `protobuf:"bytes,5400,opt,name=failure,proto3" json:"failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1266,6 +1278,13 @@ func (x *ObjectiveTurn) GetCompletedAtMs() int64 {
 		return *x.CompletedAtMs
 	}
 	return 0
+}
+
+func (x *ObjectiveTurn) GetFailure() *ObjectiveSessionFailure {
+	if x != nil {
+		return x.Failure
+	}
+	return nil
 }
 
 type ObjectiveTeamPost struct {
@@ -1413,7 +1432,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12!\n" +
 	"\fnext_actions\x18\x03 \x03(\tR\vnextActions\x12\x17\n" +
 	"\atask_id\x18\x04 \x01(\tR\x06taskId\x12\x15\n" +
-	"\x06tag_id\x18\x05 \x01(\tR\x05tagId\"\xb5\x04\n" +
+	"\x06tag_id\x18\x05 \x01(\tR\x05tagId\"\xf1\x04\n" +
 	"\x14ObjectiveSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x15\n" +
@@ -1428,8 +1447,10 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x0elatest_task_id\x18\t \x01(\tR\flatestTaskId\x12J\n" +
 	"\bdelivery\x18\x98* \x01(\v2-.supertag.runtime.v2.ObjectiveSessionDeliveryR\bdelivery\x12G\n" +
 	"\afailure\x18\x99* \x01(\v2,.supertag.runtime.v2.ObjectiveSessionFailureR\afailure\x129\n" +
-	"\x16latest_completed_at_ms\x18\x9a* \x01(\x03H\x00R\x13latestCompletedAtMs\x88\x01\x01B\x19\n" +
-	"\x17_latest_completed_at_ms\"\xf1\x01\n" +
+	"\x16latest_completed_at_ms\x18\x9a* \x01(\x03H\x00R\x13latestCompletedAtMs\x88\x01\x01\x12(\n" +
+	"\rstarted_at_ms\x18\x9b* \x01(\x03H\x01R\vstartedAtMs\x88\x01\x01B\x19\n" +
+	"\x17_latest_completed_at_msB\x10\n" +
+	"\x0e_started_at_ms\"\xf1\x01\n" +
 	"\x18ObjectiveSessionDelivery\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -1445,7 +1466,7 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x1e.supertag.runtime.v2.TaskStateR\x05state\x12C\n" +
 	"\fharness_kind\x18\x03 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12!\n" +
-	"\fnext_actions\x18\x05 \x03(\tR\vnextActions\"\x99\x02\n" +
+	"\fnext_actions\x18\x05 \x03(\tR\vnextActions\"\xe2\x02\n" +
 	"\rObjectiveTurn\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
@@ -1455,7 +1476,8 @@ const file_supertag_runtime_v2_objective_overview_proto_rawDesc = "" +
 	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x16\n" +
 	"\x06prompt\x18\x06 \x01(\tR\x06prompt\x12\x16\n" +
 	"\x06result\x18\a \x01(\tR\x06result\x12+\n" +
-	"\x0fcompleted_at_ms\x18\b \x01(\x03H\x00R\rcompletedAtMs\x88\x01\x01B\x12\n" +
+	"\x0fcompleted_at_ms\x18\b \x01(\x03H\x00R\rcompletedAtMs\x88\x01\x01\x12G\n" +
+	"\afailure\x18\x98* \x01(\v2,.supertag.runtime.v2.ObjectiveSessionFailureR\afailureB\x12\n" +
 	"\x10_completed_at_ms\"\xa9\x01\n" +
 	"\x11ObjectiveTeamPost\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\"\n" +
@@ -1544,13 +1566,14 @@ var file_supertag_runtime_v2_objective_overview_proto_depIdxs = []int32{
 	16, // 15: supertag.runtime.v2.ObjectiveSessionFailure.state:type_name -> supertag.runtime.v2.TaskState
 	17, // 16: supertag.runtime.v2.ObjectiveSessionFailure.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	16, // 17: supertag.runtime.v2.ObjectiveTurn.state:type_name -> supertag.runtime.v2.TaskState
-	3,  // 18: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
-	4,  // 19: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
-	19, // [19:20] is the sub-list for method output_type
-	18, // [18:19] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	12, // 18: supertag.runtime.v2.ObjectiveTurn.failure:type_name -> supertag.runtime.v2.ObjectiveSessionFailure
+	3,  // 19: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:input_type -> supertag.runtime.v2.GetObjectiveOverviewRequest
+	4,  // 20: supertag.runtime.v2.ObjectiveOverviews.GetObjectiveOverview:output_type -> supertag.runtime.v2.ObjectiveOverview
+	20, // [20:21] is the sub-list for method output_type
+	19, // [19:20] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_objective_overview_proto_init() }
