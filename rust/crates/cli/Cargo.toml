@@ -146,3 +146,8 @@ required-features = ["test-fixtures"]
 name = "local_services"
 path = "tests/local_services.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "transport_runtime"
+path = "tests/transport_runtime.rs"
+required-features = ["test-fixtures"]

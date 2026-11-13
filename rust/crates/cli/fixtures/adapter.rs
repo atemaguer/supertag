@@ -629,6 +629,18 @@ async fn main() -> Result<()> {
         }
         sleep(Duration::from_secs(60)).await;
     }
+    // Holds an accepted Attempt open until the test releases it, so transport
+    // faults can be injected while execution is in progress.
+    if let Some(release) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--wait-for-file=")
+            .map(std::path::PathBuf::from)
+    }) {
+        let deadline = Instant::now() + Duration::from_secs(300);
+        while !release.exists() {
+            ensure!(Instant::now() < deadline, "release file never appeared");
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
     if take_live {
         let input = take_input(&mut harness, &bootstrap.token).await?;
         if take_and_wait {
