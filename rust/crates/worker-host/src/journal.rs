@@ -13,7 +13,7 @@ use supertag_protocol::{
     v2::{RemoteWorkspaceOwner, SessionCheckpoint},
     valid_sha256,
 };
-use supertag_workspaces::TransferArtifact;
+use supertag_workspaces::{ExclusiveLock, TransferArtifact};
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -185,7 +185,7 @@ impl Entry {
 
 pub(crate) struct Journal {
     directory: PathBuf,
-    _lock: File,
+    _lock: ExclusiveLock,
 }
 
 impl Journal {
@@ -214,7 +214,7 @@ impl Journal {
             metadata.is_file() && metadata.uid() == owner && metadata.mode() & 0o077 == 0,
             "Worker Host state lock must be private"
         );
-        lock.try_lock()
+        let lock = ExclusiveLock::try_acquire(lock)
             .context("another Worker Host owns this state directory")?;
         Ok(Self {
             directory: directory.to_owned(),
@@ -639,6 +639,34 @@ mod tests {
         assert!(journal.load()?.is_none());
         assert!(journal.remote_sandbox()?.is_none());
         Ok(())
+    }
+
+    #[test]
+    fn released_ownership_is_immediately_reacquirable_while_children_spawn() -> Result<()> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Children spawned on other threads briefly share the lock's open file description
+        // until exec closes it. Dropping a Journal must still release ownership at once.
+        let state = tempfile::tempdir()?;
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let spawners = (0..4)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        let _ = std::process::Command::new("/usr/bin/true")
+                            .stdin(std::process::Stdio::null())
+                            .status();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let reopened = (0..2_000).try_for_each(|_| Journal::open(state.path()).map(drop));
+        stop.store(true, Ordering::Relaxed);
+        for spawner in spawners {
+            spawner.join().expect("spawner thread panicked");
+        }
+        reopened
     }
 
     #[test]
