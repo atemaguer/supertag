@@ -714,7 +714,15 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
             "reporter":{"type":"host","adapter":ADAPTER,"adapter-args":["--report-environment"],"concurrency":1}
         }}),
     )?;
-    let path = std::env::var("PATH")?;
+    // The Codex host checks its CLI before it starts; this machine's own Codex is not used.
+    let bin = temp.path().join("bin");
+    fs::create_dir(&bin)?;
+    fs::write(
+        bin.join("codex"),
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo codex-cli 0.163.0; fi\n",
+    )?;
+    fs::set_permissions(bin.join("codex"), fs::Permissions::from_mode(0o700))?;
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH")?);
     let home_value = home.to_str().context("UTF-8 home")?;
     let mut supervisor = Process::spawn(
         &state,

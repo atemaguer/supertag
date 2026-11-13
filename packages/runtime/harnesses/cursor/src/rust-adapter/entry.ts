@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { readBootstrap } from "@supertag/worker-sdk/internal/rust-harness";
 import { runAdapter } from "./adapter.js";
+import { writeModelCheck } from "./model-check.js";
 
 const controller = new AbortController();
 const stop = () => controller.abort();
@@ -12,8 +13,19 @@ try {
       model: { type: "string" },
       "timeout-seconds": { type: "string" },
       "allow-unsandboxed-commands": { type: "boolean", default: false },
+      "check-models": { type: "boolean", default: false },
+      "check-model": { type: "string", multiple: true },
     },
   });
+  if (values["check-models"]) {
+    let output = "";
+    await writeModelCheck(values["check-model"] ?? [], process.env, (line) => {
+      output += line;
+    });
+    // The SDK may hold connections open; exit once the result is flushed.
+    await new Promise<void>((resolve) => process.stdout.write(output, () => resolve()));
+    process.exit(0);
+  }
   const seconds = Number(values["timeout-seconds"] ?? "3600");
   if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 86400)
     throw new Error("Invalid timeout");

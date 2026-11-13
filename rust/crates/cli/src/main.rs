@@ -4,6 +4,7 @@ mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
 mod harness;
+mod harness_checks;
 mod health;
 mod host_status;
 mod inbox;
@@ -235,6 +236,8 @@ enum Command {
     },
     /// Set up SuperTag on this machine for the git repository in the current directory.
     Init(init::InitArgs),
+    /// Check that a harness's Worker Host credentials work, and say how to sign in when not.
+    SignIn(harness_checks::SignInArgs),
     /// Start local services or configured Worker Hosts in the background and return when ready.
     ///
     /// With --foreground, supervise them in this terminal until interrupted. A service with
@@ -866,6 +869,7 @@ async fn run(command: Command) -> Result<()> {
             command,
         } => teams::run(connection, command).await?,
         Command::Init(args) => init::init(args).await?,
+        Command::SignIn(args) => harness_checks::sign_in(args).await?,
         Command::Down(args) => lifecycle::down(args).await?,
         Command::Logs(args) => lifecycle::logs(args).await?,
         Command::Ps(args) => lifecycle::ps(args).await?,

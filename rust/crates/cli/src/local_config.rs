@@ -216,6 +216,10 @@ pub fn load(file: Option<PathBuf>, state: &Path) -> Result<Option<Config>> {
     }
     Ok(Some(config))
 }
+/// The environment a configuration in `state` without an `env_file` would read: `state/.env`.
+pub fn default_environment(state: &Path) -> Result<Environment> {
+    environment::resolve(&mut serde_json::json!({}), state, |_| None)
+}
 /// The document after `env_file` loading and interpolation, without `x-` keys.
 fn resolved(
     bytes: &[u8],

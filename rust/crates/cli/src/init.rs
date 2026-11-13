@@ -1,5 +1,6 @@
 //! `supertag init`: the local setup wizard. It checks for a harness before asking or changing
-//! anything, asks a few questions (or takes the defaults with `--yes`), writes supertag.yaml
+//! anything, checks harness sign-in with the credentials the host will have, asks a few
+//! questions (or takes the defaults with `--yes`), writes supertag.yaml
 //! with a control-plane service that provisions the lead Tag and a host service named after
 //! this machine, and brings them up in the background.
 use std::{
@@ -12,8 +13,9 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use serde_json::{Value, json};
+use supertag_protocol::v2::HarnessKind;
 
-use crate::{lifecycle, local_config};
+use crate::{harness_checks, lifecycle, local_config};
 
 const DEFAULT_PORT: u16 = 3434;
 const PERMISSION_SET: &str = "local-tools";
@@ -37,6 +39,15 @@ enum Found {
 }
 
 impl Found {
+    fn check(self) -> harness_checks::Harness {
+        match self {
+            Self::ClaudeCode => harness_checks::Harness::ClaudeCode,
+            Self::Codex => harness_checks::Harness::Codex,
+            Self::Opencode => harness_checks::Harness::Opencode,
+            Self::Cursor => harness_checks::Harness::Cursor,
+        }
+    }
+
     fn harness(self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude-code",
@@ -74,6 +85,45 @@ fn on_path(program: &str) -> bool {
             })
         })
     })
+}
+
+/// Sign-in probes run with the credentials the host will have, each harness and model once.
+struct SignIns {
+    environment: local_config::Environment,
+    results: Vec<(Found, Option<String>, bool)>,
+}
+
+impl SignIns {
+    async fn check(&mut self, harness: Found, model: Option<&str>) -> Result<bool> {
+        if let Some((_, _, signed_in)) = self
+            .results
+            .iter()
+            .find(|(known, known_model, _)| *known == harness && known_model.as_deref() == model)
+        {
+            return Ok(*signed_in);
+        }
+        println!(
+            "Checking {} sign-in with the Worker Host credentials...",
+            harness.harness()
+        );
+        let variables =
+            harness_checks::worker_variables(harness.check(), model, &self.environment)?;
+        let signed_in = harness_checks::probe_sign_in(harness.check(), model, &variables)
+            .await
+            .signed_in;
+        self.results
+            .push((harness, model.map(str::to_owned), signed_in));
+        Ok(signed_in)
+    }
+}
+
+fn no_sign_in(harnesses: &[Found]) -> anyhow::Error {
+    let mut message = "No selected harness could complete the sign-in check. Check your sign-in, model access, and network connection, then run supertag init again.".to_owned();
+    for harness in harnesses {
+        message.push('\n');
+        message.push_str(harness_checks::instructions(harness.check()));
+    }
+    anyhow::anyhow!(message)
 }
 
 struct Repository {
@@ -257,13 +307,66 @@ pub async fn init(args: InitArgs) -> Result<()> {
             );
             return Ok(());
         }
+        let mut sign_ins = SignIns {
+            environment: config.environment.clone(),
+            results: Vec::new(),
+        };
+        let mut checked = Vec::new();
+        let mut runnable = false;
+        for host in config.hosts.iter().filter(|host| host.gateway.is_none()) {
+            for adapter in &host.harnesses {
+                let found = match adapter.harness_kind() {
+                    HarnessKind::ClaudeCode => Found::ClaudeCode,
+                    HarnessKind::Codex => Found::Codex,
+                    HarnessKind::Cursor => Found::Cursor,
+                    HarnessKind::Opencode => Found::Opencode,
+                    _ => continue,
+                };
+                let model = adapter.execution_profile()?.default_model;
+                let signed_in = sign_ins.check(found, model.as_deref()).await?;
+                report(found, signed_in);
+                runnable |= signed_in;
+                checked.push(found);
+            }
+        }
+        if !checked.is_empty() && !runnable {
+            return Err(no_sign_in(&checked));
+        }
         return up(&state, config).await;
     }
 
+    let mut sign_ins = SignIns {
+        environment: local_config::default_environment(&state)?,
+        results: Vec::new(),
+    };
+    let mut signed_in = Vec::new();
+    for harness in &installed {
+        if *harness == Found::Opencode {
+            println!("  opencode: sign-in not checked (choose a model)");
+            continue;
+        }
+        let result = sign_ins.check(*harness, None).await?;
+        report(*harness, result);
+        if result {
+            signed_in.push(*harness);
+        } else if prompter.is_some() {
+            println!("{}", harness_checks::instructions(harness.check()));
+        }
+    }
+    if prompter.is_none() && signed_in.is_empty() {
+        return Err(no_sign_in(&installed));
+    }
     if prompter.is_some() {
         println!("Press Enter to accept the default in [brackets].");
     }
-    let answers = answers(prompter.as_mut(), &installed, &repository)?;
+    let answers = answers(prompter.as_mut(), &installed, &signed_in, &repository)?;
+    let result = sign_ins
+        .check(answers.harness, answers.model.as_deref())
+        .await?;
+    report(answers.harness, result);
+    if !result {
+        return Err(no_sign_in(&[answers.harness]));
+    }
     let document = document(&answers, &repository);
     std::fs::DirBuilder::new()
         .recursive(true)
@@ -328,9 +431,22 @@ async fn up(state: &Path, config: local_config::Config) -> Result<()> {
     .await
 }
 
+fn report(harness: Found, signed_in: bool) {
+    println!(
+        "  {}: {}",
+        harness.harness(),
+        if signed_in {
+            "signed in"
+        } else {
+            "not signed in (the credential check did not succeed)"
+        }
+    );
+}
+
 fn answers(
     mut ask: Option<&mut Prompter>,
     installed: &[Found],
+    signed_in: &[Found],
     repository: &Repository,
 ) -> Result<Answers> {
     let free = (DEFAULT_PORT..=u16::MAX)
@@ -347,11 +463,15 @@ fn answers(
             }
         },
     };
-    // With --yes, prefer a harness that needs no model answer.
-    let default = installed
-        .iter()
+    // Prefer a signed-in harness; with --yes, only a signed-in one that needs no model answer.
+    let default = signed_in
+        .first()
+        .or_else(|| {
+            installed
+                .iter()
+                .find(|harness| **harness != Found::Opencode)
+        })
         .copied()
-        .find(|harness| *harness != Found::Opencode)
         .unwrap_or(installed[0]);
     let harness = match ask.as_deref_mut() {
         Some(prompter) if installed.len() > 1 => {

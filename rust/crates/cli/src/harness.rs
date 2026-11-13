@@ -509,6 +509,13 @@ impl AdapterOptions {
     }
 }
 
+/// The packaged Cursor bridge: its Node runtime and adapter entry.
+pub fn cursor_bridge() -> Result<(PathBuf, PathBuf)> {
+    node_adapter(NodeBridge::Cursor, None, None, || {
+        std::env::current_exe().context("locate installed SuperTag executable")
+    })
+}
+
 fn node_adapter(
     bridge: NodeBridge,
     entrypoint: Option<PathBuf>,
