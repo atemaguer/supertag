@@ -1,6 +1,6 @@
 //! Workspace data Volume catalog and Task admission.
 use crate::{
-    ControlPlane, Store, StoreError,
+    ControlPlane, HostAuthority, Store, StoreError,
     store::{Result, invalid},
 };
 use prost::Message;
@@ -176,11 +176,23 @@ pub(crate) async fn current_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Re
     Ok(true)
 }
 
+fn operator(principal: &str) -> Result<()> {
+    principal
+        .strip_prefix("operator:")
+        .filter(|id| !id.is_empty())
+        .map(|_| ())
+        .ok_or(StoreError::PermissionDenied)
+}
+
 impl Store {
+    /// Register or retarget an operator-owned file Volume for Workspace data.
+    /// A new source gets a new revision, so pins on queued work stop matching.
     pub async fn put_workspace_volume(
         &self,
+        principal: &str,
         input: &PutWorkspaceVolumeRequest,
     ) -> Result<WorkspaceVolume> {
+        operator(principal)?;
         if !volume_id(&input.volume_id) {
             return Err(invalid("invalid Workspace Volume ID"));
         }
@@ -205,7 +217,6 @@ impl Store {
         if let Some(old) = old.filter(|old| old.source == input.source) {
             return Ok(old);
         }
-        // Keep historical pins meaningful and prevent retargeting queued work.
         let revision = revision
             .checked_add(1)
             .and_then(|n| i64::try_from(n).ok())
@@ -219,6 +230,59 @@ impl Store {
             revision: revision as u64,
         })
     }
+
+    pub async fn get_workspace_volume(
+        &self,
+        principal: &str,
+        volume_id: &str,
+    ) -> Result<WorkspaceVolume> {
+        operator(principal)?;
+        let mut tx = self.pool.begin().await?;
+        volume_in(&mut tx, volume_id).await
+    }
+
+    /// Disclose file artifact Volume paths to the Worker Host that owns a
+    /// running Attempt with current Workspace mount pins, for alias rejection.
+    pub async fn workspace_mount_preflight(
+        &self,
+        host: &HostAuthority,
+        request: &InspectAttemptRequest,
+    ) -> Result<WorkspaceMountPreflight> {
+        let mut tx = self.pool.begin().await?;
+        let row = crate::store::owned(
+            &mut tx,
+            host,
+            &request.task_id,
+            &request.attempt_id,
+            &request.lease_token,
+        )
+        .await?;
+        crate::artifact_captures::running(&row, self.execution_now_ms())?;
+        let task = crate::store::task_row(&row)?;
+        if task
+            .workspace
+            .as_ref()
+            .is_none_or(|workspace| workspace.mounts.is_empty())
+            || !current_in(&mut tx, &task).await?
+        {
+            return Err(StoreError::FailedPrecondition(
+                "Task has no current Workspace mount pins".into(),
+            ));
+        }
+        let sources: Vec<String> = sqlx::query_scalar(
+            "SELECT source FROM supertag_v2_artifact_volumes WHERE deleted=0 AND source LIKE 'file:%' ORDER BY volume_id LIMIT 257",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        if sources.len() > 256 || sources.iter().map(String::len).sum::<usize>() > 512 * 1024 {
+            return Err(StoreError::FailedPrecondition(
+                "too many artifact Volume protection paths".into(),
+            ));
+        }
+        Ok(WorkspaceMountPreflight {
+            protected_file_sources: sources,
+        })
+    }
 }
 
 #[tonic::async_trait]
@@ -227,9 +291,11 @@ impl workspace_volumes_server::WorkspaceVolumes for ControlPlane {
         &self,
         request: Request<PutWorkspaceVolumeRequest>,
     ) -> std::result::Result<Response<WorkspaceVolume>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.principal(&request, "operator:")?;
         Ok(Response::new(
-            self.store.put_workspace_volume(request.get_ref()).await?,
+            self.store
+                .put_workspace_volume(&principal, request.get_ref())
+                .await?,
         ))
     }
 
@@ -237,10 +303,11 @@ impl workspace_volumes_server::WorkspaceVolumes for ControlPlane {
         &self,
         request: Request<GetWorkspaceVolumeRequest>,
     ) -> std::result::Result<Response<WorkspaceVolume>, Status> {
-        self.principal(&request, "operator:")?;
-        let mut tx = self.store.pool.begin().await.map_err(StoreError::from)?;
+        let principal = self.principal(&request, "operator:")?;
         Ok(Response::new(
-            volume_in(&mut tx, &request.get_ref().volume_id).await?,
+            self.store
+                .get_workspace_volume(&principal, &request.get_ref().volume_id)
+                .await?,
         ))
     }
 }
@@ -252,38 +319,10 @@ impl attempt_workspace_mounts_server::AttemptWorkspaceMounts for ControlPlane {
         request: Request<InspectAttemptRequest>,
     ) -> std::result::Result<Response<WorkspaceMountPreflight>, Status> {
         let host = self.host_authority(&request)?;
-        let request = request.get_ref();
-        let mut tx = self.store.pool.begin().await.map_err(StoreError::from)?;
-        let row = crate::store::owned(
-            &mut tx,
-            &host,
-            &request.task_id,
-            &request.attempt_id,
-            &request.lease_token,
-        )
-        .await?;
-        crate::artifact_captures::running(&row, self.store.execution_now_ms())?;
-        let task = crate::store::task_row(&row)?;
-        if task
-            .workspace
-            .as_ref()
-            .is_none_or(|workspace| workspace.mounts.is_empty())
-            || !current_in(&mut tx, &task).await?
-        {
-            return Err(Status::failed_precondition(
-                "Task has no current Workspace mount pins",
-            ));
-        }
-        let sources: Vec<String> = sqlx::query_scalar(
-            "SELECT source FROM supertag_v2_artifact_volumes WHERE deleted=0 AND source LIKE 'file:%' ORDER BY volume_id LIMIT 257",
-        ).fetch_all(&mut *tx).await.map_err(StoreError::from)?;
-        if sources.len() > 256 || sources.iter().map(String::len).sum::<usize>() > 512 * 1024 {
-            return Err(Status::resource_exhausted(
-                "too many artifact Volume protection paths",
-            ));
-        }
-        Ok(Response::new(WorkspaceMountPreflight {
-            protected_file_sources: sources,
-        }))
+        Ok(Response::new(
+            self.store
+                .workspace_mount_preflight(&host, request.get_ref())
+                .await?,
+        ))
     }
 }
