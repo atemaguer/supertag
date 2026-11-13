@@ -767,17 +767,19 @@ impl<'a> Catalog<'a> {
             );
             self.require_tag(declarations, sender).await?;
         }
-        if let Some(runs_on) = spec.runs_on.take() {
-            let mut runs_on: Vec<String> = runs_on
+        let runs_on = spec.runs_on.take().map(|labels| {
+            let mut labels: Vec<String> = labels
                 .iter()
                 .map(|label| label.trim().to_ascii_lowercase())
                 .collect();
-            runs_on.sort_unstable();
-            runs_on.dedup();
-            if prior
-                .as_ref()
-                .map_or(!runs_on.is_empty(), |prior| prior.runs_on != runs_on)
-            {
+            labels.sort_unstable();
+            labels.dedup();
+            labels
+        });
+        // Provisioning only creates Tags, so it sets their labels outright; an apply merges its
+        // labels by value with those other managers and the CLI added.
+        if let Some(runs_on) = runs_on.clone().filter(|_| self.create_only) {
+            if !runs_on.is_empty() {
                 followups.push(Change {
                     key: None,
                     label: format!("Tag/{name} runsOn"),
@@ -796,6 +798,9 @@ impl<'a> Catalog<'a> {
             role_ids: role_ids.keys().cloned().collect(),
             mailbox_senders: spec.accepts_messages_from,
             preview: true,
+            runs_on: runs_on
+                .filter(|_| !self.create_only)
+                .map(|labels| TagRunsOnLabels { labels }),
         };
         if self.create_only {
             return Ok(Some((
@@ -826,6 +831,13 @@ impl<'a> Catalog<'a> {
                     .chain(reconciliation.mailbox_senders.iter().map(|sender| {
                         format!("grant Mailbox access from Tag/{sender} to Tag/{name}")
                     }))
+                    .chain(
+                        reconciliation
+                            .runs_on
+                            .iter()
+                            .flat_map(|runs_on| &runs_on.labels)
+                            .map(|label| format!("add runsOn label {label} to Tag/{name}")),
+                    )
                     .collect()
             };
         if !details.is_empty() {
@@ -1307,6 +1319,17 @@ fn relationship_preview(
             format!("grant Mailbox access from Tag/{sender} to Tag/{tag}")
         } else {
             format!("revoke Mailbox access from Tag/{sender} to Tag/{tag}")
+        };
+    }
+    if let Some(label) = change
+        .path
+        .strip_prefix("spec.runsOn[")
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        return if change.present {
+            format!("add runsOn label {label} to Tag/{tag}")
+        } else {
+            format!("remove runsOn label {label} from Tag/{tag}")
         };
     }
     format!("reconcile Tag/{tag} {}", change.path)

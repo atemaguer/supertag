@@ -19,6 +19,7 @@ const MAX_RELATIONSHIPS: usize = 256;
 enum Kind {
     Role,
     Mailbox,
+    RunsOn,
 }
 
 impl Kind {
@@ -26,8 +27,28 @@ impl Kind {
         match self {
             Self::Role => "roles",
             Self::Mailbox => "acceptsMessagesFrom",
+            Self::RunsOn => "runsOn",
         }
     }
+}
+
+/// Drops manifest ownership of runsOn labels an imperative change removed.
+pub(crate) async fn imperative_runs_on(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    labels: &[String],
+) -> Result<()> {
+    let owned: Vec<String> = sqlx::query_scalar(
+        "SELECT related_id FROM supertag_v2_manifest_relationships WHERE tag_id=$1 AND kind=$2",
+    )
+    .bind(tag)
+    .bind(Kind::RunsOn.field())
+    .fetch_all(&mut **tx)
+    .await?;
+    for label in owned.iter().filter(|label| !labels.contains(label)) {
+        imperative_change(tx, tag, Kind::RunsOn.field(), label).await?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn imperative_change(
@@ -91,6 +112,21 @@ async fn current(
                 }),
                 present: assignment
                     .is_some_and(|value| value.status() == RoleAssignmentStatus::Active),
+            })
+        }
+        Kind::RunsOn => {
+            let present = crate::placement::runs_on_in(tx, tag)
+                .await?
+                .iter()
+                .any(|label| label == related);
+            Ok(Relationship {
+                // A label has no identity beyond its value.
+                version: if present {
+                    "label".into()
+                } else {
+                    String::new()
+                },
+                present,
             })
         }
         Kind::Mailbox => {
@@ -159,6 +195,20 @@ async fn apply(
             .into();
             save_assignment(tx, &assignment).await?;
         }
+        Kind::RunsOn => {
+            let mut labels = crate::placement::runs_on_in(tx, tag).await?;
+            labels.retain(|label| label != related);
+            if present {
+                labels.push(related.into());
+            }
+            let labels =
+                crate::placement::parse_labels(&labels, crate::placement::LabelField::RunsOn)?;
+            sqlx::query("UPDATE supertag_v2_tags SET runs_on=$1 WHERE tag_id=$2")
+                .bind(serde_json::to_string(&labels)?)
+                .bind(tag)
+                .execute(&mut **tx)
+                .await?;
+        }
         Kind::Mailbox if present => {
             sqlx::query("INSERT INTO supertag_v2_mailbox_grants (sender_tag_id,recipient_tag_id,granted_by,granted_at_ms) VALUES ($1,$2,$3,$4)")
                 .bind(related).bind(tag).bind(principal).bind(now).execute(&mut **tx).await?;
@@ -199,7 +249,17 @@ impl Store {
         if input.role_ids.len() + input.mailbox_senders.len() > MAX_RELATIONSHIPS {
             return Err(invalid("too many manifest Tag relationships"));
         }
+        let runs_on = input
+            .runs_on
+            .as_ref()
+            .map(|labels| {
+                crate::placement::parse_labels(&labels.labels, crate::placement::LabelField::RunsOn)
+            })
+            .transpose()?;
         let mut desired = BTreeSet::new();
+        for label in runs_on.iter().flatten() {
+            desired.insert((Kind::RunsOn, label.clone()));
+        }
         for (kind, values) in [
             (Kind::Role, &input.role_ids),
             (Kind::Mailbox, &input.mailbox_senders),
@@ -232,6 +292,7 @@ impl Store {
                         }
                     }
                     Kind::Mailbox => tags::require_active(tx, related).await?,
+                    Kind::RunsOn => {}
                 }
             }
         }
@@ -247,6 +308,7 @@ impl Store {
             let kind = match row.try_get::<String, _>("kind")?.as_str() {
                 "roles" => Kind::Role,
                 "acceptsMessagesFrom" => Kind::Mailbox,
+                "runsOn" => Kind::RunsOn,
                 _ => {
                     return Err(StoreError::FailedPrecondition(
                         "stored relationship kind is invalid".into(),
@@ -266,7 +328,10 @@ impl Store {
             .chain(
                 stored
                     .iter()
-                    .filter(|(_, value)| value.manager == owner)
+                    // Without declared runsOn labels, this manager's labels stay as they are.
+                    .filter(|((kind, _), value)| {
+                        value.manager == owner && (*kind != Kind::RunsOn || runs_on.is_some())
+                    })
                     .map(|(key, _)| key),
             )
             .cloned()

@@ -128,6 +128,13 @@ message ReconcileTagRelationshipsRequest {
   repeated string role_ids = 3;
   repeated string mailbox_senders = 4;
   bool preview = 5;
+  // The Tag's runsOn labels this manager declares, merged by value: a label another manager or
+  // the CLI added stays. Unset leaves every label alone.
+  optional TagRunsOnLabels runs_on = 5500;
+}
+
+message TagRunsOnLabels {
+  repeated string labels = 1;
 }
 
 message ManifestRelationshipChange {

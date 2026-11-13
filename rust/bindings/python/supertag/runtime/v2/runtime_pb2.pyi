@@ -465,18 +465,26 @@ class ProvisionTagsResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class ReconcileTagRelationshipsRequest(_message.Message):
-    __slots__ = ("tag_id", "manager", "role_ids", "mailbox_senders", "preview")
+    __slots__ = ("tag_id", "manager", "role_ids", "mailbox_senders", "preview", "runs_on")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     MANAGER_FIELD_NUMBER: _ClassVar[int]
     ROLE_IDS_FIELD_NUMBER: _ClassVar[int]
     MAILBOX_SENDERS_FIELD_NUMBER: _ClassVar[int]
     PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    RUNS_ON_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     manager: str
     role_ids: _containers.RepeatedScalarFieldContainer[str]
     mailbox_senders: _containers.RepeatedScalarFieldContainer[str]
     preview: bool
-    def __init__(self, tag_id: _Optional[str] = ..., manager: _Optional[str] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ..., preview: _Optional[bool] = ...) -> None: ...
+    runs_on: TagRunsOnLabels
+    def __init__(self, tag_id: _Optional[str] = ..., manager: _Optional[str] = ..., role_ids: _Optional[_Iterable[str]] = ..., mailbox_senders: _Optional[_Iterable[str]] = ..., preview: _Optional[bool] = ..., runs_on: _Optional[_Union[TagRunsOnLabels, _Mapping]] = ...) -> None: ...
+
+class TagRunsOnLabels(_message.Message):
+    __slots__ = ("labels",)
+    LABELS_FIELD_NUMBER: _ClassVar[int]
+    labels: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, labels: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ManifestRelationshipChange(_message.Message):
     __slots__ = ("path", "present", "ownership_only")

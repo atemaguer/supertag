@@ -142,6 +142,38 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         json(op(&["get", "tag", "trainer"], &[])).await?["runs_on"],
         json!(["gpu"])
     );
+    // Apply merges runsOn by value: a label the CLI added survives re-applying the manifest,
+    // and a manifest that drops its label removes only that one.
+    json(op(&["placement"], &["runs-on", "trainer", "gpu", "linux"])).await?;
+    let reapplied = output(op(&["apply", "-f", manifest.to_str().unwrap()], &[])).await?;
+    ensure!(reapplied.status.success(), "re-apply failed");
+    assert_eq!(
+        json(op(&["get", "tag", "trainer"], &[])).await?["runs_on"],
+        json!(["gpu", "linux"])
+    );
+    let dropped = directory.join("trainer-without-gpu.yaml");
+    std::fs::write(
+        &dropped,
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: trainer}\nspec: {instructions: \"Train the model\", runsOn: []}\n",
+    )?;
+    let preview = output(op(&["diff", "-f", dropped.to_str().unwrap()], &[])).await?;
+    let preview = String::from_utf8_lossy(&preview.stdout);
+    ensure!(
+        preview.contains("remove runsOn label gpu from Tag/trainer") && !preview.contains("linux"),
+        "unexpected runsOn preview: {preview}"
+    );
+    ensure!(
+        output(op(&["apply", "-f", dropped.to_str().unwrap()], &[]))
+            .await?
+            .status
+            .success(),
+        "apply without gpu failed"
+    );
+    assert_eq!(
+        json(op(&["get", "tag", "trainer"], &[])).await?["runs_on"],
+        json!(["linux"])
+    );
+    json(op(&["placement"], &["runs-on", "trainer", "gpu"])).await?;
     let researcher = json(op(&["placement"], &["runs-on", "researcher", "gpu", "TPU"])).await?;
     assert_eq!(researcher["runs_on"], json!(["gpu", "tpu"]));
 
