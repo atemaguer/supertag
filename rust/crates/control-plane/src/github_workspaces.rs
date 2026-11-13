@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub(crate) mod refs;
+pub(crate) mod selection;
 
 const RESOURCE: &str = "github-workspace";
 

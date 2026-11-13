@@ -613,3 +613,62 @@ async fn stopped_checkout_discard_reopens_without_source_and_preserves_receipts_
         Some(receipt)
     );
 }
+
+/// TypeScript parity: `tests/worker-host-changed-paths.test.ts`.
+#[tokio::test]
+async fn changed_paths_cover_edits_untracked_files_renames_and_commits_but_not_git_metadata() {
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let checkout = prepare(&workspace, "task", "attempt", None).await;
+    let cancel = CancellationToken::new();
+    let keep = |path: &str| supertag_protocol_path(path);
+    assert_eq!(
+        supertag_workspaces::changed_paths(&checkout, keep, 500, &cancel)
+            .await
+            .unwrap(),
+        (vec![], false)
+    );
+    fs::write(checkout.path.join("README.md"), "changed\n").unwrap();
+    fs::write(checkout.path.join("new.txt"), "new\n").unwrap();
+    fs::rename(
+        checkout.path.join(".gitignore"),
+        checkout.path.join("renamed-ignore"),
+    )
+    .unwrap();
+    git(&checkout.path, &["add", "-A"]);
+    fs::create_dir_all(checkout.path.join("nested/.git")).unwrap();
+    fs::write(checkout.path.join("nested/.git/metadata"), "ignored\n").unwrap();
+    assert_eq!(
+        supertag_workspaces::changed_paths(&checkout, keep, 500, &cancel)
+            .await
+            .unwrap(),
+        (
+            vec![
+                ".gitignore".to_owned(),
+                "README.md".into(),
+                "new.txt".into(),
+                "renamed-ignore".into()
+            ],
+            false
+        )
+    );
+    // Committed changes since the start commit count, and more than the cap are truncated.
+    git(&checkout.path, &["commit", "--quiet", "-m", "change"]);
+    for index in 0..501 {
+        fs::write(checkout.path.join(format!("file-{index:03}.txt")), "x").unwrap();
+    }
+    let (paths, truncated) = supertag_workspaces::changed_paths(&checkout, keep, 500, &cancel)
+        .await
+        .unwrap();
+    assert!(truncated);
+    assert_eq!(paths.len(), 500);
+    assert_eq!(paths[0], ".gitignore");
+    assert_eq!(paths.last().unwrap(), "file-497.txt");
+}
+
+fn supertag_protocol_path(path: &str) -> bool {
+    !path.is_empty()
+        && path
+            .split('/')
+            .all(|part| !matches!(part, "" | "." | ".." | ".git"))
+}

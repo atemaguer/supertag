@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// A Worker Host reports the paths a running Attempt's local Workspace checkout has changed since
+// the Attempt's start commit. The Control Plane compares reports of running Attempts of one
+// Objective in one Workspace and tells the Objective's conversation about shared paths once.
+service AttemptChangedPaths {
+  rpc Report(ReportChangedPathsRequest) returns (ReportChangedPathsResponse);
+}
+
+message ReportChangedPathsRequest {
+  InspectAttemptRequest attempt = 1;
+  // Sorted, unique, Workspace-relative paths; at most 500.
+  repeated string paths = 2;
+  // More paths changed than were reported. A truncated report is never compared.
+  bool truncated = 3;
+}
+
+message ReportChangedPathsResponse {
+  // Running Attempts of the same Objective and Workspace whose reported paths overlap.
+  repeated string overlapping_attempt_ids = 1;
+  // False when the Attempt has no Objective or no Workspace. Its host stops reporting.
+  bool compared = 2;
+}

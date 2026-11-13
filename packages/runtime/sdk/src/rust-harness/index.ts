@@ -11,6 +11,7 @@ export {
 } from "./coordination.js";
 export { startCoordinationHttp } from "./coordination-http.js";
 export * from "./gen/supertag/runtime/v2/artifact_pb.js";
+export * from "./gen/supertag/runtime/v2/effects_pb.js";
 export * from "./gen/supertag/runtime/v2/mcp_pb.js";
 export * from "./gen/supertag/runtime/v2/policy_pb.js";
 export * from "./gen/supertag/runtime/v2/runtime_pb.js";

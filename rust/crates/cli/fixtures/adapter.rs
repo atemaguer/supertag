@@ -1,6 +1,7 @@
 mod artifact_acquisition;
 mod budget;
 mod commit_reviews;
+mod coordination;
 
 use std::{io::Read, time::Duration};
 
@@ -589,6 +590,10 @@ async fn main() -> Result<()> {
             );
             "Region us-east-1 is verified.".into()
         };
+    }
+    coordination::start_parallel(&bootstrap, &task).await?;
+    if let Some(effects) = coordination::effects(&bootstrap, &task).await? {
+        result = effects;
     }
     if std::env::args().any(|arg| arg == "--artifact-acquisition-fixture") {
         result = artifact_acquisition::exercise(&bootstrap, &run).await?;

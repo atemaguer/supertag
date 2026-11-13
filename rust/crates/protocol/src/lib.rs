@@ -4,6 +4,7 @@ use subtle::ConstantTimeEq;
 use tonic::{Request, Status, metadata::MetadataValue};
 
 pub mod artifacts;
+pub mod changed_paths;
 mod crash_points;
 #[cfg(feature = "crash-points")]
 pub use crash_points::crash_now;

@@ -416,6 +416,65 @@ impl Repository {
             .await
     }
 
+    /// Paths changed since the checkout's start commit: committed, staged, unstaged, untracked,
+    /// and both sides of a rename. TypeScript parity: `scanChangedPaths` in
+    /// `apps/cli/src/worker-changed-paths.ts`. `keep` filters each path before counting.
+    pub(crate) async fn changed_paths(
+        checkout: &crate::Checkout,
+        keep: impl Fn(&str) -> bool,
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        let repository = Self::output_repository(&checkout.path, checkout.start_commit.len())?;
+        validate_oid(&checkout.start_commit)?;
+        let diff = repository
+            .command(
+                &[
+                    "diff",
+                    "--name-status",
+                    "-z",
+                    "-M",
+                    "--no-ext-diff",
+                    &checkout.start_commit,
+                    "--",
+                ],
+                &[],
+                &[],
+                cancel,
+            )
+            .await?;
+        let status = repository
+            .command(
+                &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                &[],
+                &[],
+                cancel,
+            )
+            .await?;
+        let mut paths = BTreeSet::new();
+        let mut add = |field: &[u8]| {
+            if let Ok(path) = std::str::from_utf8(field)
+                && keep(path)
+            {
+                paths.insert(path.to_owned());
+            }
+        };
+        let mut fields = diff.split(|byte| *byte == 0);
+        while let Some(status) = fields.next().filter(|field| !field.is_empty()) {
+            add(fields.next().unwrap_or_default());
+            if matches!(status.first(), Some(b'R' | b'C')) {
+                add(fields.next().unwrap_or_default());
+            }
+        }
+        let mut fields = status.split(|byte| *byte == 0);
+        while let Some(entry) = fields.next().filter(|field| field.len() > 3) {
+            add(&entry[3..]);
+            if entry[..2].iter().any(|code| matches!(code, b'R' | b'C')) {
+                add(fields.next().unwrap_or_default());
+            }
+        }
+        Ok(paths)
+    }
+
     pub(crate) async fn prepared_tracked_outputs(
         checkout: &crate::Checkout,
         cancel: &CancellationToken,

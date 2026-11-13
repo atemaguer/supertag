@@ -10712,8 +10712,11 @@ type Task struct {
 	// Optional output requirements frozen when the Task is accepted.
 	OutputPolicy   *TaskOutputPolicy            `protobuf:"bytes,20,opt,name=output_policy,json=outputPolicy,proto3" json:"output_policy,omitempty"`
 	InputArtifacts []*AcceptedTaskArtifactInput `protobuf:"bytes,21,rep,name=input_artifacts,json=inputArtifacts,proto3" json:"input_artifacts,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// How a surface message selected this Task's GitHub Workspace: request, origin or default.
+	// Absent when the Tag's configured Workspace (or none) was used.
+	WorkspaceSelection *string `protobuf:"bytes,3500,opt,name=workspace_selection,json=workspaceSelection,proto3,oneof" json:"workspace_selection,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -10891,6 +10894,13 @@ func (x *Task) GetInputArtifacts() []*AcceptedTaskArtifactInput {
 		return x.InputArtifacts
 	}
 	return nil
+}
+
+func (x *Task) GetWorkspaceSelection() string {
+	if x != nil && x.WorkspaceSelection != nil {
+		return *x.WorkspaceSelection
+	}
+	return ""
 }
 
 type TaskArtifactInputSelection struct {
@@ -20812,7 +20822,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x11max_reported_cost\x18\x02 \x01(\v2&.supertag.runtime.v2.ReportedCostLimitR\x0fmaxReportedCost\x12/\n" +
 	"\x11max_native_agents\x18\x03 \x01(\x04H\x01R\x0fmaxNativeAgents\x88\x01\x01B\x16\n" +
 	"\x14_max_reported_tokensB\x14\n" +
-	"\x12_max_native_agents\"\xe4\t\n" +
+	"\x12_max_native_agents\"\xb3\n" +
+	"\n" +
 	"\x04Task\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
@@ -20837,9 +20848,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x11attempt_execution\x18\x12 \x01(\v2..supertag.runtime.v2.AttemptExecutionSelectionR\x10attemptExecution\x12D\n" +
 	"\tartifacts\x18\x13 \x03(\v2&.supertag.runtime.v2.ArtifactSelectionR\tartifacts\x12J\n" +
 	"\routput_policy\x18\x14 \x01(\v2%.supertag.runtime.v2.TaskOutputPolicyR\foutputPolicy\x12W\n" +
-	"\x0finput_artifacts\x18\x15 \x03(\v2..supertag.runtime.v2.AcceptedTaskArtifactInputR\x0einputArtifactsB\t\n" +
+	"\x0finput_artifacts\x18\x15 \x03(\v2..supertag.runtime.v2.AcceptedTaskArtifactInputR\x0einputArtifacts\x125\n" +
+	"\x13workspace_selection\x18\xac\x1b \x01(\tH\x02R\x12workspaceSelection\x88\x01\x01B\t\n" +
 	"\a_resultB\r\n" +
-	"\v_attempt_id\"\xd7\x01\n" +
+	"\v_attempt_idB\x16\n" +
+	"\x14_workspace_selection\"\xd7\x01\n" +
 	"\x1aTaskArtifactInputSelection\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
 	"artifactId\x12\x14\n" +

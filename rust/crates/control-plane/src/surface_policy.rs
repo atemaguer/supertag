@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     ControlPlane, StoreError, objectives, policy,
-    store::{Result, insert_task_with_surface, invalid, name},
+    store::{Result, insert_surface_message_task, invalid, name},
 };
 
 use surface_account_identity::Provider as Identity;
@@ -190,7 +190,7 @@ pub(crate) async fn admit_connector_task_in(
         return Ok(None);
     };
     objectives::objective_admission_in(tx, verified.tag_id, session_id, now_ms).await?;
-    let mut task = insert_task_with_surface(
+    let mut task = insert_surface_message_task(
         tx,
         order,
         verified.tag_id,
