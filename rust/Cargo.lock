@@ -2670,10 +2670,12 @@ dependencies = [
  "supertag-gateway",
  "supertag-protocol",
  "supertag-shared-execution",
+ "supertag-transport",
  "supertag-worker-host",
  "supertag-workspaces",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
@@ -2819,6 +2821,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "supertag-transport"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "http 1.5.0",
+ "hyper-util",
+ "rustls",
+ "rustls-native-certs",
+ "supertag-protocol",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tonic",
+ "tower-service",
+ "url",
+]
+
+[[package]]
 name = "supertag-worker-host"
 version = "0.1.0"
 dependencies = [
@@ -2833,6 +2857,7 @@ dependencies = [
  "sha2 0.10.9",
  "supertag-protocol",
  "supertag-shared-execution",
+ "supertag-transport",
  "supertag-workspaces",
  "tempfile",
  "tokio",

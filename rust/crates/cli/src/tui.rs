@@ -74,7 +74,12 @@ pub async fn launch(
         return Ok(());
     };
     let endpoint = target.endpoint(Duration::from_secs(15)).await?;
-    let tls = endpoint.uri().scheme_str() == Some("https");
+    // The terminal UI dials native gRPC itself.
+    ensure!(
+        !endpoint.tunnelled(),
+        "the terminal UI connects only to https:// or loopback http:// Gateway URLs"
+    );
+    let tls = endpoint.url().starts_with("https:");
     let saved = target.tls.clone();
     let certificate = |name: &str| {
         if !tls {
