@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../proto/supertag/runtime/v2/access.proto",
         "../../proto/supertag/runtime/v2/placement.proto",
         "../../proto/supertag/runtime/v2/reply_progress.proto",
+        "../../proto/supertag/runtime/v2/spend.proto",
     ];
     for file in files {
         println!("cargo:rerun-if-changed={file}");

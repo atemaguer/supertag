@@ -370,7 +370,7 @@ fn commit_review_output(review: CommitReview) -> Value {
     })
 }
 
-fn output(objective: Objective) -> Value {
+pub(crate) fn output(objective: Objective) -> Value {
     json!({
         "objective_id": objective.objective_id,
         "owner_tag_id": objective.owner_tag_id,

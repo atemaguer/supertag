@@ -279,7 +279,7 @@ fn validate_native(usage: &NativeTokenUsage) -> Result<()> {
     }
     safe_count(effective_total(usage)?)
 }
-fn effective_total(usage: &NativeTokenUsage) -> Result<u64> {
+pub(crate) fn effective_total(usage: &NativeTokenUsage) -> Result<u64> {
     usage.total_tokens.map(Ok).unwrap_or_else(|| {
         usage
             .input_tokens
@@ -325,7 +325,7 @@ fn receipt_row(row: &AnyRow) -> Result<HarnessUsageRequest> {
         estimated: row.try_get::<i64, _>("estimated")? == 1,
     })
 }
-fn usage_row(row: &AnyRow) -> Result<NativeTokenUsage> {
+pub(crate) fn usage_row(row: &AnyRow) -> Result<NativeTokenUsage> {
     Ok(NativeTokenUsage {
         input_tokens: row.try_get::<i64, _>("input_tokens")? as u64,
         cached_input_tokens: row.try_get::<i64, _>("cached_input_tokens")? as u64,

@@ -84,7 +84,7 @@ pub fn mappings(values: Vec<String>, s3: Option<PathBuf>) -> Result<ArtifactVolu
         None => Ok(mappings),
     }
 }
-fn volume(v: &ArtifactVolume) -> Value {
+pub(crate) fn volume(v: &ArtifactVolume) -> Value {
     json!({"volume_id":v.volume_id,"source":v.source,"revision":v.revision})
 }
 fn copy(v: &ArtifactVolumeCopy) -> Value {
@@ -95,12 +95,13 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
         command,
         VolumeCommand::Copy { .. } | VolumeCommand::Download { .. }
     ) {
-        let (uri, token) = crate::operator_target(connection)?;
-        let channel = crate::network::endpoint_with_timeout(uri, false, VOLUME_TRANSFER_TIMEOUT)
+        let target = crate::resolve_target(connection)?;
+        let channel = target
+            .endpoint(VOLUME_TRANSFER_TIMEOUT)
             .await?
             .connect()
             .await?;
-        (channel, token)
+        (channel, target.token)
     } else {
         connect_operator(connection).await?
     };

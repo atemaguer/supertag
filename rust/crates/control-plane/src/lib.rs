@@ -30,6 +30,7 @@ mod policy;
 mod replies;
 pub mod reply_progress;
 mod review_artifacts;
+mod spend;
 mod store;
 mod surface_objectives;
 mod surface_policy;

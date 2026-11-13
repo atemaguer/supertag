@@ -452,7 +452,7 @@ pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
     Ok(())
 }
 
-fn permission_json(set: PermissionSet) -> Value {
+pub(crate) fn permission_json(set: PermissionSet) -> Value {
     let permissions = set.permissions.into_iter().map(|grant| json!({
         "permission_id":grant.permission_id, "target":grant.target().as_str_name().trim_start_matches("POLICY_PERMISSION_TARGET_").to_ascii_lowercase(),
         "action":grant.action, "surface_account_id":grant.surface_account_id, "scope":grant.scope,
@@ -461,7 +461,7 @@ fn permission_json(set: PermissionSet) -> Value {
     json!({ "set_id":set.set_id, "name":set.name, "revision":set.revision, "approvers":set.approvers, "permissions":permissions })
 }
 
-fn context_json(set: ContextSet) -> Result<Value> {
+pub(crate) fn context_json(set: ContextSet) -> Result<Value> {
     let items = set.items.into_iter().map(|item| -> Result<Value> {
         Ok(json!({
             "item_id":item.item_id, "item_key":item.item_key, "type":item.r#type,
@@ -471,7 +471,7 @@ fn context_json(set: ContextSet) -> Result<Value> {
     Ok(json!({ "set_id":set.set_id, "name":set.name, "revision":set.revision, "items":items }))
 }
 
-fn role_json(role: Role) -> Value {
+pub(crate) fn role_json(role: Role) -> Value {
     json!({
         "role_id":role.role_id, "name":role.name, "purpose":role.purpose, "instructions":role.instructions,
         "permission_set_ids":role.permission_set_ids, "context_set_ids":role.context_set_ids,

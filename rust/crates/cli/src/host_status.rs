@@ -59,7 +59,7 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
     Ok(())
 }
 
-fn status_json(host: WorkerHostStatus) -> Value {
+pub(crate) fn status_json(host: WorkerHostStatus) -> Value {
     let phase = host
         .phase()
         .as_str_name()

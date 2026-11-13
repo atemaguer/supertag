@@ -17,10 +17,12 @@ mod manifests;
 mod network;
 mod node_bridges;
 mod objectives;
+mod observe;
 mod operator_access;
 mod output_policy;
 mod placement;
 mod policy;
+mod profiles;
 mod replies;
 mod service_manager;
 mod status;
@@ -90,17 +92,22 @@ use uuid::Uuid;
 #[derive(Parser)]
 #[command(name = "supertag", version)]
 struct Cli {
+    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app,
+    /// for the operator command that follows.
+    #[arg(long, value_name = "URL|NAME")]
+    gateway: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
+/// The Gateway selected before the command name, if any.
+static ROOT_GATEWAY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 #[derive(Args)]
 struct Connection {
-    #[arg(
-        long,
-        conflicts_with = "state_directory",
-        required_unless_present = "state_directory"
-    )]
+    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app.
+    /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
+    #[arg(long, value_name = "URL|NAME", conflicts_with = "state_directory")]
     gateway: Option<String>,
     #[arg(long)]
     state_directory: Option<PathBuf>,
@@ -664,6 +671,27 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: inputs::InputCommand,
     },
+    /// Report recorded spend by Objective, Tag, or day.
+    Spend {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: observe::SpendArgs,
+    },
+    /// Describe one resource in readable text.
+    Describe {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: observe::DescribeArgs,
+    },
+    /// Stream change notices, reconnecting from the last resume token.
+    Watch {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: observe::WatchArgs,
+    },
     /// Manage an Objective and inspect its owner's work.
     Objective {
         #[command(flatten)]
@@ -674,7 +702,8 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
 }
 
 fn main() -> Result<()> {
-    let command = match Cli::parse().command {
+    let cli = Cli::parse();
+    let command = match cli.command {
         Some(command) => command,
         None => Command::Tui {
             gateway: None,
@@ -683,6 +712,23 @@ fn main() -> Result<()> {
             workspace: None,
         },
     };
+    if let Some(gateway) = cli.gateway {
+        ensure!(
+            !matches!(
+                command,
+                Command::Health(_)
+                    | Command::Up { .. }
+                    | Command::ControlPlane { .. }
+                    | Command::Gateway { .. }
+                    | Command::WorkerHost { .. }
+                    | Command::EnrollHost { .. }
+                    | Command::CodexAdapter(_)
+                    | Command::AdapterGuardian { .. }
+            ),
+            "--gateway before the command applies only to operator commands"
+        );
+        let _ = ROOT_GATEWAY.set(gateway);
+    }
     match command {
         Command::AdapterGuardian {
             adapter,
@@ -702,6 +748,9 @@ fn main() -> Result<()> {
 async fn run(command: Command) -> Result<()> {
     match command {
         Command::Health(args) => health::run(args).await?,
+        Command::Spend { connection, args } => observe::spend(connection, args).await?,
+        Command::Describe { connection, args } => observe::describe(connection, args).await?,
+        Command::Watch { connection, args } => observe::watch(connection, args).await?,
         Command::Diff(args) => manifests::run(args, false).await?,
         Command::Apply(args) => manifests::run(args, true).await?,
         Command::Policy {
@@ -1642,6 +1691,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health
         .set_serving::<OperatorEventsServer<OperatorWatch>>()
         .await;
+    health
+        .set_serving::<supertag_protocol::v2::spend_server::SpendServer<ControlPlane>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
@@ -1744,6 +1796,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.attempt_mcp_effects_service())
+        .add_service(plane.spend_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
@@ -1921,6 +1974,9 @@ async fn gateway(
     health
         .set_serving::<OperatorEventsServer<GatewayWatch>>()
         .await;
+    health
+        .set_serving::<supertag_protocol::v2::spend_server::SpendServer<Gateway>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -1970,6 +2026,7 @@ async fn gateway(
         .add_service(gateway.attempt_work_sessions_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.attempt_mcp_effects_service())
+        .add_service(gateway.spend_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router
@@ -2421,19 +2478,26 @@ async fn operator(connection: Connection) -> Result<(OperatorClient<Channel>, St
 }
 
 async fn connect_operator(connection: Connection) -> Result<(Channel, String)> {
-    let (uri, token) = operator_target(connection)?;
-    let channel = network::endpoint(uri, false).await?.connect().await?;
-    Ok((channel, token))
+    let target = resolve_target(connection)?;
+    let channel = target
+        .endpoint(Duration::from_secs(15))
+        .await?
+        .connect()
+        .await?;
+    Ok((channel, target.token))
 }
 
-fn operator_target(connection: Connection) -> Result<(String, String)> {
-    if let Some(directory) = connection.state_directory {
-        local::connection(&directory)
-    } else {
-        Ok((
-            connection.gateway.context("Gateway address required")?,
-            required_env("SUPERTAG_OPERATOR_TOKEN")?,
-        ))
+/// Where an operator command connects, and with which credentials.
+struct OperatorTarget {
+    url: String,
+    token: String,
+    /// Present for a saved Gateway; otherwise TLS comes from the environment.
+    tls: Option<network::TlsFiles>,
+}
+
+impl OperatorTarget {
+    async fn endpoint(&self, timeout: Duration) -> Result<tonic::transport::Endpoint> {
+        network::operator_endpoint(self.url.clone(), timeout, self.tls.as_ref()).await
     }
 }
 
@@ -2468,6 +2532,46 @@ fn test_host_environment(
     Ok((keep_awake, disk_space))
 }
 
+fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
+    let root = ROOT_GATEWAY.get().cloned();
+    ensure!(
+        connection.gateway.is_none() || root.is_none(),
+        "pass --gateway once"
+    );
+    let gateway = connection.gateway.or(root);
+    if let Some(directory) = connection.state_directory {
+        ensure!(
+            gateway.is_none(),
+            "--gateway cannot be combined with --state-directory"
+        );
+        let (url, token) = local::connection(&directory)?;
+        return Ok(OperatorTarget {
+            url,
+            token,
+            tls: None,
+        });
+    }
+    let gateway = gateway
+        .context("pass --gateway URL, --gateway NAME of a saved Gateway, or --state-directory")?;
+    if profiles::is_url(&gateway) {
+        return Ok(OperatorTarget {
+            url: gateway,
+            token: required_env("SUPERTAG_OPERATOR_TOKEN")?,
+            tls: None,
+        });
+    }
+    let saved = profiles::resolve(&gateway)?;
+    Ok(OperatorTarget {
+        url: saved.url,
+        token: saved.token,
+        tls: Some(network::TlsFiles {
+            server_ca: saved.server_ca_file,
+            client_cert: saved.client_cert_file,
+            client_key: saved.client_key_file,
+        }),
+    })
+}
+
 fn required_env(name: &str) -> Result<String> {
     let value = std::env::var(name).with_context(|| format!("set {name}"))?;
     ensure!(!value.trim().is_empty(), "{name} must be nonempty");
@@ -2496,43 +2600,44 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
 }
 
 fn print_task(task: &Task) {
-    println!(
-        "{}",
-        json!({
-            "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
-            "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
-            "harness": task.harness_kind().as_str_name(),
-            "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
-            "workspace": task.workspace.as_ref().map(|spec| json!({
-                "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
-                "mounts": workspace_mounts::describe(&spec.mounts),
-                "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
-            })),
-            "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
-            "artifacts": task.artifacts.iter().map(|selection| json!({
-                "artifact_id": selection.artifact_id,
-                "paths": selection.paths,
-            })).collect::<Vec<_>>(),
-            "input_artifacts": task.input_artifacts.iter().map(|input| json!({
-                "artifact_id": input.artifact_id,
-                "source_task_id": input.source_task_id,
-                "source_attempt_id": input.source_attempt_id,
-                "publication": input.publication.as_ref().map(|p|json!({"publication_id":p.publication_id,"publication_revision":p.publication_revision,"consumption_id":p.consumption_id,"consumption_revision":p.consumption_revision,"source_objective_id":p.source_objective_id,"destination_objective_id":p.destination_objective_id})),
-                "files": input.files.iter().map(|file| json!({
-                    "path": file.path,
-                    "blob": file.blob.as_ref().map(|blob| json!({
-                        "sha256": blob.sha256,
-                        "byte_length": blob.byte_length,
-                    })),
-                })).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-            "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
-                "max_reported_tokens": limits.max_reported_tokens,
-                "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
-                    "amount_minor": limit.amount_minor, "currency": limit.currency,
+    println!("{}", task_json(task));
+}
+
+fn task_json(task: &Task) -> serde_json::Value {
+    json!({
+        "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
+        "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
+        "harness": task.harness_kind().as_str_name(),
+        "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
+        "workspace": task.workspace.as_ref().map(|spec| json!({
+            "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+            "mounts": workspace_mounts::describe(&spec.mounts),
+            "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
+        })),
+        "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
+        "artifacts": task.artifacts.iter().map(|selection| json!({
+            "artifact_id": selection.artifact_id,
+            "paths": selection.paths,
+        })).collect::<Vec<_>>(),
+        "input_artifacts": task.input_artifacts.iter().map(|input| json!({
+            "artifact_id": input.artifact_id,
+            "source_task_id": input.source_task_id,
+            "source_attempt_id": input.source_attempt_id,
+            "publication": input.publication.as_ref().map(|p|json!({"publication_id":p.publication_id,"publication_revision":p.publication_revision,"consumption_id":p.consumption_id,"consumption_revision":p.consumption_revision,"source_objective_id":p.source_objective_id,"destination_objective_id":p.destination_objective_id})),
+            "files": input.files.iter().map(|file| json!({
+                "path": file.path,
+                "blob": file.blob.as_ref().map(|blob| json!({
+                    "sha256": blob.sha256,
+                    "byte_length": blob.byte_length,
                 })),
-                "max_native_agents": limits.max_native_agents,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
+            "max_reported_tokens": limits.max_reported_tokens,
+            "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
+                "amount_minor": limit.amount_minor, "currency": limit.currency,
             })),
-        })
-    );
+            "max_native_agents": limits.max_native_agents,
+        })),
+    })
 }

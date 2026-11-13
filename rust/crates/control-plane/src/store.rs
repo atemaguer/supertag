@@ -74,7 +74,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 62;
+        const SCHEMA_VERSION: i64 = 63;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -187,6 +187,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0060_host_harness_capacity.sql"),
                 include_str!("../migrations/sqlite/0061_reply_progress.sql"),
                 include_str!("../migrations/sqlite/0062_surface_objectives_connector_leases.sql"),
+                include_str!("../migrations/sqlite/0063_attempt_claim_times.sql"),
             ]
         } else {
             [
@@ -254,6 +255,7 @@ impl Store {
                 include_str!(
                     "../migrations/postgresql/0062_surface_objectives_connector_leases.sql"
                 ),
+                include_str!("../migrations/postgresql/0063_attempt_claim_times.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -761,8 +763,8 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7 WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
-            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
