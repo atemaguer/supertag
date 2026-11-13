@@ -243,10 +243,7 @@ pub async fn run(
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    ensure!(
-        !options.attempt_timeout.is_zero(),
-        "attempt timeout must be positive"
-    );
+    remote::validate_time_limit(options.attempt_timeout, options.remote_provider.is_some())?;
     ensure!(
         options.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
             && (options.execution_profile.mcp_servers.is_empty()
@@ -1500,7 +1497,7 @@ async fn run_assignment(
         }
     };
     let processes = journal.processes(&attempt);
-    processes.begin()?;
+    processes.begin(options.remote_provider.is_none() && options.shared_execution.is_none())?;
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
         prepared: workspace
@@ -1575,6 +1572,7 @@ async fn run_assignment(
             );
         }
     };
+    let mut sandbox_execution_ends = None;
     let mut provider = if options.remote_provider.is_some() {
         let workspace = workspace
             .as_ref()
@@ -1617,11 +1615,12 @@ async fn run_assignment(
         ))
         .await;
         match prepared {
-            Ok(((provider, instructions), expires)) => {
+            Ok(((provider, instructions, execution_ends), expires)) => {
                 if let Some(instructions) = instructions {
                     task.instructions.push_str(&instructions);
                 }
                 valid_until = expires;
+                sandbox_execution_ends = Some(execution_ends);
                 Some(provider)
             }
             Err(error) => {
@@ -1813,6 +1812,7 @@ async fn run_assignment(
             remote_workspace,
             mcp: mcp.clone(),
             processes: processes.clone(),
+            sandbox_execution_ends,
         },
         (host.clone(), inputs.clone(), coordination.clone()),
         token,

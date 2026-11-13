@@ -609,6 +609,47 @@ enum ProcessRecord {
     },
 }
 
+/// Who wrote a process record, as TypeScript's ownership manifest names it. Process group IDs
+/// prove nothing on another machine, for another user, or in another PID namespace.
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct ProcessOwner {
+    attempt_id: String,
+    hostname: String,
+    uid: u32,
+    platform: String,
+    /// The PID namespace on Linux.
+    pid_namespace: Option<String>,
+    /// Whether every process ran on this host. A remote sandbox or shared execution environment
+    /// runs commands this record cannot see, so its Attempt is never reclaimed automatically.
+    colocated: bool,
+}
+
+impl ProcessOwner {
+    fn current(attempt_id: &str, colocated: bool) -> Result<Self> {
+        let mut name = [0_u8; 256];
+        // SAFETY: the buffer is writable for its length.
+        ensure!(
+            unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len()) } == 0,
+            "read the host name"
+        );
+        let end = name
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(name.len());
+        Ok(Self {
+            attempt_id: attempt_id.to_owned(),
+            hostname: String::from_utf8_lossy(&name[..end]).into_owned(),
+            // SAFETY: geteuid has no preconditions.
+            uid: unsafe { libc::geteuid() },
+            platform: std::env::consts::OS.to_owned(),
+            pid_namespace: fs::read_link("/proc/self/ns/pid")
+                .ok()
+                .map(|link| link.to_string_lossy().into_owned()),
+            colocated,
+        })
+    }
+}
+
 /// The process groups an executing Attempt started, recorded before each spawn as TypeScript's
 /// `LocalAttemptOwnership` does. A host restarted after it was killed may reclaim the Attempt
 /// only when every record names a process group that is gone. A pending, unreadable, or live
@@ -625,15 +666,19 @@ pub(crate) struct PendingProcess {
 }
 
 impl Processes {
-    /// Start an empty record before the Attempt can start any process.
-    pub(crate) fn begin(&self) -> Result<()> {
+    /// Start an empty record before the Attempt can start any process. `colocated` is false
+    /// when the Attempt also runs commands off this host.
+    pub(crate) fn begin(&self, colocated: bool) -> Result<()> {
         match fs::remove_dir_all(&self.directory) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
         DirBuilder::new().mode(0o700).create(&self.directory)?;
-        write_private(&self.directory.join("attempt"), self.attempt_id.as_bytes())?;
+        write_private(
+            &self.directory.join("attempt"),
+            &serde_json::to_vec(&ProcessOwner::current(&self.attempt_id, colocated)?)?,
+        )?;
         sync(&self.directory)?;
         sync(self.directory.parent().context("process record parent")?)
     }
@@ -674,7 +719,8 @@ impl Processes {
             Ok(owner) => owner,
             Err(_) => return Ok(None),
         };
-        if owner != self.attempt_id.as_bytes() {
+        let current = ProcessOwner::current(&self.attempt_id, true)?;
+        if serde_json::from_slice::<ProcessOwner>(&owner).ok() != Some(current) {
             return Ok(None);
         }
         let mut groups = Vec::new();
@@ -795,7 +841,7 @@ mod tests {
         let processes = journal.processes(&attempt("attempt"));
         // No record at all is no evidence.
         assert!(processes.stopped()?.is_none());
-        processes.begin()?;
+        processes.begin(true)?;
         assert!(
             processes
                 .stopped()?
@@ -822,6 +868,15 @@ mod tests {
         fs::write(state.path().join(PROCESSES).join("stray"), b"")?;
         assert!(processes.stopped()?.is_none());
         processes.discard()?;
+        assert!(processes.stopped()?.is_none());
+        // Commands off this host are never proven stopped, nor is another owner's record.
+        processes.begin(false)?;
+        assert!(processes.stopped()?.is_none());
+        processes.begin(true)?;
+        let owner = state.path().join(PROCESSES).join("attempt");
+        let mut forged: ProcessOwner = serde_json::from_slice(&read_private(&owner)?)?;
+        forged.hostname.push_str("-elsewhere");
+        write_private(&owner, &serde_json::to_vec(&forged)?)?;
         assert!(processes.stopped()?.is_none());
         Ok(())
     }

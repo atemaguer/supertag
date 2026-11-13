@@ -199,7 +199,7 @@ async fn reclaim_contract(url: &str) {
                 },
             )
             .await,
-        Err(StoreError::Conflict(_))
+        Err(StoreError::Conflict(message)) if message.contains("Worker Host laptop reclaimed")
     ));
 
     // A host that registers a new incarnation fences its old Attempt as uncertain; that host
@@ -236,9 +236,15 @@ async fn reclaim_contract(url: &str) {
         .reclaim_attempt(&restarted, &reclaim(&cancelled, evidence))
         .await
         .unwrap();
-    assert_eq!(
-        store.get_task(&cancelled.task_id).await.unwrap().state(),
-        TaskState::Cancelled
+    let cancelled = store.get_task(&cancelled.task_id).await.unwrap();
+    assert_eq!(cancelled.state(), TaskState::Cancelled);
+    assert!(
+        !cancelled
+            .result
+            .as_deref()
+            .unwrap_or_default()
+            .contains("outcome is unknown"),
+        "{cancelled:?}"
     );
 
     // A finished Attempt needs no recovery.

@@ -136,14 +136,19 @@ impl Store {
             return Ok(resolution);
         }
         let already_resolved: Option<String> = sqlx::query_scalar(
-            "SELECT attempt_id FROM supertag_v2_attempt_resolutions WHERE attempt_id = $1",
+            "SELECT operator_principal FROM supertag_v2_attempt_resolutions WHERE attempt_id = $1",
         )
         .bind(&input.attempt_id)
         .fetch_optional(&mut *transaction)
         .await?;
-        if already_resolved.is_some() {
+        if let Some(principal) = already_resolved {
             return Err(StoreError::Conflict(
-                "Task Attempt already has a recovery decision".into(),
+                match principal.strip_prefix("host:") {
+                    Some(host) => format!(
+                        "Worker Host {host} reclaimed this Task Attempt as failed after it proved the Attempt's processes stopped"
+                    ),
+                    None => "Task Attempt already has a recovery decision".into(),
+                },
             ));
         }
 
@@ -297,7 +302,8 @@ impl Store {
             .bind(AttemptDecision::Failed as i64).bind(&input.evidence).bind(now)
             .execute(&mut *transaction).await?;
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1 WHERE task_id = $3")
-            .bind(state as i64).bind(RECLAIMED_RESULT).bind(&attempt.task_id)
+            // A cancelled Task keeps its cancellation as its result.
+            .bind(state as i64).bind((state == TaskState::Failed).then_some(RECLAIMED_RESULT)).bind(&attempt.task_id)
             .execute(&mut *transaction).await?;
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         transaction.commit().await?;
