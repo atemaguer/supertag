@@ -65,6 +65,7 @@ impl Connector {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
                 };
+                supertag_protocol::crash_point("gateway.github-reply", "claimed");
                 return self.send_claimed_reply(&reply, target).await;
             }
             Entry::Sending { target } => {
@@ -98,6 +99,7 @@ impl Connector {
                 {
                     return Ok(false);
                 }
+                supertag_protocol::crash_point("gateway.github-reply", "settled");
                 self.journal.clear()?;
                 // Leave time before claiming another provider write.
                 return Ok(false);
@@ -131,11 +133,14 @@ impl Connector {
                 self.journal.save(&Entry::Sending {
                     target: target.clone(),
                 })?;
+                supertag_protocol::crash_point("gateway.github-reply", "sending-journaled");
                 let outcome = self.post(reply, &token).await;
+                supertag_protocol::crash_point("gateway.github-reply", "provider-answered");
                 self.journal.save(&Entry::Settle {
                     target: target.clone(),
                     outcome,
                 })?;
+                supertag_protocol::crash_point("gateway.github-reply", "settle-journaled");
                 Ok(true)
             },
         )
