@@ -168,9 +168,9 @@ List verified Workspace results and their separate GitHub publication status
 Usage: supertag github-publication list [OPTIONS]
 
 Options:
-      --task-id <TASK_ID>            [default: ""]
-      --limit <LIMIT>                [default: 50]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --task-id <TASK_ID>            Only results of this Task [default: ""]
+      --limit <LIMIT>                Most entries to return on one page [default: 50]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -280,8 +280,8 @@ List GitHub Workspace sources
 Usage: supertag github-workspace list [OPTIONS]
 
 Options:
-      --limit <LIMIT>        [default: 50]
-      --after-id <AFTER_ID>  [default: ""]
+      --limit <LIMIT>        Most entries to return on one page [default: 50]
+      --after-id <AFTER_ID>  Continue after the last ID the previous page returned [default: ""]
   -h, --help                 Print help
 ```
 
@@ -334,9 +334,9 @@ List connector replies and their recorded delivery status
 Usage: supertag replies list [OPTIONS]
 
 Options:
-      --account <ACCOUNT>            [default: ""]
-      --state <STATE>                [possible values: pending, claimed, delivered, failed, uncertain]
-      --limit <LIMIT>                [default: 50]
+      --account <ACCOUNT>            Only replies sent through this connector account [default: ""]
+      --state <STATE>                Only replies in this delivery state [possible values: pending, claimed, delivered, failed, uncertain]
+      --limit <LIMIT>                Most entries to return on one page [default: 50]
       --before-order <BEFORE_ORDER>  Continue with next_before_order from the previous page [default: 0]
   -h, --help                         Print help
 ```
@@ -367,7 +367,7 @@ Arguments:
 
 Options:
       --decision <DECISION>
-          [possible values: delivered, failed]
+          What the provider shows happened to the reply [possible values: delivered, failed]
       --evidence <EVIDENCE>
           What you checked at the provider that shows the outcome
       --provider-receipt <PROVIDER_RECEIPT>
@@ -450,8 +450,8 @@ Arguments:
   <KIND>  [possible values: permission-set, context-set, role]
 
 Options:
-      --limit <LIMIT>    [default: 20]
-      --cursor <CURSOR>  [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 20]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -499,11 +499,11 @@ List Role assignments
 Usage: supertag policy assignments [OPTIONS]
 
 Options:
-      --role <ROLE>      [default: ""]
-      --tag <TAG>        [default: ""]
+      --role <ROLE>      Only assignments of this Role [default: ""]
+      --tag <TAG>        Only assignments to this Tag [default: ""]
       --active           Only assignments in effect now
-      --limit <LIMIT>    [default: 20]
-      --cursor <CURSOR>  [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 20]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -598,8 +598,8 @@ Arguments:
 
 Options:
       --account <ACCOUNT>  Restrict locations to one account
-      --limit <LIMIT>      [default: 20]
-      --cursor <CURSOR>    [default: ""]
+      --limit <LIMIT>      Most entries to return on one page [default: 20]
+      --cursor <CURSOR>    Continue from the cursor the previous page returned [default: ""]
   -h, --help               Print help
 ```
 
@@ -697,8 +697,8 @@ List Worker Hosts and their readiness
 Usage: supertag host list [OPTIONS]
 
 Options:
-      --limit <LIMIT>    [default: 32]
-      --cursor <CURSOR>  [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 32]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -828,10 +828,10 @@ List questions and work waiting for an operator
 Usage: supertag inbox list [OPTIONS]
 
 Options:
-      --objective <OBJECTIVE>  [default: ""]
-      --kind <KIND>            [possible values: question, budget, limit, task-attention, approval, mcp-login]
-      --limit <LIMIT>          [default: 50]
-      --cursor <CURSOR>        [default: ""]
+      --objective <OBJECTIVE>  Only items for this Objective [default: ""]
+      --kind <KIND>            Only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
+      --limit <LIMIT>          Most entries to return on one page [default: 50]
+      --cursor <CURSOR>        Continue from the cursor the previous page returned [default: ""]
   -h, --help                   Print help
 ```
 
@@ -887,11 +887,11 @@ List approval history
 Usage: supertag inbox approvals [OPTIONS]
 
 Options:
-      --objective <OBJECTIVE>  [default: ""]
-      --task <TASK>            [default: ""]
+      --objective <OBJECTIVE>  Only items for this Objective [default: ""]
+      --task <TASK>            Only approvals requested by this Task [default: ""]
       --pending                Only requests that still wait for a decision
-      --limit <LIMIT>          [default: 20]
-      --cursor <CURSOR>        [default: ""]
+      --limit <LIMIT>          Most entries to return on one page [default: 20]
+      --cursor <CURSOR>        Continue from the cursor the previous page returned [default: ""]
   -h, --help                   Print help
 ```
 
@@ -997,9 +997,9 @@ Options:
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --limit <LIMIT>
-          [default: 32]
+          Most entries to return on one page [default: 32]
       --cursor <CURSOR>
-          [default: ""]
+          Continue from the cursor the previous page returned [default: ""]
   -h, --help
           Print help
 ```
@@ -1069,8 +1069,8 @@ Arguments:
   <TAG_ID>  
 
 Options:
-      --limit <LIMIT>    [default: 32]
-      --cursor <CURSOR>  [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 32]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -1118,12 +1118,18 @@ List the Work Sessions started from a parent Session
 Usage: supertag work-sessions list [OPTIONS] --parent-tag <PARENT_TAG> --parent-session <PARENT_SESSION>
 
 Options:
-      --parent-tag <PARENT_TAG>          Tag that started the Work Sessions
-      --parent-session <PARENT_SESSION>  Session that started the Work Sessions
-      --starter-task <STARTER_TASK>      Only Work Sessions started by this Task
-      --limit <LIMIT>                    [default: 32]
-      --cursor <CURSOR>                  [default: ""]
-  -h, --help                             Print help
+      --parent-tag <PARENT_TAG>
+          Tag that started the Work Sessions
+      --parent-session <PARENT_SESSION>
+          Session that started the Work Sessions
+      --starter-task <STARTER_TASK>
+          Only Work Sessions started by this Task
+      --limit <LIMIT>
+          Most entries to return on one page [default: 32]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
+  -h, --help
+          Print help
 ```
 
 ## `supertag operator-token`
@@ -1176,8 +1182,8 @@ List Operator Tokens without their secrets
 Usage: supertag operator-token list [OPTIONS]
 
 Options:
-      --limit <LIMIT>    [default: 50]
-      --cursor <CURSOR>  [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 50]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -1319,9 +1325,9 @@ List Teams, optionally for one member Tag
 Usage: supertag team list [OPTIONS]
 
 Options:
-      --member <MEMBER>  [default: ""]
-      --limit <LIMIT>    [default: 32]
-      --cursor <CURSOR>  [default: ""]
+      --member <MEMBER>  Only Teams this Tag belongs to [default: ""]
+      --limit <LIMIT>    Most entries to return on one page [default: 32]
+      --cursor <CURSOR>  Continue from the cursor the previous page returned [default: ""]
   -h, --help             Print help
 ```
 
@@ -1381,9 +1387,9 @@ Options:
       --after-sequence <AFTER_SEQUENCE>
           Continue after this post sequence instead of reading the newest posts
       --limit <LIMIT>
-          [default: 16]
+          Most entries to return on one page [default: 16]
       --cursor <CURSOR>
-          [default: ""]
+          Continue from the cursor the previous page returned [default: ""]
   -h, --help
           Print help
 ```
@@ -1495,6 +1501,8 @@ Options:
           Private host allowlist of Skill packages
 
       --gateway-listen <GATEWAY_LISTEN>
+          Address the local Gateway listens on. Port 0 picks a free port
+          
           [default: 127.0.0.1:0]
 
   -h, --help
@@ -1620,7 +1628,7 @@ Run the private service that stores work and schedules execution
 Usage: supertag control-plane [OPTIONS]
 
 Options:
-      --listen <LISTEN>  [default: 127.0.0.1:0]
+      --listen <LISTEN>  Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
   -h, --help             Print help
 ```
 
@@ -1633,6 +1641,8 @@ Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
 
 Options:
       --listen <LISTEN>
+          Address this service listens on. Port 0 picks a free port
+          
           [default: 127.0.0.1:0]
 
       --control-plane <CONTROL_PLANE>
@@ -1843,6 +1853,8 @@ Options:
           Private host allowlist of Skill packages
 
       --attempt-timeout-seconds <ATTEMPT_TIMEOUT_SECONDS>
+          Seconds a Task Attempt may run before this host stops it
+          
           [default: 120]
 
       --once
@@ -2028,9 +2040,9 @@ Options:
       --include-retired
           Also list retired Tags
       --limit <LIMIT>
-          [default: 100]
+          Most entries to return on one page [default: 100]
       --cursor <CURSOR>
-          [default: ""]
+          Continue from the cursor the previous page returned [default: ""]
   -h, --help
           Print help
 ```
@@ -2215,8 +2227,8 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --limit <LIMIT>                [default: 30]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --limit <LIMIT>                Most entries to return on one page [default: 30]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -2231,8 +2243,8 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --limit <LIMIT>                [default: 30]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --limit <LIMIT>                Most entries to return on one page [default: 30]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -2355,8 +2367,8 @@ List registered Volumes
 Usage: supertag volume list [OPTIONS]
 
 Options:
-      --limit <LIMIT>        [default: 30]
-      --after-id <AFTER_ID>  [default: ""]
+      --limit <LIMIT>        Most entries to return on one page [default: 30]
+      --after-id <AFTER_ID>  Continue after the last ID the previous page returned [default: ""]
   -h, --help                 Print help
 ```
 
@@ -2438,9 +2450,9 @@ List recorded artifact copies, newest first, optionally for one Volume
 Usage: supertag volume copies [OPTIONS]
 
 Options:
-      --volume-id <VOLUME_ID>        [default: ""]
-      --limit <LIMIT>                [default: 30]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --volume-id <VOLUME_ID>        Only copies made into this Volume [default: ""]
+      --limit <LIMIT>                Most entries to return on one page [default: 30]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -2529,8 +2541,8 @@ Usage: supertag artifact list [OPTIONS] --task <TASK>
 
 Options:
       --task <TASK>                  Task whose artifacts to list
-      --limit <LIMIT>                [default: 50]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --limit <LIMIT>                Most entries to return on one page [default: 50]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -2580,7 +2592,7 @@ Options:
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --kind <KIND>
-          [possible values: patch, bundle]
+          Which published result to download [possible values: patch, bundle]
       --output <OUTPUT>
           Local file to create with the download. It must not already exist
   -h, --help
@@ -2603,7 +2615,7 @@ Options:
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --after <AFTER>
-          [default: 0]
+          Only entries after this sequence number [default: 0]
   -h, --help
           Print help
 ```
@@ -2625,7 +2637,7 @@ Options:
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --after <AFTER>
-          [default: 0]
+          Only entries after this sequence number [default: 0]
   -h, --help
           Print help
 ```
@@ -2666,7 +2678,7 @@ Options:
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Gateway
       --decision <DECISION>
-          [possible values: failed, retry]
+          Mark the Attempt failed, or run the Task again [possible values: failed, retry]
       --evidence <EVIDENCE>
           What you checked that shows the Attempt stopped and what it did
       --confirmed-stopped
@@ -2901,8 +2913,8 @@ List Objectives
 Usage: supertag objective list [OPTIONS]
 
 Options:
-      --limit <LIMIT>        [default: 20]
-      --after-id <AFTER_ID>  [default: ""]
+      --limit <LIMIT>        Most entries to return on one page [default: 20]
+      --after-id <AFTER_ID>  Continue after the last ID the previous page returned [default: ""]
   -h, --help                 Print help
 ```
 
@@ -2917,8 +2929,8 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --limit <LIMIT>                [default: 50]
-      --before-order <BEFORE_ORDER>  [default: 0]
+      --limit <LIMIT>                Most entries to return on one page [default: 50]
+      --before-order <BEFORE_ORDER>  Continue from the next_before_order the previous page returned [default: 0]
   -h, --help                         Print help
 ```
 
@@ -2985,7 +2997,7 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --reason <REASON>              [default: ""]
+      --reason <REASON>              Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>  Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help                         Print help
 ```
@@ -3001,7 +3013,7 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --reason <REASON>              [default: ""]
+      --reason <REASON>              Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>  Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help                         Print help
 ```
@@ -3017,7 +3029,7 @@ Arguments:
   <OBJECTIVE_ID>  
 
 Options:
-      --reason <REASON>              [default: ""]
+      --reason <REASON>              Why, recorded in the Objective history [default: ""]
       --operation-id <OPERATION_ID>  Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help                         Print help
 ```
@@ -3034,7 +3046,7 @@ Arguments:
   <DECISION>      [possible values: approve, request-changes]
 
 Options:
-      --feedback <FEEDBACK>          [default: ""]
+      --feedback <FEEDBACK>          What the owner should change. Use it when you reject the result [default: ""]
       --operation-id <OPERATION_ID>  Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
   -h, --help                         Print help
 ```

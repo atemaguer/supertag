@@ -115,6 +115,41 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
     let error = services.fails(&["describe", "tag", HOSTILE]).await?;
     assert_terminal_safe(&error);
     assert!(error.starts_with("Error: "), "{error}");
+    assert!(
+        !error
+            .lines()
+            .any(|line| line.trim_start().starts_with("fake line")),
+        "{error:?}"
+    );
+
+    // A watch frame is one line per change, whatever the changed resource holds.
+    let watch = services.run(&["watch", "--limit", "1", "--reconnect-seconds", "0"]);
+    let change = async {
+        for attempt in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let instructions = format!("Review releases {attempt}. {HOSTILE}");
+            services
+                .ok(&["put-tag", "lead", "--instructions", &instructions])
+                .await?;
+        }
+        anyhow::Ok(())
+    };
+    let watched = tokio::select! {
+        watched = watch => watched?,
+        changed = change => {
+            changed?;
+            anyhow::bail!("watch printed no change");
+        }
+    };
+    assert!(watched.success, "{}", watched.stderr);
+    assert_terminal_safe(&watched.stdout);
+    let frames: Vec<&str> = watched
+        .stdout
+        .lines()
+        .filter(|line| !line.starts_with("Watching."))
+        .collect();
+    assert_eq!(frames.len(), 1, "{:?}", watched.stdout);
+    assert!(frames[0].contains("tag lead"), "{:?}", watched.stdout);
 
     let reason = format!("Paused for review. {HOSTILE}");
     services

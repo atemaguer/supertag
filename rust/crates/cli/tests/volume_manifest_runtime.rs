@@ -278,5 +278,26 @@ async fn workspace_data_volumes_cannot_alias_artifact_storage(database: String) 
             "{source}: {error}"
         );
     }
+
+    if cfg!(target_os = "macos") {
+        // The same name composed (NFC) and decomposed (NFD) names one macOS directory.
+        let output = put("composed", "file:///srv/supertag/caf%C3%A9").await?;
+        assert!(output.success, "{}", output.stderr);
+        let error = services
+            .fails(&[
+                "volume",
+                "put",
+                "decomposed",
+                "--source",
+                "file:///srv/supertag/cafe%CC%81/artifacts",
+                "--operation-id",
+                "decomposed",
+            ])
+            .await?;
+        assert!(
+            error.contains("artifact Volume overlaps a Workspace data Volume"),
+            "{error}"
+        );
+    }
     services.stop().await
 }

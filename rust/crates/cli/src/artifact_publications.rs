@@ -32,16 +32,20 @@ pub enum PublicationCommand {
     /// List the artifact publications approved from an Objective.
     List {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },
     /// List the consumption approvals for a destination Objective.
     Consumptions {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },

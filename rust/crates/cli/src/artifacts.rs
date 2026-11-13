@@ -36,8 +36,10 @@ pub enum CaptureCommand {
         /// Task whose artifacts to list.
         #[arg(long)]
         task: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },

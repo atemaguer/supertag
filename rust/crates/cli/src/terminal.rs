@@ -12,83 +12,8 @@
 
 use std::io::Write;
 
-/// Unicode `General_Category=Cf` (format characters), as of Unicode 16.
-const FORMAT: &[(u32, u32)] = &[
-    (0x00ad, 0x00ad),
-    (0x0600, 0x0605),
-    (0x061c, 0x061c),
-    (0x06dd, 0x06dd),
-    (0x070f, 0x070f),
-    (0x0890, 0x0891),
-    (0x08e2, 0x08e2),
-    (0x180e, 0x180e),
-    (0x200b, 0x200f),
-    (0x202a, 0x202e),
-    (0x2060, 0x2064),
-    (0x2066, 0x206f),
-    (0xfeff, 0xfeff),
-    (0xfff9, 0xfffb),
-    (0x110bd, 0x110bd),
-    (0x110cd, 0x110cd),
-    (0x13430, 0x1343f),
-    (0x1bca0, 0x1bca3),
-    (0x1d173, 0x1d17a),
-    (0xe0001, 0xe0001),
-    (0xe0020, 0xe007f),
-];
-
-/// Characters that render as blank space without being classed as space.
-const FILLERS: &[char] = &['\u{115f}', '\u{1160}', '\u{2800}', '\u{3164}', '\u{ffa0}'];
-
-/// At most this many combining marks may stack on one character. Two cover ordinary accents.
-const MAX_MARKS: usize = 2;
-
-/// Whether `c` could move the cursor, change the terminal, reorder text, or hide as blank space.
-fn unsafe_char(c: char) -> bool {
-    let code = u32::from(c);
-    c.is_control()
-        || matches!(c, '\u{2028}' | '\u{2029}')
-        || FILLERS.contains(&c)
-        || FORMAT
-            .iter()
-            .any(|&(start, end)| (start..=end).contains(&code))
-}
-
-fn mark(c: char) -> bool {
-    unicode_normalization::char::is_combining_mark(c)
-}
-
-/// One field or assembled display line. Every control, including a line break, becomes a space.
-pub fn text(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    let mut marks = 0;
-    for c in value.chars() {
-        if unsafe_char(c) {
-            marks = 0;
-            output.push(' ');
-        } else if mark(c) {
-            marks += 1;
-            if marks <= MAX_MARKS {
-                output.push(c);
-            } else if marks == MAX_MARKS + 1 {
-                output.push(' ');
-            }
-        } else {
-            marks = 0;
-            output.push(c);
-        }
-    }
-    output
-}
-
-/// Filter each line but keep the line breaks, so multi-line output stays readable.
-pub fn lines(value: &str) -> String {
-    value
-        .split('\n')
-        .map(|line| text(line.strip_suffix('\r').unwrap_or(line)))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+use supertag_protocol::terminal_text::{MAX_MARKS, mark, unsafe_char};
+pub use supertag_protocol::terminal_text::{lines, text};
 
 /// Escape unsafe characters, and combining marks past the bound, inside serialized JSON.
 /// Serialized JSON holds raw line breaks only as structure, never inside a string.
@@ -211,13 +136,19 @@ mod tests {
         assert!(!output.contains("\nend"), "{output:?}");
     }
 
-    /// Every write to standard output or standard error goes through this module. A raw write
-    /// needs a `// terminal-safe:` comment on the line before it that says why it is safe.
+    /// Every write to standard output or standard error goes through this module, or through
+    /// `supertag_protocol::terminal_text` in the services the `supertag` binary runs in the
+    /// foreground. A raw write needs a `// terminal-safe:` comment on the line before it that says
+    /// why it is safe. Test sources are not part of the binary and are skipped.
     #[test]
     fn the_cli_prints_only_through_this_module() {
         fn sources(directory: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if name == "tests" || name == "tests.rs" {
+                    continue;
+                }
                 if path.is_dir() {
                     sources(&path, files);
                 } else if path.extension().is_some_and(|extension| extension == "rs") {
@@ -225,10 +156,24 @@ mod tests {
                 }
             }
         }
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut files = Vec::new();
-        sources(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut files,
+        for linked in [
+            "cli",
+            "protocol",
+            "control-plane",
+            "gateway",
+            "worker-host",
+            "codex-adapter",
+            "workspaces",
+        ] {
+            sources(&crates.join(linked).join("src"), &mut files);
+        }
+        assert!(
+            files
+                .iter()
+                .any(|file| file.ends_with("worker-host/src/lib.rs")),
+            "{files:?}"
         );
         let raw = [
             "print!(",

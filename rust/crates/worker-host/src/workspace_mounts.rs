@@ -466,10 +466,10 @@ fn clear_receipt(directory: &File, name: &str) -> Result<()> {
             }
         }
         // Never follow a moved or replaced root. Leave its contents in place.
-        _ => eprintln!(
+        _ => supertag_protocol::terminal_text::warn(&format!(
             "Workspace mount root {} changed; leaving its copies in place",
             parent.display()
-        ),
+        )),
     }
     unlink_at(directory, name, 0)?;
     directory.sync_all()?;

@@ -23,8 +23,10 @@ pub enum OperatorTokenCommand {
     Create { name: String },
     /// List Operator Tokens without their secrets.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },

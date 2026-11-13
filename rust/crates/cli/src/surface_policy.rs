@@ -56,8 +56,10 @@ enum SurfacePolicyCommand {
         /// Restrict locations to one account.
         #[arg(long)]
         account: Option<String>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },

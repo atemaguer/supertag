@@ -8,10 +8,13 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 pub enum PublicationCommand {
     /// List verified Workspace results and their separate GitHub publication status.
     List {
+        /// Only results of this Task.
         #[arg(long, default_value = "")]
         task_id: String,
+        /// Most entries to return on one page.
         #[arg(long,default_value_t=50,value_parser=clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long,default_value_t=0,value_parser=clap::value_parser!(i64).range(0..))]
         before_order: i64,
     },

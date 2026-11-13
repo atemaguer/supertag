@@ -53,16 +53,20 @@ pub enum ObjectiveCommand {
     Get { objective_id: String },
     /// List Objectives.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue after the last ID the previous page returned.
         #[arg(long, default_value = "")]
         after_id: String,
     },
     /// List commit review requests and recorded verdicts for an Objective.
     ListCommitReviews {
         objective_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },
@@ -122,6 +126,7 @@ pub enum ObjectiveCommand {
         objective_id: String,
         #[arg(value_enum)]
         decision: ReviewDecision,
+        /// What the owner should change. Use it when you reject the result.
         #[arg(long, default_value = "")]
         feedback: String,
         /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
@@ -133,6 +138,7 @@ pub enum ObjectiveCommand {
 #[derive(Args)]
 pub struct Action {
     objective_id: String,
+    /// Why, recorded in the Objective history.
     #[arg(long, default_value = "")]
     reason: String,
     /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.

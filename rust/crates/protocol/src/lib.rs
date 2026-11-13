@@ -11,6 +11,7 @@ pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};
 pub mod git_outputs;
 pub mod output_policy;
 pub mod task_artifact_inputs;
+pub mod terminal_text;
 mod workspace_tools;
 pub use workspace_tools::{MAX_WORKSPACE_TOOL_OUTPUT_BYTES, validate_workspace_operation};
 pub mod mcp;

@@ -435,7 +435,7 @@ pub async fn run(
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     // Preflight: warn before claiming work when the host is short of disk space.
     if let Some(warning) = environment::low_disk_warning(options.disk_space.sample().as_ref()) {
-        eprintln!("{warning}");
+        supertag_protocol::terminal_text::warn(&warning);
     }
     let keep_awake = environment::KeepAwake::start(options.keep_awake.clone(), shutdown.clone());
     let presence = match &options.lane {
@@ -554,10 +554,10 @@ pub async fn run(
                     Ok(false) if options.wait_for_recovery => {
                         if let Some(ready) = ready.take() {
                             ready();
-                            eprintln!(
+                            supertag_protocol::terminal_text::warn(&format!(
                                 "Task {} Attempt {} needs recovery before this host can claim work",
                                 attempt.task_id, attempt.attempt_id
-                            );
+                            ));
                         }
                         wait_for_work(&shutdown).await;
                     }
@@ -1394,7 +1394,9 @@ async fn run_assignment(
             .await
             .map_err(|_| Status::internal("Workspace Volume staging failed"))?
             .map_err(|error| {
-                eprintln!("Workspace Volume staging failed: {error:#}");
+                supertag_protocol::terminal_text::warn(&format!(
+                    "Workspace Volume staging failed: {error:#}"
+                ));
                 Status::failed_precondition("Workspace Volume staging failed")
             })
         };

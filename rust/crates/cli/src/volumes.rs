@@ -27,8 +27,10 @@ pub enum VolumeCommand {
     Get { volume_id: String },
     /// List registered Volumes.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue after the last ID the previous page returned.
         #[arg(long, default_value = "")]
         after_id: String,
     },
@@ -67,10 +69,13 @@ pub enum VolumeCommand {
     CopyGet { copy_id: String },
     /// List recorded artifact copies, newest first, optionally for one Volume.
     Copies {
+        /// Only copies made into this Volume.
         #[arg(long, default_value = "")]
         volume_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Continue from the next_before_order the previous page returned.
         #[arg(long, default_value_t = 0)]
         before_order: u64,
     },

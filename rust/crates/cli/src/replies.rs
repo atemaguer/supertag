@@ -37,10 +37,13 @@ pub enum Decision {
 pub enum ReplyCommand {
     /// List connector replies and their recorded delivery status.
     List {
+        /// Only replies sent through this connector account.
         #[arg(long, default_value = "")]
         account: String,
+        /// Only replies in this delivery state.
         #[arg(long)]
         state: Option<State>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
         /// Continue with next_before_order from the previous page.
@@ -52,6 +55,7 @@ pub enum ReplyCommand {
     /// Record verified delivery or failure for an uncertain reply. This never resends it.
     Resolve {
         reply_id: String,
+        /// What the provider shows happened to the reply.
         #[arg(long)]
         decision: Decision,
         /// What you checked at the provider that shows the outcome.

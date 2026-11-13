@@ -833,6 +833,9 @@ fn workspace_client(channel: Channel) -> WorkspaceDirectoryClient<Channel> {
 }
 
 fn storage_error(error: std::io::Error) -> Status {
-    eprintln!("Gateway blob storage error: {}", error.kind());
+    supertag_protocol::terminal_text::warn(&format!(
+        "Gateway blob storage error: {}",
+        error.kind()
+    ));
     Status::internal("blob storage operation failed")
 }

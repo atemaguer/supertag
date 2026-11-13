@@ -147,50 +147,118 @@ fn every_command_has_a_plain_description() -> Result<()> {
     Ok(())
 }
 
-/// Flags without a sentence of help, as `supertag PATH --flag`. Clap prints a flag's help on the
-/// same line, or on the next line indented further when any flag of the command has long help.
-fn undocumented_flags(entry: &Entry) -> Vec<String> {
-    let lines: Vec<&str> = entry
-        .help
-        .lines()
-        .skip_while(|line| *line != "Options:")
-        .skip(1)
-        .take_while(|line| !line.is_empty())
-        .collect();
-    let mut missing = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with('-') || line.len() - trimmed.len() > 6 {
-            continue;
-        }
-        let name = trimmed
-            .split([' ', ','])
-            .find(|part| part.starts_with("--"))
-            .unwrap_or(trimmed);
-        // Drop the flag names and the value placeholder; whatever remains is help text.
-        let after = trimmed
-            .split_once(name)
-            .map_or("", |(_, rest)| rest)
-            .trim_start();
-        let after = match after.strip_prefix('<') {
-            Some(rest) => rest.split_once('>').map_or("", |(_, rest)| rest),
-            None => after,
-        };
-        let next = lines.get(index + 1).copied().unwrap_or("");
-        let described_below = next.starts_with("          ")
-            && !next.trim().is_empty()
-            && !next.trim().starts_with('-');
-        if after.trim().is_empty() && !described_below {
-            missing.push(format!("supertag {} {name}", entry.path.join(" ")));
+/// Removes clap's bracketed annotations, such as `[default: 100]` or `[possible values: a, b]`.
+/// They describe a value, not what the flag is for, so they never count as help.
+fn without_annotations(text: &str) -> String {
+    const ANNOTATIONS: [&str; 5] = [
+        "default:",
+        "possible values:",
+        "aliases:",
+        "short aliases:",
+        "env:",
+    ];
+    let mut rest = text;
+    let mut kept = String::new();
+    while let Some(open) = rest.find('[') {
+        let (before, from) = rest.split_at(open);
+        kept.push_str(before);
+        let inner = &from[1..];
+        match inner.find(']') {
+            Some(close)
+                if ANNOTATIONS
+                    .iter()
+                    .any(|prefix| inner[..close].trim_start().starts_with(prefix)) =>
+            {
+                rest = &inner[close + 1..];
+            }
+            _ => {
+                kept.push('[');
+                rest = inner;
+            }
         }
     }
-    missing
+    kept.push_str(rest);
+    kept
+}
+
+/// Entries of one help section, such as `Options:`, as `(name, help)`. Clap prints an entry's help
+/// on the same line, or on the following lines indented further with a blank line between
+/// entries when any entry of the command has long help. The help keeps no names, placeholders or
+/// clap annotations, so it is empty when the entry says nothing about itself.
+fn section_entries(help: &str, section: &str) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut lines = help.lines().skip_while(|line| *line != section).skip(1);
+    for line in lines.by_ref() {
+        // A line that is not indented starts the next section.
+        if !line.is_empty() && !line.starts_with(' ') {
+            break;
+        }
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if indent <= 6 {
+            // `-s, --long <VALUE>  help`, `--long [<VALUE>]  help`, or `<NAME>  help`.
+            let (head, rest) = match trimmed.find("  ") {
+                Some(gap) => trimmed.split_at(gap),
+                None => (trimmed, ""),
+            };
+            let name = head
+                .split([' ', ','])
+                .find(|part| part.starts_with("--"))
+                .unwrap_or(head)
+                .to_owned();
+            entries.push((name, rest.to_owned()));
+        } else if let Some((_, text)) = entries.last_mut() {
+            text.push(' ');
+            text.push_str(trimmed);
+        }
+    }
+    entries
+        .into_iter()
+        .map(|(name, text)| (name, without_annotations(&text).trim().to_owned()))
+        .collect()
+}
+
+/// Flags without a sentence of help, as `supertag PATH --flag`.
+fn undocumented(entry: &Entry) -> Vec<String> {
+    section_entries(&entry.help, "Options:")
+        .into_iter()
+        .filter(|(_, text)| text.is_empty())
+        .map(|(name, _)| format!("supertag {} {name}", entry.path.join(" ")))
+        .collect()
+}
+
+#[test]
+fn the_flag_check_reads_both_help_layouts_and_ignores_annotations() {
+    let entry = |help: &str| Entry {
+        path: vec!["demo".into()],
+        description: String::new(),
+        help: help.into(),
+    };
+    let short = "Demo\n\nUsage: supertag demo [OPTIONS] <ID>\n\nArguments:\n  <ID>  \n\n\
+                 Options:\n      --limit <LIMIT>      [default: 100]\n      \
+                 --cursor <CURSOR>    Page to continue from [default: \"\"]\n      \
+                 --state <STATE>      [possible values: a, b]\n  -h, --help           Print help\n";
+    assert_eq!(
+        undocumented(&entry(short)),
+        ["supertag demo --limit", "supertag demo --state"]
+    );
+    let long = "Demo\n\nUsage: supertag demo [OPTIONS]\n\nOptions:\n      --gateway <GATEWAY>\n          \
+                Gateway URL\n\n      --limit <LIMIT>\n          [default: 100]\n\n      \
+                --harness <HARNESS>\n          Built-in harness\n          \n          \
+                [possible values: codex]\n\n      --quiet\n\n  -h, --help\n          Print help\n";
+    assert_eq!(
+        undocumented(&entry(long)),
+        ["supertag demo --limit", "supertag demo --quiet"]
+    );
 }
 
 /// Each flag says in a sentence what it does.
 #[test]
 fn every_flag_has_a_plain_description() -> Result<()> {
-    let missing: Vec<String> = commands()?.iter().flat_map(undocumented_flags).collect();
+    let missing: Vec<String> = commands()?.iter().flat_map(undocumented).collect();
     ensure!(
         missing.is_empty(),
         "flags without a description: {missing:#?}"

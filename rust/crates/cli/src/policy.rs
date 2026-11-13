@@ -34,8 +34,10 @@ pub enum PolicyCommand {
     /// List catalog resources.
     List {
         kind: Kind,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -60,15 +62,19 @@ pub enum PolicyCommand {
     },
     /// List Role assignments.
     Assignments {
+        /// Only assignments of this Role.
         #[arg(long, default_value = "")]
         role: String,
+        /// Only assignments to this Tag.
         #[arg(long, default_value = "")]
         tag: String,
         /// Only assignments in effect now.
         #[arg(long)]
         active: bool,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },

@@ -29,10 +29,13 @@ pub enum TeamCommand {
     Get { team: String },
     /// List Teams, optionally for one member Tag.
     List {
+        /// Only Teams this Tag belongs to.
         #[arg(long, default_value = "")]
         member: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -71,8 +74,10 @@ pub enum TeamCommand {
         /// Continue after this post sequence instead of reading the newest posts.
         #[arg(long)]
         after_sequence: Option<u64>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 16)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },

@@ -202,8 +202,10 @@ enum Command {
         #[command(flatten)]
         connection: Connection,
         tag_id: String,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 32)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -262,6 +264,7 @@ enum Command {
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
+        /// Address the local Gateway listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         gateway_listen: SocketAddr,
     },
@@ -289,11 +292,13 @@ enum Command {
     },
     /// Run the private service that stores work and schedules execution.
     ControlPlane {
+        /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
     },
     /// Run the public gRPC service for operators and Worker Hosts.
     Gateway {
+        /// Address this service listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
         /// Private Control Plane URL that this Gateway forwards to.
@@ -445,6 +450,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
+        /// Seconds a Task Attempt may run before this host stops it.
         #[arg(long, default_value_t = 120)]
         attempt_timeout_seconds: u64,
         /// Exit after running one Task Attempt.
@@ -584,8 +590,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Also list retired Tags.
         #[arg(long)]
         include_retired: bool,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 100)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -673,6 +681,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+        /// Which published result to download.
         #[arg(long, value_enum)]
         kind: artifacts::ArtifactKind,
         /// Local file to create with the download. It must not already exist.
@@ -684,6 +693,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+        /// Only entries after this sequence number.
         #[arg(long, default_value_t = 0)]
         after: u64,
     },
@@ -693,6 +703,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
         attempt_id: String,
+        /// Only entries after this sequence number.
         #[arg(long, default_value_t = 0)]
         after: u64,
     },
@@ -708,6 +719,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         task_id: String,
         attempt_id: String,
+        /// Mark the Attempt failed, or run the Task again.
         #[arg(long, value_enum)]
         decision: RecoveryDecision,
         /// What you checked that shows the Attempt stopped and what it did.
@@ -784,17 +796,29 @@ fn usage_error(error: clap::Error) -> ! {
         error.exit()
     }
     let filtered = std::env::args_os().map(|arg| terminal::text(&arg.to_string_lossy()));
-    let error = match Cli::try_parse_from(filtered) {
-        Err(filtered) if filtered.kind() == error.kind() => filtered,
-        _ => error,
-    };
-    let text = error.render().to_string();
+    let text = usage_error_text(&error, filtered);
     if error.use_stderr() {
         terminal::write_stderr(&text);
     } else {
         terminal::write_stdout(&text);
     }
     std::process::exit(error.exit_code())
+}
+
+/// A usage error repeats what was typed, so it is rendered again from the filtered arguments. If
+/// those parse differently, only the kind of error is printed: the original rendering still holds
+/// the typed text, and a typed line break in it would print as a separate line.
+fn usage_error_text(error: &clap::Error, filtered: impl IntoIterator<Item = String>) -> String {
+    match Cli::try_parse_from(filtered) {
+        Err(filtered) if filtered.kind() == error.kind() => filtered.render().to_string(),
+        _ => format!(
+            "error: {}\n\nFor more information, try '--help'.\n",
+            error
+                .kind()
+                .as_str()
+                .unwrap_or("the arguments could not be read")
+        ),
+    }
 }
 
 fn dispatch(cli: Cli) -> Result<()> {
@@ -2723,4 +2747,44 @@ fn task_json(task: &Task) -> serde_json::Value {
             "max_native_agents": limits.max_native_agents,
         })),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, usage_error_text};
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_usage_error_never_falls_back_to_the_typed_text() {
+        let typed = "5\nerror: fake line";
+        let error = Cli::try_parse_from(args(&["supertag", "objective", "list", "--limit", typed]))
+            .err()
+            .expect("an invalid limit is a usage error");
+        assert!(error.render().to_string().contains("\nerror: fake line"));
+        // The filtered arguments parse to a different kind of error, so the original rendering,
+        // which still holds the typed line break, must not be used.
+        let text = usage_error_text(&error, args(&["supertag", "--version"]));
+        assert_eq!(
+            text,
+            "error: invalid value for one of the arguments\n\nFor more information, try '--help'.\n"
+        );
+        // With the same kind, the filtered rendering keeps the value on one line.
+        let filtered = usage_error_text(
+            &error,
+            args(&[
+                "supertag",
+                "objective",
+                "list",
+                "--limit",
+                &crate::terminal::text(typed),
+            ]),
+        );
+        assert!(filtered.contains("'5 error: fake line'"), "{filtered}");
+        assert!(!filtered.contains("\nerror: fake line"), "{filtered}");
+    }
 }

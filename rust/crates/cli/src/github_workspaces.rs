@@ -39,8 +39,10 @@ pub enum GithubWorkspaceCommand {
     Get { workspace_id: String },
     /// List GitHub Workspace sources.
     List {
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
         limit: u32,
+        /// Continue after the last ID the previous page returned.
         #[arg(long, default_value = "")]
         after_id: String,
     },

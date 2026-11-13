@@ -33,12 +33,16 @@ impl From<Kind> for InboxItemKind {
 pub enum InboxCommand {
     /// List questions and work waiting for an operator.
     List {
+        /// Only items for this Objective.
         #[arg(long, default_value = "")]
         objective: String,
+        /// Only items of this kind.
         #[arg(long)]
         kind: Option<Kind>,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },
@@ -56,15 +60,19 @@ pub enum InboxCommand {
     Approval { approval_id: String },
     /// List approval history.
     Approvals {
+        /// Only items for this Objective.
         #[arg(long, default_value = "")]
         objective: String,
+        /// Only approvals requested by this Task.
         #[arg(long, default_value = "")]
         task: String,
         /// Only requests that still wait for a decision.
         #[arg(long)]
         pending: bool,
+        /// Most entries to return on one page.
         #[arg(long, default_value_t = 20)]
         limit: u32,
+        /// Continue from the cursor the previous page returned.
         #[arg(long, default_value = "")]
         cursor: String,
     },

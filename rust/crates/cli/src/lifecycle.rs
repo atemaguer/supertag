@@ -314,7 +314,7 @@ pub async fn up(options: Background) -> Result<()> {
         Some(config) if config.service_unit => {
             let definition = unit_definition(&options, config)?;
             for warning in local_config::unit_check(config, &definition.environment)? {
-                outln!("{warning}");
+                outln!("{}", crate::terminal::text(&warning));
             }
             Some(definition)
         }
@@ -933,24 +933,26 @@ async fn host_states(
     hosts
 }
 
+/// Each field goes through [`crate::terminal::text`], so a path, name, or address that holds a line
+/// break cannot add a line to the table.
 fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
+    use crate::terminal::text;
     let mut out = String::new();
+    let state_directory = text(&report.state_directory);
     match (&report.supervisor, supervisor) {
         (Some(row), _) => {
             let how = match (row.mode.as_str(), &row.unit) {
-                ("service", Some(unit)) => format!("service unit {unit}"),
-                (mode, _) => mode.to_owned(),
+                ("service", Some(unit)) => format!("service unit {}", text(unit)),
+                (mode, _) => text(mode),
             };
             out.push_str(&format!(
-                "SuperTag {} runs in {} as process {} ({how}).\n",
-                row.version, report.state_directory, row.pid
+                "SuperTag {} runs in {state_directory} as process {} ({how}).\n",
+                text(&row.version),
+                row.pid
             ));
         }
         (None, Supervisor::Starting) => {
-            out.push_str(&format!(
-                "SuperTag is starting in {}.\n",
-                report.state_directory
-            ));
+            out.push_str(&format!("SuperTag is starting in {state_directory}.\n"));
         }
         _ => out.push_str("SuperTag is not running on this machine.\n"),
     }
@@ -979,10 +981,10 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
                 detail.push(format!("{attempts}/{capacity} Task Attempts"));
             }
             [
-                row.service.clone(),
-                row.kind.clone(),
+                text(&row.service),
+                text(&row.kind),
                 row.state.to_owned(),
-                row.address.clone().unwrap_or_else(|| "-".into()),
+                row.address.as_deref().map_or_else(|| "-".into(), text),
                 [
                     row.pid.map_or_else(|| "-".into(), |pid| pid.to_string()),
                     detail.join(", "),
@@ -1181,6 +1183,41 @@ const MAX_PARTIAL_LOG_LINE: usize = 64 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ps_fields_cannot_add_a_line() {
+        let hostile = "x\nfake line\x1b[2J";
+        let row = |service: &str| Row {
+            service: service.into(),
+            kind: hostile.into(),
+            state: "running",
+            address: Some(hostile.into()),
+            pid: Some(7),
+            worker_host_id: None,
+            connected: Some(true),
+            draining: None,
+            attempts: None,
+            capacity: None,
+        };
+        let report = PsReport {
+            state_directory: format!("/tmp/{hostile}"),
+            supervisor: Some(SupervisorRow {
+                pid: 1,
+                mode: "service".into(),
+                version: hostile.into(),
+                unit: Some(hostile.into()),
+            }),
+            services: vec![row(hostile), row("gateway")],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert_eq!(text.lines().count(), 4, "{text}");
+        assert!(
+            !text.lines().any(|line| line.starts_with("fake line")),
+            "{text}"
+        );
+        assert!(!text.contains('\x1b'), "{text}");
+        assert!(text.contains("x fake line [2J"), "{text}");
+    }
 
     #[test]
     fn timestamps_are_iso_8601_utc() {

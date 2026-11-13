@@ -506,10 +506,10 @@ async fn record_entry(store: &Store, mut record: AuditRecord, kind: &str) {
         result = store.record_audit_entry(&record).await;
     }
     if let Err(error) = result {
-        eprintln!(
+        supertag_protocol::terminal_text::warn(&format!(
             "Could not record the audit entry for {} {}: {error}",
             record.action, record.target
-        );
+        ));
     }
 }
 
