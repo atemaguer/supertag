@@ -372,7 +372,20 @@ impl Store {
             let record = host_in(&mut transaction, &enrolled)
                 .await?
                 .ok_or(StoreError::PermissionDenied)?;
-            transaction.rollback().await?;
+            // A retried join is audited under the host it enrolled, which may carry a suffix.
+            if enrolled != input.host_id {
+                crate::audit::changes_in(
+                    &mut transaction,
+                    &[crate::audit::AuditChange {
+                        action: "worker-host.join".into(),
+                        target: format!("WorkerHost/{enrolled}"),
+                    }],
+                )
+                .await?;
+                transaction.commit().await?;
+            } else {
+                transaction.rollback().await?;
+            }
             return host_row(&record);
         }
         let now = self.execution_now_ms();
@@ -735,33 +748,12 @@ async fn settle_removed_host_in(
         return Ok(());
     }
     let principal = format!("host:{id}");
-    let interrupted: Vec<(String, Option<String>, i64)> = sqlx::query_as("SELECT task_id,attempt_id,state FROM supertag_v2_tasks WHERE host_principal=$1 AND host_generation=$2 AND (state=$3 OR (state=$4 AND cleanup_pending=1)) ORDER BY task_id")
-        .bind(&principal).bind(generation).bind(TaskState::Uncertain as i64).bind(TaskState::Cancelled as i64)
-        .fetch_all(&mut **transaction).await?;
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=NULL,attempt_id=NULL,host_principal=NULL,host_generation=NULL,lease_token=NULL,lease_expires_at_ms=NULL,cleanup_pending=0,cleanup_observed=0,event_sequence_base=0,finish_objective_signal=0 WHERE host_principal=$2 AND host_generation=$3 AND state=$4")
         .bind(TaskState::Queued as i64).bind(&principal).bind(generation).bind(TaskState::Uncertain as i64)
         .execute(&mut **transaction).await?;
     sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending=0,cleanup_observed=1 WHERE host_principal=$1 AND host_generation=$2 AND state=$3 AND cleanup_pending=1")
         .bind(&principal).bind(generation).bind(TaskState::Cancelled as i64)
         .execute(&mut **transaction).await?;
-    // Each interrupted Task records why its Attempt stopped, as TypeScript's
-    // `task.worker-host-removed` event does: a running one was queued again, a cancelled one only
-    // finished its cleanup.
-    for (task_id, attempt_id, state) in interrupted {
-        let text = serde_json::to_string(&serde_json::json!({
-            "type": "task.worker-host-removed",
-            "version": 1,
-            "workerHostId": id,
-            "attemptId": attempt_id,
-            "requeued": state == TaskState::Uncertain as i64,
-        }))?;
-        sqlx::query("INSERT INTO supertag_v2_task_events (task_id,sequence,text) SELECT task_id,next_sequence,$2 FROM supertag_v2_tasks WHERE task_id=$1")
-            .bind(&task_id).bind(&text).execute(&mut **transaction).await?;
-        sqlx::query("UPDATE supertag_v2_tasks SET next_sequence=next_sequence+1 WHERE task_id=$1")
-            .bind(&task_id)
-            .execute(&mut **transaction)
-            .await?;
-    }
     Ok(())
 }
 

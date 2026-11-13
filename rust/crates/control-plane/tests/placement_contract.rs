@@ -429,28 +429,8 @@ async fn ephemeral_contract(url: &str) {
     let queued = store.get_task(&task).await.unwrap();
     assert_eq!(queued.state, TaskState::Queued as i32);
     assert!(queued.attempt_id.is_none());
-    // The Task records why its Attempt stopped, as TypeScript's event does.
-    let events = store.list_events(&task, 0, 0).await.unwrap();
-    let [event] = events.as_slice() else {
-        panic!("one event expected: {events:?}");
-    };
-    let mut removed_event: serde_json::Value = serde_json::from_str(&event.text).unwrap();
-    assert!(
-        removed_event["attemptId"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty())
-    );
-    removed_event["attemptId"] = serde_json::Value::Null;
-    assert_eq!(
-        removed_event,
-        serde_json::json!({
-            "type": "task.worker-host-removed",
-            "version": 1,
-            "workerHostId": "runner",
-            "attemptId": null,
-            "requeued": true,
-        })
-    );
+    // The removal is not written into the Task's events, which are the Tag's reply text.
+    assert!(store.list_events(&task, 0, 0).await.unwrap().is_empty());
     let listed = store
         .list_hosts(&ListHostsRequest::default())
         .await
@@ -493,10 +473,9 @@ async fn ephemeral_contract(url: &str) {
     store.close().await;
 }
 
-/// Time the Control Plane is down never counts as a host being offline.
 /// A removed ephemeral host's cancelled Attempt finishes its cleanup without running again, and
-/// its Task records `task.worker-host-removed` with `requeued` false, as
-/// tests/uncertain-attempt.test.ts expects.
+/// nothing is written into the Task's reply text (TypeScript's typed `task.worker-host-removed`
+/// event has no Rust counterpart; see the capability ledger).
 async fn removed_host_cancelled_attempt_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
@@ -514,14 +493,7 @@ async fn removed_host_cancelled_attempt_contract(url: &str) {
         store.get_task(&task).await.unwrap().state,
         TaskState::Cancelled as i32
     );
-    let events = store.list_events(&task, 0, 0).await.unwrap();
-    let [event] = events.as_slice() else {
-        panic!("one event expected: {events:?}");
-    };
-    let event: serde_json::Value = serde_json::from_str(&event.text).unwrap();
-    assert_eq!(event["type"], "task.worker-host-removed");
-    assert_eq!(event["workerHostId"], "worker");
-    assert_eq!(event["requeued"], false);
+    assert!(store.list_events(&task, 0, 0).await.unwrap().is_empty());
 }
 
 /// A reusable Auth Key that asks for a taken or reserved Worker Host ID enrolls the first free
@@ -598,6 +570,7 @@ async fn host_id_suffix_contract(url: &str) {
     assert_eq!(ids, [long.as_str(), "runner", "runner-2", "runner-4"]);
 }
 
+/// Time the Control Plane is down never counts as a host being offline.
 async fn ephemeral_restart_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;

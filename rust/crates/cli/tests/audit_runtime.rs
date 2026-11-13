@@ -389,6 +389,11 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .await??
         .into_inner();
     assert_eq!(suffixed.host_id, "review-host-2");
+    // A retried join returns the suffixed host, and its entry names that host too.
+    let retried = join(fleet_key, "review-host", "fleet-join")
+        .await??
+        .into_inner();
+    assert_eq!(retried.host_id, "review-host-2");
 
     let actor = format!("auth-key:{key_name}");
     let joins = services
@@ -397,17 +402,19 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
         .into_iter()
         .filter(|entry| entry[1] == "worker-host.join")
         .collect::<Vec<_>>();
-    assert_eq!(joins.len(), 4, "{joins:?}");
-    assert_eq!(
-        joins[3],
-        entry(
-            "auth-key:fleet-key",
-            "worker-host.join",
-            "WorkerHost/review-host-2",
-            "succeeded",
-            "OK"
-        )
-    );
+    assert_eq!(joins.len(), 5, "{joins:?}");
+    for joined in &joins[3..] {
+        assert_eq!(
+            *joined,
+            entry(
+                "auth-key:fleet-key",
+                "worker-host.join",
+                "WorkerHost/review-host-2",
+                "succeeded",
+                "OK"
+            )
+        );
+    }
     assert_eq!(
         joins[0],
         entry(
