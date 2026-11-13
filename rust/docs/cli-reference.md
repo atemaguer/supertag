@@ -1778,7 +1778,9 @@ Options:
           Retrieve each Workspace's accepted GitHub source from the Gateway
 
       --skill-catalog <SKILL_CATALOG>
-          Private host allowlist of Skill packages
+          Private host allowlist of Skill packages.
+          
+          A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository.
 
       --gateway-listen <GATEWAY_LISTEN>
           Address the local Gateway listens on. Port 0 picks a free port
@@ -2121,11 +2123,11 @@ Options:
           
           Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
           
-          A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+          A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/ABSOLUTE/PATH"}, from that owner-only file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
           
           The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
           
-          A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain.
+          A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain. The stdio preset lark runs the official Lark server through npx with chat resources: {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}}.
           
           Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP.
 
@@ -2142,7 +2144,9 @@ Options:
           Enable lease-bound commands on an operator-trusted Linux shared execution provider. Commands start in the fixed root with an empty credential environment and run with the provider's configured workload UID and GID. That identity's OS filesystem and network permissions also apply.
 
       --skill-catalog <SKILL_CATALOG>
-          Private host allowlist of Skill packages
+          Private host allowlist of Skill packages.
+          
+          A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository.
 
       --attempt-timeout-seconds <ATTEMPT_TIMEOUT_SECONDS>
           Seconds a Task Attempt may run before this host stops it

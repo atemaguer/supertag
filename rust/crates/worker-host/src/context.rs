@@ -16,6 +16,8 @@ use supertag_protocol::v2::{
 use supertag_workspaces::packages;
 use tokio_util::sync::CancellationToken;
 
+mod github;
+
 const TYPE: &str = "supertag/skill";
 const MAX_SKILLS: usize = 64;
 const MANIFEST_BYTES: usize = 128 * 1024;
@@ -24,6 +26,8 @@ const MANIFEST_BYTES: usize = 128 * 1024;
 pub struct ContextCatalog {
     configured: bool,
     entries: BTreeMap<String, CatalogEntry>,
+    /// Skills from GitHub-hosted catalogs, by reference (the Skill's directory name).
+    github: BTreeMap<String, github::GithubCatalog>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +40,11 @@ struct CatalogEntry {
 #[serde(deny_unknown_fields)]
 struct Catalog {
     version: u32,
+    #[serde(default)]
     skills: Vec<CatalogEntry>,
+    /// Catalogs in GitHub repositories, fetched at an exact commit when a Task needs a Skill.
+    #[serde(default)]
+    github: Vec<github::GithubCatalog>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,7 +102,11 @@ impl ContextCatalog {
                     });
                 }
             }
-            Catalog { version: 1, skills }
+            Catalog {
+                version: 1,
+                skills,
+                github: vec![],
+            }
         } else {
             let parent = packages::open_directory(path.parent().context("catalog has no parent")?)?;
             let bytes = packages::read_regular_at(
@@ -134,9 +146,22 @@ impl ContextCatalog {
                 "duplicate Skill catalog reference"
             );
         }
+        let mut github = BTreeMap::new();
+        ensure!(catalog.github.len() <= 16, "too many GitHub Skill catalogs");
+        for mut source in catalog.github {
+            source.validate()?;
+            for skill in source.skills.clone() {
+                validate_reference(&skill)?;
+                ensure!(
+                    !entries.contains_key(&skill) && github.insert(skill, source.clone()).is_none(),
+                    "duplicate Skill catalog reference"
+                );
+            }
+        }
         Ok(Self {
             configured: true,
             entries,
+            github,
         })
     }
     pub fn supported_contracts(&self) -> Vec<ContextContract> {
@@ -238,31 +263,53 @@ impl ContextCatalog {
                     let config: SkillConfig = serde_json::from_str(&item.config_json)
                         .context("invalid admitted Skill configuration")?;
                     validate_reference(&config.reference)?;
-                    let entry = self
-                        .entries
-                        .get(&config.reference)
-                        .context("Skill reference is not present in the host catalog")?;
-                    if let Some(version) = &config.version {
-                        ensure!(
-                            entry.version.as_ref() == Some(version),
-                            "Skill catalog version differs from the admitted version"
-                        );
-                    }
-                    let version = entry.version.clone().unwrap_or_default();
-                    let digest = if let Some((previous_version, digest)) =
+                    let (version, digest) = if let Some((version, digest)) =
                         delivered.get(&config.reference)
                     {
                         ensure!(
-                            previous_version == &version,
+                            config
+                                .version
+                                .as_ref()
+                                .is_none_or(|admitted| admitted == version),
                             "Skill reference resolved to conflicting versions"
                         );
-                        digest.clone()
+                        (version.clone(), digest.clone())
                     } else {
+                        let (path, version) =
+                            if let Some(entry) = self.entries.get(&config.reference) {
+                                if let Some(version) = &config.version {
+                                    ensure!(
+                                        entry.version.as_ref() == Some(version),
+                                        "Skill catalog version differs from the admitted version"
+                                    );
+                                }
+                                (
+                                    entry.path.clone(),
+                                    entry.version.clone().unwrap_or_default(),
+                                )
+                            } else {
+                                let source = self.github.get(&config.reference).context(
+                                    "Skill reference is not present in the host catalog",
+                                )?;
+                                // A retry keeps its Task's commit; a new Task may name one.
+                                let pinned = expected
+                                    .pins
+                                    .iter()
+                                    .find(|pin| pin.reference == config.reference)
+                                    .map(|pin| pin.version.as_str())
+                                    .or(config.version.as_deref());
+                                source.pin(
+                                    &config.reference,
+                                    pinned,
+                                    &prepared.state_root.join("skill-catalogs"),
+                                    cancel,
+                                )?
+                            };
                         ensure!(
                             delivered.len() < MAX_SKILLS,
                             "context exceeds Skill package count limit"
                         );
-                        let package = packages::capture(&entry.path, cancel)
+                        let package = packages::capture(&path, cancel)
                             .context("Skill package capture failed")?;
                         total = total
                             .checked_add(
@@ -282,7 +329,7 @@ impl ContextCatalog {
                             config.reference.clone(),
                             (version.clone(), package.digest.clone()),
                         );
-                        package.digest
+                        (version, package.digest)
                     };
                     if let Some(expected) = &config.digest {
                         ensure!(
@@ -682,5 +729,182 @@ mod tests {
         )
         .unwrap();
         assert!(prepared.discard().is_err());
+    }
+    fn git(directory: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(directory)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "-c",
+                "commit.gpgSign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().into()
+    }
+    fn github_catalog(root: &Path, url: &Path, revision: &str) -> ContextCatalog {
+        let file = root.join(format!("catalog-{revision}.json"));
+        fs::write(
+            &file,
+            serde_json::json!({"version":1,"github":[{
+                "repository":"acme/skills","path":"catalog","revision":revision,"skills":["review"]
+            }]})
+            .to_string(),
+        )
+        .unwrap();
+        let mut resolver = ContextCatalog::load(Some(&file)).unwrap();
+        for source in resolver.github.values_mut() {
+            *source = source.clone().with_url(url.to_str().unwrap());
+        }
+        resolver
+    }
+    fn prepare(
+        resolver: &ContextCatalog,
+        root: &Path,
+        attempt: &str,
+        expected: &ContextResolutionManifest,
+    ) -> Result<PreparedContext> {
+        fs::create_dir_all(root).unwrap();
+        fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
+        resolver.prepare_blocking(
+            &task(true, TYPE),
+            root,
+            attempt,
+            expected,
+            &CancellationToken::new(),
+        )
+    }
+    #[test]
+    fn github_catalog_pins_commit_and_digest_across_a_moved_branch_and_new_hosts() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let repository = root.join("skills");
+        let skill = repository.join("catalog/review");
+        fs::create_dir_all(&skill).unwrap();
+        git(&repository, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(skill.join("SKILL.md"), "first").unwrap();
+        fs::write(skill.join("check.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(skill.join("check.sh"), fs::Permissions::from_mode(0o700)).unwrap();
+        git(&repository, &["add", "catalog"]);
+        git(&repository, &["commit", "--quiet", "-m", "Add Skill"]);
+        let first_commit = git(&repository, &["rev-parse", "HEAD"]);
+        let resolver = github_catalog(&root, &repository, "main");
+        let host = root.join("host");
+        let first = prepare(&resolver, &host, "first", &Default::default()).unwrap();
+        let pinned = first.manifest().unwrap();
+        assert_eq!(pinned.pins[0].reference, "review");
+        assert_eq!(pinned.pins[0].version, first_commit);
+        let delivered = PathBuf::from(&first.delivery().unwrap()[0].local_path);
+        // Git modes, not the host umask or the author's mode bits, decide the files' modes.
+        assert_eq!(
+            fs::metadata(delivered.join("SKILL.md")).unwrap().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(delivered.join("check.sh")).unwrap().mode() & 0o777,
+            0o755
+        );
+
+        fs::write(skill.join("SKILL.md"), "second").unwrap();
+        git(&repository, &["commit", "--quiet", "-am", "Change Skill"]);
+        // A retry, here or on a host that never fetched the catalog, keeps the pinned commit.
+        for host in [&host, &root.join("new-host")] {
+            let retry = prepare(&resolver, host, "retry", &pinned).unwrap();
+            assert_eq!(retry.manifest().unwrap(), pinned);
+            let path = PathBuf::from(&retry.delivery().unwrap()[0].local_path);
+            assert_eq!(fs::read_to_string(path.join("SKILL.md")).unwrap(), "first");
+            retry.discard().unwrap();
+        }
+        // A new Task pins the branch as it is now.
+        let next = prepare(&resolver, &host, "next", &Default::default()).unwrap();
+        let moved = next.manifest().unwrap();
+        assert_ne!(moved.pins[0].version, first_commit);
+        assert_ne!(moved.pins[0].digest, pinned.pins[0].digest);
+
+        // Removing the executable bit changes the digest.
+        fs::set_permissions(skill.join("check.sh"), fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(skill.join("SKILL.md"), "first").unwrap();
+        git(&repository, &["commit", "--quiet", "-am", "Not executable"]);
+        let plain = prepare(&resolver, &host, "plain", &Default::default()).unwrap();
+        assert_ne!(
+            plain.manifest().unwrap().pins[0].digest,
+            pinned.pins[0].digest
+        );
+
+        // A pinned commit the source no longer serves names its recovery options.
+        let gone = github_catalog(&root, &root.join("unavailable"), "main");
+        let error = prepare(&gone, &root.join("third-host"), "lost", &pinned)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains(&format!("acme/skills at {first_commit}"))
+                && error.contains("Skill review")
+                && error.contains("not available on this Worker Host")
+                && error.contains("restore the commit")
+                && error.contains("original host")
+                && error.contains("new Task to re-pin"),
+            "{error}"
+        );
+    }
+    #[test]
+    fn github_catalog_reports_missing_skills_revisions_and_access() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let repository = root.join("skills");
+        fs::create_dir_all(repository.join("other")).unwrap();
+        git(&repository, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(repository.join("other/SKILL.md"), "x").unwrap();
+        git(&repository, &["add", "other"]);
+        git(&repository, &["commit", "--quiet", "-m", "Other"]);
+        let error = |resolver: &ContextCatalog| {
+            prepare(resolver, &root.join("host"), "attempt", &Default::default())
+                .err()
+                .unwrap()
+                .to_string()
+        };
+        assert!(
+            error(&github_catalog(&root, &repository, "main")).contains("Skill review is missing"),
+        );
+        assert!(
+            error(&github_catalog(&root, &repository, "absent"))
+                .contains("cannot fetch revision absent")
+        );
+        assert!(
+            error(&github_catalog(&root, &root.join("none"), "main"))
+                .contains("Worker Host GitHub access")
+        );
+        let skill = repository.join("catalog/review");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("notes.md"), "no instructions").unwrap();
+        git(&repository, &["add", "catalog"]);
+        git(&repository, &["commit", "--quiet", "-m", "No SKILL.md"]);
+        assert!(error(&github_catalog(&root, &repository, "main")).contains("needs SKILL.md"));
+        for invalid in [
+            serde_json::json!({"repository":"acme","path":"catalog","revision":"main","skills":["review"]}),
+            serde_json::json!({"repository":"acme/skills","path":"../catalog","revision":"main","skills":["review"]}),
+            serde_json::json!({"repository":"acme/skills","path":"catalog","revision":"--upload-pack=x","skills":["review"]}),
+            serde_json::json!({"repository":"acme/skills","path":"catalog","revision":"main","skills":["a/b"]}),
+            serde_json::json!({"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"],"url":"file:///tmp"}),
+        ] {
+            let file = root.join("invalid.json");
+            fs::write(
+                &file,
+                serde_json::json!({"version":1,"github":[invalid]}).to_string(),
+            )
+            .unwrap();
+            assert!(ContextCatalog::load(Some(&file)).is_err(), "{invalid}");
+        }
     }
 }

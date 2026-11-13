@@ -48,6 +48,10 @@ mod volumes;
 mod work_sessions;
 mod workspace_mounts;
 
+const SKILL_CATALOG_HELP: &str = r#"Private host allowlist of Skill packages.
+
+A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository."#;
+
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -314,7 +318,7 @@ enum Command {
         #[command(flatten)]
         adapter: AdapterOptions,
         /// Private host allowlist of Skill packages.
-        #[arg(long)]
+        #[arg(long, long_help = SKILL_CATALOG_HELP)]
         skill_catalog: Option<PathBuf>,
         /// Address the local Gateway listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
@@ -521,7 +525,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         )]
         shared_execution_commands: bool,
         /// Private host allowlist of Skill packages.
-        #[arg(long)]
+        #[arg(long, long_help = SKILL_CATALOG_HELP)]
         skill_catalog: Option<PathBuf>,
         /// Seconds a Task Attempt may run before this host stops it.
         #[arg(long, default_value_t = 120)]
