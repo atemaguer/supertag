@@ -205,11 +205,17 @@ impl Store {
         }
         let fingerprint = fingerprint(&(&input.host_id, &input.operation_id, &token))?;
         let (mut transaction, _) = self.write().await?;
-        let row = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE key_digest=$1")
+        let Some(row) = sqlx::query("SELECT * FROM supertag_v2_auth_keys WHERE key_digest=$1")
             .bind(&key)
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(StoreError::PermissionDenied)?;
+        else {
+            // A join with a key the Control Plane does not know names no one to record.
+            crate::audit::skip_call();
+            return Err(StoreError::PermissionDenied);
+        };
+        let key_id: String = row.try_get("key_id")?;
+        crate::audit::note_actor_in(&mut transaction, &format!("auth-key:{key_id}")).await?;
         // Revocation also refuses replays, as packages/store/src/auth-key-store.ts does.
         if row.try_get::<Option<i64>, _>("revoked_at_ms")?.is_some() {
             return Err(StoreError::PermissionDenied);

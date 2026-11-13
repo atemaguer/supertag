@@ -2,11 +2,20 @@
 //!
 //! The layer wraps the private gRPC router. For each audited unary method called by a
 //! Gateway-authenticated operator, it records who called, what the call did, its target, and the
-//! gRPC outcome, after the handler answers and before the response leaves the Control Plane. A
-//! later call therefore lists it. Calls refused as unauthenticated and previews are not recorded.
-//! A call that changes several resources records one entry per resource. Recording never fails the
-//! call it describes: a target the log refuses is recorded by kind, and a storage failure is
-//! reported on standard error.
+//! gRPC outcome. A later call therefore lists it. Calls refused as unauthenticated and previews are
+//! not recorded. A call that changes several resources records one entry per resource.
+//!
+//! Each entry is written in the transaction that makes the change it describes: every write
+//! transaction takes the next write order, and that step records the entries of the audited call
+//! running on the task, so an entry commits exactly when its change does. After the handler answers,
+//! the layer settles the call: a call that changed nothing transactionally gets its entries then, a
+//! failed call is recorded as failed, and entries an inner transaction committed for a call that
+//! ultimately failed are marked failed. A target the log refuses is recorded by kind; a storage
+//! failure while settling is reported on standard error and never fails the call.
+//!
+//! Callers other than operators are recorded too: a Worker Host joining with an Auth Key as
+//! `auth-key:KEY_ID`, and a person directing an Objective from a surface thread as
+//! `<provider>:<user ID>`.
 
 use std::{
     pin::Pin,
@@ -23,7 +32,10 @@ use tonic::{Code, body::Body};
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{ControlPlane, Store, StoreError, operator_access::AuditRecord};
+use sqlx::{Any, Transaction};
+use uuid::Uuid;
+
+use crate::{ControlPlane, Store, operator_access::AuditRecord};
 
 const PRINCIPAL: &str = "x-supertag-principal";
 
@@ -52,10 +64,20 @@ pub struct AuditChanges(pub Vec<AuditChange>);
 
 type Decode = fn(&[u8]) -> Option<Target>;
 
+/// Who an audited call acts as before its handler names a more specific actor.
+#[derive(Clone, Copy)]
+enum Caller {
+    /// A Gateway-authenticated operator, recorded by its operator ID.
+    Operator,
+    /// A Worker Host presenting an Auth Key through the Gateway. The handler names the key.
+    AuthKey,
+}
+
 struct Rule {
     action: &'static str,
     kind: &'static str,
     decode: Decode,
+    caller: Caller,
 }
 
 fn named(kind: &str, id: &str) -> Option<Target> {
@@ -71,6 +93,7 @@ macro_rules! rule {
         Rule {
             action: $action,
             kind: $kind,
+            caller: Caller::Operator,
             decode: |bytes| {
                 let $value = <$message>::decode(bytes).ok()?;
                 $target
@@ -109,6 +132,21 @@ fn rule(path: &str) -> Option<Rule> {
             CreateAuthKeyRequest,
             |value| named("WorkerHost", &value.host_id)
         ),
+        ("HostDirectory", "Enroll") => Rule {
+            caller: Caller::AuthKey,
+            ..rule!(
+                "worker-host.join",
+                "WorkerHost",
+                PrivateEnrollHostRequest,
+                |value| named(
+                    "WorkerHost",
+                    value
+                        .enrollment
+                        .as_ref()
+                        .map_or("", |enrollment| enrollment.host_id.as_str())
+                )
+            )
+        },
         ("Operator", "RevokeHost") => rule!(
             "worker-host.revoke",
             "WorkerHost",
@@ -125,6 +163,7 @@ fn rule(path: &str) -> Option<Rule> {
                 action: "worker-host.set-draining",
                 kind: "WorkerHost",
                 decode,
+                caller: Caller::Operator,
             }
         }
         ("Operator", "PutTag") => {
@@ -497,20 +536,199 @@ fn gateway_bearer(headers: &http::HeaderMap, token: &str) -> bool {
         })
 }
 
-/// Stores one entry. An entry whose target the log refuses is kept with the kind alone, so a
-/// change the handler accepted is never left out of the log.
-async fn record_entry(store: &Store, mut record: AuditRecord, kind: &str) {
-    let mut result = store.record_audit_entry(&record).await;
-    if matches!(result, Err(StoreError::InvalidArgument(_))) && record.target != kind {
+tokio::task_local! {
+    /// The audited call whose handler is running on this task.
+    static CALL: Arc<AuditCall>;
+}
+
+/// One audited call while its handler runs.
+pub(crate) struct AuditCall {
+    id: String,
+    store: Store,
+    action: &'static str,
+    kind: &'static str,
+    method: String,
+    decode: Decode,
+    /// The unary request message as the handler read it.
+    copy: Arc<Mutex<Option<BytesMut>>>,
+    state: Mutex<CallState>,
+}
+
+struct CallState {
+    actor: String,
+    /// Set by a handler that refuses a caller it cannot attribute, which is not recorded.
+    skip: bool,
+}
+
+impl AuditCall {
+    fn actor(&self) -> String {
+        self.state
+            .lock()
+            .map_or_else(|_| String::new(), |state| state.actor.clone())
+    }
+
+    fn skipped(&self) -> bool {
+        self.state.lock().is_ok_and(|state| state.skip)
+    }
+
+    /// What the request targets, once the handler has read it.
+    fn target(&self) -> Target {
+        let bytes = self
+            .copy
+            .lock()
+            .ok()
+            .and_then(|copy| copy.as_ref().map(|copy| copy.clone().freeze()))
+            .unwrap_or_default();
+        unary_message(&bytes)
+            .and_then(self.decode)
+            .unwrap_or(Target::Kind)
+    }
+
+    fn record(&self, action: &str, target: String, succeeded: bool, code: Code) -> AuditRecord {
+        AuditRecord {
+            actor: self.actor(),
+            action: action.into(),
+            target,
+            succeeded,
+            code: code_name(code).into(),
+            method: self.method.clone(),
+        }
+    }
+
+    /// The entries of a successful call: one per resource it names.
+    fn entries(&self, target: Target) -> Vec<(String, String)> {
+        match target {
+            Target::Named(target) => vec![(self.action.into(), target)],
+            Target::Many(targets) => targets
+                .into_iter()
+                .map(|target| (self.action.to_owned(), target))
+                .collect(),
+            Target::Kind => vec![(self.action.into(), self.kind.into())],
+            Target::Skip => Vec::new(),
+        }
+    }
+}
+
+fn current_call() -> Option<Arc<AuditCall>> {
+    CALL.try_with(Arc::clone).ok()
+}
+
+/// Names who the running audited call acts as, such as the Auth Key a Worker Host presented.
+pub(crate) fn note_actor(actor: &str) {
+    if let Some(call) = current_call()
+        && let Ok(mut state) = call.state.lock()
+    {
+        state.actor = actor.into();
+    }
+}
+
+/// Leaves the running audited call out of the log, as for a credential the Control Plane does
+/// not know.
+pub(crate) fn skip_call() {
+    if let Some(call) = current_call()
+        && let Ok(mut state) = call.state.lock()
+    {
+        state.skip = true;
+    }
+}
+
+/// Writes one entry in `transaction`, under the next write order. An entry of a call is written
+/// at most once per action and target. A target the log refuses is recorded by its kind.
+pub(crate) async fn insert_in(
+    transaction: &mut Transaction<'_, Any>,
+    call_id: Option<&str>,
+    at_ms: i64,
+    mut record: AuditRecord,
+    kind: &str,
+) -> crate::store::Result<()> {
+    if crate::operator_access::validate_audit_record(&record).is_err() && record.target != kind {
         record.target = kind.into();
-        result = store.record_audit_entry(&record).await;
     }
-    if let Err(error) = result {
-        eprintln!(
-            "Could not record the audit entry for {} {}: {error}",
-            record.action, record.target
-        );
+    crate::operator_access::validate_audit_record(&record)?;
+    let order = crate::store::increment_order(transaction).await?;
+    sqlx::query("INSERT INTO supertag_v2_audit_entries (sequence, entry_id, at_ms, actor, action, target, outcome, code, method, call_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (call_id, action, target) DO NOTHING")
+        .bind(order)
+        .bind(Uuid::new_v4().to_string())
+        .bind(at_ms)
+        .bind(&record.actor)
+        .bind(&record.action)
+        .bind(&record.target)
+        .bind(if record.succeeded { 1_i64 } else { 2 })
+        .bind(&record.code)
+        .bind(&record.method)
+        .bind(call_id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+/// Records the running audited call's entries in `transaction` as succeeded, once per call. A
+/// rolled-back transaction takes its entries with it; the next one writes them again.
+pub(crate) async fn record_call_in(
+    transaction: &mut Transaction<'_, Any>,
+) -> crate::store::Result<()> {
+    let Some(call) = current_call() else {
+        return Ok(());
+    };
+    if call.skipped() {
+        return Ok(());
     }
+    let recorded: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM supertag_v2_audit_entries WHERE call_id=$1 LIMIT 1")
+            .bind(&call.id)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    if recorded.is_some() {
+        return Ok(());
+    }
+    let at_ms = call.store.execution_now_ms();
+    for (action, target) in call.entries(call.target()) {
+        let record = call.record(&action, target, true, Code::Ok);
+        insert_in(transaction, Some(&call.id), at_ms, record, call.kind).await?;
+    }
+    Ok(())
+}
+
+/// Names who the running audited call acts as, in the entries already written in `transaction`
+/// and in those written later.
+pub(crate) async fn note_actor_in(
+    transaction: &mut Transaction<'_, Any>,
+    actor: &str,
+) -> crate::store::Result<()> {
+    let Some(call) = current_call() else {
+        return Ok(());
+    };
+    note_actor(actor);
+    sqlx::query("UPDATE supertag_v2_audit_entries SET actor=$1 WHERE call_id=$2")
+        .bind(actor)
+        .bind(&call.id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+/// Replaces the running audited call's entries in `transaction` with one per change, such as each
+/// member an apply-set prune deletes. Without changes the call keeps its own entry.
+pub(crate) async fn changes_in(
+    transaction: &mut Transaction<'_, Any>,
+    changes: &[AuditChange],
+) -> crate::store::Result<()> {
+    let Some(call) = current_call() else {
+        return Ok(());
+    };
+    if changes.is_empty() || call.skipped() {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM supertag_v2_audit_entries WHERE call_id=$1")
+        .bind(&call.id)
+        .execute(&mut **transaction)
+        .await?;
+    let at_ms = call.store.execution_now_ms();
+    for change in changes {
+        let record = call.record(&change.action, change.target.clone(), true, Code::Ok);
+        insert_in(transaction, Some(&call.id), at_ms, record, call.kind).await?;
+    }
+    Ok(())
 }
 
 /// Passes a request body through unchanged and copies up to one maximum-size unary message.
@@ -611,42 +829,50 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
         let rule = rule(request.uri().path());
-        let actor = rule.as_ref().and_then(|_| {
-            // Only Gateway-authenticated operators are recorded; the handler refuses the rest.
+        let actor = rule.as_ref().and_then(|rule| {
+            // Only Gateway-authenticated callers are recorded; the handler refuses the rest.
             if !gateway_bearer(request.headers(), &self.layer.gateway_token) {
                 return None;
             }
             let principal = request.headers().get(PRINCIPAL)?.to_str().ok()?;
-            principal
-                .strip_prefix("operator:")
-                .filter(|id| !id.is_empty())
-                .map(str::to_owned)
+            match rule.caller {
+                Caller::Operator => principal
+                    .strip_prefix("operator:")
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned),
+                Caller::AuthKey => principal
+                    .starts_with("service:")
+                    .then(|| "auth-key".to_owned()),
+            }
         });
         let (Some(rule), Some(actor)) = (rule, actor) else {
             return Box::pin(inner.call(request));
         };
         let store = self.layer.store.clone();
         Box::pin(async move {
-            let method = request.uri().path().to_owned();
             // The handler reads the body exactly as sent, including tonic's own refusal of an
-            // oversized message; the layer keeps a copy to name the target afterwards.
+            // oversized message; the layer keeps a copy to name the target.
             let copy = Arc::new(Mutex::new(Some(BytesMut::new())));
-            let (parts, body) = request.into_parts();
-            let body = Body::new(Recording {
-                inner: body,
+            let call = Arc::new(AuditCall {
+                id: Uuid::new_v4().to_string(),
+                store: store.clone(),
+                action: rule.action,
+                kind: rule.kind,
+                method: request.uri().path().to_owned(),
+                decode: rule.decode,
                 copy: copy.clone(),
+                state: Mutex::new(CallState { actor, skip: false }),
             });
-            let response = inner.call(http::Request::from_parts(parts, body)).await?;
-            let bytes = copy
-                .lock()
-                .ok()
-                .and_then(|mut copy| copy.take())
-                .map(BytesMut::freeze)
-                .unwrap_or_default();
-            let target = unary_message(&bytes)
-                .and_then(rule.decode)
-                .unwrap_or(Target::Kind);
-            if matches!(target, Target::Skip) {
+            let (parts, body) = request.into_parts();
+            let body = Body::new(Recording { inner: body, copy });
+            let response = CALL
+                .scope(
+                    call.clone(),
+                    inner.call(http::Request::from_parts(parts, body)),
+                )
+                .await?;
+            let target = call.target();
+            if matches!(target, Target::Skip) || call.skipped() {
                 return Ok(response);
             }
             let code = response
@@ -658,37 +884,38 @@ where
             if code == Code::Unauthenticated {
                 return Ok(response);
             }
-            let succeeded = code == Code::Ok;
-            let changes = response
-                .extensions()
-                .get::<AuditChanges>()
-                .filter(|changes| succeeded && !changes.0.is_empty())
-                .map(|changes| {
-                    changes
-                        .0
-                        .iter()
-                        .map(|change| (change.action.clone(), change.target.clone()))
-                        .collect::<Vec<_>>()
-                });
-            let entries = match (changes, target) {
-                (Some(changes), _) => changes,
-                (None, Target::Named(target)) if succeeded => vec![(rule.action.into(), target)],
-                (None, Target::Many(targets)) if succeeded => targets
+            let result = if code == Code::Ok {
+                let changes = response
+                    .extensions()
+                    .get::<AuditChanges>()
+                    .filter(|changes| !changes.0.is_empty());
+                let replace = changes.is_some();
+                let entries = changes.map_or_else(
+                    || call.entries(target),
+                    |changes| {
+                        changes
+                            .0
+                            .iter()
+                            .map(|change| (change.action.clone(), change.target.clone()))
+                            .collect()
+                    },
+                );
+                let records = entries
                     .into_iter()
-                    .map(|target| (rule.action.to_owned(), target))
-                    .collect(),
-                _ => vec![(rule.action.into(), rule.kind.into())],
+                    .map(|(action, target)| call.record(&action, target, true, code))
+                    .collect::<Vec<_>>();
+                store
+                    .settle_audit_call(&call.id, &records, replace, rule.kind)
+                    .await
+            } else {
+                let record = call.record(rule.action, rule.kind.into(), false, code);
+                store.fail_audit_call(&call.id, &record, rule.kind).await
             };
-            for (action, target) in entries {
-                let record = AuditRecord {
-                    actor: actor.clone(),
-                    action,
-                    target,
-                    succeeded,
-                    code: code_name(code).into(),
-                    method: method.clone(),
-                };
-                record_entry(&store, record, rule.kind).await;
+            if let Err(error) = result {
+                eprintln!(
+                    "Could not record the audit entry for {} {}: {error}",
+                    rule.action, rule.kind
+                );
             }
             Ok(response)
         })

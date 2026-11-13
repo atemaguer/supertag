@@ -581,7 +581,25 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
         )?)
         .await?;
 
-    // Pruning an apply set records each member it removed, not only the set.
+    // Pruning an apply set records each member it removed, not only the set. As `supertag apply`
+    // does, the set first claims the Tags it is about to create.
+    let claims = ["prune-kept", "prune-removed"].map(|tag| ApplySetDeclaration {
+        kind: "Tag".into(),
+        name: tag.into(),
+        revision: 0,
+        created: true,
+    });
+    manifests
+        .reconcile_apply_set(request(
+            ReconcileApplySetRequest {
+                apply_set: "web".into(),
+                declared: claims.to_vec(),
+                prune: false,
+                preview: false,
+            },
+            &secret,
+        )?)
+        .await?;
     let mut declared = Vec::new();
     for tag in ["prune-kept", "prune-removed"] {
         let put = operator
@@ -663,6 +681,13 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
         entry(actor, "team.create", "Team/core", "succeeded", "OK"),
         entry(actor, "tag.provision", "Tag/planner", "succeeded", "OK"),
         entry(actor, "tag.provision", "Tag/builder", "succeeded", "OK"),
+        entry(
+            actor,
+            "apply-set.reconcile",
+            "ApplySet/web",
+            "succeeded",
+            "OK",
+        ),
         entry(actor, "tag.put", "Tag/prune-kept", "succeeded", "OK"),
         entry(actor, "tag.put", "Tag/prune-removed", "succeeded", "OK"),
         entry(

@@ -64,6 +64,11 @@ path = "tests/split_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "audit_runtime"
+path = "tests/audit_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "enrolled_runtime"
 path = "tests/enrolled_runtime.rs"
 required-features = ["test-fixtures"]

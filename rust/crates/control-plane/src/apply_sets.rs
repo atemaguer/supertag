@@ -251,6 +251,16 @@ impl Store {
         if input.preview {
             tx.rollback().await?;
         } else {
+            // Each member the prune deleted is its own audit entry, committed with the deletion.
+            let deleted = pruned
+                .iter()
+                .filter(|item| item.action() == ApplySetPruneAction::Delete)
+                .map(|item| crate::audit::AuditChange {
+                    action: "resource.prune".into(),
+                    target: format!("{}/{}", item.kind, item.name),
+                })
+                .collect::<Vec<_>>();
+            crate::audit::changes_in(&mut tx, &deleted).await?;
             tx.commit().await?;
         }
         Ok(ReconcileApplySetResponse { pruned })

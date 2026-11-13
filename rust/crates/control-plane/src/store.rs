@@ -75,7 +75,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 64;
+        const SCHEMA_VERSION: i64 = 65;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -193,6 +193,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0062_surface_objectives_connector_leases.sql"),
                 include_str!("../migrations/sqlite/0063_attempt_claim_times.sql"),
                 include_str!("../migrations/sqlite/0064_workspace_mcp.sql"),
+                include_str!("../migrations/sqlite/0107_audit_calls.sql"),
             ]
         } else {
             [
@@ -262,6 +263,7 @@ impl Store {
                 ),
                 include_str!("../migrations/postgresql/0063_attempt_claim_times.sql"),
                 include_str!("../migrations/postgresql/0064_workspace_mcp.sql"),
+                include_str!("../migrations/postgresql/0107_audit_calls.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1691,6 +1693,15 @@ pub(crate) async fn preserve_execution_in(
 }
 
 pub(crate) async fn next_order(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
+    let order = increment_order(transaction).await?;
+    // An audited operator call records its entries in each transaction that can change state, so
+    // an entry commits exactly when the change it describes does.
+    crate::audit::record_call_in(transaction).await?;
+    Ok(order)
+}
+
+/// Takes the next write order without recording anything else.
+pub(crate) async fn increment_order(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
     Ok(sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision = revision + 1 WHERE singleton = 1 RETURNING revision")
         .fetch_one(&mut **transaction).await?)
 }

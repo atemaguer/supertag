@@ -7,12 +7,12 @@ use sqlx::{Connection, Executor, Row};
 use std::future::Future;
 use supertag_control_plane::{HostAuthority, Store, StoreError};
 use supertag_protocol::v2::{
-    AcceptSlackEventRequest, DeleteSurfaceLocationRequest, FinishTaskRequest,
-    GetSurfaceLocationRequest, ListObjectivesRequest, ListSurfaceLocationsRequest, Objective,
-    ObjectiveSignal, ObjectiveStatus, PutSurfaceAccountRequest, PutSurfaceLocationRequest,
-    SlackSurfaceChannel, SlackSurfaceIdentity, StartTaskRequest, SurfaceAccount,
-    SurfaceAccountIdentity, SurfaceLocation, SurfaceLocationScope, Task, TaskState,
-    surface_account_identity, surface_location_scope,
+    AcceptSlackEventRequest, AuditOutcome, DeleteSurfaceLocationRequest, FinishTaskRequest,
+    GetSurfaceLocationRequest, ListAuditEntriesRequest, ListObjectivesRequest,
+    ListSurfaceLocationsRequest, Objective, ObjectiveSignal, ObjectiveStatus,
+    PutSurfaceAccountRequest, PutSurfaceLocationRequest, SlackSurfaceChannel, SlackSurfaceIdentity,
+    StartTaskRequest, SurfaceAccount, SurfaceAccountIdentity, SurfaceLocation,
+    SurfaceLocationScope, Task, TaskState, surface_account_identity, surface_location_scope,
 };
 use uuid::Uuid;
 
@@ -502,6 +502,52 @@ async fn contract(url: String) {
     )
     .await;
     answered(&store, &url, &late, "Objective").await;
+    // Each action on the Objective is audited under the same person, with its outcome.
+    let audited = store
+        .list_audit_entries(&ListAuditEntriesRequest {
+            limit: 100,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .entries
+        .into_iter()
+        .rev()
+        .filter(|entry| entry.target == format!("Objective/{}", objective.objective_id))
+        .map(|entry| {
+            assert_eq!(entry.actor, "slack:UALICE1");
+            assert_eq!(
+                entry.method,
+                "/supertag.runtime.v2.Connector/AcceptSlackEvent"
+            );
+            (entry.outcome(), entry.action, entry.code)
+        })
+        .collect::<Vec<_>>();
+    let ok = |action: &str| (AuditOutcome::Succeeded, action.to_owned(), "OK".to_owned());
+    let refused = |action: &str| {
+        (
+            AuditOutcome::Failed,
+            action.to_owned(),
+            "FAILED_PRECONDITION".to_owned(),
+        )
+    };
+    assert_eq!(
+        audited,
+        [
+            // The steer, the mention, and the two colleague messages.
+            ok("objective.message"),
+            ok("objective.message"),
+            ok("objective.message"),
+            ok("objective.message"),
+            refused("objective.approve"),
+            ok("objective.pause"),
+            ok("objective.pause"),
+            refused("objective.message"),
+            ok("objective.resume"),
+            ok("objective.approve"),
+            refused("objective.message"),
+        ]
+    );
     // An empty invocation fails closed without an Objective.
     let empty_thread = "1794470100.100000";
     let empty = accept(

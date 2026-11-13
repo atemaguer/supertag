@@ -126,6 +126,7 @@ impl Store {
                 // message that mentions someone else is never a command.
                 addressed: input.mention_tag_id.is_some(),
                 actor: &actor,
+                method: "/supertag.runtime.v2.Connector/AcceptSlackEvent",
             },
             now_ms,
         ))

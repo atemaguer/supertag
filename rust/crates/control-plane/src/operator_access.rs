@@ -81,6 +81,15 @@ fn token_name(value: &str) -> Result<&str> {
 /// The longest audit target: a kind and up to two 256-byte IDs, such as a Mailbox grant.
 pub const MAX_AUDIT_TARGET_BYTES: usize = 1024;
 
+/// Refuses an entry the log cannot store.
+pub(crate) fn validate_audit_record(record: &AuditRecord) -> Result<()> {
+    name("audit actor", &record.actor)?;
+    name("audit action", &record.action)?;
+    audit_target(&record.target)?;
+    name("audit code", &record.code)?;
+    name("audit method", &record.method)
+}
+
 fn audit_target(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > MAX_AUDIT_TARGET_BYTES
@@ -335,11 +344,7 @@ impl Store {
 
     /// Stores one audit entry in the Control Plane write order.
     pub async fn record_audit_entry(&self, record: &AuditRecord) -> Result<AuditEntry> {
-        name("audit actor", &record.actor)?;
-        name("audit action", &record.action)?;
-        audit_target(&record.target)?;
-        name("audit code", &record.code)?;
-        name("audit method", &record.method)?;
+        validate_audit_record(record)?;
         let (mut tx, order) = self.write().await?;
         let at_ms = self.execution_now_ms();
         let id = Uuid::new_v4().to_string();
@@ -364,6 +369,77 @@ impl Store {
             code: record.code.clone(),
             method: record.method.clone(),
         })
+    }
+
+    /// Completes the entries of a call that succeeded. Entries its transactions already committed
+    /// stay as they are; missing ones are added, as for a call that changed nothing
+    /// transactionally. With `replace`, the call's entries are exactly `records`.
+    pub(crate) async fn settle_audit_call(
+        &self,
+        call_id: &str,
+        records: &[AuditRecord],
+        replace: bool,
+        kind: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        crate::store::increment_order(&mut tx).await?;
+        let existing: Vec<(String, String)> =
+            sqlx::query_as("SELECT action, target FROM supertag_v2_audit_entries WHERE call_id=$1")
+                .bind(call_id)
+                .fetch_all(&mut *tx)
+                .await?;
+        if replace {
+            for (action, target) in &existing {
+                if !records
+                    .iter()
+                    .any(|record| &record.action == action && &record.target == target)
+                {
+                    sqlx::query("DELETE FROM supertag_v2_audit_entries WHERE call_id=$1 AND action=$2 AND target=$3")
+                        .bind(call_id).bind(action).bind(target).execute(&mut *tx).await?;
+                }
+            }
+        } else if !existing.is_empty() {
+            // The change committed with its entries; nothing is missing.
+            tx.rollback().await?;
+            return Ok(());
+        }
+        let at_ms = self.execution_now_ms();
+        for record in records {
+            if existing
+                .iter()
+                .any(|(action, target)| action == &record.action && target == &record.target)
+            {
+                continue;
+            }
+            crate::audit::insert_in(&mut tx, Some(call_id), at_ms, record.clone(), kind).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Records a call that failed. Entries an earlier transaction of the call committed are
+    /// marked failed with the call's code; otherwise the failure is recorded by the target's kind.
+    pub(crate) async fn fail_audit_call(
+        &self,
+        call_id: &str,
+        record: &AuditRecord,
+        kind: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        crate::store::increment_order(&mut tx).await?;
+        let updated =
+            sqlx::query("UPDATE supertag_v2_audit_entries SET outcome=2, code=$1 WHERE call_id=$2")
+                .bind(&record.code)
+                .bind(call_id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        if updated == 0 {
+            let at_ms = self.execution_now_ms();
+            crate::audit::insert_in(&mut tx, Some(call_id), at_ms, record.clone(), kind).await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Newest first. A page that continues from `next_cursor` neither repeats nor skips entries
