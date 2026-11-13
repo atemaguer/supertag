@@ -317,9 +317,9 @@ pub(super) struct ServerConfig {
     /// A stdio server: the executable and its arguments.
     pub(super) command: Option<Vec<String>>,
     /// A stdio server's environment: each variable it receives, mapped to the Worker Host
-    /// variable that holds its value.
+    /// variable that holds its value, or to `{"file": PATH}`, an owner-only file that holds it.
     #[serde(default)]
-    pub(super) env: BTreeMap<String, String>,
+    pub(super) env: BTreeMap<String, EnvSource>,
     #[serde(default)]
     resources: ResourceMapping,
 }
@@ -334,6 +334,21 @@ impl ServerConfig {
             helper: self.helper.as_deref(),
         }
     }
+}
+
+/// Where a stdio server's variable comes from. Never the value itself.
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+pub(super) enum EnvSource {
+    /// A Worker Host environment variable.
+    Variable(String),
+    File(FileSource),
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FileSource {
+    file: std::path::PathBuf,
 }
 
 #[derive(Default, Deserialize)]
@@ -388,22 +403,31 @@ impl McpCatalog {
             .servers
             .into_iter()
             .map(|server| {
-                let sources: Vec<_> = if server.command.is_some() {
-                    server.env.values().cloned().collect()
+                let variable_missing = |source: &String| {
+                    std::env::var(source).map_or(true, |value| value.trim().is_empty())
+                };
+                let missing = if server.command.is_some() {
+                    server
+                        .env
+                        .values()
+                        .filter_map(|source| match source {
+                            EnvSource::Variable(variable) => {
+                                variable_missing(variable).then(|| variable.clone())
+                            }
+                            EnvSource::File(source) => read_env_file(&source.file)
+                                .is_err()
+                                .then(|| source.file.display().to_string()),
+                        })
+                        .collect()
                 } else {
                     server
                         .header_env
                         .values()
                         .cloned()
                         .chain(server.auth().variables())
+                        .filter(|source| variable_missing(source))
                         .collect()
                 };
-                let missing = sources
-                    .into_iter()
-                    .filter(|source| {
-                        std::env::var(source).map_or(true, |value| value.trim().is_empty())
-                    })
-                    .collect();
                 let (target, auth, login_url) = match (&server.url, &server.command) {
                     (_, Some(command)) => (
                         format!(
@@ -731,18 +755,33 @@ fn stdio_server(
     let mut env = BTreeMap::new();
     for (variable, source) in &server.env {
         ensure!(
-            valid_server_env(variable) && valid_env(source),
+            valid_server_env(variable),
             "MCP server {name}: env must map variable names to Worker Host variables not named SUPERTAG_*"
         );
-        let value = environment(source)
-            .filter(|value| {
-                !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0')
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "MCP server {name} reads {source}, which is not set on this Worker Host"
+        let value = match source {
+            EnvSource::Variable(source) => {
+                ensure!(
+                    valid_env(source),
+                    "MCP server {name}: env must map variable names to Worker Host variables not named SUPERTAG_*"
+                );
+                environment(source)
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| {
+                        !value.is_empty() && value.len() <= 4096 && !value.contains('\0')
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "MCP server {name} reads {source}, which is not set on this Worker Host"
+                        )
+                    })?
+            }
+            EnvSource::File(source) => read_env_file(&source.file).with_context(|| {
+                format!(
+                    "MCP server {name}: {variable} reads {}, which must be an absolute path to an owner-only file holding one value",
+                    source.file.display()
                 )
-            })?;
+            })?,
+        };
         if value.len() >= TRACKED_ENV_VALUE_BYTES {
             secrets.insert(value.clone());
         }
@@ -754,6 +793,36 @@ fn stdio_server(
         cwd: None,
         sandboxed: false,
     })
+}
+
+/// A credential file a stdio server's variable reads: absolute, owner-only, regular, and at
+/// most 4 KiB, holding one value. Surrounding whitespace is not part of the value, as in
+/// TypeScript.
+fn read_env_file(path: &Path) -> Result<String> {
+    ensure!(path.is_absolute(), "credential file path is not absolute");
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    // SAFETY: geteuid takes no parameters and has no caller invariants.
+    let uid = unsafe { libc::geteuid() };
+    ensure!(
+        metadata.is_file()
+            && metadata.uid() == uid
+            && metadata.mode() & 0o077 == 0
+            && metadata.len() <= 4097,
+        "credential file must be a bounded, owner-only regular file"
+    );
+    let mut bytes = Vec::new();
+    file.take(4098).read_to_end(&mut bytes)?;
+    let value = String::from_utf8(bytes)?;
+    let value = value.trim();
+    ensure!(
+        !value.is_empty() && value.len() <= 4096 && !value.contains(['\0', '\n']),
+        "credential file must hold one value"
+    );
+    Ok(value.to_owned())
 }
 
 pub(super) fn valid_server_env(value: &str) -> bool {
@@ -913,7 +982,7 @@ mod tests {
             "env":{"DB_TOKEN":"ACME_DB_TOKEN"}
         }]});
         let environment =
-            |name: &str| (name == "ACME_DB_TOKEN").then(|| "stdio-secret-value-7f3a".into());
+            |name: &str| (name == "ACME_DB_TOKEN").then(|| " stdio-secret-value-7f3a\n".into());
         let parse = |value: &Value| McpCatalog::parse(value.to_string().as_bytes(), environment);
         let catalog = parse(&valid).unwrap();
         let Transport::Stdio(server) = &catalog.servers["db"].transport else {
@@ -949,6 +1018,60 @@ mod tests {
         ] {
             let config = json!({"version":1,"servers":[invalid]});
             assert!(parse(&config).is_err(), "{config}");
+        }
+    }
+
+    #[test]
+    fn stdio_env_reads_owner_only_credential_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = |name: &str, contents: &str, mode: u32| {
+            let path = directory.path().join(name);
+            fs::write(&path, contents).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            path
+        };
+        let parse = |source: Value| {
+            McpCatalog::parse(
+                json!({"version":1,"servers":[
+                    {"name":"db","command":["db-mcp"],"env":{"DB_TOKEN":source}}
+                ]})
+                .to_string()
+                .as_bytes(),
+                |_| None,
+            )
+        };
+        // Surrounding whitespace is trimmed, as TypeScript trims a file reference.
+        let private = file("token", "  file-secret-value-1c9e \r\n", 0o600);
+        let catalog = parse(json!({"file": private})).unwrap();
+        let Transport::Stdio(server) = &catalog.servers["db"].transport else {
+            panic!("stdio server expected");
+        };
+        assert_eq!(server.env["DB_TOKEN"], "file-secret-value-1c9e");
+        assert!(
+            catalog
+                .secrets
+                .contains(&"file-secret-value-1c9e".to_owned())
+        );
+        let shared = file("shared", "file-secret-value-1c9e", 0o644);
+        let multiple = file("multiple", "one\ntwo\n", 0o600);
+        let empty = file("empty", " \n\t", 0o600);
+        for refused in [
+            json!({"file": shared}),
+            json!({"file": multiple}),
+            json!({"file": empty}),
+            json!({"file": "token"}),
+            json!({"file": directory.path().join("absent")}),
+            json!({"file": private, "env": "DB_TOKEN"}),
+            json!({"secretRef": "db"}),
+        ] {
+            let error = parse(refused.clone())
+                .err()
+                .map(|error| format!("{error:#}"));
+            assert!(error.is_some(), "{refused}");
+            assert!(
+                !error.unwrap().contains("file-secret-value-1c9e"),
+                "{refused}"
+            );
         }
     }
 

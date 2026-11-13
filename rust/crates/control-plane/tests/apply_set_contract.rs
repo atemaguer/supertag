@@ -394,6 +394,7 @@ async fn exercise(url: &str) {
 
     resumable(&store).await;
     foreign_tag_bindings(&store).await;
+    runs_on_labels_merge_by_value(&store).await;
 
     // Names are validated, and pruning needs a named set.
     for set in ["", "apply", "cli", "Team-A"] {
@@ -526,6 +527,115 @@ async fn tag(store: &Store, id: &str) -> Tag {
         })
         .await
         .unwrap()
+}
+
+async fn runs_on(
+    store: &Store,
+    manager: &str,
+    labels: Option<&[&str]>,
+    preview: bool,
+) -> Vec<String> {
+    store
+        .reconcile_tag_relationships(
+            OP,
+            &ReconcileTagRelationshipsRequest {
+                tag_id: "trainer".into(),
+                manager: manager.into(),
+                preview,
+                runs_on: labels.map(|labels| TagRunsOnLabels {
+                    labels: labels.iter().map(|label| (*label).into()).collect(),
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .changes
+        .into_iter()
+        .map(|change| {
+            format!(
+                "{}{}{}",
+                if change.present { "+" } else { "-" },
+                change.path,
+                if change.ownership_only {
+                    " (owner)"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect()
+}
+
+/// Each manager owns the runsOn labels it declares, by value: dropping a label removes only
+/// that manager's, a label another manager or the CLI added survives, and a manifest without
+/// runsOn leaves every label alone.
+async fn runs_on_labels_merge_by_value(store: &Store) {
+    tag(store, "trainer").await;
+    let labels = |store: &Store| {
+        let store = store.clone();
+        async move { store.get_tag("trainer").await.unwrap().runs_on }
+    };
+    runs_on(store, "team-a", Some(&["GPU", "linux"]), false).await;
+    runs_on(store, "team-b", Some(&["macos"]), false).await;
+    assert_eq!(labels(store).await, ["gpu", "linux", "macos"]);
+
+    assert_eq!(
+        runs_on(store, "team-a", Some(&["gpu"]), true).await,
+        ["-spec.runsOn[linux]"]
+    );
+    assert_eq!(labels(store).await, ["gpu", "linux", "macos"]);
+    runs_on(store, "team-a", Some(&["gpu"]), false).await;
+    assert_eq!(labels(store).await, ["gpu", "macos"]);
+    assert!(
+        runs_on(store, "team-a", Some(&["gpu"]), true)
+            .await
+            .is_empty()
+    );
+    // A manifest without runsOn changes no label, even one its manager owns.
+    assert!(runs_on(store, "team-a", None, false).await.is_empty());
+    assert_eq!(labels(store).await, ["gpu", "macos"]);
+
+    // A label the CLI added survives every manager's apply; declaring one another manager
+    // owns takes ownership without a change.
+    store
+        .set_tag_runs_on(&SetTagRunsOnRequest {
+            tag_id: "trainer".into(),
+            runs_on: vec!["gpu".into(), "macos".into(), "arm64".into()],
+        })
+        .await
+        .unwrap();
+    assert!(
+        runs_on(store, "team-a", Some(&["gpu"]), false)
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        runs_on(store, "team-a", Some(&["gpu", "macos"]), false).await,
+        ["+spec.runsOn[macos] (owner)"]
+    );
+    assert_eq!(
+        runs_on(store, "team-b", Some(&[]), false).await,
+        Vec::<String>::new()
+    );
+    assert_eq!(labels(store).await, ["arm64", "gpu", "macos"]);
+    // The CLI removing a managed label drops its ownership; the manager adds it back.
+    store
+        .set_tag_runs_on(&SetTagRunsOnRequest {
+            tag_id: "trainer".into(),
+            runs_on: vec!["arm64".into(), "macos".into()],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        runs_on(store, "team-a", Some(&["gpu", "macos"]), false).await,
+        ["+spec.runsOn[gpu]"]
+    );
+    assert_eq!(
+        runs_on(store, "team-a", Some(&[]), false).await,
+        ["-spec.runsOn[gpu]", "-spec.runsOn[macos]"]
+    );
+    assert_eq!(labels(store).await, ["arm64"]);
 }
 
 /// Retiring a Tag removes its grants and Role assignments, so prune keeps a

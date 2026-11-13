@@ -238,6 +238,12 @@ impl Store {
         let runs_on = parse_labels(&input.runs_on, LabelField::RunsOn)?;
         let (mut transaction, _) = self.write().await?;
         crate::tags::require_active(&mut transaction, &input.tag_id).await?;
+        crate::manifest_relationships::imperative_runs_on(
+            &mut transaction,
+            &input.tag_id,
+            &runs_on,
+        )
+        .await?;
         sqlx::query("UPDATE supertag_v2_tags SET runs_on=$1 WHERE tag_id=$2")
             .bind(serde_json::to_string(&runs_on)?)
             .bind(&input.tag_id)

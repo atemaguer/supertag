@@ -33,6 +33,7 @@ mod operator_access;
 mod output_policy;
 mod placement;
 mod policy;
+mod power;
 mod profiles;
 mod removed_hosts;
 mod replies;
@@ -49,6 +50,10 @@ mod tui;
 mod volumes;
 mod work_sessions;
 mod workspace_mounts;
+
+const SKILL_CATALOG_HELP: &str = r#"Private host allowlist of Skill packages.
+
+A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository."#;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -308,7 +313,7 @@ enum Command {
         #[command(flatten)]
         adapter: AdapterOptions,
         /// Private host allowlist of Skill packages.
-        #[arg(long)]
+        #[arg(long, long_help = SKILL_CATALOG_HELP)]
         skill_catalog: Option<PathBuf>,
         /// Address the local Control Plane listens on. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
@@ -501,7 +506,7 @@ Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","h
 
 An HTTP server may instead mint its credentials for each Task Attempt, with exactly one of: "oauth":{"refreshTokenEnv":"VAR"} (a refresh token, or the JSON `supertag mcp login NAME --export` prints); "clientCredentials":{"clientId":"ID","clientSecretEnv":"VAR"} or {"clientId":"ID","assertionKeyEnv":"VAR"} (a client secret, or an RSA or EC private key for a signed JWT client assertion; also "clientIdEnv", "scope", and "tokenUrl"); "githubApp":{"appId":1,"installationId":2,"privateKeyEnv":"VAR"} (a GitHub App installation token); or "helper":["/path/to/command","arg"] (a host command that prints a JSON object of header names to values). Each VAR names a Worker Host variable. Without "tokenUrl", the token endpoint comes from the server's OAuth metadata and must share the server's origin.
 
-A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/ABSOLUTE/PATH"}, from that owner-only file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
 
 The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
@@ -527,7 +532,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         )]
         shared_execution_commands: bool,
         /// Private host allowlist of Skill packages.
-        #[arg(long)]
+        #[arg(long, long_help = SKILL_CATALOG_HELP)]
         skill_catalog: Option<PathBuf>,
         /// Seconds a Task Attempt may run before this host stops it, from 1 through 86400.
         #[arg(long, default_value_t = local_config::DEFAULT_ATTEMPT_TIMEOUT_SECONDS, value_parser = clap::value_parser!(u64).range(1..=local_config::MAX_ATTEMPT_TIMEOUT_SECONDS))]

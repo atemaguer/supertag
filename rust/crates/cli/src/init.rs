@@ -183,11 +183,51 @@ fn sanitize(value: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+/// The name this machine goes by, for naming its host service. On macOS `hostname` can be a
+/// network-assigned name such as `Mac.attlocal.net`, so the user-set LocalHostName
+/// (`Dana-MacBook-Pro`) comes first there.
 fn machine_name() -> String {
+    let local_host_name = if cfg!(target_os = "macos") {
+        mac_local_host_name()
+    } else {
+        None
+    };
+    name_for_machine(local_host_name, &hostname())
+}
+
+fn mac_local_host_name() -> Option<String> {
+    let mut child = std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "LocalHostName"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8(output.stdout).ok())
+        .flatten()
+}
+
+fn hostname() -> String {
     let mut buffer = [0_u8; 256];
     // SAFETY: the buffer is writable for its full length, and gethostname NUL-terminates
     // within it on success.
-    let name = if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } == 0 {
+    if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } == 0 {
         let end = buffer
             .iter()
             .position(|byte| *byte == 0)
@@ -195,9 +235,17 @@ fn machine_name() -> String {
         String::from_utf8_lossy(&buffer[..end]).into_owned()
     } else {
         String::new()
-    };
-    let short = name.split('.').next().unwrap_or_default();
-    sanitize(short)
+    }
+}
+
+/// The LocalHostName when there is one, otherwise the hostname's first label, as an identifier
+/// that does not collide with a built-in service.
+fn name_for_machine(local_host_name: Option<String>, hostname: &str) -> String {
+    let name = local_host_name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| hostname.split('.').next().unwrap_or_default().to_owned());
+    sanitize(&name)
         .filter(|name| {
             ![
                 lifecycle::CONTROL_PLANE,
@@ -636,5 +684,20 @@ mod tests {
         assert_eq!(sanitize("--x--").as_deref(), Some("x"));
         assert_eq!(sanitize("..."), None);
         assert_eq!(sanitize(&"a".repeat(80)).map(|name| name.len()), Some(63));
+    }
+
+    #[test]
+    fn prefers_the_macos_local_host_name_over_a_network_assigned_hostname() {
+        assert_eq!(
+            name_for_machine(Some("Dana-MacBook-Pro\n".into()), "Mac.attlocal.net"),
+            "dana-macbook-pro"
+        );
+        assert_eq!(name_for_machine(None, "Mac.attlocal.net"), "mac");
+        assert_eq!(
+            name_for_machine(Some(" \n".into()), "build-01.lan"),
+            "build-01"
+        );
+        assert_eq!(name_for_machine(None, "gateway.local"), "this-machine");
+        assert_eq!(name_for_machine(None, ""), "this-machine");
     }
 }

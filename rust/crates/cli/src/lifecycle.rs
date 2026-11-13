@@ -940,6 +940,9 @@ struct Row {
     uncertain_attempts: Vec<UncertainAttempt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     uncertain_total: Option<u32>,
+    /// A laptop power risk to the host's running Task Attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    power_warning: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1060,7 +1063,19 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                     uncertain_total: host
                         .map(|host| host.total_uncertain_attempts)
                         .filter(|total| *total > 0),
+                    power_warning: None,
                 });
+            }
+            if services
+                .iter()
+                .any(|row| row.kind == HOST && row.attempts.is_some_and(|count| count > 0))
+            {
+                let warning = crate::power::warning(crate::power::read().await);
+                for row in &mut services {
+                    if row.kind == HOST && row.attempts.is_some_and(|count| count > 0) {
+                        row.power_warning.clone_from(&warning);
+                    }
+                }
             }
         }
         Supervisor::Starting | Supervisor::Stopped => {
@@ -1104,6 +1119,7 @@ fn stopped_row(name: &str, kind: &str, state: &'static str) -> Row {
         capacity: None,
         uncertain_attempts: Vec::new(),
         uncertain_total: None,
+        power_warning: None,
     }
 }
 
@@ -1234,8 +1250,11 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
         )
     };
     out.push_str(&line(header));
-    for row in &rows {
+    for (row, service) in rows.iter().zip(&report.services) {
         out.push_str(&line([&row[0], &row[1], &row[2], &row[3], &row[4]]));
+        if let Some(warning) = &service.power_warning {
+            out.push_str(&format!("  {}\n", text(warning)));
+        }
     }
     // A slot held by an uncertain Attempt counts as occupied, so a host can look full while
     // nothing runs. Each one is named with the command that frees it.
@@ -1444,6 +1463,7 @@ mod tests {
             capacity: None,
             uncertain_attempts: Vec::new(),
             uncertain_total: None,
+            power_warning: None,
         };
         let report = PsReport {
             state_directory: format!("/tmp/{hostile}"),
@@ -1495,6 +1515,7 @@ mod tests {
                 uncertain("task-2", true, true),
             ],
             uncertain_total: Some(3),
+            power_warning: None,
         };
         let report = PsReport {
             state_directory: "/tmp/state".into(),
@@ -1554,6 +1575,7 @@ mod tests {
                 capacity: Some(2),
                 uncertain_attempts: Vec::new(),
                 uncertain_total: None,
+                power_warning: None,
             }],
         };
         let text = format_ps(&report, &Supervisor::Stopped);
@@ -1562,6 +1584,38 @@ mod tests {
             serde_json::to_value(&report).unwrap()["services"][0]
                 .get("uncertain_attempts")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn ps_prints_the_power_warning_under_the_host_row() {
+        let report = PsReport {
+            state_directory: "/tmp/state".into(),
+            supervisor: None,
+            services: vec![Row {
+                service: "laptop".into(),
+                kind: HOST.into(),
+                state: "running",
+                address: None,
+                pid: Some(7),
+                worker_host_id: Some("laptop".into()),
+                connected: Some(true),
+                draining: None,
+                attempts: Some(2),
+                capacity: Some(4),
+                uncertain_attempts: Vec::new(),
+                uncertain_total: None,
+                power_warning: Some(
+                    "warning: Task Attempts are running, but closing the lid will sleep it.".into(),
+                ),
+            }],
+        };
+        let text = format_ps(&report, &Supervisor::Stopped);
+        assert!(
+            text.ends_with(
+                "7  connected, 2/4 Task Attempts\n  warning: Task Attempts are running, but closing the lid will sleep it.\n"
+            ),
+            "{text}"
         );
     }
 

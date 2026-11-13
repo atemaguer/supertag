@@ -152,6 +152,8 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("PolicyCatalog", "*", O),
     ("SurfacePolicyCatalog", "*", O),
     ("ManifestRelationships", "*", O),
+    // Manifest field ownership and `--force-conflicts`: an operator's apply, never a client's.
+    ("ManifestRelationships", "ReconcileManifestFields", O),
     ("Teams", "*", O),
     ("Teams", "GetTeam", OC),
     ("Teams", "ListTeams", OC),
@@ -598,6 +600,10 @@ mod tests {
         assert_eq!(roles("WorkerHost/ClaimTask"), ["host"]);
         assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
+        assert_eq!(
+            roles("ManifestRelationships/ReconcileManifestFields"),
+            ["operator"]
+        );
         assert_eq!(roles("Transfers/UploadCheckpoint"), ["host"]);
         assert_eq!(
             roles("Transfers/DownloadWorkspaceArtifact"),

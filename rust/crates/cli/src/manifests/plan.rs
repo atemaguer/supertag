@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use sha2::{Digest, Sha256};
 use supertag_control_plane::{
     normalize_manifest_context, normalize_manifest_permission, normalize_manifest_role,
     normalize_tag_execution, validate_manifest_account, validate_manifest_location,
@@ -33,6 +34,10 @@ pub(super) struct Catalog<'a> {
     /// The revision the current resource was planned against, if it exists.
     observed: Option<u64>,
     declared: BTreeMap<Key, Declared>,
+    /// The fields the resource being planned sets, with its stored values.
+    planned_fields: Vec<ManifestField>,
+    /// Each resource's fields, and whether its planned write (if any) succeeded.
+    fields: BTreeMap<Key, (Vec<ManifestField>, bool)>,
 }
 
 /// A declared resource of a prunable kind, as this apply leaves it.
@@ -177,6 +182,8 @@ impl<'a> Catalog<'a> {
             create_only,
             observed: None,
             declared: BTreeMap::new(),
+            planned_fields: Vec::new(),
+            fields: BTreeMap::new(),
         })
     }
 
@@ -195,11 +202,18 @@ impl<'a> Catalog<'a> {
             let name = item.name;
             let label = format!("{:?}/{name}", item.kind);
             self.observed = None;
+            self.planned_fields.clear();
             let change = self
                 .plan_resource(item.resource, &name, &mut declarations, &mut followups)
                 .await
                 .with_context(|| format!("{label} from {}", item.source))?;
             let key = (item.kind, name.clone());
+            if !self.create_only && !self.planned_fields.is_empty() {
+                self.fields.insert(
+                    key.clone(),
+                    (std::mem::take(&mut self.planned_fields), change.is_none()),
+                );
+            }
             if prunable(item.kind) {
                 self.declared.insert(
                     key.clone(),
@@ -212,7 +226,7 @@ impl<'a> Catalog<'a> {
             }
             if let Some((exists, write)) = change {
                 changes.push(Change {
-                    key: prunable(item.kind).then_some(key),
+                    key: Some(key),
                     label,
                     action: if exists { "update" } else { "create" },
                     write,
@@ -303,6 +317,18 @@ impl<'a> Catalog<'a> {
                 );
                 declarations.accounts.insert(name.into(), value.clone());
                 value.revision = revision.unwrap_or_default();
+                self.planned_fields = vec![
+                    field(
+                        "spec.identity",
+                        prior.as_ref().map(|v| message(&v.identity)),
+                        message(&value.identity),
+                    ),
+                    field(
+                        "spec.enabled",
+                        prior.as_ref().map(|v| flag(v.enabled)),
+                        flag(value.enabled),
+                    ),
+                ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
@@ -327,6 +353,11 @@ impl<'a> Catalog<'a> {
                 if self.create_only && prior.is_some() {
                     return Ok(None);
                 }
+                self.planned_fields = vec![field(
+                    "spec.source",
+                    prior.as_ref().map(|v| v.source.as_bytes().to_vec()),
+                    source.as_bytes().to_vec(),
+                )];
                 prior
                     .as_ref()
                     .is_none_or(|value| value.source != source)
@@ -381,6 +412,18 @@ impl<'a> Catalog<'a> {
                 declarations
                     .ids
                     .insert((Kind::Workspace, name.into()), name.into());
+                self.planned_fields = vec![
+                    field(
+                        "spec.github",
+                        prior.as_ref().map(|v| message(&v.source)),
+                        message(&value.source),
+                    ),
+                    field(
+                        "spec.pullRequestBase",
+                        prior.as_ref().map(|v| message(&v.pull_request)),
+                        message(&value.pull_request),
+                    ),
+                ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
@@ -419,6 +462,11 @@ impl<'a> Catalog<'a> {
                 if let Some(previous) = &mut previous {
                     clear_context_ids(previous);
                 }
+                self.planned_fields = vec![field(
+                    "spec.items",
+                    previous.as_ref().map(|v| messages(&v.items)),
+                    messages(&value.items),
+                )];
                 (previous.as_ref() != Some(&value)).then(|| {
                     (
                         previous.is_some(),
@@ -461,6 +509,18 @@ impl<'a> Catalog<'a> {
                         grant.permission_id.clear();
                     }
                 }
+                self.planned_fields = vec![
+                    field(
+                        "spec.approvers",
+                        previous.as_ref().map(|v| list(&v.approvers)),
+                        list(&value.approvers),
+                    ),
+                    field(
+                        "spec.permissions",
+                        previous.as_ref().map(|v| messages(&v.permissions)),
+                        messages(&value.permissions),
+                    ),
+                ];
                 (previous.as_ref() != Some(&value)).then(|| {
                     (
                         previous.is_some(),
@@ -497,6 +557,39 @@ impl<'a> Catalog<'a> {
                 )?;
                 value.revision = revision.unwrap_or_default();
                 declarations.roles.insert(name.into(), value.clone());
+                let old = prior.as_ref();
+                self.planned_fields = vec![
+                    field(
+                        "spec.purpose",
+                        old.map(|v| v.purpose.as_bytes().to_vec()),
+                        value.purpose.as_bytes().to_vec(),
+                    ),
+                    field(
+                        "spec.instructions",
+                        old.map(|v| v.instructions.as_bytes().to_vec()),
+                        value.instructions.as_bytes().to_vec(),
+                    ),
+                    field(
+                        "spec.permissionSets",
+                        old.map(|v| list(&v.permission_set_ids)),
+                        list(&value.permission_set_ids),
+                    ),
+                    field(
+                        "spec.contextSets",
+                        old.map(|v| list(&v.context_set_ids)),
+                        list(&value.context_set_ids),
+                    ),
+                    field(
+                        "spec.status",
+                        old.map(|v| number(v.status.into())),
+                        number(value.status.into()),
+                    ),
+                    field(
+                        "spec.execution",
+                        old.map(|v| message(&v.execution)),
+                        message(&value.execution),
+                    ),
+                ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
@@ -550,6 +643,24 @@ impl<'a> Catalog<'a> {
                 );
                 let revision = prior.as_ref().map(|value| value.revision);
                 value.revision = revision.unwrap_or_default();
+                let old = prior.as_ref();
+                self.planned_fields = vec![
+                    field(
+                        "spec.enabled",
+                        old.map(|v| flag(v.enabled)),
+                        flag(value.enabled),
+                    ),
+                    field(
+                        "spec.permission_set_ids",
+                        old.map(|v| list(&v.permission_set_ids)),
+                        list(&value.permission_set_ids),
+                    ),
+                    field(
+                        "spec.context_set_ids",
+                        old.map(|v| list(&v.context_set_ids)),
+                        list(&value.context_set_ids),
+                    ),
+                ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
@@ -663,6 +774,12 @@ impl<'a> Catalog<'a> {
                 .is_none_or(|prior| prior.retired_at_ms.is_none()),
             "Tag is retired"
         );
+        let declared = [
+            spec.instructions.is_some(),
+            spec.allowed_actions.is_some(),
+            spec.workspace.is_some(),
+            spec.execution.is_some(),
+        ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
             name: prior.as_ref().map(|prior| prior.name.clone()),
@@ -767,28 +884,31 @@ impl<'a> Catalog<'a> {
             );
             self.require_tag(declarations, sender).await?;
         }
-        if let Some(runs_on) = spec.runs_on.take() {
-            let mut runs_on: Vec<String> = runs_on
+        let runs_on = spec.runs_on.take().map(|labels| {
+            let mut labels: Vec<String> = labels
                 .iter()
                 .map(|label| label.trim().to_ascii_lowercase())
                 .collect();
-            runs_on.sort_unstable();
-            runs_on.dedup();
-            if prior
-                .as_ref()
-                .map_or(!runs_on.is_empty(), |prior| prior.runs_on != runs_on)
-            {
-                followups.push(Change {
-                    key: None,
-                    label: format!("Tag/{name} runsOn"),
-                    action: "set",
-                    details: vec![format!("set Tag/{name} runsOn to [{}]", runs_on.join(", "))],
-                    write: Write::RunsOn(SetTagRunsOnRequest {
-                        tag_id: name.into(),
-                        runs_on,
-                    }),
-                });
-            }
+            labels.sort_unstable();
+            labels.dedup();
+            labels
+        });
+        // Provisioning only creates Tags, so it sets their labels outright; an apply merges its
+        // labels by value with those other managers and the CLI added.
+        if let Some(runs_on) = runs_on
+            .clone()
+            .filter(|labels| self.create_only && !labels.is_empty())
+        {
+            followups.push(Change {
+                key: None,
+                label: format!("Tag/{name} runsOn"),
+                action: "set",
+                details: vec![format!("set Tag/{name} runsOn to [{}]", runs_on.join(", "))],
+                write: Write::RunsOn(SetTagRunsOnRequest {
+                    tag_id: name.into(),
+                    runs_on,
+                }),
+            });
         }
         let mut reconciliation = ReconcileTagRelationshipsRequest {
             tag_id: name.into(),
@@ -796,6 +916,9 @@ impl<'a> Catalog<'a> {
             role_ids: role_ids.keys().cloned().collect(),
             mailbox_senders: spec.accepts_messages_from,
             preview: true,
+            runs_on: runs_on
+                .filter(|_| !self.create_only)
+                .map(|labels| TagRunsOnLabels { labels }),
         };
         if self.create_only {
             return Ok(Some((
@@ -826,6 +949,13 @@ impl<'a> Catalog<'a> {
                     .chain(reconciliation.mailbox_senders.iter().map(|sender| {
                         format!("grant Mailbox access from Tag/{sender} to Tag/{name}")
                     }))
+                    .chain(
+                        reconciliation
+                            .runs_on
+                            .iter()
+                            .flat_map(|runs_on| &runs_on.labels)
+                            .map(|label| format!("add runsOn label {label} to Tag/{name}")),
+                    )
                     .collect()
             };
         if !details.is_empty() {
@@ -838,6 +968,38 @@ impl<'a> Catalog<'a> {
                 details,
             });
         }
+        let old = prior.as_ref();
+        let execution = |kind: i32, execution: &Option<PolicyExecutionSettings>| {
+            let mut bytes = number(kind.into());
+            bytes.extend(message(execution));
+            bytes
+        };
+        self.planned_fields = [
+            field(
+                "spec.instructions",
+                old.map(|v| v.instructions.as_bytes().to_vec()),
+                value.instructions.as_bytes().to_vec(),
+            ),
+            field(
+                "spec.allowedActions",
+                old.map(|v| list(&v.allowed_actions)),
+                list(&value.allowed_actions),
+            ),
+            field(
+                "spec.workspace",
+                old.map(|v| message(&v.workspace)),
+                message(&value.workspace),
+            ),
+            field(
+                "spec.execution",
+                old.map(|v| execution(v.harness_kind, &v.execution)),
+                execution(value.harness_kind, &value.execution),
+            ),
+        ]
+        .into_iter()
+        .zip(declared)
+        .filter_map(|(field, declared)| declared.then_some(field))
+        .collect();
         let unchanged = prior.as_ref().is_some_and(|old| {
             old.instructions == value.instructions
                 && old.allowed_actions == value.allowed_actions
@@ -884,6 +1046,11 @@ impl<'a> Catalog<'a> {
             prior.as_ref().is_none_or(|prior| prior.team_id == name),
             "Team name belongs to a different ID"
         );
+        let declared = [
+            spec.name.is_some(),
+            spec.members.is_some(),
+            spec.max_concurrency.is_some(),
+        ];
         let display = spec.name.unwrap_or_else(|| {
             prior
                 .as_ref()
@@ -932,6 +1099,30 @@ impl<'a> Catalog<'a> {
                 "Team display name belongs to another Team"
             );
         }
+        let old = prior.as_ref();
+        let concurrency =
+            |limit: Option<u32>| limit.map(|limit| number(limit.into())).unwrap_or_default();
+        self.planned_fields = [
+            field(
+                "spec.name",
+                old.map(|v| v.name.as_bytes().to_vec()),
+                display.as_bytes().to_vec(),
+            ),
+            field(
+                "spec.members",
+                old.map(|v| list(&v.member_tag_ids)),
+                list(&members),
+            ),
+            field(
+                "spec.maxConcurrency",
+                old.map(|v| concurrency(v.max_concurrency)),
+                concurrency(limit),
+            ),
+        ]
+        .into_iter()
+        .zip(declared)
+        .filter_map(|(field, declared)| declared.then_some(field))
+        .collect();
         let change = match prior {
             Some(prior)
                 if prior.name != display
@@ -1155,6 +1346,11 @@ impl<'a> Catalog<'a> {
                 .map(|_| None),
         };
         let revision = result.with_context(|| format!("apply {}", change.label))?;
+        if let Some(key) = &change.key
+            && let Some((_, applied)) = self.fields.get_mut(key)
+        {
+            *applied = true;
+        }
         if let (Some(key), Some(revision)) = (&change.key, revision)
             && let Some(declared) = self.declared.get_mut(key)
         {
@@ -1235,6 +1431,74 @@ impl<'a> Catalog<'a> {
     }
 }
 
+impl Catalog<'_> {
+    /// The fields this apply would change that another manager owns.
+    pub(super) async fn field_conflicts(&self, force: bool) -> Result<Vec<String>> {
+        let resources = self
+            .fields
+            .iter()
+            .map(|(key, (fields, _))| resource(key, fields))
+            .collect();
+        let response = self.send_fields(resources, force, true).await?;
+        Ok(response
+            .conflicts
+            .iter()
+            .map(|conflict| {
+                format!(
+                    "{}/{}: {} is owned by {}",
+                    conflict.kind, conflict.name, conflict.path, conflict.manager
+                )
+            })
+            .collect())
+    }
+
+    /// Records this manager as the owner of every field it applied.
+    pub(super) async fn record_fields(&self) -> Result<()> {
+        let resources = self
+            .fields
+            .iter()
+            .filter(|(_, (_, applied))| *applied)
+            .map(|(key, (fields, _))| resource(key, fields))
+            .collect();
+        self.send_fields(resources, true, false).await?;
+        Ok(())
+    }
+
+    async fn send_fields(
+        &self,
+        resources: Vec<ManifestFieldResource>,
+        force_conflicts: bool,
+        preview: bool,
+    ) -> Result<ReconcileManifestFieldsResponse> {
+        if resources.is_empty() {
+            return Ok(ReconcileManifestFieldsResponse::default());
+        }
+        Ok(self
+            .relationships
+            .clone()
+            .reconcile_manifest_fields(request(
+                ReconcileManifestFieldsRequest {
+                    manager: self.manager.into(),
+                    resources,
+                    force_conflicts,
+                    preview,
+                },
+                self.token,
+            )?)
+            .await
+            .context("reconcile field managers")?
+            .into_inner())
+    }
+}
+
+fn resource((kind, name): &Key, fields: &[ManifestField]) -> ManifestFieldResource {
+    ManifestFieldResource {
+        kind: format!("{kind:?}"),
+        name: name.clone(),
+        fields: fields.to_vec(),
+    }
+}
+
 fn prune_line(item: &ApplySetPrune, preview: bool, apply_set: &str) -> String {
     let label = format!("{}/{}", item.kind, item.name);
     let retires = matches!(item.kind.as_str(), "Tag" | "Role");
@@ -1256,6 +1520,59 @@ fn prune_line(item: &ApplySetPrune, preview: bool, apply_set: &str) -> String {
             format!("{verb} {label}: {}", item.reason)
         }
         _ => format!("{verb} {label}: no longer exists; it leaves apply set {apply_set}"),
+    }
+}
+
+/// A field the manifest sets, with digests of its stored value (`None` when the resource does
+/// not exist yet) and its declared value. An empty value digests to the empty string.
+fn field(path: &str, current: Option<Vec<u8>>, desired: Vec<u8>) -> ManifestField {
+    let digest = |bytes: &[u8]| {
+        if bytes.is_empty() {
+            String::new()
+        } else {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+    };
+    ManifestField {
+        path: path.into(),
+        current_digest: current.as_deref().map(digest).unwrap_or_default(),
+        desired_digest: digest(&desired),
+    }
+}
+
+fn list(values: &[String]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for value in values {
+        bytes.extend((value.len() as u64).to_le_bytes());
+        bytes.extend(value.as_bytes());
+    }
+    bytes
+}
+
+fn messages<M: prost::Message>(values: &[M]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for value in values {
+        bytes.extend(value.encode_length_delimited_to_vec());
+    }
+    bytes
+}
+
+fn message<M: prost::Message>(value: &Option<M>) -> Vec<u8> {
+    value.as_ref().map(M::encode_to_vec).unwrap_or_default()
+}
+
+fn flag(value: bool) -> Vec<u8> {
+    if value { vec![1] } else { Vec::new() }
+}
+
+fn number(value: i64) -> Vec<u8> {
+    if value == 0 {
+        Vec::new()
+    } else {
+        value.to_le_bytes().to_vec()
     }
 }
 
@@ -1308,6 +1625,17 @@ fn relationship_preview(
             format!("grant Mailbox access from Tag/{sender} to Tag/{tag}")
         } else {
             format!("revoke Mailbox access from Tag/{sender} to Tag/{tag}")
+        };
+    }
+    if let Some(label) = change
+        .path
+        .strip_prefix("spec.runsOn[")
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        return if change.present {
+            format!("add runsOn label {label} to Tag/{tag}")
+        } else {
+            format!("remove runsOn label {label} from Tag/{tag}")
         };
     }
     format!("reconcile Tag/{tag} {}", change.path)

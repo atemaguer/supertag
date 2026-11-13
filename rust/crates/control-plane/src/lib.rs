@@ -23,6 +23,7 @@ mod history;
 mod inbox;
 mod inputs;
 mod mailbox;
+mod manifest_fields;
 mod manifest_relationships;
 mod mcp_effects;
 mod metrics;

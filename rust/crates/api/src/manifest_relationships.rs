@@ -51,4 +51,17 @@ impl manifest_relationships_server::ManifestRelationships for Api {
         })
         .await
     }
+    async fn reconcile_manifest_fields(
+        &self,
+        request: Request<ReconcileManifestFieldsRequest>,
+    ) -> Result<Response<ReconcileManifestFieldsResponse>, Status> {
+        self.forward(request, |channel, request| async {
+            manifest_relationships_client::ManifestRelationshipsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .reconcile_manifest_fields(request)
+                .await
+        })
+        .await
+    }
 }

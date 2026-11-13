@@ -423,6 +423,22 @@ fn rule(path: &str) -> Option<Rule> {
                 named("ApplySet", &value.apply_set)
             }
         ),
+        ("ManifestRelationships", "ReconcileManifestFields") => rule!(
+            "manifest-fields.reconcile",
+            "ManifestFields",
+            ReconcileManifestFieldsRequest,
+            |value| if value.preview {
+                Some(Target::Skip)
+            } else {
+                Some(Target::Many(
+                    value
+                        .resources
+                        .iter()
+                        .map(|resource| format!("{}/{}", resource.kind, resource.name))
+                        .collect(),
+                ))
+            }
+        ),
         ("LiveInputs", "QueueInput") => {
             rule!("task.input", "Task", QueueInputRequest, |value| named(
                 "Task",

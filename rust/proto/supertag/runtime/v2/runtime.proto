@@ -51,6 +51,50 @@ service ManifestRelationships {
   // Records an apply set's members and, with prune, removes the members its
   // input no longer declares, all in one serialized Control Plane write.
   rpc ReconcileApplySet(ReconcileApplySetRequest) returns (ReconcileApplySetResponse);
+  // Checks and records which manager (an apply set, default apply) owns each
+  // field a manifest sets. Changing a field another manager owns, or one
+  // changed outside apply since, is a conflict unless forced.
+  rpc ReconcileManifestFields(ReconcileManifestFieldsRequest) returns (ReconcileManifestFieldsResponse);
+}
+
+// One field a manifest sets, by its manifest path, with SHA-256 hex digests
+// of its stored and declared values. An empty digest is an unset field.
+message ManifestField {
+  string path = 1;
+  string current_digest = 2;
+  string desired_digest = 3;
+}
+
+message ManifestFieldResource {
+  // SurfaceAccount, Volume, Workspace, ContextSet, PermissionSet, Role, Tag,
+  // Team or SurfaceLocation.
+  string kind = 1;
+  // The manifest's metadata.name.
+  string name = 2;
+  repeated ManifestField fields = 3;
+}
+
+message ReconcileManifestFieldsRequest {
+  // An apply set name; empty is the default manager, apply.
+  string manager = 1;
+  repeated ManifestFieldResource resources = 2;
+  // Takes ownership of conflicting fields instead of reporting them.
+  bool force_conflicts = 3;
+  // Reports conflicts and records nothing.
+  bool preview = 4;
+}
+
+message ManifestFieldConflict {
+  string kind = 1;
+  string name = 2;
+  string path = 3;
+  // The owning manager; cli for a value set outside apply.
+  string manager = 4;
+}
+
+message ReconcileManifestFieldsResponse {
+  // Without force: when any field conflicts, nothing is recorded.
+  repeated ManifestFieldConflict conflicts = 1;
 }
 
 // One resource an apply set's input declares. Kinds are SurfaceLocation,
@@ -128,6 +172,13 @@ message ReconcileTagRelationshipsRequest {
   repeated string role_ids = 3;
   repeated string mailbox_senders = 4;
   bool preview = 5;
+  // The Tag's runsOn labels this manager declares, merged by value: a label another manager or
+  // the CLI added stays. Unset leaves every label alone.
+  optional TagRunsOnLabels runs_on = 5500;
+}
+
+message TagRunsOnLabels {
+  repeated string labels = 1;
 }
 
 message ManifestRelationshipChange {

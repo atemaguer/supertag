@@ -444,6 +444,7 @@ spec: {purpose: Observe releases.}
     assert_eq!(grants["grants"].as_array().unwrap().len(), 2);
 
     prune_apply_set(root, &gateway).await?;
+    field_managers(root, &gateway).await?;
     resume_apply_set(root, &gateway).await?;
     plane.kill().await?;
     Ok(())
@@ -606,6 +607,101 @@ spec: {{members: [resume-worker]}}
     Ok(())
 }
 
+/// Each field a manifest sets belongs to the manager that applied it; another
+/// manager's value, or one changed outside apply, conflicts until forced.
+async fn field_managers(root: &Path, gateway: &str) -> Result<()> {
+    let write = |name: &str, purpose: &str, instructions: &str| -> Result<String> {
+        let path = root.join(name);
+        std::fs::write(
+            &path,
+            format!(
+                "apiVersion: supertag/v1\nkind: Role\nmetadata: {{name: Owner}}\nspec: {{purpose: \"{purpose}\"}}\n---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: field-tag}}\nspec: {{instructions: \"{instructions}\"}}\n"
+            ),
+        )?;
+        Ok(path.to_str().context("manifest path")?.to_owned())
+    };
+    let first = write("fields-a.yaml", "Ship reviewed changes.", "One.")?;
+    command(gateway, &["apply", "-f", &first, "--set", "team-a"], true).await?;
+
+    // Two sets that disagree about a Role conflict on the field, naming the owning set.
+    let quick = write("fields-b.yaml", "Ship quickly.", "One.")?;
+    let preview = command(gateway, &["diff", "-f", &quick, "--set", "team-b"], true).await?;
+    assert_eq!(
+        preview.trim(),
+        "update Role/Owner\nconflict Role/Owner: spec.purpose is owned by team-a  (use --force-conflicts)"
+    );
+    let refused = command(gateway, &["apply", "-f", &quick, "--set", "team-b"], false).await?;
+    assert!(
+        refused.contains("Nothing was applied. Role/Owner: spec.purpose is owned by team-a"),
+        "{refused}"
+    );
+    assert_eq!(
+        command(gateway, &["diff", "-f", &first, "--set", "team-a"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    // The same value is not a conflict: ownership simply moves.
+    command(gateway, &["apply", "-f", &first, "--set", "team-b"], true).await?;
+    command(gateway, &["apply", "-f", &quick, "--set", "team-b"], true).await?;
+    assert!(
+        command(gateway, &["diff", "-f", &first, "--set", "team-a"], true)
+            .await?
+            .contains("spec.purpose is owned by team-b")
+    );
+
+    // A change outside apply belongs to cli until a forced apply takes it back.
+    let mut operator = OperatorClient::new(protocol::dial(gateway.to_owned()).await?);
+    let tag = operator
+        .get_tag(authenticated_request(
+            GetTagRequest {
+                tag_id: "field-tag".into(),
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: tag.tag_id,
+                instructions: "Changed by hand.".into(),
+                expected_revision: Some(tag.revision),
+                ..Default::default()
+            },
+            OPERATOR,
+            None,
+        )?)
+        .await?;
+    let second = write("fields-c.yaml", "Ship quickly.", "Two.")?;
+    let refused = command(gateway, &["apply", "-f", &second, "--set", "team-b"], false).await?;
+    assert!(
+        refused.contains("Tag/field-tag: spec.instructions is owned by cli"),
+        "{refused}"
+    );
+    command(
+        gateway,
+        &[
+            "apply",
+            "-f",
+            &second,
+            "--set",
+            "team-b",
+            "--force-conflicts",
+        ],
+        true,
+    )
+    .await?;
+    assert_eq!(
+        command(gateway, &["diff", "-f", &second, "--set", "team-b"], true)
+            .await?
+            .trim(),
+        "No changes."
+    );
+    Ok(())
+}
+
 async fn prune_apply_set(root: &Path, gateway: &str) -> Result<()> {
     let set = root.join("apply-set");
     std::fs::create_dir(&set)?;
@@ -667,7 +763,26 @@ spec: {items: []}
     // An operator's imperative Volume and another writer's edit of a member.
     let outside = root.join("outside.yaml");
     std::fs::write(&outside, volume("set-b", "file:///srv/b-by-hand"))?;
-    command(gateway, &["apply", "-f", outside.to_str().unwrap()], true).await?;
+    // The field belongs to the release set: a different value is a conflict until forced.
+    let outside = outside.to_str().unwrap();
+    let preview = command(gateway, &["diff", "-f", outside], true).await?;
+    assert!(
+        preview.contains(
+            "conflict Volume/set-b: spec.source is owned by release  (use --force-conflicts)"
+        ),
+        "{preview}"
+    );
+    let refused = command(gateway, &["apply", "-f", outside], false).await?;
+    assert!(
+        refused.contains("Nothing was applied. Volume/set-b: spec.source is owned by release"),
+        "{refused}"
+    );
+    command(
+        gateway,
+        &["apply", "-f", outside, "--force-conflicts"],
+        true,
+    )
+    .await?;
     command(
         gateway,
         &[
