@@ -4,9 +4,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
     artifacts::{MAX_ARTIFACT_FILE_BYTES, validate_artifact_path},
@@ -31,20 +32,6 @@ pub enum ArtifactKind {
 
 #[derive(Subcommand)]
 pub enum CaptureCommand {
-    /// List artifacts captured by a Task.
-    List {
-        /// Task whose artifacts to list.
-        #[arg(long)]
-        task: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
-        limit: u32,
-        /// Continue from the next_before_order the previous page returned.
-        #[arg(long, default_value_t = 0)]
-        before_order: u64,
-    },
-    /// Read an artifact's provenance and exact file manifest.
-    Get { artifact_id: String },
     /// Download one immutable file and verify its digest before publishing it locally.
     Download {
         artifact_id: String,
@@ -57,90 +44,100 @@ pub enum CaptureCommand {
     },
 }
 
+// Options for `supertag get artifacts`: the artifacts captured by a Task.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Task whose artifacts to list.
+    #[arg(long, required_unless_present = "id", conflicts_with = "id")]
+    task: Option<String>,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100), conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the next_before_order the previous page returned.
+    #[arg(long, default_value_t = 0, conflicts_with = "id")]
+    before_order: u64,
+}
+
+fn catalog(channel: ProtocolChannel) -> ArtifactCatalogClient<ProtocolChannel> {
+    ArtifactCatalogClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = catalog(channel)
+        .list(request(
+            ListCapturedArtifactsRequest {
+                task_id: args.task.unwrap_or_default(),
+                limit: args.limit,
+                before_order: args.before_order,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "artifacts": page.artifacts.iter().map(capture_summary).collect::<Vec<_>>(),
+        "next_before_order": page.next_before_order,
+    }))
+}
+
+/// An artifact's provenance and exact file manifest.
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    artifact_id: String,
+) -> Result<Value> {
+    let capture = catalog(channel)
+        .get(request(GetCapturedArtifactRequest { artifact_id }, token)?)
+        .await?
+        .into_inner();
+    Ok(json!({
+        "summary": capture.summary.as_ref().map(capture_summary),
+        "inputs": capture.inputs.iter().map(|input| json!({"artifact_id":input.artifact_id,"paths":input.paths})).collect::<Vec<_>>(),
+        "files": capture.files.iter().map(|file| json!({
+            "path": file.path,
+            "blob": file.blob.as_ref().map(describe_blob),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Result<()> {
-    let (channel, token) = if matches!(command, CaptureCommand::Download { .. }) {
-        crate::connect_operator_with_timeout(connection, Duration::from_secs(65)).await?
-    } else {
-        connect_operator(connection).await?
-    };
-    let mut catalog = ArtifactCatalogClient::new(channel.clone())
+    let CaptureCommand::Download {
+        artifact_id,
+        path,
+        output,
+    } = command;
+    validate_artifact_path(&path)?;
+    let (channel, token) =
+        crate::connect_operator_with_timeout(connection, Duration::from_secs(65)).await?;
+    let mut client = ArtifactTransfersClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let value = match command {
-        CaptureCommand::List {
-            task,
-            limit,
-            before_order,
-        } => {
-            let page = catalog
-                .list(request(
-                    ListCapturedArtifactsRequest {
-                        task_id: task,
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({
-                "artifacts": page.artifacts.iter().map(capture_summary).collect::<Vec<_>>(),
-                "next_before_order": page.next_before_order,
-            })
-        }
-        CaptureCommand::Get { artifact_id } => {
-            let capture = catalog
-                .get(request(GetCapturedArtifactRequest { artifact_id }, &token)?)
-                .await?
-                .into_inner();
-            json!({
-                "summary": capture.summary.as_ref().map(capture_summary),
-                "inputs": capture.inputs.iter().map(|input| json!({"artifact_id":input.artifact_id,"paths":input.paths})).collect::<Vec<_>>(),
-                "files": capture.files.iter().map(|file| json!({
-                    "path": file.path,
-                    "blob": file.blob.as_ref().map(describe_blob),
-                })).collect::<Vec<_>>(),
-            })
-        }
-        CaptureCommand::Download {
+    let mut upstream = request(
+        DownloadArtifactFileRequest {
             artifact_id,
-            path,
-            output,
-        } => {
-            validate_artifact_path(&path)?;
-            let mut client = ArtifactTransfersClient::new(channel)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES);
-            let mut upstream = request(
-                DownloadArtifactFileRequest {
-                    artifact_id,
-                    path: path.clone(),
-                },
-                &token,
-            )?;
-            upstream.set_timeout(Duration::from_secs(65));
-            let mut stream = client.download_file(upstream).await?.into_inner();
-            let file = match stream.message().await?.and_then(|message| message.part) {
-                Some(artifact_download::Part::File(file)) if file.path == path => file,
-                _ => bail!("artifact download did not include the selected file receipt"),
-            };
-            let blob = file
-                .blob
-                .as_ref()
-                .filter(|value| {
-                    valid_sha256(&value.sha256) && value.byte_length <= MAX_ARTIFACT_FILE_BYTES
-                })
-                .context("invalid artifact file receipt")?;
-            publish_download(&output, blob, stream, |record| match record.part {
-                Some(artifact_download::Part::Chunk(chunk)) => Some(chunk),
-                _ => None,
-            })
-            .await?;
-            return Ok(());
-        }
+            path: path.clone(),
+        },
+        &token,
+    )?;
+    upstream.set_timeout(Duration::from_secs(65));
+    let mut stream = client.download_file(upstream).await?.into_inner();
+    let file = match stream.message().await?.and_then(|message| message.part) {
+        Some(artifact_download::Part::File(file)) if file.path == path => file,
+        _ => bail!("artifact download did not include the selected file receipt"),
     };
-    crate::terminal::print_json(&value)?;
-    Ok(())
+    let blob = file
+        .blob
+        .as_ref()
+        .filter(|value| valid_sha256(&value.sha256) && value.byte_length <= MAX_ARTIFACT_FILE_BYTES)
+        .context("invalid artifact file receipt")?;
+    publish_download(&output, blob, stream, |record| match record.part {
+        Some(artifact_download::Part::Chunk(chunk)) => Some(chunk),
+        _ => None,
+    })
+    .await
 }
 
 pub async fn download(

@@ -1,25 +1,12 @@
 use crate::{Connection, connect_operator, request};
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 
 #[derive(Subcommand)]
 pub enum PublicationCommand {
-    /// List verified Workspace results and their separate GitHub publication status.
-    List {
-        /// Only results of this Task.
-        #[arg(long, default_value = "")]
-        task_id: String,
-        /// Most entries to return on one page.
-        #[arg(long,default_value_t=50,value_parser=clap::value_parser!(u32).range(1..=100))]
-        limit: u32,
-        /// Continue from the next_before_order the previous page returned.
-        #[arg(long,default_value_t=0,value_parser=clap::value_parser!(i64).range(0..))]
-        before_order: i64,
-    },
-    /// Read one GitHub publication.
-    Get { publication_id: String },
     /// Stop further provider writes. This does not delete a branch or close a PR.
     Cancel {
         publication_id: String,
@@ -31,39 +18,68 @@ pub enum PublicationCommand {
         operation_id: Option<String>,
     },
 }
+
+// Options for `supertag get github-publications`: verified Workspace results and their separate
+// GitHub publication status.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Only results of this Task.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    task_id: String,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100), conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the next_before_order the previous page returned.
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(i64).range(0..), conflicts_with = "id")]
+    before_order: i64,
+}
+
+fn client(
+    channel: ProtocolChannel,
+) -> github_publications_client::GithubPublicationsClient<ProtocolChannel> {
+    github_publications_client::GithubPublicationsClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    publication_id: String,
+) -> Result<Value> {
+    Ok(describe(
+        client(channel)
+            .get(request(
+                GetGithubPublicationRequest { publication_id },
+                token,
+            )?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list(request(
+            ListGithubPublicationsRequest {
+                task_id: args.task_id,
+                limit: args.limit,
+                before_order: args.before_order,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"publications":page.publications.into_iter().map(describe).collect::<Vec<_>>(),"next_before_order":page.next_before_order}),
+    )
+}
+
 pub async fn run(connection: Connection, command: PublicationCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = github_publications_client::GithubPublicationsClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let value = match command {
-        PublicationCommand::List {
-            task_id,
-            limit,
-            before_order,
-        } => {
-            let page = client
-                .list(request(
-                    ListGithubPublicationsRequest {
-                        task_id,
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"publications":page.publications.into_iter().map(describe).collect::<Vec<_>>(),"next_before_order":page.next_before_order})
-        }
-        PublicationCommand::Get { publication_id } => describe(
-            client
-                .get(request(
-                    GetGithubPublicationRequest { publication_id },
-                    &token,
-                )?)
-                .await?
-                .into_inner(),
-        ),
         PublicationCommand::Cancel {
             publication_id,
             reason,

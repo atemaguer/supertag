@@ -1,7 +1,8 @@
 use crate::{Connection, connect_operator, request};
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use uuid::Uuid;
 
@@ -35,34 +36,94 @@ pub enum GithubWorkspaceCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Read one GitHub Workspace source.
-    Get { workspace_id: String },
-    /// List GitHub Workspace sources.
-    List {
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
-        limit: u32,
-        /// Continue after the last ID the previous page returned.
-        #[arg(long, default_value = "")]
-        after_id: String,
-    },
-    /// Delete a GitHub Workspace source at its exact revision.
-    Delete {
-        workspace_id: String,
-        /// The revision you last read. The change is refused when the resource has changed since.
-        #[arg(long)]
-        expected_revision: u64,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
+}
+
+// Options for `supertag get workspaces`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100), conflicts_with = "id")]
+    limit: u32,
+    /// Continue after the last ID the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    after_id: String,
+}
+
+// Options for `supertag delete workspace`, which deletes a GitHub Workspace source at its exact
+// revision.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// The revision you last read. The change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: u64,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
+}
+
+fn client(
+    channel: ProtocolChannel,
+) -> github_workspaces_client::GithubWorkspacesClient<ProtocolChannel> {
+    github_workspaces_client::GithubWorkspacesClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    workspace_id: String,
+) -> Result<Value> {
+    Ok(describe(
+        client(channel)
+            .get(request(GetGithubWorkspaceRequest { workspace_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list(request(
+            ListGithubWorkspacesRequest {
+                limit: args.limit,
+                after_id: args.after_id,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"workspaces":page.workspaces.into_iter().map(describe).collect::<Vec<_>>(), "next_cursor":page.next_cursor}),
+    )
+}
+
+pub(crate) async fn delete(
+    connection: Connection,
+    workspace_id: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let operation_id = args
+        .operation_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    client(channel)
+        .delete(request(
+            DeleteGithubWorkspaceRequest {
+                workspace_id: workspace_id.clone(),
+                expected_revision: args.expected_revision,
+                operation_id: operation_id.clone(),
+            },
+            &token,
+        )?)
+        .await?;
+    Ok(json!({"workspace_id":workspace_id,"deleted":true,"operation_id":operation_id}))
 }
 
 pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = github_workspaces_client::GithubWorkspacesClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let output = match command {
         GithubWorkspaceCommand::Put {
             workspace_id,
@@ -103,40 +164,6 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
             let mut output = describe(value);
             output["operation_id"] = operation_id.into();
             output
-        }
-        GithubWorkspaceCommand::Get { workspace_id } => describe(
-            client
-                .get(request(GetGithubWorkspaceRequest { workspace_id }, &token)?)
-                .await?
-                .into_inner(),
-        ),
-        GithubWorkspaceCommand::List { limit, after_id } => {
-            let page = client
-                .list(request(
-                    ListGithubWorkspacesRequest { limit, after_id },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"workspaces":page.workspaces.into_iter().map(describe).collect::<Vec<_>>(), "next_cursor":page.next_cursor})
-        }
-        GithubWorkspaceCommand::Delete {
-            workspace_id,
-            expected_revision,
-            operation_id,
-        } => {
-            let operation_id = operation_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-            client
-                .delete(request(
-                    DeleteGithubWorkspaceRequest {
-                        workspace_id: workspace_id.clone(),
-                        expected_revision,
-                        operation_id: operation_id.clone(),
-                    },
-                    &token,
-                )?)
-                .await?;
-            json!({"workspace_id":workspace_id,"deleted":true,"operation_id":operation_id})
         }
     };
     crate::terminal::print_json(&output)?;

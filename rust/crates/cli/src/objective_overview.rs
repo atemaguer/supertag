@@ -322,7 +322,7 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         ));
     }
     if !closed {
-        lines.push("  Follow it: supertag watch --kind objective".into());
+        lines.push("  Follow it: supertag watch objective".into());
     }
     lines.push(format!(
         "  Full record: supertag describe objective {id} --output json"
@@ -481,7 +481,7 @@ mod tests {
             "Needs you:\n  The owner submitted the Objective for review.\n    supertag objective review ship-sso approve\n"
         ));
         assert!(text.contains("Work: 1 Session\n"));
-        assert!(text.contains("Follow it: supertag watch --kind objective"));
+        assert!(text.contains("Follow it: supertag watch objective"));
     }
 
     #[test]

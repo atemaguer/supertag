@@ -245,7 +245,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     refused(volume(&credentials, &public, &copy_args), "consent").await?;
     assert_eq!(object_state.lock().unwrap().reads, 0);
     assert!(
-        json(volume(&credentials, &public, &["copies"])).await?["copies"]
+        json(resource(&credentials, &public, &["get", "volume-copies"])).await?["copies"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -263,7 +263,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     let divergence = vec![b'x'; bytes.len()];
     object_state.lock().unwrap().competing_write = Some(divergence.clone());
     refused(volume(&credentials, &public, &copy_args), "verified").await?;
-    let pending = json(volume(&credentials, &public, &["copies"])).await?;
+    let pending = json(resource(&credentials, &public, &["get", "volume-copies"])).await?;
     let pending = &pending["copies"][0];
     assert_eq!(pending["state"], "ARTIFACT_VOLUME_COPY_STATE_RESERVED");
     {

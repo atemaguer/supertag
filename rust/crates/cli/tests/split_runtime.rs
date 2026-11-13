@@ -376,7 +376,8 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         credentials.command(),
         directory,
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &services.endpoint,
             "engineer",
@@ -391,6 +392,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         credentials.command(),
         directory,
         &[
+            "task",
             "submit",
             "--gateway",
             &services.endpoint,
@@ -929,7 +931,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     std::fs::write(&endpoint, format!("http://{}\n", stale.local_addr()?))?;
     let mut command = local_command();
     command
-        .arg("get-task")
+        .args(["get", "task"])
         .arg("--state-directory")
         .arg(&state)
         .arg("untrusted-stale-endpoint");
@@ -1158,7 +1160,8 @@ async fn local_up_runs_work_and_reaps_its_services() -> Result<()> {
         local_command(),
         directory.path(),
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--state-directory",
             state_arg,
             "local-engineer",
@@ -1173,6 +1176,7 @@ async fn local_up_runs_work_and_reaps_its_services() -> Result<()> {
         local_command(),
         directory.path(),
         &[
+            "task",
             "submit",
             "--state-directory",
             state_arg,
@@ -1194,7 +1198,7 @@ async fn local_up_runs_work_and_reaps_its_services() -> Result<()> {
         let observed = cli(
             local_command(),
             directory.path(),
-            &["get-task", "--state-directory", state_arg, id],
+            &["get", "task", "--state-directory", state_arg, id],
         )
         .await?;
         if observed["state"] == "TASK_STATE_SUCCEEDED" {
@@ -2127,7 +2131,8 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
         local_command(),
         directory.path(),
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--state-directory",
             local,
             "native-engineer",
@@ -2181,10 +2186,10 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
         local_command(),
         directory.path(),
         &[
-            "objective",
+            "get",
             "--state-directory",
             local,
-            "get",
+            "objective",
             "native-objective",
         ],
     )
@@ -2195,7 +2200,8 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
         local_command(),
         directory.path(),
         &[
-            "task-usage",
+            "task",
+            "usage",
             "--state-directory",
             local,
             task_id,
@@ -2856,7 +2862,8 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     };
     cli(
         operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "engineer",
             "--instructions",
             "Release engineering",

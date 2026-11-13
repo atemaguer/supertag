@@ -98,6 +98,13 @@ fn volume(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
     c.args(args);
     c
 }
+/// `supertag get` for Volumes and their copies, or `supertag delete` with a leading "delete".
+fn resource(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
+    let (verb, args) = args.split_first().expect("a verb");
+    let mut c = credentials.command(&[verb, "--gateway", public]);
+    c.args(args);
+    c
+}
 #[path = "support/s3_artifact_volume.rs"]
 mod s3_artifact_volume;
 
@@ -417,7 +424,7 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     assert!(!denied.status.success());
     assert!(String::from_utf8_lossy(&denied.stderr).contains("consent"));
     assert!(
-        json(volume(&credentials, &public, &["copies"])).await?["copies"]
+        json(resource(&credentials, &public, &["get", "volume-copies"])).await?["copies"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -434,11 +441,12 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         json(volume(&credentials, &next_public, &copy_args)).await?,
         receipt
     );
-    let deletion = volume(
+    let deletion = resource(
         &credentials,
         &next_public,
         &[
             "delete",
+            "volume",
             "durable",
             "--expected-revision",
             "1",
@@ -461,10 +469,10 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
         json(volume(&credentials, &new_public, &copy_args)).await?,
         receipt
     );
-    let listed = json(volume(
+    let listed = json(resource(
         &credentials,
         &new_public,
-        &["copies", "--volume-id", "durable"],
+        &["get", "volume-copies", "--volume-id", "durable"],
     ))
     .await?;
     assert_eq!(listed["copies"], serde_json::json!([receipt.clone()]));
@@ -507,7 +515,12 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     assert!(!refused.exists());
     let copy_id = receipt["copy_id"].as_str().unwrap();
     assert_eq!(
-        json(volume(&credentials, &new_public, &["copy-get", copy_id])).await?,
+        json(resource(
+            &credentials,
+            &new_public,
+            &["get", "volume-copy", copy_id]
+        ))
+        .await?,
         receipt
     );
     stop(&mut ingress).await?;

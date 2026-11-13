@@ -4,8 +4,8 @@
 //!
 //! Ports `apps/cli/src/deploy.ts` and `deploy/shared/src/index.ts`. Setup writes one private
 //! environment file per role instead of one file for a single Node service. Worker Hosts are not
-//! configured here: each joins with an Auth Key (`supertag create-auth-key`, then
-//! `supertag enroll-host`).
+//! configured here: each joins with an Auth Key (`supertag auth-key create`, then
+//! `supertag host enroll`).
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -854,7 +854,7 @@ pub async fn verify_channel(
                 if ready == 1 { "" } else { "s" }
             )
         } else {
-            "not ready; enroll a Worker Host and inspect `supertag host list`".into()
+            "not ready; enroll a Worker Host and inspect `supertag get hosts`".into()
         }
     ))
 }

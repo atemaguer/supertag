@@ -1,24 +1,18 @@
-//! Operator observation commands: `spend`, `metrics`, `describe`, and `watch`.
+//! Operator observation commands: `spend`, `metrics`, and `watch`, and the readable text
+//! `describe` prints.
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
-use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        GetArtifactVolumeRequest, GetGithubWorkspaceRequest, GetHostRequest, GetMetricsRequest,
-        GetObjectiveOverviewRequest, GetPolicyResourceRequest, GetSpendRequest, GetTagRequest,
-        GetTaskRequest, GetTeamRequest, GetWorkSessionRequest, GetWorkspaceVolumeRequest,
-        HostPhase, MetricSnapshot, SpendGrouping, SpendReport, WatchEvent, WatchKind, WatchRequest,
-        artifact_volumes_client::ArtifactVolumesClient,
-        github_workspaces_client::GithubWorkspacesClient, metrics_client::MetricsClient,
-        objective_overviews_client::ObjectiveOverviewsClient, operator_client::OperatorClient,
-        operator_events_client::OperatorEventsClient, policy_catalog_client::PolicyCatalogClient,
-        spend_client::SpendClient, teams_client::TeamsClient, watch_event::Update,
-        work_sessions_client::WorkSessionsClient, workspace_volumes_client::WorkspaceVolumesClient,
+        GetMetricsRequest, GetSpendRequest, HostPhase, MetricSnapshot, SpendGrouping, SpendReport,
+        WatchEvent, WatchKind, WatchRequest, metrics_client::MetricsClient,
+        operator_events_client::OperatorEventsClient, spend_client::SpendClient,
+        watch_event::Update,
     },
 };
 use tonic::Code;
@@ -396,187 +390,12 @@ fn group_thousands(value: u64) -> String {
     out
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-pub enum DescribeKind {
-    Tag,
-    Task,
-    Objective,
-    Team,
-    WorkerHost,
-    Session,
-    Role,
-    PermissionSet,
-    ContextSet,
-    Volume,
-    WorkspaceVolume,
-    Workspace,
-}
-
-#[derive(Args)]
-pub struct DescribeArgs {
-    #[arg(value_enum)]
-    kind: DescribeKind,
-    /// The resource's ID or name.
-    id: String,
-    /// Print readable text, or JSON for scripts.
-    #[arg(long, value_enum, default_value = "text")]
-    output: Output,
-}
-
 macro_rules! client {
     ($client:ident, $channel:expr) => {
         $client::new($channel)
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     };
-}
-
-pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let id = args.id;
-    if matches!(args.kind, DescribeKind::Objective) {
-        let view = client!(ObjectiveOverviewsClient, channel)
-            .get_objective_overview(request(
-                GetObjectiveOverviewRequest {
-                    objective_id: id,
-                    ..Default::default()
-                },
-                &token,
-            )?)
-            .await?
-            .into_inner();
-        match args.output {
-            Output::Json => crate::terminal::print_json(&crate::objective_overview::json(&view))?,
-            Output::Text => out!("{}", crate::objective_overview::text(&view)),
-        }
-        return Ok(());
-    }
-    let (title, value) = fetch(channel, &token, args.kind, id).await?;
-    match args.output {
-        Output::Json => crate::terminal::print_json(&value)?,
-        Output::Text => out!("{}", describe_text(title, &value)),
-    }
-    Ok(())
-}
-
-async fn fetch(
-    channel: ProtocolChannel,
-    token: &str,
-    kind: DescribeKind,
-    id: String,
-) -> Result<(&'static str, Value)> {
-    Ok(match kind {
-        DescribeKind::Tag => (
-            "Tag",
-            crate::tag_json(
-                &client!(OperatorClient, channel)
-                    .get_tag(request(GetTagRequest { tag_id: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::Task => (
-            "Task",
-            crate::task_json(
-                &client!(OperatorClient, channel)
-                    .get_task(request(GetTaskRequest { task_id: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::WorkerHost => (
-            "Worker Host",
-            crate::host_status::status_json(
-                client!(OperatorClient, channel)
-                    .get_host(request(GetHostRequest { host_id: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::Objective => unreachable!("describe objective renders the overview"),
-        DescribeKind::Team => (
-            "Team",
-            crate::teams::team_json(
-                client!(TeamsClient, channel)
-                    .get_team(request(GetTeamRequest { team: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::Session => (
-            "Work Session",
-            crate::work_sessions::view(
-                &client!(WorkSessionsClient, channel)
-                    .get(request(
-                        GetWorkSessionRequest {
-                            work_session_id: id,
-                            report_task_id: None,
-                        },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::Role => (
-            "Role",
-            crate::policy::role_json(
-                client!(PolicyCatalogClient, channel)
-                    .get_role(request(GetPolicyResourceRequest { reference: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::PermissionSet => (
-            "Permission Set",
-            crate::policy::permission_json(
-                client!(PolicyCatalogClient, channel)
-                    .get_permission_set(request(GetPolicyResourceRequest { reference: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::ContextSet => (
-            "Context Set",
-            crate::policy::context_json(
-                client!(PolicyCatalogClient, channel)
-                    .get_context_set(request(GetPolicyResourceRequest { reference: id }, token)?)
-                    .await?
-                    .into_inner(),
-            )?,
-        ),
-        DescribeKind::Volume => (
-            "Volume",
-            crate::volumes::volume(
-                &client!(ArtifactVolumesClient, channel)
-                    .get(request(GetArtifactVolumeRequest { volume_id: id }, token)?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-        DescribeKind::WorkspaceVolume => {
-            let volume = WorkspaceVolumesClient::new(channel)
-                .get(request(GetWorkspaceVolumeRequest { volume_id: id }, token)?)
-                .await?
-                .into_inner();
-            (
-                "Workspace Volume",
-                json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision}),
-            )
-        }
-        DescribeKind::Workspace => (
-            "Workspace",
-            crate::github_workspaces::describe(
-                client!(GithubWorkspacesClient, channel)
-                    .get(request(
-                        GetGithubWorkspaceRequest { workspace_id: id },
-                        token,
-                    )?)
-                    .await?
-                    .into_inner(),
-            ),
-        ),
-    })
 }
 
 /// Readable text for a resource: one `Field: value` line per field in name
@@ -684,15 +503,31 @@ fn scalar(value: &Value) -> String {
     }
 }
 
+/// A kind of change `watch` follows: a resource kind marked `watch` in
+/// [`crate::resources::KINDS`], or one of [`WATCH_EVENT_STREAMS`].
 #[derive(Clone, Copy, ValueEnum)]
 pub enum WatchKindArg {
+    #[value(alias = "tags")]
     Tag,
+    #[value(alias = "tasks")]
     Task,
+    #[value(alias = "conversation-messages")]
     ConversationMessage,
+    #[value(alias = "objectives")]
     Objective,
+    #[value(alias = "teams")]
     Team,
+    #[value(alias = "workstream-posts")]
     WorkstreamPost,
 }
+
+/// Change streams `watch` follows that are not resources `get` reads: messages in a Session's
+/// conversation, and posts to a Team's Workstream. Singular, then plural.
+#[cfg(test)]
+pub(crate) const WATCH_EVENT_STREAMS: &[[&str; 2]] = &[
+    ["conversation-message", "conversation-messages"],
+    ["workstream-post", "workstream-posts"],
+];
 
 impl From<WatchKindArg> for WatchKind {
     fn from(value: WatchKindArg) -> Self {
@@ -709,8 +544,8 @@ impl From<WatchKindArg> for WatchKind {
 
 #[derive(Args)]
 pub struct WatchArgs {
-    /// Only these kinds of change. Repeat for more; omit for every kind.
-    #[arg(long = "kind", value_enum)]
+    /// Only these kinds of change; omit for every kind.
+    #[arg(value_enum, value_name = "KIND")]
     kinds: Vec<WatchKindArg>,
     /// Continue after the last notice a previous watch printed.
     #[arg(long)]

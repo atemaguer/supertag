@@ -314,7 +314,7 @@ fn usage_errors_filter_what_was_typed() -> Result<()> {
     let hostile = "visible\x1b[2J\x1b]0;hidden-title\x07\r\n\t\u{9b}\u{202e}end";
     for args in [
         vec![hostile],
-        vec!["objective", "list", "--limit", hostile],
+        vec!["get", "objectives", "--limit", hostile],
         vec!["--gateway", hostile, "health"],
     ] {
         let output = supertag(&args)?;

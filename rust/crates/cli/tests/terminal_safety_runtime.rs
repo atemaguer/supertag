@@ -64,7 +64,8 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
     let instructions = format!("Review releases. {HOSTILE}");
     services
         .ok(&[
-            "put-tag",
+            "tag",
+            "put",
             "lead",
             "--name",
             DISPLAY_NAME,
@@ -76,7 +77,7 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
         .await?;
 
     // JSON keeps the stored value exactly, but carries it as escapes.
-    let tag = services.ok(&["get-tag", "lead"]).await?;
+    let tag = services.ok(&["get", "tag", "lead"]).await?;
     assert_terminal_safe(&tag);
     assert!(tag.contains("\\u009b") && tag.contains("\\u202e"), "{tag}");
     let parsed: Value = serde_json::from_str(&tag)?;
@@ -95,11 +96,11 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
     services
         .ok(&["objective", "create", "ship", &outcome, "--owner", "lead"])
         .await?;
-    let objective = services.ok(&["objective", "get", "ship"]).await?;
+    let objective = services.ok(&["get", "objective", "ship"]).await?;
     assert_terminal_safe(&objective);
     let parsed: Value = serde_json::from_str(&objective)?;
     assert_eq!(parsed["outcome"], outcome.as_str());
-    let listed = services.ok(&["objective", "list"]).await?;
+    let listed = services.ok(&["get", "objectives"]).await?;
     assert_terminal_safe(&listed);
 
     assert_readable(&services.ok(&["describe", "objective", "ship"]).await?);
@@ -129,7 +130,7 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             let instructions = format!("Review releases {attempt}. {HOSTILE}");
             services
-                .ok(&["put-tag", "lead", "--instructions", &instructions])
+                .ok(&["tag", "put", "lead", "--instructions", &instructions])
                 .await?;
         }
         anyhow::Ok(())
@@ -155,7 +156,7 @@ async fn stored_text_cannot_drive_the_terminal(database: String) -> Result<()> {
     services
         .ok(&["objective", "pause", "ship", "--reason", &reason])
         .await?;
-    let paused: Value = serde_json::from_str(&services.ok(&["objective", "get", "ship"]).await?)
+    let paused: Value = serde_json::from_str(&services.ok(&["get", "objective", "ship"]).await?)
         .context("parse paused Objective")?;
     assert!(paused["paused_at_ms"].is_number(), "{paused}");
     services.stop().await

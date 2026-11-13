@@ -1,6 +1,7 @@
 use anyhow::{Result, ensure};
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use uuid::Uuid;
 
@@ -35,23 +36,6 @@ pub enum Decision {
 
 #[derive(Subcommand)]
 pub enum ReplyCommand {
-    /// List connector replies and their recorded delivery status.
-    List {
-        /// Only replies sent through this connector account.
-        #[arg(long, default_value = "")]
-        account: String,
-        /// Only replies in this delivery state.
-        #[arg(long)]
-        state: Option<State>,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100))]
-        limit: u32,
-        /// Continue with next_before_order from the previous page.
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(i64).range(0..))]
-        before_order: i64,
-    },
-    /// Read a reply, its delivery status, and its audit history.
-    Get { reply_id: String },
     /// Record verified delivery or failure for an uncertain reply. This never resends it.
     Resolve {
         reply_id: String,
@@ -70,38 +54,69 @@ pub enum ReplyCommand {
     },
 }
 
+// Options for `supertag get replies`: connector replies and their recorded delivery status.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Only replies sent through this connector account.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    account: String,
+    /// Only replies in this delivery state.
+    #[arg(long, conflicts_with = "id")]
+    state: Option<State>,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=100), conflicts_with = "id")]
+    limit: u32,
+    /// Continue with next_before_order from the previous page.
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(i64).range(0..), conflicts_with = "id")]
+    before_order: i64,
+}
+
+fn client(channel: ProtocolChannel) -> operator_client::OperatorClient<ProtocolChannel> {
+    operator_client::OperatorClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+/// A reply, its delivery status, and its audit history.
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    reply_id: String,
+) -> Result<Value> {
+    Ok(describe(
+        client(channel)
+            .get_reply_delivery(request(GetReplyDeliveryRequest { reply_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_reply_deliveries(request(
+            ListReplyDeliveriesRequest {
+                account_id: args.account,
+                state: args
+                    .state
+                    .map_or(ReplyState::Unspecified, Into::into)
+                    .into(),
+                limit: args.limit,
+                before_order: args.before_order,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"deliveries": page.deliveries.into_iter().map(describe).collect::<Vec<_>>(), "next_before_order": page.next_before_order}),
+    )
+}
+
 pub async fn run(connection: Connection, command: ReplyCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = operator_client::OperatorClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let output = match command {
-        ReplyCommand::List {
-            account,
-            state,
-            limit,
-            before_order,
-        } => {
-            let page = client
-                .list_reply_deliveries(request(
-                    ListReplyDeliveriesRequest {
-                        account_id: account,
-                        state: state.map_or(ReplyState::Unspecified, Into::into).into(),
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"deliveries": page.deliveries.into_iter().map(describe).collect::<Vec<_>>(), "next_before_order": page.next_before_order})
-        }
-        ReplyCommand::Get { reply_id } => describe(
-            client
-                .get_reply_delivery(request(GetReplyDeliveryRequest { reply_id }, &token)?)
-                .await?
-                .into_inner(),
-        ),
         ReplyCommand::Resolve {
             reply_id,
             decision,

@@ -901,7 +901,8 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: Str
         let mut command = runtime.credentials.command();
         command
             .args([
-                "put-tag",
+                "tag",
+                "put",
                 "reviewer",
                 "--gateway",
                 &runtime.endpoint,
@@ -911,7 +912,7 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: Str
                 "opencode",
             ])
             .args(flags);
-        Process::spawn(command, directory.path(), "put-tag", false)
+        Process::spawn(command, directory.path(), "tag-put", false)
     };
     let alternate = "openai/alternate";
     put_tag(
@@ -936,7 +937,7 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: Str
         .into_inner()
         .tags
         .pop()
-        .context("put-tag did not create the reviewer")?;
+        .context("tag put did not create the reviewer")?;
     assert_eq!(tag.tag_id, "reviewer");
     assert_eq!(tag.harness_kind(), HarnessKind::Opencode);
     let range = tag.execution.context("Tag execution range missing")?;

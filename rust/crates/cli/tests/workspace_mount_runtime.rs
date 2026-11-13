@@ -198,7 +198,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let declarations = declarations.to_str().context("path is not UTF-8")?;
     let put_tag = |id: &str, allow: &[&str]| {
         let mut args = vec![
-            "put-tag",
+            "tag",
+            "put",
             id,
             "--instructions",
             "Read the mounted data.",
@@ -217,7 +218,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         credentials.operator(&args, &public)
     };
     json_output(put_tag("reader", &["files:read"])).await?;
-    let tag = json_output(credentials.operator(&["get-tag", "reader"], &public)).await?;
+    let tag = json_output(credentials.operator(&["get", "tag", "reader"], &public)).await?;
     assert_eq!(
         tag["workspace_mounts"][0]["destination"],
         json!(destination),
@@ -227,14 +228,30 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     // Tags that could write or execute are refused at admission.
     json_output(put_tag("writer", &["files:read", "files:write"])).await?;
     let refused = output(credentials.operator(
-        &["submit", "--tag", "writer", "--session", "w", "Write"],
+        &[
+            "task",
+            "submit",
+            "--tag",
+            "writer",
+            "--session",
+            "w",
+            "Write",
+        ],
         &public,
     ))
     .await?;
     ensure!(!refused.status.success(), "a writable Tag admitted mounts");
 
     let task = json_output(credentials.operator(
-        &["submit", "--tag", "reader", "--session", "s", "Summarize"],
+        &[
+            "task",
+            "submit",
+            "--tag",
+            "reader",
+            "--session",
+            "s",
+            "Summarize",
+        ],
         &public,
     ))
     .await?;
@@ -267,7 +284,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let ran = output(worker()).await?;
     let stderr = String::from_utf8_lossy(&ran.stderr);
     ensure!(ran.status.success(), "Worker Host failed: {stderr}");
-    let settled = json_output(credentials.operator(&["get-task", task_id], &public)).await?;
+    let settled = json_output(credentials.operator(&["get", "task", task_id], &public)).await?;
     assert_eq!(
         settled["state"], "TASK_STATE_SUCCEEDED",
         "{settled} {stderr}"
@@ -292,6 +309,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     for case in ["cancel", "crash"] {
         let held = json_output(credentials.operator(
             &[
+                "task",
                 "submit",
                 "--tag",
                 "reader",
@@ -315,7 +333,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         assert_eq!(mode, 0o500, "{case}");
         if case == "cancel" {
             let cancelled =
-                json_output(credentials.operator(&["cancel", held_id], &public)).await?;
+                json_output(credentials.operator(&["task", "cancel", held_id], &public)).await?;
             assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
             ensure!(
                 timeout(WAIT, running.wait()).await??.success(),
@@ -333,7 +351,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             running.kill().await?;
             running.wait().await?;
             assert!(destination.exists(), "the crashed Host already cleaned up");
-            let attempt = json_output(credentials.operator(&["get-task", held_id], &public))
+            let attempt = json_output(credentials.operator(&["get", "task", held_id], &public))
                 .await?["attempt_id"]
                 .as_str()
                 .context("missing Attempt")?
@@ -343,6 +361,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             loop {
                 let resolved = output(credentials.operator(
                     &[
+                        "task",
                         "resolve-attempt",
                         held_id,
                         &attempt,
@@ -369,7 +388,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             }
             // The restarted Host settles the journaled Attempt and cleans up.
             success(worker()).await?;
-            let failed = json_output(credentials.operator(&["get-task", held_id], &public)).await?;
+            let failed =
+                json_output(credentials.operator(&["get", "task", held_id], &public)).await?;
             assert_eq!(failed["state"], "TASK_STATE_FAILED");
         }
         assert_eq!(std::fs::read_dir(&root)?.count(), 0, "{case}");
@@ -384,6 +404,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     // Retargeting the Volume leaves a queued Task unplaceable on this Host.
     let queued = json_output(credentials.operator(
         &[
+            "task",
             "submit",
             "--tag",
             "reader",
@@ -410,7 +431,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     ]))
     .await?;
     success(worker()).await?;
-    let still = json_output(credentials.operator(&["get-task", queued_id], &public)).await?;
+    let still = json_output(credentials.operator(&["get", "task", queued_id], &public)).await?;
     assert_eq!(still["state"], "TASK_STATE_QUEUED", "{still}");
     assert_eq!(std::fs::read_dir(&root)?.count(), 0);
 

@@ -516,7 +516,7 @@ async fn start_host(
     let key = directory.join(format!("{id}.key"));
     std::fs::write(&key, &secret)?;
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
-    let mut enroll = binary(&["enroll-host", &id, "--gateway", &proxy.url()]);
+    let mut enroll = binary(&["host", "enroll", &id, "--gateway", &proxy.url()]);
     enroll
         .arg("--state-directory")
         .arg(&state)
@@ -1174,7 +1174,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         operator_cli(
             &services,
             &tokens,
-            &["put-tag", id, "--instructions", "Relay calls"],
+            &["tag", "put", id, "--instructions", "Relay calls"],
         )
         .await?;
     }
@@ -1250,8 +1250,8 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
                 &services,
                 &tokens,
                 &[
+                    "task",
                     "input",
-                    "queue",
                     &task_id,
                     "Check the partition",
                     "--operation-id",
@@ -1387,8 +1387,8 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
         &services,
         &tokens,
         &[
-            "work-sessions",
-            "list",
+            "get",
+            "sessions",
             "--parent-tag",
             tag,
             "--parent-session",
@@ -1404,7 +1404,7 @@ async fn exercise_adapter_calls_through_partition(database: String) -> Result<()
             == 1,
         "the Work Session was not started exactly once: {sessions}"
     );
-    let receipt = operator_cli(&services, &tokens, &["input", "get", &input_id]).await?;
+    let receipt = operator_cli(&services, &tokens, &["get", "input", &input_id]).await?;
     ensure!(
         receipt["state"] == "LIVE_INPUT_STATE_ACCEPTED",
         "live input was not settled: {receipt}"
@@ -1784,24 +1784,19 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         client_tls(&mut command, &pki.ca(), leaf);
         command
     };
-    let unauthenticated = run(operator(&["list-tags"], None)).await?;
+    let unauthenticated = run(operator(&["get", "tags"], None)).await?;
     ensure!(
         !unauthenticated.status.success(),
         "an operator without a client certificate reached the Gateway"
     );
     run_json(operator(
-        &["put-tag", "secure", "--instructions", "Answer over TLS"],
+        &["tag", "put", "secure", "--instructions", "Answer over TLS"],
         Some(&operator_leaf),
     ))
     .await?;
     let issued = run_json(operator(
         &[
-            "create-auth-key",
-            "tls",
-            "--host",
-            "tls-host",
-            "--tag",
-            "secure",
+            "auth-key", "create", "tls", "--host", "tls-host", "--tag", "secure",
         ],
         Some(&operator_leaf),
     ))
@@ -1811,7 +1806,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
     let state = root.join("tls-host");
     let enroll = |leaf: &Leaf, server_ca: &Path| {
-        let mut command = binary(&["enroll-host", "tls-host", "--gateway", &public]);
+        let mut command = binary(&["host", "enroll", "tls-host", "--gateway", &public]);
         command
             .arg("--state-directory")
             .arg(&state)
@@ -1838,6 +1833,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
 
     let submitted = run_json(operator(
         &[
+            "task",
             "submit",
             "--tag",
             "secure",
@@ -1865,7 +1861,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         "TLS Worker Host failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let task = run_json(operator(&["get-task", &task_id], Some(&operator_leaf))).await?;
+    let task = run_json(operator(&["get", "task", &task_id], Some(&operator_leaf))).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED");
     assert_eq!(task["result"], "Answer over TLS: Check the chain []");
 
@@ -1995,7 +1991,8 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
             "unclear Worker Host failure: {stderr}"
         );
         let mut enroll = binary(&[
-            "enroll-host",
+            "host",
+            "enroll",
             "old-host",
             "--gateway",
             &format!("http://{target}"),
@@ -2165,7 +2162,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
 
     // The CLI negotiates as an operator client.
     let gateway = format!("http://{}", services.gateway_address);
-    let mut list = binary(&["list-tags", "--gateway", &gateway]);
+    let mut list = binary(&["get", "tags", "--gateway", &gateway]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let listed = run(list).await?;
     ensure!(
@@ -2182,7 +2179,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         ),
     )
     .await?;
-    let mut list = binary(&["list-tags", "--gateway", &format!("http://{old_gateway}")]);
+    let mut list = binary(&["get", "tags", "--gateway", &format!("http://{old_gateway}")]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let refused = run(list).await?;
     let stderr = String::from_utf8_lossy(&refused.stderr);
@@ -2339,14 +2336,16 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
         command
     };
     run_json(operator(&[
-        "put-tag",
+        "tag",
+        "put",
         "proxied",
         "--instructions",
         "Answer through the proxy",
     ]))
     .await?;
     let issued = run_json(operator(&[
-        "create-auth-key",
+        "auth-key",
+        "create",
         "proxy-host",
         "--host",
         "proxy-host",
@@ -2358,7 +2357,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     std::fs::write(&key, issued["auth_key"].as_str().context("Auth Key")?)?;
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
     let state = root.join("proxy-host");
-    let mut enroll = binary(&["enroll-host", "proxy-host", "--gateway", &proxied]);
+    let mut enroll = binary(&["host", "enroll", "proxy-host", "--gateway", &proxied]);
     enroll
         .arg("--state-directory")
         .arg(&state)
@@ -2381,7 +2380,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     // open; its other Gateway channels sit idle, and when the proxy closes them
     // they reconnect on their next call. Neither stops the host.
     let host_ready = || {
-        let mut command = binary(&["host", "--gateway", &public, "get", "proxy-host"]);
+        let mut command = binary(&["get", "--gateway", &public, "host", "proxy-host"]);
         command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
         run_json(command)
@@ -2422,6 +2421,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     proxy.restore();
 
     let submitted = run_json(operator(&[
+        "task",
         "submit",
         "--tag",
         "proxied",
@@ -2433,7 +2433,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
     let deadline = Instant::now() + Duration::from_secs(30);
     let task = loop {
-        let task = run_json(operator(&["get-task", &task_id])).await?;
+        let task = run_json(operator(&["get", "task", &task_id])).await?;
         if matches!(
             task["state"].as_str(),
             Some("TASK_STATE_SUCCEEDED" | "TASK_STATE_FAILED" | "TASK_STATE_CANCELLED")

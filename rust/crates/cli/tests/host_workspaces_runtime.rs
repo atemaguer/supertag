@@ -137,7 +137,8 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
         ("other-builder", "other", &app_base),
     ] {
         json(cli(&[
-            "put-tag",
+            "tag",
+            "put",
             tag,
             "--instructions",
             "Edit the repository",
@@ -158,7 +159,16 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
         "missing-builder",
         "other-builder",
     ] {
-        let task = json(cli(&["submit", "--tag", tag, "--session", "work", tag])).await?;
+        let task = json(cli(&[
+            "task",
+            "submit",
+            "--tag",
+            tag,
+            "--session",
+            "work",
+            tag,
+        ]))
+        .await?;
         tasks.push(field(&task, "task_id")?.to_owned());
     }
 
@@ -195,7 +205,7 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
     for _ in 0..3 {
         success(services.worker(&state, Some(&services.host), &mappings)).await?;
     }
-    let get = |id: &str| cli(&["get-task", id]);
+    let get = |id: &str| cli(&["get", "task", id]);
     for (index, (workspace, before)) in [
         ("app", "app source\n"),
         ("alias", "app source\n"),
@@ -239,7 +249,7 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
     for task in &tasks[3..] {
         assert_eq!(json(get(task)).await?["state"], "TASK_STATE_QUEUED");
     }
-    let host = json(cli(&["host", "get", "local"])).await?;
+    let host = json(cli(&["get", "host", "local"])).await?;
     assert_eq!(host["workspace_ids"], json!(["alias", "app", "docs"]));
     let labels = host["labels"].as_array().context("labels")?;
     for label in ["workspace:alias", "workspace:app", "workspace:docs"] {
@@ -267,7 +277,8 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let services = Services::start(&database, root).await?;
     let cli = |args: &[&str]| services.cli(args);
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "builder",
         "--instructions",
         "Edit the repository",
@@ -282,7 +293,8 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
 
     // Keys carry the operator's name, which is never reused.
     let issued = json(cli(&[
-        "create-auth-key",
+        "auth-key",
+        "create",
         "laptop",
         "--host",
         "laptop-host",
@@ -297,11 +309,11 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let key = field(&issued, "auth_key")?.to_owned();
     for (args, message) in [
         (
-            ["create-auth-key", "laptop", "--reusable", "--all-tags"],
+            ["auth-key", "create", "laptop", "--reusable", "--all-tags"],
             "never reused",
         ),
         (
-            ["create-auth-key", "Laptop", "--reusable", "--all-tags"],
+            ["auth-key", "create", "Laptop", "--reusable", "--all-tags"],
             "Auth Key name must be 1-63 lowercase",
         ),
     ] {
@@ -313,12 +325,20 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
             String::from_utf8_lossy(&refused.stderr)
         );
     }
-    json(cli(&["create-auth-key", "ci", "--reusable", "--all-tags"])).await?;
-    json(cli(&["revoke-auth-key", "ci"])).await?;
+    json(cli(&[
+        "auth-key",
+        "create",
+        "ci",
+        "--reusable",
+        "--all-tags",
+    ]))
+    .await?;
+    json(cli(&["auth-key", "revoke", "ci"])).await?;
 
     let state = root.join("laptop-state");
     let mut enroll = bare(&[
-        "enroll-host",
+        "host",
+        "enroll",
         "laptop-host",
         "--gateway",
         &services.public,
@@ -328,7 +348,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     enroll.arg("--state-directory").arg(&state);
     json(enroll).await?;
 
-    let listed = json(cli(&["list-auth-keys"])).await?;
+    let listed = json(cli(&["get", "auth-keys"])).await?;
     let keys = listed["auth_keys"].as_array().context("auth_keys")?;
     let summary: Vec<(&str, &str)> = keys
         .iter()
@@ -344,10 +364,11 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
         !listed.to_string().contains(&key),
         "a listed Auth Key exposed its secret"
     );
-    let page = json(cli(&["list-auth-keys", "--limit", "1"])).await?;
+    let page = json(cli(&["get", "auth-keys", "--limit", "1"])).await?;
     assert_eq!(page["next_cursor"], "laptop");
     let rest = json(cli(&[
-        "list-auth-keys",
+        "get",
+        "auth-keys",
         "--limit",
         "1",
         "--cursor",
@@ -355,10 +376,13 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     ]))
     .await?;
     assert_eq!(rest["auth_keys"][0]["name"], "ci");
-    assert_eq!(json(cli(&["get-auth-key", "laptop"])).await?["used"], true);
+    assert_eq!(
+        json(cli(&["get", "auth-key", "laptop"])).await?["used"],
+        true
+    );
 
     let submit = |prompt: &str| {
-        let mut command = cli(&["submit", "--tag", "builder", "--session", "work"]);
+        let mut command = cli(&["task", "submit", "--tag", "builder", "--session", "work"]);
         command.arg(prompt);
         command
     };
@@ -367,15 +391,15 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let first = json(submit("first")).await?;
     success(run(None)).await?;
     assert_eq!(
-        json(cli(&["get-task", field(&first, "task_id")?])).await?["state"],
+        json(cli(&["get", "task", field(&first, "task_id")?])).await?["state"],
         "TASK_STATE_SUCCEEDED"
     );
-    let host = json(cli(&["host", "get", "laptop-host"])).await?;
+    let host = json(cli(&["get", "host", "laptop-host"])).await?;
     assert_eq!(host["credential_revision"], 1);
 
     // Rotating in the host's state directory installs the new credential there.
     let rotated = json({
-        let mut command = cli(&["rotate-host-credential", "laptop-host"]);
+        let mut command = cli(&["host", "rotate-credential", "laptop-host"]);
         command.arg("--host-state-directory").arg(&state);
         command
     })
@@ -384,14 +408,14 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let second = json(submit("second")).await?;
     success(run(None)).await?;
     assert_eq!(
-        json(cli(&["get-task", field(&second, "task_id")?])).await?["state"],
+        json(cli(&["get", "task", field(&second, "task_id")?])).await?["state"],
         "TASK_STATE_SUCCEEDED"
     );
 
     // Rotating to a file stops the installed credential at once.
     let out = root.join("laptop.credential");
     let rotated = json({
-        let mut command = cli(&["rotate-host-credential", "laptop-host"]);
+        let mut command = cli(&["host", "rotate-credential", "laptop-host"]);
         command.arg("--out").arg(&out);
         command
     })
@@ -413,29 +437,29 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
         String::from_utf8_lossy(&stale.stderr)
     );
     assert_eq!(
-        json(cli(&["get-task", &third_id])).await?["state"],
+        json(cli(&["get", "task", &third_id])).await?["state"],
         "TASK_STATE_QUEUED"
     );
     success(run(Some(&token))).await?;
     assert_eq!(
-        json(cli(&["get-task", &third_id])).await?["state"],
+        json(cli(&["get", "task", &third_id])).await?["state"],
         "TASK_STATE_SUCCEEDED"
     );
     // An existing output file is refused before anything rotates.
     let refused = output({
-        let mut command = cli(&["rotate-host-credential", "laptop-host"]);
+        let mut command = cli(&["host", "rotate-credential", "laptop-host"]);
         command.arg("--out").arg(&out);
         command
     })
     .await?;
     ensure!(!refused.status.success());
     assert_eq!(
-        json(cli(&["host", "get", "laptop-host"])).await?["credential_revision"],
+        json(cli(&["get", "host", "laptop-host"])).await?["credential_revision"],
         3
     );
     // The bootstrap host's credential is configured at Control Plane startup instead.
     let refused = output({
-        let mut command = cli(&["rotate-host-credential", "local"]);
+        let mut command = cli(&["host", "rotate-credential", "local"]);
         command.arg("--out").arg(root.join("local.credential"));
         command
     })

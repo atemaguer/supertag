@@ -2,6 +2,7 @@
 mod terminal;
 mod artifact_publications;
 mod artifacts;
+mod auth_keys;
 mod delivery_branches;
 mod deployment;
 mod gateway_credentials;
@@ -32,11 +33,14 @@ mod placement;
 mod policy;
 mod profiles;
 mod replies;
+mod resources;
 mod service_manager;
 mod status;
 mod surface_policy;
 mod surface_setup;
+mod tags;
 mod task_artifact_inputs;
+mod tasks;
 mod teams;
 mod tui;
 mod volumes;
@@ -46,8 +50,8 @@ mod workspace_mounts;
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result, ensure};
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use harness::{AdapterOptions, CodexAdapterArgs, Harness};
+use clap::{Args, Parser, Subcommand};
+use harness::{AdapterOptions, CodexAdapterArgs};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use supertag_control_plane::{ControlPlane, OperatorWatch};
@@ -68,11 +72,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::{Negotiator, ProtocolChannel, connect, fence},
     v2::{
-        ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
-        GetTagRequest, GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest,
-        ListNativeUsageRequest, ListTagsRequest, PolicyExecutionSettings, PutTagRequest,
-        ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest, ServiceRole,
-        SubmitTaskRequest, Tag, Task, WorkspaceSpec,
+        HarnessKind, LarkDomain, ListTagsRequest, ServiceRole, Tag, Task,
         artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
@@ -96,14 +96,13 @@ use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
-use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "supertag", version)]
 struct Cli {
     /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app,
     /// for the operator command that follows.
-    #[arg(long, value_name = "URL|NAME")]
+    #[arg(long = "gateway", id = "root_gateway", value_name = "URL|NAME")]
     gateway: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
@@ -112,21 +111,22 @@ struct Cli {
 /// The Gateway selected before the command name, if any.
 static ROOT_GATEWAY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// Where an operator command connects. Both options are global, so a command group accepts them
+/// before or after its subcommand: `supertag get --gateway G tag` or `supertag get tag --gateway G`.
 #[derive(Args)]
 struct Connection {
     /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app.
     /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
-    #[arg(long, value_name = "URL|NAME", conflicts_with = "state_directory")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "URL|NAME",
+        conflicts_with = "state_directory"
+    )]
     gateway: Option<String>,
     /// Use the local services in this state directory instead of a Gateway.
-    #[arg(long)]
+    #[arg(long, global = true)]
     state_directory: Option<PathBuf>,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum RecoveryDecision {
-    Failed,
-    Retry,
 }
 
 /// `supertag setup`: a hosted deployment, or a collaboration surface account.
@@ -164,22 +164,22 @@ enum Command {
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Gateway.
     Apply(manifests::ManifestArgs),
-    /// Read GitHub publications of verified Workspace results and stop further provider writes.
+    /// Stop further provider writes of a GitHub publication.
     GithubPublication {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: github_publications::PublicationCommand,
     },
-    /// Manage GitHub Workspace sources pinned to one repository and commit.
+    /// Select GitHub Workspace sources pinned to one repository and commit.
     GithubWorkspace {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: github_workspaces::GithubWorkspaceCommand,
     },
-    /// Inspect connector deliveries and resolve uncertain replies from provider evidence.
-    Replies {
+    /// Resolve uncertain connector replies from provider evidence.
+    Reply {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
@@ -213,7 +213,7 @@ enum Command {
         #[command(subcommand)]
         command: gateway_credentials::GatewayCredentialCommand,
     },
-    /// Read Worker Host readiness and manage draining.
+    /// Enroll, drain, resume, and revoke Worker Hosts, and rotate their credentials.
     Host {
         #[command(flatten)]
         connection: Connection,
@@ -258,14 +258,7 @@ enum Command {
         #[command(subcommand)]
         command: mailbox_grants::MailboxGrantCommand,
     },
-    /// Read the Work Sessions started by a Tag.
-    WorkSessions {
-        #[command(flatten)]
-        connection: Connection,
-        #[command(subcommand)]
-        command: work_sessions::WorkSessionCommand,
-    },
-    /// Issue, list, rotate, and revoke named Operator Tokens. Admin operator token only.
+    /// Issue, rotate, and revoke named Operator Tokens. Admin operator token only.
     OperatorToken {
         #[command(flatten)]
         connection: Connection,
@@ -515,46 +508,17 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long)]
         wait_for_recovery: bool,
     },
-    /// Create a named, scoped Auth Key: one-time for a named Worker Host, or reusable.
-    CreateAuthKey {
+    /// Create and revoke Auth Keys that enroll Worker Hosts.
+    AuthKey {
         #[command(flatten)]
         connection: Connection,
-        /// The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused.
-        name: String,
-        /// Worker Host ID a one-time key enrolls. Omit with --reusable.
-        #[arg(
-            long = "host",
-            required_unless_present = "reusable",
-            conflicts_with = "reusable"
-        )]
-        host_id: Option<String>,
-        /// Enroll any number of Worker Hosts, each choosing its own ID.
-        #[arg(long)]
-        reusable: bool,
-        /// Remove hosts that join with this key once they go offline.
-        #[arg(long)]
-        ephemeral: bool,
-        /// Label granted to every host that joins. Repeat for more labels.
-        #[arg(long = "label")]
-        labels: Vec<String>,
-        /// Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable.
-        #[arg(long)]
-        expires_in_seconds: Option<u64>,
-        /// Tag whose Tasks hosts enrolled with this key may run. Repeat for more Tags.
-        #[arg(
-            long,
-            conflicts_with = "all_tags",
-            required_unless_present = "all_tags"
-        )]
-        tag: Vec<String>,
-        /// Let hosts enrolled with this key run Tasks for every Tag.
-        #[arg(long)]
-        all_tags: bool,
+        #[command(subcommand)]
+        command: auth_keys::AuthKeyCommand,
     },
     /// Check an operator token against a Gateway, then save the Gateway under a name for
     /// `--gateway NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
     /// from standard input when that is not set.
-    ConnectGateway {
+    Connect {
         /// The Gateway origin, such as https://supertag.example.com.
         url: String,
         /// The name to save it under.
@@ -573,66 +537,6 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long, requires = "client_cert_file")]
         client_key_file: Option<PathBuf>,
     },
-    /// List Auth Keys, revoked, expired and used ones included, without their secrets.
-    ListAuthKeys {
-        #[command(flatten)]
-        connection: Connection,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 100)]
-        limit: u32,
-        /// The next_cursor of the previous page.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Show one Auth Key without its secret.
-    GetAuthKey {
-        #[command(flatten)]
-        connection: Connection,
-        name: String,
-    },
-    /// Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled.
-    RevokeAuthKey {
-        #[command(flatten)]
-        connection: Connection,
-        name: String,
-    },
-    /// Replace an enrolled Worker Host's credential. The previous one stops working at once.
-    RotateHostCredential {
-        #[command(flatten)]
-        connection: Connection,
-        host_id: String,
-        /// Write the new credential to this new owner-only file, for a host that reads
-        /// SUPERTAG_HOST_TOKEN from its own secret manager.
-        #[arg(
-            long,
-            required_unless_present = "host_state_directory",
-            conflicts_with = "host_state_directory"
-        )]
-        out: Option<PathBuf>,
-        /// Install the new credential in the state directory of this machine's stopped,
-        /// enrolled Worker Host. It uses the credential when it next starts.
-        #[arg(long)]
-        host_state_directory: Option<PathBuf>,
-    },
-    /// Enroll this installation with a one-time Auth Key.
-    EnrollHost {
-        /// Gateway URL to enroll with.
-        #[arg(long)]
-        gateway: String,
-        /// Private directory for this Worker Host's enrollment and execution journal.
-        #[arg(long)]
-        state_directory: PathBuf,
-        host_id: String,
-        /// Auth Key or file:PATH. Also reads SUPERTAG_AUTH_KEY.
-        #[arg(long)]
-        auth_key: Option<String>,
-    },
-    /// Revoke a Worker Host and its execution authority.
-    RevokeHost {
-        #[command(flatten)]
-        connection: Connection,
-        host_id: String,
-    },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
     #[command(name = "__adapter-guardian", hide = true)]
@@ -642,128 +546,19 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(last = true)]
         adapter_args: Vec<OsString>,
     },
-    /// Set the instructions and allowed actions for a Tag.
-    PutTag {
+    /// Set up and retire Tags.
+    Tag {
         #[command(flatten)]
         connection: Connection,
-        tag_id: String,
-        /// Display name. Defaults to the Tag ID for a new Tag.
-        #[arg(long = "name")]
-        display_name: Option<String>,
-        /// Standing instructions the Tag follows in every Task.
-        #[arg(long)]
-        instructions: String,
-        /// Action the Tag may take, such as files:read. Repeat for each action.
-        #[arg(long)]
-        allow: Vec<String>,
-        /// Require approval before this Tag posts to a Team Workstream.
-        #[arg(long)]
-        require_workstream_approval: bool,
-        /// Bare operator ID eligible to approve. Omit to allow any eligible operator.
-        #[arg(long, requires = "require_workstream_approval")]
-        workstream_approver: Vec<String>,
-        /// Require approval before this Tag sends a direct message.
-        #[arg(long)]
-        require_mailbox_approval: bool,
-        /// Bare operator ID eligible to approve a direct message.
-        #[arg(long, requires = "require_mailbox_approval")]
-        mailbox_approver: Vec<String>,
-        /// Logical local or configured GitHub repository binding.
-        #[arg(long)]
-        workspace_id: Option<String>,
-        /// Full local Git base commit. Omit for a configured GitHub source.
-        #[arg(long, requires = "workspace_id")]
-        workspace_base: Option<String>,
-        /// JSON array of {volumeId,destination,maxBytes} for local read-only copy mounts.
-        #[arg(long, requires = "workspace_base")]
-        workspace_mounts: Option<PathBuf>,
-        /// A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read
-        /// from the Task's base commit. May be repeated.
-        #[arg(long = "workspace-mcp", requires = "workspace_id")]
-        workspace_mcp: Vec<String>,
-        /// Required harness for Tasks accepted from this Tag.
-        #[arg(long)]
-        harness: Option<Harness>,
-        /// Allowed model IDs, with the default first. May be repeated.
-        #[arg(long = "model", value_delimiter = ',')]
-        models: Vec<String>,
-        /// Allowed reasoning efforts, with the default first. May be repeated.
-        #[arg(long = "effort", value_delimiter = ',')]
-        efforts: Vec<String>,
-        /// Require this fixed execution environment for new Cursor Sessions.
-        #[arg(long, conflicts_with = "workspace_id")]
-        shared_execution_environment: Option<String>,
+        #[command(subcommand)]
+        command: tags::TagCommand,
     },
-    /// Inspect a Tag by its permanent ID, including after retirement.
-    GetTag {
+    /// Submit, cancel, and steer Tasks, and read their events, usage, and published results.
+    Task {
         #[command(flatten)]
         connection: Connection,
-        tag_id: String,
-    },
-    /// List active Tags and optionally include retired identities.
-    ListTags {
-        #[command(flatten)]
-        connection: Connection,
-        /// Also list retired Tags.
-        #[arg(long)]
-        include_retired: bool,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 100)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Retire a Tag by ID while preserving its work history.
-    RetireTag {
-        #[command(flatten)]
-        connection: Connection,
-        tag_id: String,
-        /// Show blockers and what retirement would detach.
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Accept one turn of work in a Tag's Session.
-    Submit {
-        #[command(flatten)]
-        connection: Connection,
-        /// Tag that does the work.
-        #[arg(long)]
-        tag: String,
-        /// Session that the turn belongs to; a new name starts a new Session.
-        #[arg(long)]
-        session: String,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-        /// Stop the turn when its reported token count reaches this limit.
-        #[arg(long)]
-        max_reported_tokens: Option<u64>,
-        /// Apply a provider-reported spending limit in minor currency units.
-        #[arg(long, requires = "reported_cost_currency")]
-        max_reported_cost_minor: Option<u64>,
-        /// Three-letter currency for the reported cost limit.
-        #[arg(long, requires = "max_reported_cost_minor")]
-        reported_cost_currency: Option<String>,
-        /// Limit native agents and Work Sessions started by this turn.
-        #[arg(long)]
-        max_native_agents: Option<u64>,
-        /// Read declared output requirements from a JSON file.
-        #[arg(long)]
-        outputs: Option<PathBuf>,
-        /// Include one submitted artifact file from the same Objective. Repeat for more files.
-        #[arg(long = "artifact-input", value_name = "ARTIFACT_ID:PATH")]
-        artifact_inputs: Vec<String>,
-        /// Bind selected artifact inputs to this explicit publication approval.
-        #[arg(long, requires = "artifact_inputs")]
-        artifact_publication: Option<String>,
-        prompt: String,
-    },
-    /// Read a Task.
-    GetTask {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
+        #[command(subcommand)]
+        command: tasks::TaskCommand,
     },
     /// Approve and withdraw explicit cross-Objective artifact reuse.
     ArtifactPublication {
@@ -779,31 +574,19 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: volumes::VolumeCommand,
     },
-    /// Register or inspect a file Volume for read-only Workspace data.
+    /// Register a file Volume for read-only Workspace data.
     WorkspaceVolume {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: workspace_mounts::VolumeCommand,
     },
-    /// Inspect or download files captured by a Task.
+    /// Download files captured by a Task.
     Artifact {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: artifacts::CaptureCommand,
-    },
-    /// Download the patch or Git bundle published by a successful workspace Task.
-    WorkspaceArtifact {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
-        /// Which published result to download.
-        #[arg(long, value_enum)]
-        kind: artifacts::ArtifactKind,
-        /// Local file to create with the download. It must not already exist.
-        #[arg(long)]
-        output: PathBuf,
     },
     /// Import a Task's or Session's delivered commits as its Session branch in a repository.
     Fetch {
@@ -812,51 +595,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         args: delivery_branches::FetchArgs,
     },
-    /// Read a page of recorded Task events.
-    TaskEvents {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
-        /// Only entries after this sequence number.
-        #[arg(long, default_value_t = 0)]
-        after: u64,
-    },
-    /// Read native token usage recorded for a Task Attempt.
-    TaskUsage {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
-        attempt_id: String,
-        /// Only entries after this sequence number.
-        #[arg(long, default_value_t = 0)]
-        after: u64,
-    },
-    /// Cancel a Task.
-    Cancel {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
-    },
-    /// Record an audited decision for a stopped, uncertain Task Attempt.
-    ResolveAttempt {
-        #[command(flatten)]
-        connection: Connection,
-        task_id: String,
-        attempt_id: String,
-        /// Mark the Attempt failed, or run the Task again.
-        #[arg(long, value_enum)]
-        decision: RecoveryDecision,
-        /// What you checked that shows the Attempt stopped and what it did.
-        #[arg(long)]
-        evidence: String,
-        /// Confirm that no process of this Attempt is still running.
-        #[arg(long)]
-        confirmed_stopped: bool,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
-    /// Direct input into an active Task and inspect its delivery.
+    /// Resolve a message whose delivery to a running Task is uncertain.
     Input {
         #[command(flatten)]
         connection: Connection,
@@ -883,12 +622,26 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         args: observe::MetricsArgs,
     },
+    /// Read one resource by kind and ID, or list a kind, as JSON.
+    Get {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: resources::GetCommand,
+    },
     /// Describe one resource in readable text.
     Describe {
         #[command(flatten)]
         connection: Connection,
         #[command(flatten)]
-        args: observe::DescribeArgs,
+        args: resources::DescribeArgs,
+    },
+    /// Delete one resource by kind and ID.
+    Delete {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: resources::DeleteCommand,
     },
     /// Stream change notices, reconnecting from the last resume token.
     Watch {
@@ -982,7 +735,10 @@ fn dispatch(cli: Cli) -> Result<()> {
                     | Command::ControlPlane { .. }
                     | Command::Gateway { .. }
                     | Command::WorkerHost { .. }
-                    | Command::EnrollHost { .. }
+                    | Command::Host {
+                        command: host_status::HostCommand::Enroll { .. },
+                        ..
+                    }
                     | Command::CodexAdapter(_)
                     | Command::AdapterGuardian { .. }
             ),
@@ -1017,7 +773,15 @@ async fn run(command: Command) -> Result<()> {
         Command::Spend { connection, args } => observe::spend(connection, args).await?,
         Command::Metrics { connection, args } => observe::metrics(connection, args).await?,
         Command::Test { command } => notifications::run(command).await?,
-        Command::Describe { connection, args } => observe::describe(connection, args).await?,
+        Command::Get {
+            connection,
+            command,
+        } => resources::get(connection, command).await?,
+        Command::Describe { connection, args } => resources::describe(connection, args).await?,
+        Command::Delete {
+            connection,
+            command,
+        } => resources::delete(connection, command).await?,
         Command::Watch { connection, args } => observe::watch(connection, args).await?,
         Command::Diff(args) => manifests::run(args, false).await?,
         Command::Apply(args) => manifests::run(args, true).await?,
@@ -1048,7 +812,7 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => host_status::run(connection, command).await?,
-        Command::Replies {
+        Command::Reply {
             connection,
             command,
         } => replies::run(connection, command).await?,
@@ -1061,10 +825,6 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => mailbox_grants::run(connection, command).await?,
-        Command::WorkSessions {
-            connection,
-            command,
-        } => work_sessions::run(connection, command).await?,
         Command::Mailbox {
             connection,
             tag_id,
@@ -1462,46 +1222,11 @@ async fn run(command: Command) -> Result<()> {
             signal.abort();
             result?;
         }
-        Command::CreateAuthKey {
+        Command::AuthKey {
             connection,
-            name,
-            host_id,
-            reusable,
-            ephemeral,
-            labels,
-            expires_in_seconds,
-            tag,
-            all_tags,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-            let key = operator
-                .create_auth_key(request(
-                    CreateAuthKeyRequest {
-                        name,
-                        host_id: host_id.unwrap_or_default(),
-                        reusable,
-                        ephemeral,
-                        labels,
-                        operation_id: Uuid::new_v4().to_string(),
-                        key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
-                        expires_in_ms: expires_in_seconds
-                            .map_or(Some(0), |seconds| {
-                                seconds.checked_mul(1000).filter(|ms| *ms > 0)
-                            })
-                            .context("invalid Auth Key lifetime")?,
-                        allowed_tag_ids: tag,
-                        all_tags,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            let mut view = placement::auth_key_view(&key);
-            view["auth_key"] = secret.into();
-            crate::terminal::print_json(&view)?;
-        }
-        Command::ConnectGateway {
+            command,
+        } => auth_keys::run(connection, command).await?,
+        Command::Connect {
             url,
             name,
             replace,
@@ -1522,270 +1247,16 @@ async fn run(command: Command) -> Result<()> {
             )
             .await?;
         }
-        Command::ListAuthKeys {
-            connection,
-            limit,
-            cursor,
-        } => placement::list_auth_keys(connection, limit, cursor).await?,
-        Command::GetAuthKey { connection, name } => {
-            placement::get_auth_key(connection, name).await?;
-        }
-        Command::RevokeAuthKey { connection, name } => {
-            placement::revoke_auth_key(connection, name).await?;
-        }
-        Command::RotateHostCredential {
-            connection,
-            host_id,
-            out,
-            host_state_directory,
-        } => {
-            placement::rotate_host_credential(connection, host_id, out, host_state_directory)
-                .await?;
-        }
-        Command::EnrollHost {
-            gateway,
-            state_directory,
-            host_id,
-            auth_key,
-        } => {
-            let gateway = network::endpoint(gateway, false).await?;
-            let auth_key = auth_key.or_else(|| std::env::var("SUPERTAG_AUTH_KEY").ok());
-            let auth_key = match auth_key {
-                Some(key) if key.starts_with("file:") => {
-                    let path = key.strip_prefix("file:").expect("checked prefix");
-                    let contents = tokio::fs::read_to_string(path)
-                        .await
-                        .context("read Auth Key file")?;
-                    Some(contents.trim().to_owned())
-                }
-                other => other,
-            };
-            let record = supertag_worker_host::enroll(
-                gateway,
-                &state_directory,
-                host_id,
-                auth_key.as_deref(),
-            )
-            .await?;
-            crate::terminal::print_json(
-                &json!({ "host_id": record.host_id, "generation": record.generation }),
-            )?;
-        }
-        Command::RevokeHost {
-            connection,
-            host_id,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let record = operator
-                .revoke_host(request(RevokeHostRequest { host_id }, &token)?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(
-                &json!({ "host_id": record.host_id, "revoked": record.revoked }),
-            )?;
-        }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
-        Command::PutTag {
+        Command::Tag {
             connection,
-            tag_id,
-            display_name,
-            instructions,
-            mut allow,
-            require_workstream_approval,
-            workstream_approver,
-            require_mailbox_approval,
-            mailbox_approver,
-            workspace_id,
-            workspace_base,
-            workspace_mounts,
-            workspace_mcp,
-            harness,
-            models,
-            efforts,
-            shared_execution_environment,
-        } => {
-            let mounts = workspace_mounts
-                .as_deref()
-                .map(workspace_mounts::read_declarations)
-                .transpose()?
-                .unwrap_or_default();
-            let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
-                mcp_servers: workspace_mcp,
-                workspace_id,
-                base_commit: workspace_base.unwrap_or_default(),
-                github_source: None,
-                mounts,
-            });
-            let mut approval_rules = Vec::new();
-            for (required, action, operator_ids) in [
-                (
-                    require_workstream_approval,
-                    "workstream:post",
-                    workstream_approver,
-                ),
-                (require_mailbox_approval, "mailbox:send", mailbox_approver),
-            ] {
-                if !required {
-                    continue;
-                }
-                let action = action.to_string();
-                allow.push(action.clone());
-                approval_rules.push(ApprovalRule {
-                    action,
-                    operator_ids,
-                });
-            }
-            let (mut operator, token) = operator(connection).await?;
-            let tag = operator
-                .put_tag(request(
-                    PutTagRequest {
-                        tag_id,
-                        name: display_name,
-                        instructions,
-                        allowed_actions: allow,
-                        workspace,
-                        harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
-                            as i32,
-                        approval_rules,
-                        expected_revision: None,
-                        execution: (!models.is_empty()
-                            || !efforts.is_empty()
-                            || shared_execution_environment.is_some())
-                        .then_some(PolicyExecutionSettings {
-                            models,
-                            efforts,
-                            harness: None,
-                            shared_execution_environment_id: shared_execution_environment,
-                        }),
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(
-                &json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision }),
-            )?;
-        }
-        Command::GetTag { connection, tag_id } => {
-            let (mut operator, token) = operator(connection).await?;
-            let tag = operator
-                .get_tag(request(GetTagRequest { tag_id }, &token)?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(&tag_json(&tag))?;
-        }
-        Command::ListTags {
+            command,
+        } => tags::run(connection, command).await?,
+        Command::Task {
             connection,
-            include_retired,
-            limit,
-            cursor,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let page = operator
-                .list_tags(request(
-                    ListTagsRequest {
-                        limit,
-                        cursor,
-                        include_retired,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(&json!({
-                "tags": page.tags.iter().map(tag_json).collect::<Vec<_>>(),
-                "next_cursor": page.next_cursor,
-            }))?;
-        }
-        Command::RetireTag {
-            connection,
-            tag_id,
-            dry_run,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let response = operator
-                .retire_tag(request(RetireTagRequest { tag_id, dry_run }, &token)?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(&json!({
-                "tag": response.tag.as_ref().map(tag_json),
-                "dry_run": dry_run,
-                "blockers": response.blockers,
-                "surface_locations": response.surface_locations,
-                "host_bindings": response.host_bindings,
-                "mailbox_grants": response.mailbox_grants,
-                "role_assignments": response.role_assignments,
-            }))?;
-        }
-        Command::Submit {
-            connection,
-            tag,
-            session,
-            operation_id,
-            max_reported_tokens,
-            max_reported_cost_minor,
-            reported_cost_currency,
-            max_native_agents,
-            outputs,
-            artifact_inputs,
-            artifact_publication,
-            prompt,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let max_reported_cost = max_reported_cost_minor.zip(reported_cost_currency).map(
-                |(amount_minor, currency)| ReportedCostLimit {
-                    amount_minor,
-                    currency,
-                },
-            );
-            let execution_limits = (max_reported_tokens.is_some()
-                || max_reported_cost.is_some()
-                || max_native_agents.is_some())
-            .then_some(ExecutionLimits {
-                max_reported_tokens,
-                max_reported_cost,
-                max_native_agents,
-            });
-            let output_policy = outputs.as_deref().map(output_policy::read).transpose()?;
-            let input_artifacts =
-                task_artifact_inputs::parse(artifact_inputs, artifact_publication)?;
-            let task = operator
-                .submit_task(request(
-                    SubmitTaskRequest {
-                        tag_id: tag,
-                        session_id: session,
-                        prompt,
-                        operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        execution_limits,
-                        output_policy,
-                        input_artifacts,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            print_task(&task)?;
-        }
-        Command::GetTask {
-            connection,
-            task_id,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let task = operator
-                .get_task(request(GetTaskRequest { task_id }, &token)?)
-                .await?
-                .into_inner();
-            print_task(&task)?;
-        }
-        Command::WorkspaceArtifact {
-            connection,
-            task_id,
-            kind,
-            output,
-        } => {
-            artifacts::download(connection, task_id, kind, &output).await?;
-        }
+            command,
+        } => tasks::run(connection, command).await?,
         Command::Fetch { connection, args } => delivery_branches::fetch(connection, args).await?,
         Command::ArtifactPublication {
             connection,
@@ -1804,109 +1275,6 @@ async fn run(command: Command) -> Result<()> {
             command,
         } => {
             artifacts::run_capture(connection, command).await?;
-        }
-        Command::TaskEvents {
-            connection,
-            task_id,
-            after,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let events = operator
-                .list_events(request(
-                    ListEventsRequest {
-                        task_id,
-                        after_sequence: after,
-                        limit: 100,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            for event in events.events {
-                crate::terminal::print_json(
-                    &json!({ "sequence": event.sequence, "text": event.text }),
-                )?;
-            }
-        }
-        Command::TaskUsage {
-            connection,
-            task_id,
-            attempt_id,
-            after,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let response = operator
-                .list_native_usage(request(
-                    ListNativeUsageRequest {
-                        task_id,
-                        attempt_id,
-                        after_sequence: after,
-                        limit: 100,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            for report in response.reports {
-                if let Some(usage) = report.native_usage {
-                    crate::terminal::print_json(&json!({
-                        "sequence": report.sequence,
-                        "input_tokens": usage.input_tokens,
-                        "cached_input_tokens": usage.cached_input_tokens,
-                        "output_tokens": usage.output_tokens,
-                        "total_tokens": usage.total_tokens,
-                        "observed_model": usage.observed_model,
-                        "reported_cost": report.amount_minor.zip(report.currency).map(|(amount_minor, currency)| json!({
-                            "amount_minor": amount_minor, "currency": currency, "estimated": report.estimated,
-                        })),
-                    }))?;
-                }
-            }
-        }
-        Command::Cancel {
-            connection,
-            task_id,
-        } => {
-            let (mut operator, token) = operator(connection).await?;
-            let task = operator
-                .cancel_task(request(CancelTaskRequest { task_id }, &token)?)
-                .await?
-                .into_inner();
-            print_task(&task)?;
-        }
-        Command::ResolveAttempt {
-            connection,
-            task_id,
-            attempt_id,
-            decision,
-            evidence,
-            confirmed_stopped,
-            operation_id,
-        } => {
-            let (mut client, token) = operator(connection).await?;
-            let decision = match decision {
-                RecoveryDecision::Failed => AttemptDecision::Failed,
-                RecoveryDecision::Retry => AttemptDecision::Retry,
-            };
-            let resolution = client
-                .resolve_attempt(request(
-                    ResolveAttemptRequest {
-                        task_id,
-                        attempt_id,
-                        decision: decision as i32,
-                        evidence,
-                        confirmed_stopped,
-                        operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            crate::terminal::print_json(&json!({
-                "task_id": resolution.task_id, "attempt_id": resolution.attempt_id,
-                "decision": resolution.decision().as_str_name(),
-                "operator_id": resolution.operator_id, "resolved_at_ms": resolution.resolved_at_ms,
-            }))?;
         }
         Command::Input {
             connection,
@@ -3167,9 +2535,10 @@ fn task_json(task: &Task) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::{Cli, usage_error_text};
+    use crate::{observe::WATCH_EVENT_STREAMS, resources::KINDS};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -3178,7 +2547,7 @@ mod tests {
     #[test]
     fn a_usage_error_never_falls_back_to_the_typed_text() {
         let typed = "5\nerror: fake line";
-        let error = Cli::try_parse_from(args(&["supertag", "objective", "list", "--limit", typed]))
+        let error = Cli::try_parse_from(args(&["supertag", "get", "objectives", "--limit", typed]))
             .err()
             .expect("an invalid limit is a usage error");
         assert!(error.render().to_string().contains("\nerror: fake line"));
@@ -3194,13 +2563,264 @@ mod tests {
             &error,
             args(&[
                 "supertag",
-                "objective",
-                "list",
+                "get",
+                "objectives",
                 "--limit",
                 &crate::terminal::text(typed),
             ]),
         );
         assert!(filtered.contains("'5 error: fake line'"), "{filtered}");
         assert!(!filtered.contains("\nerror: fake line"), "{filtered}");
+    }
+
+    /// Verbs that apply to every resource kind. They come first: `supertag get tag ID`.
+    const GENERIC_VERBS: [&str; 6] = ["get", "describe", "delete", "watch", "apply", "diff"];
+
+    /// Verbs that must never start a top-level command name, as in the removed `get-task` or
+    /// `create-auth-key`: a resource-specific action goes after its noun, `supertag task cancel`.
+    const VERBS: [&str; 22] = [
+        "get", "list", "show", "describe", "delete", "watch", "apply", "diff", "put", "create",
+        "update", "set", "remove", "revoke", "retire", "enroll", "rotate", "connect", "resolve",
+        "submit", "cancel", "download",
+    ];
+
+    fn names(command: &clap::Command) -> Vec<String> {
+        let mut names = vec![command.get_name().to_owned()];
+        names.extend(command.get_all_aliases().map(str::to_owned));
+        names
+    }
+
+    fn subcommand<'a>(command: &'a clap::Command, name: &str) -> &'a clap::Command {
+        command
+            .find_subcommand(name)
+            .unwrap_or_else(|| panic!("supertag {name} exists"))
+    }
+
+    /// Every value a positional kind argument accepts, aliases included.
+    fn kind_values(command: &clap::Command, argument: &str) -> Vec<String> {
+        let argument = command
+            .get_arguments()
+            .find(|candidate| candidate.get_id() == argument)
+            .unwrap_or_else(|| panic!("{} has a {argument} argument", command.get_name()));
+        assert!(argument.is_positional(), "{argument} is positional");
+        let mut values = argument
+            .get_possible_values()
+            .iter()
+            .flat_map(|value| value.get_name_and_aliases().map(str::to_owned))
+            .collect::<Vec<_>>();
+        values.sort();
+        values
+    }
+
+    fn sorted(mut values: Vec<String>) -> Vec<String> {
+        values.sort();
+        values
+    }
+
+    /// The command grammar: ACTION RESOURCE for the generic verbs, which accept exactly the kinds
+    /// in `resources::KINDS`; RESOURCE VERB for every other action. No top-level command is a
+    /// verb-noun pair, and every kind has `get` and `describe`.
+    #[test]
+    fn the_command_tree_follows_the_resource_grammar() {
+        let cli = Cli::command();
+        cli.clone().debug_assert();
+        let kind_names = |filter: fn(&crate::resources::KindSpec) -> bool| {
+            sorted(
+                KINDS
+                    .iter()
+                    .filter(|spec| filter(spec))
+                    .flat_map(|spec| [spec.name.to_owned(), spec.plural.to_owned()])
+                    .collect(),
+            )
+        };
+        for spec in KINDS {
+            assert_eq!(
+                format!("{:?}", spec.kind)
+                    .chars()
+                    .enumerate()
+                    .flat_map(|(index, letter)| {
+                        let dash = (index > 0 && letter.is_uppercase()).then_some('-');
+                        dash.into_iter().chain(letter.to_lowercase())
+                    })
+                    .collect::<String>(),
+                spec.name,
+                "the table names each kind as clap does"
+            );
+            assert_eq!(
+                crate::resources::spec(spec.kind).name,
+                spec.name,
+                "one row per kind"
+            );
+        }
+
+        // get: one subcommand per kind, named singular with the plural as an alias. A kind that
+        // lists takes an optional ID; one that does not requires it.
+        let get = subcommand(&cli, "get");
+        let mut get_names = Vec::new();
+        for kind in get.get_subcommands() {
+            let spec = KINDS
+                .iter()
+                .find(|spec| spec.name == kind.get_name())
+                .unwrap_or_else(|| panic!("get {} is in KINDS", kind.get_name()));
+            assert_eq!(names(kind), [spec.name, spec.plural], "get {}", spec.name);
+            let id = kind
+                .get_positionals()
+                .find(|argument| argument.get_id() == "id")
+                .unwrap_or_else(|| panic!("get {} takes an ID", spec.name));
+            assert_eq!(
+                id.is_required_set(),
+                !spec.list,
+                "get {} lists without an ID exactly when the table says so",
+                spec.name
+            );
+            get_names.extend(names(kind));
+        }
+        assert_eq!(
+            sorted(get_names),
+            kind_names(|_| true),
+            "get reads every kind"
+        );
+
+        let describe = subcommand(&cli, "describe");
+        assert_eq!(
+            kind_values(describe, "kind"),
+            kind_names(|_| true),
+            "describe reads every kind"
+        );
+
+        let delete = subcommand(&cli, "delete");
+        let mut delete_names = Vec::new();
+        for kind in delete.get_subcommands() {
+            let spec = KINDS
+                .iter()
+                .find(|spec| spec.name == kind.get_name())
+                .unwrap_or_else(|| panic!("delete {} is in KINDS", kind.get_name()));
+            assert_eq!(
+                names(kind),
+                [spec.name, spec.plural],
+                "delete {}",
+                spec.name
+            );
+            delete_names.extend(names(kind));
+        }
+        assert_eq!(
+            sorted(delete_names),
+            kind_names(|spec| spec.delete),
+            "delete removes exactly the deletable kinds"
+        );
+
+        let mut watched = kind_names(|spec| spec.watch);
+        watched.extend(
+            WATCH_EVENT_STREAMS
+                .iter()
+                .flatten()
+                .map(|name| (*name).to_owned()),
+        );
+        assert_eq!(
+            kind_values(subcommand(&cli, "watch"), "kinds"),
+            sorted(watched),
+            "watch follows the watchable kinds and the event streams"
+        );
+        for [stream, _] in WATCH_EVENT_STREAMS {
+            assert!(
+                KINDS.iter().all(|spec| spec.name != *stream),
+                "{stream} is a resource kind, so it belongs in KINDS"
+            );
+        }
+        for verb in ["apply", "diff"] {
+            subcommand(&cli, verb);
+        }
+
+        // RESOURCE VERB everywhere else: no top-level command starts with a verb, no top-level
+        // command is a kind followed by an action, and a noun group named after a kind leaves
+        // reading, listing, and deleting to the generic verbs.
+        for command in cli.get_subcommands() {
+            let name = command.get_name();
+            if GENERIC_VERBS.contains(&name) {
+                continue;
+            }
+            let first = name.split('-').next().unwrap_or(name);
+            assert!(
+                !(VERBS.contains(&first) && name.contains('-')),
+                "supertag {name} is verb-noun; use RESOURCE VERB"
+            );
+            for spec in KINDS {
+                assert!(
+                    name == spec.name
+                        || !name.starts_with(&format!("{}-", spec.name))
+                        || KINDS.iter().any(|other| other.name == name),
+                    "supertag {name} is a {} action; make it supertag {} {}",
+                    spec.name,
+                    spec.name,
+                    &name[spec.name.len() + 1..]
+                );
+            }
+            if KINDS.iter().any(|spec| spec.name == name) {
+                for verb in command.get_subcommands().map(clap::Command::get_name) {
+                    assert!(
+                        !["get", "list", "show", "describe", "delete", "watch"].contains(&verb),
+                        "supertag {name} {verb} duplicates a generic verb; use supertag {verb} {name}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Plurals are accepted wherever the singular is, and a connection option may follow the
+    /// subcommand of a group.
+    #[test]
+    fn kinds_accept_plurals_and_connection_options_follow_the_subcommand() {
+        for arguments in [
+            ["supertag", "get", "tags", "--state-directory", "/tmp/x"].as_slice(),
+            &["supertag", "get", "--gateway", "local", "tag", "builder"],
+            &["supertag", "get", "tag", "builder", "--gateway", "local"],
+            &["supertag", "describe", "hosts", "laptop"],
+            &["supertag", "delete", "teams", "release", "--gateway", "g"],
+            &["supertag", "watch", "tasks", "objective"],
+            &["supertag", "task", "cancel", "task-1", "--gateway", "g"],
+            &["supertag", "host", "drain", "laptop", "--gateway", "g"],
+        ] {
+            Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{arguments:?}: {error}"));
+        }
+        // host enroll names the Gateway and state directory of the host it enrolls with its own
+        // options, which shadow the group's connection options.
+        let enroll = Cli::try_parse_from([
+            "supertag",
+            "host",
+            "enroll",
+            "laptop",
+            "--gateway",
+            "https://gateway.example",
+            "--state-directory",
+            "/tmp/host",
+        ])
+        .expect("host enroll parses");
+        match enroll.command {
+            Some(super::Command::Host {
+                command:
+                    crate::host_status::HostCommand::Enroll {
+                        gateway,
+                        state_directory,
+                        ..
+                    },
+                ..
+            }) => {
+                assert_eq!(gateway, "https://gateway.example");
+                assert_eq!(state_directory, std::path::Path::new("/tmp/host"));
+            }
+            _ => panic!("host enroll parses as host enroll"),
+        }
+        assert!(enroll.gateway.is_none(), "no root --gateway was given");
+        for arguments in [
+            ["supertag", "get", "task"].as_slice(),
+            &["supertag", "get", "tag", "builder", "--include-retired"],
+            &["supertag", "get-task", "task-1"],
+            &["supertag", "list-tags"],
+        ] {
+            assert!(
+                Cli::try_parse_from(arguments).is_err(),
+                "{arguments:?} is refused"
+            );
+        }
     }
 }

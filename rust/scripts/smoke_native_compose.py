@@ -73,7 +73,7 @@ def smoke(control_image, gateway_image, fixture):
         def operator(command, *arguments):
             return json.loads(compose("exec", "-T", "gateway", CLI, command, "--gateway", GATEWAY, *arguments))
         def task_events(task_id):
-            output = compose("exec", "-T", "gateway", CLI, "task-events", "--gateway", GATEWAY, task_id)
+            output = compose("exec", "-T", "gateway", CLI, "task", "events", "--gateway", GATEWAY, task_id)
             return [json.loads(line) for line in output.splitlines()]
         def container(service):
             return compose("ps", "--all", "--quiet", service).strip()
@@ -96,14 +96,14 @@ def smoke(control_image, gateway_image, fixture):
             # The public health API is intentionally read-only and token-free;
             # accepting Task mutations still requires a named operator token.
             rejected = subprocess.run([*prefix, "exec", "-T", "gateway", "env", "SUPERTAG_OPERATOR_TOKEN=synthetic-invalid", CLI,
-                                       "put-tag", "unauthorized", "--gateway", GATEWAY, "--instructions", "must not exist"],
+                                       "tag", "put", "unauthorized", "--gateway", GATEWAY, "--instructions", "must not exist"],
                                       env=env, capture_output=True, text=True, timeout=15)
             require(rejected.returncode != 0, "operator mutation accepted an invalid token")
-            operator("put-tag", "compose-fixture", "--instructions", "Native Compose fixture")
+            operator("tag", "put", "compose-fixture", "--instructions", "Native Compose fixture")
             submit = ("--tag", "compose-fixture", "--session", "rehearsal", "--operation-id", "compose-request", "through native Compose")
-            task = operator("submit", *submit)
+            task = operator("task", "submit", *submit)
             compose("run", "--rm", "--no-deps", "worker", timeout=90)
-            finished = operator("get-task", task["task_id"])
+            finished = operator("get", "task", task["task_id"])
             require(finished["state"] == "TASK_STATE_SUCCEEDED" and "through native Compose" in finished["result"],
                     "Task did not complete through native Compose")
             events = task_events(task["task_id"])
@@ -114,9 +114,9 @@ def smoke(control_image, gateway_image, fixture):
                 require(docker("inspect", "--format", "{{.State.ExitCode}}", container(service)).strip() == "0",
                         "service did not stop cleanly")
             compose("up", "--detach", "--wait", "--wait-timeout", "90", "gateway", timeout=120)
-            require(operator("get-task", task["task_id"]) == finished, "Task changed across full service restart")
+            require(operator("get", "task", task["task_id"]) == finished, "Task changed across full service restart")
             require(task_events(task["task_id"]) == events, "Task event history changed after restart")
-            require(operator("submit", *submit)["task_id"] == task["task_id"], "request replay created another Task")
+            require(operator("task", "submit", *submit)["task_id"] == task["task_id"], "request replay created another Task")
             return {"format": "supertag-native-compose-rehearsal-v1", "compose_project": identifier,
                     "images": {service: {"tag": image, "id": docker("image", "inspect", "--format", "{{.Id}}", image).strip()}
                                for service, image in (("control-plane", control_image), ("gateway", gateway_image))},

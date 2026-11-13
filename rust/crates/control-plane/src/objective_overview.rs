@@ -348,7 +348,7 @@ impl Store {
                 kind: ObjectiveAttentionKind::Blocked as i32,
                 message: "The owner reported the Objective blocked; a message in its Session starts its next turn.".into(),
                 next_actions: vec![format!(
-                    "supertag submit --tag {} --session {} TEXT",
+                    "supertag task submit --tag {} --session {} TEXT",
                     objective.owner_tag_id, objective.session_id
                 )],
                 tag_id: objective.owner_tag_id.clone(),

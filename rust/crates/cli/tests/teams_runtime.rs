@@ -99,7 +99,8 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     for tag in ["sender", "recipient", "observer"] {
         cli(
             &[
-                "put-tag",
+                "tag",
+                "put",
                 "--gateway",
                 &public,
                 tag,
@@ -226,6 +227,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
 
     let submitted = cli(
         &[
+            "task",
             "submit",
             "--gateway",
             &public,
@@ -264,7 +266,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     );
     let source_id = submitted["task_id"].as_str().context("sender Task ID")?;
     let source = cli(
-        &["get-task", "--gateway", &public, source_id],
+        &["get", "task", "--gateway", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -293,7 +295,8 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
     assert!(message["task_id"].is_null());
     cli(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "recipient",
@@ -359,7 +362,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_rest
         .as_str()
         .context("inbox Task ID")?;
     let inbox = cli(
-        &["get-task", "--gateway", &public, inbox_id],
+        &["get", "task", "--gateway", &public, inbox_id],
         &operator_token,
     )
     .await?;
@@ -469,7 +472,8 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway(
     let (_gateway, public) = service(gateway).await?;
     cli(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "engineer",
@@ -634,7 +638,8 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let (_gateway, public) = service(gateway).await?;
     cli(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "owner",
@@ -715,7 +720,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         .as_str()
         .context("Objective Task ID")?;
     let task = cli(
-        &["get-task", "--gateway", &public, source_id],
+        &["get", "task", "--gateway", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -915,7 +920,8 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway(
     for tag in ["engineer", "reviewer"] {
         cli(
             &[
-                "put-tag",
+                "tag",
+                "put",
                 "--gateway",
                 &public,
                 tag,
@@ -1274,7 +1280,8 @@ async fn objective_questions_survive_gateway_restart_and_answer_once(
     let (mut gateway, public) = service(gateway_command()).await?;
     cli(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "owner",

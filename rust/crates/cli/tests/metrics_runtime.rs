@@ -108,7 +108,7 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     assert_eq!(empty["reply_delivery"]["backlog"], 0, "{empty}");
 
     for tag in ["reviewer", "writer"] {
-        output(operator(&["put-tag", tag, "--instructions", "Echo"])).await?;
+        output(operator(&["tag", "put", tag, "--instructions", "Echo"])).await?;
     }
     let mut client = OperatorClient::new(protocol::dial(public.clone()).await?);
     let mut submitted = vec![];
@@ -129,7 +129,12 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
             .into_inner();
         submitted.push(task.task_id);
     }
-    output(operator(&["cancel", submitted.last().context("no Task")?])).await?;
+    output(operator(&[
+        "task",
+        "cancel",
+        submitted.last().context("no Task")?,
+    ]))
+    .await?;
     let mut worker = binary(&[
         "worker-host",
         "--gateway",

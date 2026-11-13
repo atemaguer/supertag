@@ -92,10 +92,18 @@ async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Resu
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };
-    json(operator(&["put-tag", "reviewer", "--instructions", "Echo"])).await?;
+    json(operator(&[
+        "tag",
+        "put",
+        "reviewer",
+        "--instructions",
+        "Echo",
+    ]))
+    .await?;
     // The fixture publishes `Echo: PROMPT []`: 15,009 bytes, 33,009 once redacted.
     let prompt = "pw42 ".repeat(3_000);
     let submitted = json(operator(&[
+        "task",
         "submit",
         "--tag",
         "reviewer",
@@ -121,7 +129,7 @@ async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Resu
     let status = timeout(WAIT, worker.status()).await??;
     ensure!(status.success(), "Worker Host exited with {status}");
 
-    let task = json(operator(&["get-task", &task_id])).await?;
+    let task = json(operator(&["get", "task", &task_id])).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let result = task["result"].as_str().context("result")?;
     let mut connection = database::connect(&database).await?;
@@ -171,11 +179,19 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
         command
     };
 
-    json(operator(&["put-tag", "reviewer", "--instructions", "Echo"])).await?;
+    json(operator(&[
+        "tag",
+        "put",
+        "reviewer",
+        "--instructions",
+        "Echo",
+    ]))
+    .await?;
     let prompt = format!(
         "key {HOST_SECRET} clone https://bot:url-password-77@git.example/repo.git auth Basic dXNlcjpwYXNzd29yZA== at https://api.example/v1?access_token=query-token-99&page=2"
     );
     let submitted = json(operator(&[
+        "task",
         "submit",
         "--tag",
         "reviewer",
@@ -203,7 +219,7 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
     let status = timeout(WAIT, worker.status()).await??;
     ensure!(status.success(), "Worker Host exited with {status}");
 
-    let task = json(operator(&["get-task", &task_id])).await?;
+    let task = json(operator(&["get", "task", &task_id])).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let result = task["result"].as_str().context("result")?;
     let mut connection = database::connect(&database).await?;

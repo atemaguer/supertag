@@ -442,7 +442,7 @@ async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> R
     );
     assert!(!log.exists());
     let output = credentials
-        .command(&["host", "--gateway", &public, "get", "local"])
+        .command(&["get", "--gateway", &public, "host", "local"])
         .output()?;
     ensure!(output.status.success(), "{output:?}");
     let shown: serde_json::Value = serde_json::from_slice(&output.stdout)?;

@@ -121,7 +121,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
 
     for tag in ["other-team", "reviewer"] {
         json(operator(
-            &["put-tag", tag, "--instructions", "Review the change"],
+            &["tag", "put", tag, "--instructions", "Review the change"],
             &public,
             &operator_token,
         ))
@@ -129,7 +129,8 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     }
     let issued = json(operator(
         &[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "review",
             "--host",
             "review-host",
@@ -150,7 +151,8 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     let state = directory.path().join("worker-state");
     let enroll = || {
         let mut command = binary(&[
-            "enroll-host",
+            "host",
+            "enroll",
             "review-host",
             "--gateway",
             &public,
@@ -208,6 +210,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     let submit = |tag| {
         operator(
             &[
+                "task",
                 "submit",
                 "--tag",
                 tag,
@@ -229,7 +232,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
         "enrolled Worker Host failed: {}",
         String::from_utf8_lossy(&executed.stderr)
     );
-    let read_task = |id| operator(&["get-task", id], &public, &operator_token);
+    let read_task = |id| operator(&["get", "task", id], &public, &operator_token);
     let completed = json(read_task(included_id)).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED");
     assert_eq!(completed["result"], "Review the change: Check the diff []");
@@ -239,7 +242,7 @@ async fn cli_enrollment_replays_pending_credential_and_limits_assignment_until_r
     );
 
     let revoked = json(operator(
-        &["revoke-host", "review-host"],
+        &["host", "revoke", "review-host"],
         &public,
         &operator_token,
     ))

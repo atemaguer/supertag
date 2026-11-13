@@ -128,13 +128,13 @@ def smoke(control_image, gateway_image, fixture):
             )
             require(rejected.returncode != 0 and "certificate required" in rejected.stderr.lower(),
                     "Control Plane accepted TLS without a client certificate")
-            operator("put-tag", "container-fixture", "--instructions", "Container fixture")
-            task = operator("submit", "--tag", "container-fixture", "--session", "smoke", "split services")
+            operator("tag", "put", "container-fixture", "--instructions", "Container fixture")
+            task = operator("task", "submit", "--tag", "container-fixture", "--session", "smoke", "split services")
             docker("run", "--name", worker, *network("worker"), "--env-file", worker_env,
                    "--mount", f"type=bind,src={fixture},dst=/run/fixture-adapter,readonly", gateway_image,
                    "worker-host", "--gateway", GATEWAY, "--state-directory", "/var/lib/supertag/worker",
                    "--adapter", "/run/fixture-adapter", "--once")
-            finished = operator("get-task", task["task_id"])
+            finished = operator("get", "task", task["task_id"])
             require(finished["state"] == "TASK_STATE_SUCCEEDED" and "split services" in finished["result"],
                     "container Task did not complete through the split services")
             docker("stop", "--time", "10", control)
@@ -143,7 +143,7 @@ def smoke(control_image, gateway_image, fixture):
 
             def restored():
                 try:
-                    return operator("get-task", task["task_id"]) == finished
+                    return operator("get", "task", task["task_id"]) == finished
                 except ArchiveError:
                     return False
 

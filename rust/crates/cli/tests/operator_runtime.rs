@@ -109,7 +109,8 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
         }
     };
     let created = run(&[
-        "put-tag",
+        "tag",
+        "put",
         "review-1",
         "--name",
         "Reviewer",
@@ -118,16 +119,20 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     ])
     .await?;
     assert_eq!(created["name"], "Reviewer");
-    let preview = run(&["retire-tag", "review-1", "--dry-run"]).await?;
+    let preview = run(&["tag", "retire", "review-1", "--dry-run"]).await?;
     assert_eq!(preview["dry_run"], true);
     assert!(preview["tag"]["retired_at_ms"].is_null());
-    assert_eq!(run(&["list-tags"]).await?["tags"][0]["tag_id"], "review-1");
-    let retired = run(&["retire-tag", "review-1"]).await?;
+    assert_eq!(
+        run(&["get", "tags"]).await?["tags"][0]["tag_id"],
+        "review-1"
+    );
+    let retired = run(&["tag", "retire", "review-1"]).await?;
     assert!(retired["tag"]["retired_at_ms"].as_i64().is_some());
-    assert_eq!(run(&["list-tags"]).await?["tags"], serde_json::json!([]));
-    assert_eq!(run(&["get-tag", "review-1"]).await?, retired["tag"]);
+    assert_eq!(run(&["get", "tags"]).await?["tags"], serde_json::json!([]));
+    assert_eq!(run(&["get", "tag", "review-1"]).await?, retired["tag"]);
     run(&[
-        "put-tag",
+        "tag",
+        "put",
         "review-2",
         "--name",
         "Reviewer",
@@ -135,7 +140,7 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
         "Review",
     ])
     .await?;
-    let all = run(&["list-tags", "--include-retired"]).await?;
+    let all = run(&["get", "tags", "--include-retired"]).await?;
     assert_eq!(all["tags"][0], retired["tag"]);
     assert_eq!(all["tags"][1]["tag_id"], "review-2");
     assert_eq!(all["tags"][1]["name"], "Reviewer");
@@ -932,7 +937,13 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         std::fs::read_to_string(state.join("endpoint"))?.trim(),
         endpoint
     );
-    let mut put = command(&["put-tag", "engineer", "--instructions", "Process requests"]);
+    let mut put = command(&[
+        "tag",
+        "put",
+        "engineer",
+        "--instructions",
+        "Process requests",
+    ]);
     put.arg("--state-directory").arg(&state);
     let output = timeout(WAIT, put.output()).await??;
     ensure!(
@@ -1048,7 +1059,13 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
     ]);
     up.arg("--state-directory").arg(&state);
     let (mut runtime, _) = service(up).await?;
-    let mut put = command(&["put-tag", "engineer", "--instructions", "Process requests"]);
+    let mut put = command(&[
+        "tag",
+        "put",
+        "engineer",
+        "--instructions",
+        "Process requests",
+    ]);
     put.arg("--state-directory").arg(&state);
     let output = timeout(WAIT, put.output()).await??;
     ensure!(
@@ -1127,7 +1144,13 @@ async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result
     .arg("--state-directory")
     .arg(&state);
     let (mut runtime, endpoint) = service(up).await?;
-    let mut put = command(&["put-tag", "engineer", "--instructions", "Process requests"]);
+    let mut put = command(&[
+        "tag",
+        "put",
+        "engineer",
+        "--instructions",
+        "Process requests",
+    ]);
     put.arg("--state-directory").arg(&state);
     let output = timeout(WAIT, put.output()).await??;
     ensure!(
@@ -1457,7 +1480,8 @@ async fn rust_launcher_and_go_tui_answer_a_harness_question() -> Result<()> {
     up.arg("--state-directory").arg(&state);
     let (mut runtime, endpoint) = service(up).await?;
     let mut put = command(&[
-        "put-tag",
+        "tag",
+        "put",
         "engineer",
         "--instructions",
         "Release engineering",

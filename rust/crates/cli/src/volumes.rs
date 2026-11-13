@@ -1,9 +1,10 @@
 use crate::{Connection, connect_operator, request};
 use anyhow::{Context, Result, bail};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use supertag_gateway::transfers::volumes::ArtifactVolumeMappings;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 
 const VOLUME_TRANSFER_TIMEOUT: Duration = Duration::from_secs(110);
@@ -21,27 +22,6 @@ pub enum VolumeCommand {
         operation_id: String,
         /// The revision you last read, or 0 to create. The change is refused when it no longer matches.
         #[arg(long, default_value_t = 0)]
-        expected_revision: u64,
-    },
-    /// Read one Volume.
-    Get { volume_id: String },
-    /// List registered Volumes.
-    List {
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 30)]
-        limit: u32,
-        /// Continue after the last ID the previous page returned.
-        #[arg(long, default_value = "")]
-        after_id: String,
-    },
-    /// Remove metadata only when no reserved or verified copies depend on it.
-    Delete {
-        volume_id: String,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
-        #[arg(long)]
-        operation_id: String,
-        /// The revision you last read. The change is refused when the resource has changed since.
-        #[arg(long)]
         expected_revision: u64,
     },
     /// Copy one exact artifact file. The Gateway must separately consent to this Volume's storage.
@@ -65,21 +45,135 @@ pub enum VolumeCommand {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Read one recorded artifact copy.
-    CopyGet { copy_id: String },
-    /// List recorded artifact copies, newest first, optionally for one Volume.
-    Copies {
-        /// Only copies made into this Volume.
-        #[arg(long, default_value = "")]
-        volume_id: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 30)]
-        limit: u32,
-        /// Continue from the next_before_order the previous page returned.
-        #[arg(long, default_value_t = 0)]
-        before_order: u64,
-    },
 }
+
+// Options for `supertag get volumes`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 30, conflicts_with = "id")]
+    limit: u32,
+    /// Continue after the last ID the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    after_id: String,
+}
+
+// Options for `supertag get volume-copies`.
+#[derive(Args)]
+pub struct CopyListArgs {
+    /// Only copies made into this Volume.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    volume_id: String,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 30, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the next_before_order the previous page returned.
+    #[arg(long, default_value_t = 0, conflicts_with = "id")]
+    before_order: u64,
+}
+
+// Options for `supertag delete volume`. Only metadata is removed, and only when no reserved or
+// verified copies depend on it.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
+    #[arg(long)]
+    operation_id: String,
+    /// The revision you last read. The change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: u64,
+}
+
+fn client(
+    channel: ProtocolChannel,
+) -> artifact_volumes_client::ArtifactVolumesClient<ProtocolChannel> {
+    artifact_volumes_client::ArtifactVolumesClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    volume_id: String,
+) -> Result<Value> {
+    Ok(volume(
+        &client(channel)
+            .get(request(GetArtifactVolumeRequest { volume_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn fetch_copy(
+    channel: ProtocolChannel,
+    token: &str,
+    copy_id: String,
+) -> Result<Value> {
+    Ok(copy(
+        &client(channel)
+            .get_copy(request(GetArtifactVolumeCopyRequest { copy_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list(request(
+            ListArtifactVolumesRequest {
+                limit: args.limit,
+                after_id: args.after_id,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"volumes":page.volumes.iter().map(volume).collect::<Vec<_>>(),"next_after_id":page.next_after_id}),
+    )
+}
+
+pub(crate) async fn list_copies(connection: Connection, args: CopyListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_copies(request(
+            ListArtifactVolumeCopiesRequest {
+                volume_id: args.volume_id,
+                limit: args.limit,
+                before_order: args.before_order,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"copies":page.copies.iter().map(copy).collect::<Vec<_>>(),"next_before_order":page.next_before_order}),
+    )
+}
+
+pub(crate) async fn delete(
+    connection: Connection,
+    volume_id: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let deleted = client(channel)
+        .delete(request(
+            DeleteArtifactVolumeRequest {
+                volume_id,
+                operation_id: args.operation_id,
+                expected_revision: args.expected_revision,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner()
+        .deleted;
+    Ok(json!({ "deleted": deleted }))
+}
+
 pub fn mappings(values: Vec<String>, s3: Option<PathBuf>) -> Result<ArtifactVolumeMappings> {
     let mut entries = Vec::new();
     for value in values {
@@ -113,9 +207,7 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
     } else {
         connect_operator(connection).await?
     };
-    let mut client = artifact_volumes_client::ArtifactVolumesClient::new(channel.clone())
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel.clone());
     let value = match command {
         VolumeCommand::Download { copy_id, output } => {
             let receipt = client
@@ -168,29 +260,6 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
                 .await?
                 .into_inner(),
         ),
-        VolumeCommand::Get { volume_id } => volume(
-            &client
-                .get(request(GetArtifactVolumeRequest { volume_id }, &token)?)
-                .await?
-                .into_inner(),
-        ),
-        VolumeCommand::List { limit, after_id } => {
-            let page = client
-                .list(request(
-                    ListArtifactVolumesRequest { limit, after_id },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"volumes":page.volumes.iter().map(volume).collect::<Vec<_>>(),"next_after_id":page.next_after_id})
-        }
-        VolumeCommand::Delete {
-            volume_id,
-            operation_id,
-            expected_revision,
-        } => {
-            json!({"deleted":client.delete(request(DeleteArtifactVolumeRequest {volume_id,operation_id,expected_revision},&token)?).await?.into_inner().deleted})
-        }
         VolumeCommand::Copy {
             volume_id,
             artifact_id,
@@ -229,30 +298,6 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
             )?;
             transfer.set_timeout(VOLUME_TRANSFER_TIMEOUT);
             copy(&client.copy(transfer).await?.into_inner())
-        }
-        VolumeCommand::CopyGet { copy_id } => copy(
-            &client
-                .get_copy(request(GetArtifactVolumeCopyRequest { copy_id }, &token)?)
-                .await?
-                .into_inner(),
-        ),
-        VolumeCommand::Copies {
-            volume_id,
-            limit,
-            before_order,
-        } => {
-            let page = client
-                .list_copies(request(
-                    ListArtifactVolumeCopiesRequest {
-                        volume_id,
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"copies":page.copies.iter().map(copy).collect::<Vec<_>>(),"next_before_order":page.next_before_order})
         }
     };
     crate::terminal::print_json(&value)?;

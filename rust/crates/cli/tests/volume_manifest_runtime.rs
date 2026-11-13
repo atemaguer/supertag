@@ -36,7 +36,7 @@ fn manifest(name: &str, spec: &str) -> String {
 }
 
 async fn volume_ids(services: &OperatorServices) -> Result<Vec<String>> {
-    let listed: Value = serde_json::from_str(&services.ok(&["volume", "list"]).await?)?;
+    let listed: Value = serde_json::from_str(&services.ok(&["get", "volumes"]).await?)?;
     Ok(listed["volumes"]
         .as_array()
         .into_iter()
@@ -86,7 +86,7 @@ async fn volume_manifests_apply_round_trip_and_refuse_source_settings(
     assert_eq!(services.ok(&["diff", "-f", path]).await?, "No changes.\n");
     assert_eq!(services.ok(&["apply", "-f", path]).await?, "No changes.\n");
     let datasets: Value =
-        serde_json::from_str(&services.ok(&["volume", "get", "datasets"]).await?)?;
+        serde_json::from_str(&services.ok(&["get", "volume", "datasets"]).await?)?;
     assert_eq!(datasets["source"], "s3://acme-data/datasets/v3");
     assert_eq!(datasets["revision"], 1);
     assert_eq!(volume_ids(&services).await?, ["artifacts", "datasets"]);
@@ -105,7 +105,7 @@ async fn volume_manifests_apply_round_trip_and_refuse_source_settings(
     );
     services.ok(&["apply", "-f", &moved]).await?;
     let datasets: Value =
-        serde_json::from_str(&services.ok(&["volume", "get", "datasets"]).await?)?;
+        serde_json::from_str(&services.ok(&["get", "volume", "datasets"]).await?)?;
     assert_eq!(datasets["source"], "s3://acme-data/datasets/v4");
     assert_eq!(datasets["revision"], 2);
 

@@ -61,8 +61,8 @@ operator token works through the Gateway's private hop to the Control Plane. Rea
 least one Worker Host is ready; `--require-ready` makes that required. It registers no Worker
 Host and runs no Task.
 
-Worker Hosts are not part of setup. Create an Auth Key with `supertag create-auth-key`, then run
-`supertag enroll-host` and `supertag worker-host` on each host against the Gateway's URL.
+Worker Hosts are not part of setup. Create an Auth Key with `supertag auth-key create`, then run
+`supertag host enroll` and `supertag worker-host` on each host against the Gateway's URL.
 
 ## TLS files
 

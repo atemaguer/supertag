@@ -1,16 +1,9 @@
-use std::{
-    fs,
-    io::Write,
-    os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use clap::Subcommand;
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::{Digest, Sha256};
-use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{operator_client::OperatorClient, *},
@@ -87,76 +80,6 @@ pub async fn run(connection: Connection, command: PlacementCommand) -> Result<()
         }
     };
     crate::terminal::print_json(&output)?;
-    Ok(())
-}
-
-fn auth_keys(channel: ProtocolChannel) -> auth_keys_client::AuthKeysClient<ProtocolChannel> {
-    auth_keys_client::AuthKeysClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES)
-}
-
-/// An Auth Key without its secret. Its phase follows packages/core/src/auth-key.ts:
-/// revocation wins over expiry, and expiry over a one-time key's use.
-pub fn auth_key_view(key: &AuthKey) -> Value {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_millis() as i64);
-    let phase = if key.revoked {
-        "revoked"
-    } else if key.expires_at_ms <= now {
-        "expired"
-    } else if key.used && !key.reusable {
-        "used"
-    } else {
-        "active"
-    };
-    json!({
-        "name": key.name,
-        "phase": phase,
-        "host_id": key.host_id,
-        "reusable": key.reusable,
-        "ephemeral": key.ephemeral,
-        "labels": key.labels,
-        "allowed_tag_ids": key.allowed_tag_ids,
-        "all_tags": key.all_tags,
-        "used": key.used,
-        "revoked": key.revoked,
-        "created_at_ms": key.created_at_ms,
-        "expires_at_ms": key.expires_at_ms,
-    })
-}
-
-pub async fn list_auth_keys(connection: Connection, limit: u32, cursor: String) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let page = auth_keys(channel)
-        .list_auth_keys(request(ListAuthKeysRequest { limit, cursor }, &token)?)
-        .await?
-        .into_inner();
-    crate::terminal::print_json(&json!({
-        "auth_keys": page.auth_keys.iter().map(auth_key_view).collect::<Vec<_>>(),
-        "next_cursor": page.next_cursor,
-    }))?;
-    Ok(())
-}
-
-pub async fn get_auth_key(connection: Connection, name: String) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let key = auth_keys(channel)
-        .get_auth_key(request(GetAuthKeyRequest { name }, &token)?)
-        .await?
-        .into_inner();
-    crate::terminal::print_json(&auth_key_view(&key))?;
-    Ok(())
-}
-
-pub async fn revoke_auth_key(connection: Connection, name: String) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let key = auth_keys(channel)
-        .revoke_auth_key(request(RevokeAuthKeyRequest { name }, &token)?)
-        .await?
-        .into_inner();
-    crate::terminal::print_json(&auth_key_view(&key))?;
     Ok(())
 }
 

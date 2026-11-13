@@ -232,7 +232,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     .await?;
     let cli = |args: &[&str]| services.cli(&credentials, args);
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "owner",
         "--instructions",
         "Coordinate the release",
@@ -265,8 +266,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     ))
     .await?;
     let work = json(cli(&[
-        "work-sessions",
-        "list",
+        "get",
+        "sessions",
         "--parent-tag",
         "owner",
         "--parent-session",
@@ -285,7 +286,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let wait = format!("--wait-for-file={}", release.display());
     // Two enrolled Worker Hosts, so both children run at once.
     let key = json(cli(&[
-        "create-auth-key",
+        "auth-key",
+        "create",
         "children",
         "--reusable",
         "--all-tags",
@@ -294,7 +296,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let key = field(&key, "auth_key")?;
     let mut hosts = Vec::new();
     for name in ["child-one", "child-two"] {
-        let mut enroll = credentials.command(&["enroll-host", name, "--gateway", &services.public]);
+        let mut enroll =
+            credentials.command(&["host", "enroll", name, "--gateway", &services.public]);
         enroll
             .arg("--state-directory")
             .arg(root.join(name))
@@ -347,7 +350,7 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
         notices().fetch_all(&mut db).await?,
         std::slice::from_ref(&notice)
     );
-    let task = json(cli(&["get-task", &notice])).await?;
+    let task = json(cli(&["get", "task", &notice])).await?;
     assert_eq!(task["tag_id"], "owner");
     assert_eq!(task["session_id"], session.as_str());
     let prompt: String =
@@ -376,7 +379,7 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
         );
     }
     for child in &children {
-        let task = json(cli(&["get-task", child])).await?;
+        let task = json(cli(&["get", "task", child])).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     }
     // Finished Attempts are no longer compared.
@@ -400,12 +403,13 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     let services = Services::start(&credentials, &database, |_| {}, 1).await?;
     json(services.cli(
         &credentials,
-        &["put-tag", "integrator", "--instructions", "File tickets"],
+        &["tag", "put", "integrator", "--instructions", "File tickets"],
     ))
     .await?;
     let first = json(services.cli(
         &credentials,
         &[
+            "task",
             "submit",
             "--tag",
             "integrator",
@@ -416,7 +420,8 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     ))
     .await?;
     success(credentials.worker(&services.public, &root.join("host-one"), None, &[&mode])).await?;
-    let first = json(services.cli(&credentials, &["get-task", field(&first, "task_id")?])).await?;
+    let first =
+        json(services.cli(&credentials, &["get", "task", field(&first, "task_id")?])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert_eq!(
         first["result"],
@@ -428,6 +433,7 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     let retry = json(services.cli(
         &credentials,
         &[
+            "task",
             "submit",
             "--tag",
             "integrator",
@@ -438,7 +444,8 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
     ))
     .await?;
     success(credentials.worker(&services.public, &root.join("host-two"), None, &[&mode])).await?;
-    let retry = json(services.cli(&credentials, &["get-task", field(&retry, "task_id")?])).await?;
+    let retry =
+        json(services.cli(&credentials, &["get", "task", field(&retry, "task_id")?])).await?;
     assert_eq!(retry["state"], "TASK_STATE_SUCCEEDED", "{retry}");
     assert_eq!(
         retry["result"],
@@ -597,7 +604,8 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let ingress = services.extra[0].clone();
     let cli = |args: &[&str]| services.cli(&credentials, args);
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "builder",
         "--instructions",
         "Answer engineering questions",

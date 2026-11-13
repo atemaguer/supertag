@@ -414,14 +414,15 @@ async fn scenario(
         if moving { "" } else { &commit }
     );
     assert_eq!(
-        json(cli(&["github-workspace", "list"])).await?["workspaces"]
+        json(cli(&["get", "workspaces"])).await?["workspaces"]
             .as_array()
             .unwrap()
             .len(),
         1
     );
     let mut put_tag = cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "builder",
         "--instructions",
         "Improve repository",
@@ -438,6 +439,7 @@ async fn scenario(
     json(put_tag).await?;
     assert!(
         !output(cli(&[
+            "task",
             "submit",
             "--tag",
             "builder",
@@ -505,6 +507,7 @@ async fn scenario(
         host
     };
     let first = json(cli(&[
+        "task",
         "submit",
         "--tag",
         "builder",
@@ -516,7 +519,7 @@ async fn scenario(
     let first_id = field(&first, "task_id")?;
     success(worker("unmapped", false)).await?;
     assert_eq!(
-        json(cli(&["get-task", first_id])).await?["state"],
+        json(cli(&["get", "task", first_id])).await?["state"],
         "TASK_STATE_QUEUED"
     );
     if !moving {
@@ -527,7 +530,7 @@ async fn scenario(
         assert_eq!(source_lookups.load(Ordering::SeqCst), 1);
     }
     success(worker("host-one", true)).await?;
-    let first = json(cli(&["get-task", first_id])).await?;
+    let first = json(cli(&["get", "task", first_id])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert_eq!(first["result"], "Change: first\nWorkspace before:\nbase\n");
     let first_head = field(&first["workspace_delivery"], "head_commit")?.to_owned();
@@ -613,6 +616,7 @@ async fn scenario(
         None
     };
     let second = json(cli(&[
+        "task",
         "submit",
         "--tag",
         "builder",
@@ -623,7 +627,7 @@ async fn scenario(
     .await?;
     let second_id = field(&second, "task_id")?;
     success(worker("host-two", true)).await?;
-    let second = json(cli(&["get-task", second_id])).await?;
+    let second = json(cli(&["get", "task", second_id])).await?;
     assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], first_head);
     if publication {
@@ -651,6 +655,7 @@ async fn scenario(
         );
         assert_eq!(second["workspace"]["base_commit"], commit);
         let fresh = json(cli(&[
+            "task",
             "submit",
             "--tag",
             "builder",
@@ -662,7 +667,7 @@ async fn scenario(
         let fresh_id = field(&fresh, "task_id")?;
         wait_source_pin(&cli, fresh_id, &next_commit).await?;
         success(worker("host-new-session", true)).await?;
-        let fresh = json(cli(&["get-task", fresh_id])).await?;
+        let fresh = json(cli(&["get", "task", fresh_id])).await?;
         assert_eq!(fresh["state"], "TASK_STATE_SUCCEEDED", "{fresh}");
         assert_eq!(
             fresh["result"],
@@ -677,7 +682,7 @@ async fn scenario(
     );
     assert_eq!(git(&repository, &["rev-parse", "HEAD"]), commit);
     let patch = root.join("review.patch");
-    let mut download = cli(&["workspace-artifact", "--kind", "patch", second_id]);
+    let mut download = cli(&["task", "download", "--kind", "patch", second_id]);
     download.arg("--output").arg(&patch);
     success(download).await?;
     let bytes = fs::read(&patch)?;
@@ -741,7 +746,8 @@ async fn scenario(
     ]))
     .await?;
     json(local_cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "builder",
         "--instructions",
         "Improve repository",
@@ -759,6 +765,7 @@ async fn scenario(
     json(local_cli(&["policy", "put", "role", &role])).await?;
     json(local_cli(&["policy", "assign", "reader", "builder"])).await?;
     let task = json(local_cli(&[
+        "task",
         "submit",
         "--tag",
         "builder",
@@ -770,7 +777,7 @@ async fn scenario(
     let task_id = field(&task, "task_id")?;
     timeout(WAIT, async {
         loop {
-            let task = json(local_cli(&["get-task", task_id])).await?;
+            let task = json(local_cli(&["get", "task", task_id])).await?;
             if task["state"] == "TASK_STATE_SUCCEEDED" {
                 break Ok::<_, anyhow::Error>(());
             }
@@ -807,7 +814,8 @@ async fn verify_github_output(
     fs::copy(harness.join("fixtures/rust-native-claude.mjs"), &native)?;
     fs::set_permissions(&native, fs::Permissions::from_mode(0o700))?;
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "git-output",
         "--instructions",
         "Preserve exact Git outputs.",
@@ -823,6 +831,7 @@ async fn verify_github_output(
     .await?;
     json(cli(&["policy", "assign", "reader", "git-output"])).await?;
     let task = json(cli(&[
+        "task",
         "submit",
         "--tag",
         "git-output",
@@ -865,7 +874,7 @@ async fn verify_github_output(
         .arg("--state-directory")
         .arg(root.join("git-output-host"));
     success(worker).await?;
-    let completed = json(cli(&["get-task", task_id])).await?;
+    let completed = json(cli(&["get", "task", task_id])).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     let selection = &completed["artifacts"][0];
     assert_eq!(selection["paths"], json!(["supertag-git-output.json"]));
@@ -895,7 +904,7 @@ where
 {
     timeout(WAIT, async {
         loop {
-            let value = json(cli(&["get-task", task])).await?;
+            let value = json(cli(&["get", "task", task])).await?;
             if value["workspace"]["base_commit"] == commit {
                 return Ok::<_, anyhow::Error>(());
             }
@@ -912,7 +921,7 @@ where
 {
     timeout(WAIT, async {
         loop {
-            let page = json(cli(&["github-publication", "list", "--task-id", task])).await?;
+            let page = json(cli(&["get", "github-publications", "--task-id", task])).await?;
             if let Some(job) = page["publications"]
                 .as_array()
                 .and_then(|jobs| jobs.first())

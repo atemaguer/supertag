@@ -52,7 +52,7 @@ async fn up(state: &Path, adapter_flag: &str) -> Result<Child> {
     );
     cli(
         state,
-        &["put-tag", "reviewer", "--instructions", "Review changes"],
+        &["tag", "put", "reviewer", "--instructions", "Review changes"],
     )
     .await?;
     Ok(child)
@@ -82,6 +82,7 @@ async fn submit(state: &Path, session: &str) -> Result<String> {
     let task = cli(
         state,
         &[
+            "task",
             "submit",
             "--tag",
             "reviewer",
@@ -114,10 +115,10 @@ async fn local_adapter_takes_input_and_records_a_single_durable_receipt() -> Res
     let state = directory.path().join("accepted");
     let mut supervisor = up(&state, "--adapter-arg=--take-live-input").await?;
     let task = submit(&state, "active").await?;
-    wait_for_state(&state, &["get-task", &task], "TASK_STATE_RUNNING").await?;
+    wait_for_state(&state, &["get", "task", &task], "TASK_STATE_RUNNING").await?;
     let queue = [
+        "task",
         "input",
-        "queue",
         &task,
         "Check the changed API",
         "--operation-id",
@@ -125,12 +126,16 @@ async fn local_adapter_takes_input_and_records_a_single_durable_receipt() -> Res
     ];
     let input = cli(&state, &queue).await?;
     let input_id = field(&input, "input_id")?;
-    let completed = wait_for_state(&state, &["get-task", &task], "TASK_STATE_SUCCEEDED").await?;
+    let completed = wait_for_state(&state, &["get", "task", &task], "TASK_STATE_SUCCEEDED").await?;
     assert!(field(&completed, "result")?.ends_with("Live input: Check the changed API"));
-    let receipt = cli(&state, &["input", "get", input_id]).await?;
+    let receipt = cli(&state, &["get", "input", input_id]).await?;
     assert_eq!(receipt["state"], "LIVE_INPUT_STATE_ACCEPTED");
     assert_eq!(cli(&state, &queue).await?, receipt);
-    let follower = cli(&state, &["get-task", field(&receipt, "follower_task_id")?]).await?;
+    let follower = cli(
+        &state,
+        &["get", "task", field(&receipt, "follower_task_id")?],
+    )
+    .await?;
     assert_eq!(follower["state"], "TASK_STATE_SUCCEEDED");
     assert!(follower["attempt_id"].is_null());
     stop(&mut supervisor).await
@@ -143,29 +148,29 @@ async fn cancellation_releases_the_adapter_while_live_input_is_waiting_for_a_rec
     let state = directory.path().join("cancelled");
     let mut supervisor = up(&state, "--adapter-arg=--take-then-wait").await?;
     let first = submit(&state, "waiting-for-receipt").await?;
-    wait_for_state(&state, &["get-task", &first], "TASK_STATE_RUNNING").await?;
-    let input = cli(&state, &["input", "queue", &first, "One message"]).await?;
+    wait_for_state(&state, &["get", "task", &first], "TASK_STATE_RUNNING").await?;
+    let input = cli(&state, &["task", "input", &first, "One message"]).await?;
     let input_id = field(&input, "input_id")?;
     wait_for_state(
         &state,
-        &["input", "get", input_id],
+        &["get", "input", input_id],
         "LIVE_INPUT_STATE_DISPATCHING",
     )
     .await?;
 
     assert_eq!(
-        cli(&state, &["cancel", &first]).await?["state"],
+        cli(&state, &["task", "cancel", &first]).await?["state"],
         "TASK_STATE_CANCELLED"
     );
     let next = submit(&state, "independent").await?;
-    wait_for_state(&state, &["get-task", &next], "TASK_STATE_RUNNING").await?;
+    wait_for_state(&state, &["get", "task", &next], "TASK_STATE_RUNNING").await?;
     assert_eq!(
-        cli(&state, &["input", "get", input_id]).await?["state"],
+        cli(&state, &["get", "input", input_id]).await?["state"],
         "LIVE_INPUT_STATE_DISPATCHING"
     );
-    let follower = cli(&state, &["get-task", field(&input, "follower_task_id")?]).await?;
+    let follower = cli(&state, &["get", "task", field(&input, "follower_task_id")?]).await?;
     assert_eq!(follower["state"], "TASK_STATE_QUEUED");
     assert!(follower["attempt_id"].is_null());
-    cli(&state, &["cancel", &next]).await?;
+    cli(&state, &["task", "cancel", &next]).await?;
     stop(&mut supervisor).await
 }

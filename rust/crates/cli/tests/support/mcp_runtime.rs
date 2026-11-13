@@ -131,7 +131,8 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
     let services = LanguageServices::start(directory, database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "repository",
             "--harness",
             "claude-code",
@@ -152,6 +153,7 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
     grant(&services, directory, "repository", &["local/read_env"]).await?;
     let task = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "repository",
@@ -177,7 +179,7 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
         .env("SUPERTAG_MCP_LOG", &log)
         .env("UNREFERENCED_HOST_SECRET", "never-reaches-the-server");
     success(host).await?;
-    let completed = services.operator(&["get-task", task_id]).await?;
+    let completed = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     let served = completed["result"]
         .as_str()
@@ -284,7 +286,8 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     let services = LanguageServices::start(directory, database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "mcp-reader",
             "--harness",
             "claude-code",
@@ -329,6 +332,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     };
     let task = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "mcp-reader",
@@ -346,7 +350,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     );
     configure(&mut host);
     success(host).await?;
-    let completed = services.operator(&["get-task", task_id]).await?;
+    let completed = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     // The fixture asserts each mirrored result, which echoes the refresh token, was withheld.
     assert_eq!(completed["result"], "fixture used one scoped MCP tool");
@@ -381,6 +385,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     write_login(&logins, &login("refresh-2", "access-1", now - 1))?;
     let lapsing = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "mcp-reader",
@@ -458,7 +463,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
             .is_some_and(|reason| reason.contains("supertag mcp login catalog")),
         "{item}"
     );
-    let status = services.operator(&["get-task", &held]).await?;
+    let status = services.operator(&["get", "task", &held]).await?;
     assert_eq!(status["state"], "TASK_STATE_QUEUED", "{status}");
 
     // A new login, as `supertag mcp login catalog` writes, releases the Task on the same host.
@@ -466,7 +471,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     write_login(&logins, &login("relogin-1", "expired-access", now - 1))?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        let status = services.operator(&["get-task", &held]).await?;
+        let status = services.operator(&["get", "task", &held]).await?;
         if status["state"] != "TASK_STATE_QUEUED" {
             break;
         }

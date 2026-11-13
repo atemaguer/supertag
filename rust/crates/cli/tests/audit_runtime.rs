@@ -1,6 +1,6 @@
 //! Operator access through separate Control Plane and Gateway processes: an audit entry commits
 //! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
-//! and `supertag connect-gateway` saves a proven operator token for `--gateway NAME`.
+//! and `supertag connect` saves a proven operator token for `--gateway NAME`.
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -171,12 +171,19 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
     )
     .await?;
     services
-        .json(&["put-tag", "reviewer", "--instructions", "Review the change"])
+        .json(&[
+            "tag",
+            "put",
+            "reviewer",
+            "--instructions",
+            "Review the change",
+        ])
         .await?;
     let submitted = timeout(
         WAIT,
         services
             .operator(&[
+                "task",
                 "submit",
                 "--tag",
                 "reviewer",
@@ -218,11 +225,18 @@ async fn audit_entry_commits_with_the_change_it_records(database: String) -> Res
 async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     services
-        .json(&["put-tag", "reviewer", "--instructions", "Review the change"])
+        .json(&[
+            "tag",
+            "put",
+            "reviewer",
+            "--instructions",
+            "Review the change",
+        ])
         .await?;
     let issued = services
         .json(&[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "review-key",
             "--host",
             "review-host",
@@ -306,13 +320,13 @@ async fn worker_host_joins_are_recorded_under_their_auth_key(database: String) -
     Ok(())
 }
 
-/// `supertag connect-gateway` checks the token first, saves the Gateway owner-only in the
+/// `supertag connect` checks the token first, saves the Gateway owner-only in the
 /// terminal UI's store as the active one, and later commands use it by name.
 async fn connect_gateway_saves_a_proven_token_for_later_commands(database: String) -> Result<()> {
     let services = Services::start(&database, None).await?;
     let home = tempfile::tempdir()?;
     let connect = |token: &str, name: &str, url: &str, replace: bool| {
-        let mut command = binary(&["connect-gateway", url, "--name", name]);
+        let mut command = binary(&["connect", url, "--name", name]);
         if replace {
             command.arg("--replace");
         }
@@ -362,7 +376,7 @@ async fn connect_gateway_saves_a_proven_token_for_later_commands(database: Strin
     assert_eq!(profiles["gateways"][0]["token"], token.as_str());
 
     // A later command names the saved Gateway and needs no token in its environment.
-    let mut listed = binary(&["list-tags", "--gateway", "prod"]);
+    let mut listed = binary(&["get", "tags", "--gateway", "prod"]);
     listed.env("HOME", home.path());
     let output = timeout(WAIT, listed.output()).await??;
     ensure!(

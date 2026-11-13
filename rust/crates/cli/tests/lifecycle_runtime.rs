@@ -227,7 +227,7 @@ fn background_up_runs_until_down_and_reports_through_ps_logs_status_and_version(
     // The operator API answers through the background services.
     let gateway = ["--state-directory", &state];
     let tag = machine.ok(&[
-        &["put-tag"][..],
+        &["tag", "put"][..],
         &gateway,
         &["lead", "--instructions", "Lead."],
     ]
@@ -672,7 +672,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     assert_eq!(service(&ps, &host)?["state"], "running", "{ps}");
     let state = machine.state.to_str().unwrap().to_owned();
     let tag: Value =
-        serde_json::from_str(&machine.ok(&["get-tag", "--state-directory", &state, "lead"])?)?;
+        serde_json::from_str(&machine.ok(&["get", "tag", "--state-directory", &state, "lead"])?)?;
     assert_eq!(tag["harness"], "HARNESS_KIND_CODEX", "{tag}");
 
     // A second init keeps the setup and leaves the running services alone.
@@ -882,7 +882,8 @@ fn down_drains_running_work_and_leaves_services_running_until_forced() -> Result
         "--adapter-arg=--wait-for-cancel",
     ])?;
     machine.ok(&[
-        "put-tag",
+        "tag",
+        "put",
         "--state-directory",
         &state,
         "lead",
@@ -890,6 +891,7 @@ fn down_drains_running_work_and_leaves_services_running_until_forced() -> Result
         "Lead.",
     ])?;
     let task: Value = serde_json::from_str(&machine.ok(&[
+        "task",
         "submit",
         "--state-directory",
         &state,

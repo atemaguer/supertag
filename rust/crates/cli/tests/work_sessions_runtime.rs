@@ -438,10 +438,10 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     assert_eq!(page.work_sessions.len(), 1);
     let detail = cli(
         &[
-            "work-sessions",
+            "get",
             "--gateway",
             &public,
-            "get",
+            "session",
             &started.work_session_id,
         ],
         &alice_token,
@@ -451,10 +451,10 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     assert_eq!(detail["report_task_state"], "TASK_STATE_SUCCEEDED");
     let listed = cli(
         &[
-            "work-sessions",
+            "get",
             "--gateway",
             &public,
-            "list",
+            "sessions",
             "--parent-tag",
             "owner",
             "--parent-session",
@@ -1077,7 +1077,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     // The operator manages the ceiling with an exact revision and operation
     // receipt. Host credentials cannot use this management entry point.
     let current = cli(
-        &["objective", "--gateway", &public, "get", "release"],
+        &["get", "--gateway", &public, "objective", "release"],
         &operator_token,
     )
     .await?;
@@ -1226,7 +1226,8 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     .await?;
     cli(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "planner",
@@ -1262,10 +1263,10 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         .as_str()
         .context("Objective starting Task ID")?;
     let list = [
-        "work-sessions",
+        "get",
         "--gateway",
         &public,
-        "list",
+        "sessions",
         "--parent-tag",
         "planner",
         "--parent-session",
@@ -1330,7 +1331,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
             20,
         ),
     ] {
-        let task = cli(&["get-task", "--gateway", &public, id], &operator_token).await?;
+        let task = cli(&["get", "task", "--gateway", &public, id], &operator_token).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert_eq!(
             task["execution_limits"]["max_reported_cost"],
@@ -1341,7 +1342,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
                 .as_str()
                 .context("first child Attempt ID")?;
             let usage = cli(
-                &["task-usage", "--gateway", &public, id, attempt],
+                &["task", "usage", "--gateway", &public, id, attempt],
                 &operator_token,
             )
             .await?;
@@ -1353,12 +1354,13 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         }
     }
     let before = cli(
-        &["objective", "--gateway", &public, "get", "budgeted"],
+        &["get", "--gateway", &public, "objective", "budgeted"],
         &operator_token,
     )
     .await?;
     assert_eq!(before["reported_spend_minor"], 980);
     let submit = [
+        "task",
         "submit",
         "--gateway",
         &public,
@@ -1394,6 +1396,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     );
     let smaller = cli(
         &[
+            "task",
             "submit",
             "--gateway",
             &public,

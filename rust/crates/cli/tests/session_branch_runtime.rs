@@ -129,7 +129,8 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let (mut gateway, public) = service(gateway).await?;
     json(credentials.operator(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "builder",
             "--instructions",
             "Improve the repository",
@@ -147,7 +148,15 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let mut hosts = 0;
     let mut run = async |tag: &str, prompt: &str| -> Result<Value> {
         let task = json(credentials.operator(
-            &["submit", "--tag", tag, "--session", "feature", prompt],
+            &[
+                "task",
+                "submit",
+                "--tag",
+                tag,
+                "--session",
+                "feature",
+                prompt,
+            ],
             &public,
         ))
         .await?;
@@ -155,7 +164,7 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
         hosts += 1;
         success(credentials.worker(&public, &root.join(format!("host-{hosts}")), &checkout))
             .await?;
-        let task = json(credentials.operator(&["get-task", &task_id], &public)).await?;
+        let task = json(credentials.operator(&["get", "task", &task_id], &public)).await?;
         ensure!(task["state"] == "TASK_STATE_SUCCEEDED", "{task}");
         Ok(task)
     };
@@ -285,7 +294,8 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     // then ambiguous.
     json(credentials.operator(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "reviewer",
             "--instructions",
             "Review the repository",
@@ -396,7 +406,8 @@ async fn local_supervisor_advances_one_session_branch_for_each_task() -> Result<
             command
         };
         json(cli(&[
-            "put-tag",
+            "tag",
+            "put",
             "builder",
             "--instructions",
             "Improve the repository",
@@ -412,6 +423,7 @@ async fn local_supervisor_advances_one_session_branch_for_each_task() -> Result<
         let mut heads = Vec::new();
         for prompt in ["first", "second"] {
             let task = json(cli(&[
+                "task",
                 "submit",
                 "--tag",
                 "builder",
@@ -423,7 +435,7 @@ async fn local_supervisor_advances_one_session_branch_for_each_task() -> Result<
             let task_id = field(&task, "task_id")?.to_owned();
             let head = timeout(WAIT, async {
                 loop {
-                    let task = json(cli(&["get-task", &task_id])).await?;
+                    let task = json(cli(&["get", "task", &task_id])).await?;
                     ensure!(task["state"] != "TASK_STATE_FAILED", "{task}");
                     if task["state"] == "TASK_STATE_SUCCEEDED" {
                         return Ok::<_, anyhow::Error>(

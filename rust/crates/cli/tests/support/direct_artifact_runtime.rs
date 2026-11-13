@@ -16,14 +16,14 @@ async fn enroll(
     directory: &Path,
 ) -> Result<()> {
     let issued = json(credentials.operator(
-        &["create-auth-key", id, "--host", id, "--tag", "builder"],
+        &["auth-key", "create", id, "--host", id, "--tag", "builder"],
         gateway,
     ))
     .await?;
     let key_path = directory.with_extension("key");
     std::fs::write(&key_path, field(&issued, "auth_key")?)?;
     std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
-    let mut enroll = credentials.command(&["enroll-host", id, "--gateway", gateway]);
+    let mut enroll = credentials.command(&["host", "enroll", id, "--gateway", gateway]);
     enroll
         .arg("--state-directory")
         .arg(directory)
@@ -83,7 +83,8 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     let (mut gateway, public) = service(gateway).await?;
     json(credentials.operator(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "builder",
             "--instructions",
             "Produce and read exact evidence",
@@ -138,14 +139,22 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     };
     let submit = |text| {
         credentials.operator(
-            &["submit", "--tag", "builder", "--session", "evidence", text],
+            &[
+                "task",
+                "submit",
+                "--tag",
+                "builder",
+                "--session",
+                "evidence",
+                text,
+            ],
             &public,
         )
     };
     let submitted = json(submit("produce")).await?;
     success(producer(true)).await?;
-    let task =
-        json(credentials.operator(&["get-task", field(&submitted, "task_id")?], &public)).await?;
+    let task = json(credentials.operator(&["get", "task", field(&submitted, "task_id")?], &public))
+        .await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let artifact = field(&task, "result")?
         .strip_prefix("artifact:")
@@ -215,14 +224,14 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
         .arg("--artifact-peer-ca-file")
         .arg(&cert);
     success(consumer).await?;
-    let task =
-        json(credentials.operator(&["get-task", field(&submitted, "task_id")?], &public)).await?;
+    let task = json(credentials.operator(&["get", "task", field(&submitted, "task_id")?], &public))
+        .await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let derived = field(&task, "result")?
         .strip_prefix("derived:")
         .context("consumer receipt")?;
     let metadata =
-        json(credentials.command(&["artifact", "--gateway", &public, "get", derived])).await?;
+        json(credentials.command(&["get", "--gateway", &public, "artifact", derived])).await?;
     assert_eq!(
         metadata["inputs"],
         serde_json::json!([{"artifact_id":artifact,"paths":["evidence.txt"]}])

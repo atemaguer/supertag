@@ -148,7 +148,8 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
     for (tag, harness) in [("python", "openai-agents"), ("node", "claude-code")] {
         operator(
             &[
-                "put-tag",
+                "tag",
+                "put",
                 tag,
                 "--instructions",
                 "Fixture adapter",
@@ -161,6 +162,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
         .await?;
         let task = operator(
             &[
+                "task",
                 "submit",
                 "--tag",
                 tag,
@@ -210,7 +212,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
             .env("CODEX_API_KEY", "unused-codex-key")
             .env("PYTHONPATH", directory.path());
         success(host).await?;
-        let task = operator(&["get-task", &tasks[selected]], &public, &operator_token).await?;
+        let task = operator(&["get", "task", &tasks[selected]], &public, &operator_token).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert!(
             task["result"]
@@ -219,7 +221,7 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
                 .contains("matching adapter")
         );
         if selected == 1 {
-            let pending = operator(&["get-task", &tasks[0]], &public, &operator_token).await?;
+            let pending = operator(&["get", "task", &tasks[0]], &public, &operator_token).await?;
             assert_eq!(pending["state"], "TASK_STATE_QUEUED");
         }
         assert!(std::fs::read_dir(host_state)?.all(|entry| {
@@ -350,7 +352,8 @@ fn claude_fixture(directory: &Path) -> Result<std::path::PathBuf> {
 
 async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> {
     let mut command = command(&[
-        "task-usage",
+        "task",
+        "usage",
         task["task_id"].as_str().context("Task ID missing")?,
         task["attempt_id"].as_str().context("Attempt ID missing")?,
         "--gateway",
@@ -416,7 +419,8 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     }).to_string())?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "mcp-reader",
             "--harness",
             "claude-code",
@@ -440,6 +444,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .await?;
     let task = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "mcp-reader",
@@ -462,7 +467,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         host
     };
     success(worker("no-catalog")).await?;
-    let pending = services.operator(&["get-task", task_id]).await?;
+    let pending = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(pending["state"], "TASK_STATE_QUEUED");
     assert!(pending["attempt_id"].is_null());
     assert!(!journal.exists());
@@ -475,7 +480,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         host
     };
     success(catalog_worker("catalog-host")).await?;
-    let completed = services.operator(&["get-task", task_id]).await?;
+    let completed = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     assert_eq!(completed["result"], "fixture used one scoped MCP tool");
     let provider_receipts = std::fs::read_to_string(&journal)?;
@@ -535,7 +540,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .as_str()
         .context("MCP continuation Task")?;
     success(catalog_worker("catalog-resume")).await?;
-    let resumed = services.operator(&["get-task", resumed_id]).await?;
+    let resumed = services.operator(&["get", "task", resumed_id]).await?;
     assert_eq!(resumed["state"], "TASK_STATE_SUCCEEDED", "{resumed}");
     assert_eq!(resumed["session_id"], completed["session_id"]);
     assert_eq!(
@@ -615,7 +620,8 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     }).to_string())?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "mcp-reader",
             "--harness",
             "claude-code",
@@ -639,6 +645,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         .await?;
     let task = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "mcp-reader",
@@ -668,7 +675,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         host
     };
     success(catalog_worker("catalog-host")).await?;
-    let completed = services.operator(&["get-task", task_id]).await?;
+    let completed = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     assert_eq!(completed["result"], "fixture used one scoped MCP tool");
     let receipts = std::fs::read_to_string(&journal)?
@@ -789,7 +796,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
 async fn wait_for_state(services: &LanguageServices, task_id: &str, state: &str) -> Result<Value> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        let task = services.operator(&["get-task", task_id]).await?;
+        let task = services.operator(&["get", "task", task_id]).await?;
         if task["state"] == state {
             return Ok(task);
         }
@@ -812,7 +819,8 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
     let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "python",
             "--instructions",
             "Use the admitted tool surface.",
@@ -832,6 +840,7 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
     {
         let task = services
             .operator(&[
+                "task",
                 "submit",
                 "--tag",
                 "python",
@@ -849,7 +858,7 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
         );
         host.env("OPENAI_API_KEY", "fixture-provider-key");
         success(host).await?;
-        let task = services.operator(&["get-task", task_id]).await?;
+        let task = services.operator(&["get", "task", task_id]).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert_eq!(task["result"], expected);
         let usage = last_usage(&services, &task).await?;
@@ -870,7 +879,8 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
     let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "claude",
             "--instructions",
             "Use the admitted tools.",
@@ -887,6 +897,7 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
     {
         let task = services
             .operator(&[
+                "task",
                 "submit",
                 "--tag",
                 "claude",
@@ -906,7 +917,7 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
             .arg(&native)
             .env("ANTHROPIC_API_KEY", "fixture-provider-key");
         success(host).await?;
-        let task = services.operator(&["get-task", task_id]).await?;
+        let task = services.operator(&["get", "task", task_id]).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert_eq!(task["result"], expected);
         let usage = last_usage(&services, &task).await?;
@@ -955,7 +966,8 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
     let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "producer",
             "--instructions",
             "Save evidence.",
@@ -973,6 +985,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         .await?;
     let task = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "producer",
@@ -999,10 +1012,10 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         host
     };
     success(worker()).await?;
-    let task = services.operator(&["get-task", task_id]).await?;
+    let task = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let page = services
-        .operator(&["artifact", "list", "--task", task_id])
+        .operator(&["get", "artifacts", "--task", task_id])
         .await?;
     assert!(
         task["result"]
@@ -1037,7 +1050,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
             .as_str()
             .context("native Session ID missing")?,
     )?;
-    let artifact = services.operator(&["artifact", "get", artifact_id]).await?;
+    let artifact = services.operator(&["get", "artifact", artifact_id]).await?;
     assert_eq!(artifact["files"][0]["path"], "empty.txt");
     assert_eq!(artifact["files"][1]["path"], "report.txt");
     let destination = directory.path().join("download.txt");
@@ -1070,7 +1083,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
         task["artifacts"],
         serde_json::json!([{"artifact_id": managed_id, "paths": [&output_path]}])
     );
-    let managed_artifact = services.operator(&["artifact", "get", managed_id]).await?;
+    let managed_artifact = services.operator(&["get", "artifact", managed_id]).await?;
     assert_eq!(
         managed_artifact["files"]
             .as_array()
@@ -1134,6 +1147,7 @@ async fn verify_git_output_case(
     let session = format!("git-output-{mode}-{advertised}");
     let submitted = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "producer",
@@ -1146,7 +1160,7 @@ async fn verify_git_output_case(
         .await?;
     let task_id = submitted["task_id"].as_str().context("Task ID missing")?;
     success(worker()).await?;
-    let task = services.operator(&["get-task", task_id]).await?;
+    let task = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let selection = &task["artifacts"][0];
     let expected = if advertised {
@@ -1244,6 +1258,7 @@ async fn declared_output_cases(
         )?;
         let accepted = services
             .operator(&[
+                "task",
                 "submit",
                 "--tag",
                 "producer",
@@ -1256,7 +1271,7 @@ async fn declared_output_cases(
             .await?;
         let task_id = accepted["task_id"].as_str().context("Task ID missing")?;
         success(worker()).await?;
-        let result = services.operator(&["get-task", task_id]).await?;
+        let result = services.operator(&["get", "task", task_id]).await?;
         assert_eq!(result["state"], expected, "{result}");
         if expected == "TASK_STATE_FAILED" {
             assert_eq!(result["result"], "Required Task output is missing");
@@ -1313,7 +1328,8 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     };
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "claude",
             "--harness",
             "claude-code",
@@ -1324,7 +1340,8 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "recipient",
             "--harness",
             "claude-code",
@@ -1345,6 +1362,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .await?;
     let source = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "claude",
@@ -1355,7 +1373,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .await?;
     let source_id = source["task_id"].as_str().context("source Task ID")?;
     success(worker("first-host")).await?;
-    let first = services.operator(&["get-task", source_id]).await?;
+    let first = services.operator(&["get", "task", source_id]).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert_eq!(
         first["result"],
@@ -1408,7 +1426,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .context("continuation Task ID")?;
     assert_ne!(source_id, continued_id);
     success(worker("second-host")).await?;
-    let continued = services.operator(&["get-task", continued_id]).await?;
+    let continued = services.operator(&["get", "task", continued_id]).await?;
     assert_eq!(continued["state"], "TASK_STATE_SUCCEEDED", "{continued}");
     assert_eq!(continued["session_id"], first["session_id"]);
     assert_eq!(continued["result"], "fixture resumed and posted one update");
@@ -1443,7 +1461,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     assert_eq!(message["recipient_tag_id"], "recipient");
     assert_eq!(message["state"], "TAG_MESSAGE_STATE_HANDLED");
     let mail_task = message["task_id"].as_str().context("Mailbox Task ID")?;
-    let mail = services.operator(&["get-task", mail_task]).await?;
+    let mail = services.operator(&["get", "task", mail_task]).await?;
     assert_eq!(mail["state"], "TASK_STATE_SUCCEEDED", "{mail}");
     assert_eq!(mail["session_id"], "inbox:recipient");
     assert_eq!(mail["result"], "SDK fixture handled the addressed post");
@@ -1462,7 +1480,8 @@ async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
     let services = LanguageServices::start(directory.path(), &database).await?;
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "claude",
             "--instructions",
             "Budgeted native work",
@@ -1474,6 +1493,7 @@ async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
         .await?;
     let accepted = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "claude",
@@ -1501,7 +1521,7 @@ async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
         .arg(&native)
         .env("ANTHROPIC_API_KEY", "fixture-provider-key");
     success(host).await?;
-    let stopped = services.operator(&["get-task", id]).await?;
+    let stopped = services.operator(&["get", "task", id]).await?;
     assert_eq!(stopped["state"], "TASK_STATE_FAILED", "{stopped}");
     assert!(
         stopped["result"]

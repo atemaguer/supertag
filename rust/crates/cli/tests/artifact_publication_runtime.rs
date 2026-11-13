@@ -301,12 +301,9 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     assert_eq!(consent["revision"], 1);
-    let audience = json(publication(
-        &credentials,
-        &public,
-        &["list", &destination.objective_id],
-    ))
-    .await?;
+    let mut list = credentials.command(&["get", "--gateway", &public, "artifact-publications"]);
+    list.args(["--objective", &destination.objective_id]);
+    let audience = json(list).await?;
     assert_eq!(audience["publications"][0]["artifact_id"], artifact_id);
     assert!(audience["publications"][0].get("producer").is_none());
     operator
@@ -319,6 +316,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         )?)
         .await?;
     let admitted = json(credentials.command(&[
+        "task",
         "submit",
         "--gateway",
         &public,

@@ -213,7 +213,7 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
     assert_eq!(created["operator_id"], "token:laptop-2");
     assert_eq!(created["phase"], "active");
     assert_eq!(created["created_by"], "local");
-    let listed = cli(&credentials, &admin, &public, &["operator-token", "list"])?;
+    let listed = cli(&credentials, &admin, &public, &["get", "operator-tokens"])?;
     assert!(!listed.contains(&secret));
     assert_eq!(json(&listed)?["operator_tokens"][0]["name"], "laptop-2");
 
@@ -225,7 +225,7 @@ async fn revoked_token_is_refused_by_a_running_gateway(database: &str) -> Result
         &credentials,
         &admin,
         &public,
-        &["operator-token", "get", "laptop-2"],
+        &["get", "operator-token", "laptop-2"],
     )?)?;
     assert!(listed["last_used_at_ms"].as_i64().is_some());
     // It may not manage Operator Tokens, and a forged or malformed secret is refused.

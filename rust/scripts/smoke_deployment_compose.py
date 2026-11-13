@@ -307,12 +307,12 @@ def rehearse(args):
             require("Team/csv" in applied, applied)
             hosts = {}
             for host, tag in (("review-host", "review-manager"), ("builder-host", "builder-manager")):
-                issued = operator("create-auth-key", host, "--host", host, "--label", host, "--tag", tag)
+                issued = operator("auth-key", "create", host, "--host", host, "--label", host, "--tag", tag)
                 key = root / f"{host}.key"
                 key.write_text(issued["auth_key"])
                 key.chmod(0o600)
                 state = root / host
-                enrolled = json.loads(supertag("enroll-host", host, "--gateway", url, "--state-directory", str(state),
+                enrolled = json.loads(supertag("host", "enroll", host, "--gateway", url, "--state-directory", str(state),
                                                "--auth-key", f"file:{key}", env=trust).stdout)
                 require(enrolled["host_id"] == host, "unexpected host ID")
                 hosts[host] = state
@@ -325,19 +325,19 @@ def rehearse(args):
                 children.append((child, log))
 
             def finished(task_id):
-                task = operator("get-task", task_id)
+                task = operator("get", "task", task_id)
                 return task if task["state"] == "TASK_STATE_SUCCEEDED" else None
 
             start_host("review-host")
-            builder_task = operator("submit", "--tag", "builder-manager", "--session", "deploy", "Write the parser")
-            review_task = operator("submit", "--tag", "review-manager", "--session", "deploy", "Review the parser")
+            builder_task = operator("task", "submit", "--tag", "builder-manager", "--session", "deploy", "Write the parser")
+            review_task = operator("task", "submit", "--tag", "review-manager", "--session", "deploy", "Review the parser")
             review = wait_until(lambda: finished(review_task["task_id"]), "the review Task")
             require("Review the parser" in review["result"], review["result"])
             # Once the review host is idle, the builder's Task, submitted first, still has no
             # Attempt, and only the offline builder host may take it.
             wait_until(lambda: (lambda host: host["active_attempts"] == 0 and host["phase"] == "ready")(
-                grouped("host", "get", "review-host")), "the review host to be idle")
-            waiting = operator("get-task", builder_task["task_id"])
+                grouped("get", "host", "review-host")), "the review host to be idle")
+            waiting = operator("get", "task", builder_task["task_id"])
             require(waiting["state"] == "TASK_STATE_QUEUED" and waiting.get("attempt_id") is None,
                     f"a host without the builder label claimed the builder's Task: {waiting}")
             explained = grouped("placement", "explain", builder_task["task_id"])
@@ -351,14 +351,14 @@ def rehearse(args):
             receipt["tasks"] = {"review-manager": review["task_id"], "builder-manager": builder["task_id"]}
 
             # Restart every service, including the database; work and history survive.
-            events = supertag("task-events", "--gateway", url, builder["task_id"], env=operator_env).stdout
+            events = supertag("task", "events", "--gateway", url, builder["task_id"], env=operator_env).stdout
             for service in ("gateway", "control-plane", "postgres"):
                 compose("stop", service)
                 exit_code = run(["docker", "inspect", "--format", "{{.State.ExitCode}}", container(service)]).stdout
                 require(exit_code.strip() == "0", f"{service} did not stop cleanly")
             compose("up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
-            require(operator("get-task", builder["task_id"]) == builder, "Task changed across restart")
-            require(supertag("task-events", "--gateway", url, builder["task_id"], env=operator_env).stdout == events,
+            require(operator("get", "task", builder["task_id"]) == builder, "Task changed across restart")
+            require(supertag("task", "events", "--gateway", url, builder["task_id"], env=operator_env).stdout == events,
                     "Task history changed across restart")
             wait_until(lambda: "Readiness: ready (2 Worker Hosts)" in (verify("--require-ready", check=False).stdout),
                        "Worker Hosts to reconnect after the restart")

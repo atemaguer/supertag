@@ -1,6 +1,6 @@
 //! Resolve a saved Gateway by name from the stores the terminal UI and the
 //! desktop app maintain, and save one in the terminal UI's store for
-//! `supertag connect-gateway`. Saving follows the terminal UI's own protocol
+//! `supertag connect`. Saving follows the terminal UI's own protocol
 //! (`apps/tui/gateway_store.go`): an exclusive non-blocking lock on
 //! `tui-gateways.json.lock`, a private staged file renamed into place, and the
 //! saved Gateway made active. The clients own switching and removal.

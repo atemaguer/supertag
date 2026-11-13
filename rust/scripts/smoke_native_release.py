@@ -46,11 +46,11 @@ def installed_bridge(package, node, fixture_source, scratch, *, cli_override=Non
                 require(service.poll() is None, "installed bridge service stopped before readiness")
                 return (state / "endpoint").exists()
             wait_until(ready, "installed bridge readiness")
-            invoke("put-tag", "packaged-opencode", "--instructions", "Installed packaging smoke",
+            invoke("tag", "put", "packaged-opencode", "--instructions", "Installed packaging smoke",
                    "--harness", "opencode", "--allow", "files:read")
-            task = invoke("submit", "--tag", "packaged-opencode", "--session", "default-discovery", "fixture:fresh")
+            task = invoke("task", "submit", "--tag", "packaged-opencode", "--session", "default-discovery", "fixture:fresh")
             def complete():
-                current = invoke("get-task", task["task_id"])
+                current = invoke("get", "task", task["task_id"])
                 return current if current["state"] in {"TASK_STATE_SUCCEEDED", "TASK_STATE_FAILED"} else None
             completed = wait_until(complete, "installed bridge Task result")
             require(completed["state"] == "TASK_STATE_SUCCEEDED" and "native-complete:" in completed["result"],

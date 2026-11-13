@@ -110,7 +110,7 @@ func (m model) renderConversation() string {
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
 		case m.client.RuntimeV2():
 			return wrap.Render("No Tags are set up on this Gateway.\n\n" +
-				"Run supertag put-tag --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
+				"Run supertag tag put --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
 		default:
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
 				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +

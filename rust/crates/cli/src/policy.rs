@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use uuid::Uuid;
 
@@ -25,29 +26,6 @@ pub enum PolicyCommand {
         /// The revision you last read. If given, the change is refused when the resource has changed since.
         #[arg(long)]
         expected_revision: Option<u64>,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
-    /// Read a catalog resource by ID or name.
-    Show { kind: Kind, reference: String },
-    /// List catalog resources.
-    List {
-        kind: Kind,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Delete an unused Permission Set or Context Set.
-    DeleteSet {
-        kind: Kind,
-        reference: String,
-        /// The revision you last read. The change is refused when the resource has changed since.
-        #[arg(long)]
-        expected_revision: u64,
         /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
         #[arg(long)]
         operation_id: Option<String>,
@@ -287,11 +265,108 @@ fn operation_id(id: Option<String>) -> String {
     id.unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
+// Options for `supertag get roles`, `permission-sets`, and `context-sets`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+// Options for `supertag delete permission-set` and `context-set`, which delete an unused set.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// The revision you last read. The change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: u64,
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
+}
+
+fn client(channel: ProtocolChannel) -> policy_catalog_client::PolicyCatalogClient<ProtocolChannel> {
+    policy_catalog_client::PolicyCatalogClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+/// A catalog resource by ID or name.
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    kind: Kind,
+    reference: String,
+) -> Result<Value> {
+    let mut client = client(channel);
+    let input = request(GetPolicyResourceRequest { reference }, token)?;
+    Ok(match kind {
+        Kind::PermissionSet => {
+            permission_json(client.get_permission_set(input).await?.into_inner())
+        }
+        Kind::ContextSet => context_json(client.get_context_set(input).await?.into_inner())?,
+        Kind::Role => role_json(client.get_role(input).await?.into_inner()),
+    })
+}
+
+pub(crate) async fn list(connection: Connection, kind: Kind, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let mut client = client(channel);
+    let input = request(
+        ListPolicyResourcesRequest {
+            limit: args.limit,
+            cursor: args.cursor,
+        },
+        &token,
+    )?;
+    Ok(match kind {
+        Kind::PermissionSet => {
+            let page = client.list_permission_sets(input).await?.into_inner();
+            json!({ "permission_sets": page.permission_sets.into_iter().map(permission_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor })
+        }
+        Kind::ContextSet => {
+            let page = client.list_context_sets(input).await?.into_inner();
+            json!({ "context_sets": page.context_sets.into_iter().map(context_json).collect::<Result<Vec<_>>>()?, "next_cursor":page.next_cursor })
+        }
+        Kind::Role => {
+            let page = client.list_roles(input).await?.into_inner();
+            json!({ "roles": page.roles.into_iter().map(role_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor })
+        }
+    })
+}
+
+/// Deletes an unused Permission Set or Context Set. Roles are retired, not deleted.
+pub(crate) async fn delete(
+    connection: Connection,
+    kind: Kind,
+    reference: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let mut client = client(channel);
+    let input = request(
+        DeletePolicyResourceRequest {
+            reference,
+            expected_revision: args.expected_revision,
+            operation_id: operation_id(args.operation_id),
+        },
+        &token,
+    )?;
+    let deleted = match kind {
+        Kind::PermissionSet => client.delete_permission_set(input).await?,
+        Kind::ContextSet => client.delete_context_set(input).await?,
+        Kind::Role => bail!("Retire a Role by replacing its specification with status retired"),
+    }
+    .into_inner()
+    .deleted;
+    Ok(json!({ "deleted": deleted }))
+}
+
 pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = policy_catalog_client::PolicyCatalogClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let output = match command {
         PolicyCommand::Put {
             kind,
@@ -341,64 +416,6 @@ pub async fn run(connection: Connection, command: PolicyCommand) -> Result<()> {
                         .into_inner(),
                 ),
             }
-        }
-        PolicyCommand::Show { kind, reference } => {
-            let input = request(GetPolicyResourceRequest { reference }, &token)?;
-            match kind {
-                Kind::PermissionSet => {
-                    permission_json(client.get_permission_set(input).await?.into_inner())
-                }
-                Kind::ContextSet => {
-                    context_json(client.get_context_set(input).await?.into_inner())?
-                }
-                Kind::Role => role_json(client.get_role(input).await?.into_inner()),
-            }
-        }
-        PolicyCommand::List {
-            kind,
-            limit,
-            cursor,
-        } => {
-            let input = request(ListPolicyResourcesRequest { limit, cursor }, &token)?;
-            match kind {
-                Kind::PermissionSet => {
-                    let page = client.list_permission_sets(input).await?.into_inner();
-                    json!({ "permission_sets": page.permission_sets.into_iter().map(permission_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor })
-                }
-                Kind::ContextSet => {
-                    let page = client.list_context_sets(input).await?.into_inner();
-                    json!({ "context_sets": page.context_sets.into_iter().map(context_json).collect::<Result<Vec<_>>>()?, "next_cursor":page.next_cursor })
-                }
-                Kind::Role => {
-                    let page = client.list_roles(input).await?.into_inner();
-                    json!({ "roles": page.roles.into_iter().map(role_json).collect::<Vec<_>>(), "next_cursor":page.next_cursor })
-                }
-            }
-        }
-        PolicyCommand::DeleteSet {
-            kind,
-            reference,
-            expected_revision,
-            operation_id: id,
-        } => {
-            let input = request(
-                DeletePolicyResourceRequest {
-                    reference,
-                    expected_revision,
-                    operation_id: operation_id(id),
-                },
-                &token,
-            )?;
-            let deleted = match kind {
-                Kind::PermissionSet => client.delete_permission_set(input).await?,
-                Kind::ContextSet => client.delete_context_set(input).await?,
-                Kind::Role => {
-                    bail!("Retire a Role by replacing its specification with status retired")
-                }
-            }
-            .into_inner()
-            .deleted;
-            json!({ "deleted": deleted })
         }
         PolicyCommand::Assign {
             role,

@@ -177,15 +177,15 @@ def fresh_runtime(cli, fixture, root, env, old, pg=None):
         def invoke(*args, check=True):
             response = run([cli, *args, *connection], fresh_env, check=check)
             return json.loads(response.stdout) if check else response
-        roster = invoke('list-tags')
+        roster = invoke('get', 'tags')
         require(roster['tags'] == [], 'fresh runtime inherited old identities')
-        require(invoke('get-task', old['taskId'], check=False).returncode != 0, 'fresh runtime imported old Task history')
-        tag = invoke('put-tag', 'fresh-engineer', '--instructions', 'Complete synthetic cutover Tasks', '--allow', 'files:read')
+        require(invoke('get', 'task', old['taskId'], check=False).returncode != 0, 'fresh runtime imported old Task history')
+        tag = invoke('tag', 'put', 'fresh-engineer', '--instructions', 'Complete synthetic cutover Tasks', '--allow', 'files:read')
         require(tag['tag_id'] != old['tagId'], 'fresh Tag reused old identity')
-        task = invoke('submit', '--tag', 'fresh-engineer', '--session', 'fresh-session', 'Fresh cutover work')
+        task = invoke('task', 'submit', '--tag', 'fresh-engineer', '--session', 'fresh-session', 'Fresh cutover work')
         until = time.monotonic() + WAIT
         while True:
-            task = invoke('get-task', task['task_id'])
+            task = invoke('get', 'task', task['task_id'])
             if task['state'] in ('TASK_STATE_SUCCEEDED', 'TASK_STATE_FAILED'):
                 break
             require(time.monotonic() < until, 'fresh runtime did not complete synthetic work')

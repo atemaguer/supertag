@@ -552,7 +552,7 @@ fn headline(kind: InboxItemKind, item: &InboxItem, blocking: bool) -> (String, O
                     item.task_id
                 ),
                 Some(format!(
-                    "supertag resolve-attempt {} {attempt} --decision retry --evidence TEXT --confirmed-stopped",
+                    "supertag task resolve-attempt {} {attempt} --decision retry --evidence TEXT --confirmed-stopped",
                     item.task_id
                 )),
             )

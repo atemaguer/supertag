@@ -305,7 +305,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state() -> 
     // SIGKILL cannot remove the endpoint; the supervisor lock is still the liveness authority.
     assert!(state.join("endpoint").exists());
     let rejected = Command::new(BIN)
-        .args(["get-task", "--state-directory"])
+        .args(["get", "task", "--state-directory"])
         .arg(&state)
         .arg("no-task")
         .env_clear()
@@ -1962,7 +1962,8 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question() -> 
         "webhook: delivered\ndesktop: delivered\n"
     );
     cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "engineer",
         "--instructions",
         "Release engineering",

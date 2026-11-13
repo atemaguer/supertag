@@ -136,7 +136,8 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     // A fixture Task creates and submits a file through the real declared-output lifecycle.
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "input-owner",
             "--instructions",
             "Read the admitted input files.",
@@ -192,6 +193,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     success(worker(&services.public)).await?;
     let accepted = services
         .operator(&[
+            "task",
             "submit",
             "--tag",
             "input-owner",
@@ -204,7 +206,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
         .await?;
     success(worker(&services.public)).await?;
     let produced = services
-        .operator(&["get-task", accepted["task_id"].as_str().unwrap()])
+        .operator(&["get", "task", accepted["task_id"].as_str().unwrap()])
         .await?;
     assert_eq!(produced["state"], "TASK_STATE_SUCCEEDED", "{produced}");
     let artifact_id = produced["artifacts"][0]["artifact_id"]
@@ -212,6 +214,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
         .context("submitted artifact")?;
     let input = format!("{artifact_id}:evidence.txt");
     let args = [
+        "task",
         "submit",
         "--tag",
         "input-owner",
@@ -268,7 +271,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     // Claude's actual manager with the input path supplied before native launch.
     let attempt = interrupt_input_receipt(&services, root.path(), worker).await?;
     let result = services
-        .operator(&["get-task", queued["task_id"].as_str().unwrap()])
+        .operator(&["get", "task", queued["task_id"].as_str().unwrap()])
         .await?;
     assert_eq!(result["state"], "TASK_STATE_SUCCEEDED", "{result}");
     assert_eq!(result["attempt_id"], attempt);

@@ -585,14 +585,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ] {
         let issued: Value = serde_json::from_str(
             &succeed(operator(&[
-                "create-auth-key",
-                host,
-                "--host",
-                host,
-                "--label",
-                host,
-                "--tag",
-                tag,
+                "auth-key", "create", host, "--host", host, "--label", host, "--tag", tag,
             ]))
             .await?,
         )?;
@@ -603,7 +596,8 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         let mut enroll = command(
             &home,
             &[
-                "enroll-host",
+                "host",
+                "enroll",
                 host,
                 "--gateway",
                 &public_url,
@@ -642,12 +636,20 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         let task = task.to_owned();
         async move {
             let task: Value =
-                serde_json::from_str(&succeed(operator(&["get-task", &task])).await?)?;
+                serde_json::from_str(&succeed(operator(&["get", "task", &task])).await?)?;
             Ok::<_, anyhow::Error>(task)
         }
     };
     let submit = |tag: &str, prompt: &str| {
-        let args = ["submit", "--tag", tag, "--session", "deployment", prompt];
+        let args = [
+            "task",
+            "submit",
+            "--tag",
+            tag,
+            "--session",
+            "deployment",
+            prompt,
+        ];
         let command = operator(&args);
         async move {
             let task: Value = serde_json::from_str(&succeed(command).await?)?;
@@ -687,7 +689,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     let deadline = Instant::now() + WAIT;
     loop {
         let host: Value =
-            serde_json::from_str(&succeed(grouped("host", &["get", "review-host"])).await?)?;
+            serde_json::from_str(&succeed(grouped("get", &["host", "review-host"])).await?)?;
         if host["active_attempts"] == 0 && host["phase"] == "ready" {
             break;
         }

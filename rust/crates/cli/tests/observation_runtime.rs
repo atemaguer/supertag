@@ -349,7 +349,8 @@ async fn exercise(database_url: &str) -> Result<()> {
     ok(
         &home,
         &[
-            "put-tag",
+            "tag",
+            "put",
             "--gateway",
             &public,
             "builder",
@@ -373,15 +374,19 @@ async fn exercise(database_url: &str) -> Result<()> {
     let desktop = json!({"active":public,"gateways":[{"profile":{"name":"desk","origin":public},"token":operator}]});
     write_private(&desktop_store, &desktop)?;
     for args in [
-        vec!["--gateway", "local", "get-tag", "builder"],
-        vec!["get-tag", "--gateway", "local", "builder"],
-        vec!["--gateway", "desk", "get-tag", "builder"],
+        vec!["--gateway", "local", "get", "tag", "builder"],
+        vec!["get", "tag", "--gateway", "local", "builder"],
+        vec!["--gateway", "desk", "get", "tag", "builder"],
     ] {
         let tag = json_of(&home, &args, None).await?;
         assert_eq!(tag["tag_id"], "builder", "{args:?}");
     }
-    let (success, _, stderr) =
-        run(&home, &["--gateway", "missing", "get-tag", "builder"], None).await?;
+    let (success, _, stderr) = run(
+        &home,
+        &["--gateway", "missing", "get", "tag", "builder"],
+        None,
+    )
+    .await?;
     ensure!(
         !success && stderr.contains("no saved Gateway is named"),
         "{stderr}"
@@ -391,7 +396,8 @@ async fn exercise(database_url: &str) -> Result<()> {
         &[
             "--gateway",
             "local",
-            "get-tag",
+            "get",
+            "tag",
             "--gateway",
             "local",
             "builder",
@@ -408,8 +414,12 @@ async fn exercise(database_url: &str) -> Result<()> {
         &desktop_store,
         &json!({"gateways":[{"profile":{"name":"local","origin":public},"token":"other-token"}]}),
     )?;
-    let (success, _, stderr) =
-        run(&home, &["--gateway", "local", "get-tag", "builder"], None).await?;
+    let (success, _, stderr) = run(
+        &home,
+        &["--gateway", "local", "get", "tag", "builder"],
+        None,
+    )
+    .await?;
     ensure!(
         !success && stderr.contains("different connections"),
         "{stderr}"
@@ -417,8 +427,12 @@ async fn exercise(database_url: &str) -> Result<()> {
     write_private(&desktop_store, &desktop)?;
     // A store other users can read is refused.
     std::fs::set_permissions(&tui_store, std::fs::Permissions::from_mode(0o644))?;
-    let (success, _, stderr) =
-        run(&home, &["--gateway", "local", "get-tag", "builder"], None).await?;
+    let (success, _, stderr) = run(
+        &home,
+        &["--gateway", "local", "get", "tag", "builder"],
+        None,
+    )
+    .await?;
     ensure!(
         !success && stderr.contains("private regular file"),
         "{stderr}"
@@ -435,7 +449,6 @@ async fn exercise(database_url: &str) -> Result<()> {
             "--gateway",
             "local",
             "watch",
-            "--kind",
             "tag",
             "--output",
             "json",
@@ -455,7 +468,8 @@ async fn exercise(database_url: &str) -> Result<()> {
             ok(
                 &home,
                 &[
-                    "put-tag",
+                    "tag",
+                    "put",
                     "--gateway",
                     &gateway,
                     id,
@@ -500,7 +514,6 @@ async fn exercise(database_url: &str) -> Result<()> {
             "--gateway",
             "local",
             "watch",
-            "--kind",
             "tag",
             "--output",
             "json",
@@ -543,7 +556,6 @@ async fn exercise(database_url: &str) -> Result<()> {
             "--gateway",
             "local",
             "watch",
-            "--kind",
             "tag",
             "--limit",
             "1",
@@ -618,6 +630,7 @@ async fn exercise(database_url: &str) -> Result<()> {
                 &[
                     "--gateway",
                     "local",
+                    "task",
                     "submit",
                     "--tag",
                     "builder",
@@ -824,7 +837,12 @@ async fn exercise(database_url: &str) -> Result<()> {
     .await?;
     assert_eq!(
         tag_json,
-        json_of(&home, &["--gateway", "local", "get-tag", "builder"], None).await?
+        json_of(
+            &home,
+            &["--gateway", "local", "get", "tag", "builder"],
+            None
+        )
+        .await?
     );
     let task = ok(
         &home,
@@ -882,13 +900,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     assert_eq!(overview["tasks"][0]["kind"], "start");
     let worker_host = ok(
         &home,
-        &[
-            "--gateway",
-            "local",
-            "describe",
-            "worker-host",
-            &host.host_id,
-        ],
+        &["--gateway", "local", "describe", "host", &host.host_id],
         None,
     )
     .await?;
@@ -1056,48 +1068,43 @@ async fn exercise(database_url: &str) -> Result<()> {
     .await?
     .into_inner();
     for (kind, id, title, get) in [
-        ("team", "crew", "Team", vec!["team", "get", "crew"]),
+        ("team", "crew", "Team", vec!["get", "team", "crew"]),
         (
             "session",
             session.work_session_id.as_str(),
             "Work Session",
-            vec!["work-sessions", "get", session.work_session_id.as_str()],
+            vec!["get", "session", session.work_session_id.as_str()],
         ),
-        (
-            "role",
-            "review",
-            "Role",
-            vec!["policy", "show", "role", "review"],
-        ),
+        ("role", "review", "Role", vec!["get", "role", "review"]),
         (
             "permission-set",
             "edit",
             "Permission Set",
-            vec!["policy", "show", "permission-set", "edit"],
+            vec!["get", "permission-set", "edit"],
         ),
         (
             "context-set",
             "notes",
             "Context Set",
-            vec!["policy", "show", "context-set", "notes"],
+            vec!["get", "context-set", "notes"],
         ),
         (
             "volume",
             "shared",
             "Volume",
-            vec!["volume", "get", "shared"],
+            vec!["get", "volume", "shared"],
         ),
         (
             "workspace-volume",
             "data",
             "Workspace Volume",
-            vec!["workspace-volume", "get", "data"],
+            vec!["get", "workspace-volume", "data"],
         ),
         (
             "workspace",
             "project",
             "Workspace",
-            vec!["github-workspace", "get", "project"],
+            vec!["get", "workspace", "project"],
         ),
     ] {
         let text = ok(&home, &["--gateway", "local", "describe", kind, id], None).await?;
@@ -1189,8 +1196,12 @@ async fn exercise(database_url: &str) -> Result<()> {
     // private, the desktop app's only owner-writable.
     let tui_directory = tui_store.parent().context("store directory")?;
     std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o750))?;
-    let (success, _, stderr) =
-        run(&home, &["--gateway", "local", "get-tag", "builder"], None).await?;
+    let (success, _, stderr) = run(
+        &home,
+        &["--gateway", "local", "get", "tag", "builder"],
+        None,
+    )
+    .await?;
     ensure!(
         !success && stderr.contains("saved Gateway directory"),
         "{stderr}"
@@ -1198,10 +1209,10 @@ async fn exercise(database_url: &str) -> Result<()> {
     std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o700))?;
     let desktop_directory = desktop_store.parent().context("store directory")?;
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o755))?;
-    json_of(&home, &["--gateway", "desk", "get-tag", "builder"], None).await?;
+    json_of(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o775))?;
     let (success, _, stderr) =
-        run(&home, &["--gateway", "desk", "get-tag", "builder"], None).await?;
+        run(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
     ensure!(
         !success && stderr.contains("saved Gateway directory"),
         "{stderr}"
@@ -1232,11 +1243,16 @@ async fn exercise(database_url: &str) -> Result<()> {
             {"url":secure_url,"token":operator,"name":"no-trust"},
         ]}),
     )?;
-    let tag = json_of(&home, &["--gateway", "secure", "get-tag", "builder"], None).await?;
+    let tag = json_of(
+        &home,
+        &["--gateway", "secure", "get", "tag", "builder"],
+        None,
+    )
+    .await?;
     assert_eq!(tag["tag_id"], "builder");
     for name in ["no-client", "no-trust"] {
         let (success, _, stderr) =
-            run(&home, &["--gateway", name, "get-tag", "builder"], None).await?;
+            run(&home, &["--gateway", name, "get", "tag", "builder"], None).await?;
         ensure!(!success, "{name} connected without its TLS files: {stderr}");
     }
     let fixture = temporary.path().join("tui-fixture");

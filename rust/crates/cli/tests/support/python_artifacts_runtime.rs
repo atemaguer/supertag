@@ -41,12 +41,12 @@ async fn run(
     prompt: &str,
 ) -> Result<Value> {
     let accepted = services
-        .operator(&["submit", "--tag", tag, "--session", session, prompt])
+        .operator(&["task", "submit", "--tag", tag, "--session", session, prompt])
         .await?;
     let task_id = accepted["task_id"].as_str().context("accepted Task ID")?;
     worker.env("OPENAI_API_KEY", "python-artifact-fixture-key");
     success(worker).await?;
-    let task = services.operator(&["get-task", task_id]).await?;
+    let task = services.operator(&["get", "task", task_id]).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     Ok(task)
 }
@@ -54,7 +54,7 @@ async fn run(
 async fn captured(services: &LanguageServices, task: &Value) -> Result<Value> {
     let task_id = task["task_id"].as_str().context("producing Task ID")?;
     let page = services
-        .operator(&["artifact", "list", "--task", task_id])
+        .operator(&["get", "artifacts", "--task", task_id])
         .await?;
     let captures = page["artifacts"].as_array().context("captured artifacts")?;
     assert_eq!(captures.len(), 1);
@@ -64,7 +64,7 @@ async fn captured(services: &LanguageServices, task: &Value) -> Result<Value> {
     );
     assert_eq!(captures[0]["producer"]["task_id"], task_id);
     let id = captures[0]["artifact_id"].as_str().context("artifact ID")?;
-    services.operator(&["artifact", "get", id]).await
+    services.operator(&["get", "artifact", id]).await
 }
 
 database_tests! {
@@ -103,7 +103,8 @@ async fn python_agents_sdk_uses_attempt_scoped_artifact_tools(database: String) 
 
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "python-artifacts",
             "--instructions",
             "Use the admitted artifact tools.",
@@ -151,7 +152,8 @@ async fn python_agents_sdk_uses_attempt_scoped_artifact_tools(database: String) 
 
     services
         .operator(&[
-            "put-tag",
+            "tag",
+            "put",
             "python-outsider",
             "--instructions",
             "Attempt to read foreign artifact metadata.",

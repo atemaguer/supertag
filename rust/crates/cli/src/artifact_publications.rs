@@ -1,7 +1,8 @@
 use crate::{Connection, connect_operator, request};
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 #[derive(Subcommand)]
 pub enum PublicationCommand {
@@ -24,30 +25,6 @@ pub enum PublicationCommand {
         consumption_id: String,
         publication_id: String,
         objective_id: String,
-    },
-    /// Read one artifact publication.
-    Get { publication_id: String },
-    /// Read one consumption approval.
-    Consumption { consumption_id: String },
-    /// List the artifact publications approved from an Objective.
-    List {
-        objective_id: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 30)]
-        limit: u32,
-        /// Continue from the next_before_order the previous page returned.
-        #[arg(long, default_value_t = 0)]
-        before_order: u64,
-    },
-    /// List the consumption approvals for a destination Objective.
-    Consumptions {
-        objective_id: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 30)]
-        limit: u32,
-        /// Continue from the next_before_order the previous page returned.
-        #[arg(long, default_value_t = 0)]
-        before_order: u64,
     },
     /// Withdraw a publication at its exact revision, so later Tasks cannot use it.
     Withdraw {
@@ -78,11 +55,91 @@ fn publication(p: &ArtifactPublication) -> Value {
 fn consumption(c: &ArtifactConsumptionApproval) -> Value {
     json!({"consumption_id":c.consumption_id,"publication_id":c.publication_id,"objective_id":c.objective_id,"approved_by":c.approved_by,"approved_at_ms":c.approved_at_ms,"status":c.status().as_str_name(),"revision":c.revision,"withdrawn_by":c.withdrawn_by,"withdrawn_at_ms":c.withdrawn_at_ms})
 }
+
+// Options for `supertag get artifact-publications` and `supertag get artifact-consumptions`: the
+// publications approved from an Objective, or the consumption approvals for a destination one.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Objective whose approvals to list.
+    #[arg(long, required_unless_present = "id", conflicts_with = "id")]
+    objective: Option<String>,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 30, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the next_before_order the previous page returned.
+    #[arg(long, default_value_t = 0, conflicts_with = "id")]
+    before_order: u64,
+}
+
+impl ListArgs {
+    fn request(self) -> ListObjectiveArtifactApprovalsRequest {
+        ListObjectiveArtifactApprovalsRequest {
+            objective_id: self.objective.unwrap_or_default(),
+            limit: self.limit,
+            before_order: self.before_order,
+        }
+    }
+}
+
+fn client(
+    channel: ProtocolChannel,
+) -> artifact_publications_client::ArtifactPublicationsClient<ProtocolChannel> {
+    artifact_publications_client::ArtifactPublicationsClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch_publication(
+    channel: ProtocolChannel,
+    token: &str,
+    approval_id: String,
+) -> Result<Value> {
+    Ok(publication(
+        &client(channel)
+            .get_publication(request(GetArtifactApprovalRequest { approval_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn fetch_consumption(
+    channel: ProtocolChannel,
+    token: &str,
+    approval_id: String,
+) -> Result<Value> {
+    Ok(consumption(
+        &client(channel)
+            .get_consumption(request(GetArtifactApprovalRequest { approval_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list_publications(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let list = client(channel)
+        .list_publications(request(args.request(), &token)?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"publications":list.publications.iter().map(|p|json!({"publication_id":p.publication_id,"source_objective_id":p.source_objective_id,"artifact_id":p.artifact_id,"files":files(&p.files),"status":p.status().as_str_name(),"revision":p.revision,"supersedes_publication_id":p.supersedes_publication_id})).collect::<Vec<_>>(),"next_before_order":list.next_before_order}),
+    )
+}
+
+pub(crate) async fn list_consumptions(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let list = client(channel)
+        .list_consumptions(request(args.request(), &token)?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"consumptions":list.consumptions.iter().map(consumption).collect::<Vec<_>>(),"next_before_order":list.next_before_order}),
+    )
+}
+
 pub async fn run(connection: Connection, command: PublicationCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = artifact_publications_client::ArtifactPublicationsClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let value = match command {
         PublicationCommand::Publish {
             publication_id,
@@ -122,28 +179,6 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
                 .await?
                 .into_inner(),
         ),
-        PublicationCommand::Get { publication_id } => publication(
-            &client
-                .get_publication(request(
-                    GetArtifactApprovalRequest {
-                        approval_id: publication_id,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner(),
-        ),
-        PublicationCommand::Consumption { consumption_id } => consumption(
-            &client
-                .get_consumption(request(
-                    GetArtifactApprovalRequest {
-                        approval_id: consumption_id,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner(),
-        ),
         PublicationCommand::Withdraw {
             publication_id,
             expected_revision,
@@ -174,42 +209,6 @@ pub async fn run(connection: Connection, command: PublicationCommand) -> Result<
                 .await?
                 .into_inner(),
         ),
-        PublicationCommand::List {
-            objective_id,
-            limit,
-            before_order,
-        } => {
-            let list = client
-                .list_publications(request(
-                    ListObjectiveArtifactApprovalsRequest {
-                        objective_id,
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"publications":list.publications.iter().map(|p|json!({"publication_id":p.publication_id,"source_objective_id":p.source_objective_id,"artifact_id":p.artifact_id,"files":files(&p.files),"status":p.status().as_str_name(),"revision":p.revision,"supersedes_publication_id":p.supersedes_publication_id})).collect::<Vec<_>>(),"next_before_order":list.next_before_order})
-        }
-        PublicationCommand::Consumptions {
-            objective_id,
-            limit,
-            before_order,
-        } => {
-            let list = client
-                .list_consumptions(request(
-                    ListObjectiveArtifactApprovalsRequest {
-                        objective_id,
-                        limit,
-                        before_order,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({"consumptions":list.consumptions.iter().map(consumption).collect::<Vec<_>>(),"next_before_order":list.next_before_order})
-        }
         PublicationCommand::Audit {
             approval_type,
             approval_id,

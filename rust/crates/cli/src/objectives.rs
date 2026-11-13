@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use supertag_control_plane::objective_limits::Timestamp;
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
@@ -49,19 +50,8 @@ pub enum ObjectiveCommand {
         no_runtime_actions: bool,
         outcome: String,
     },
-    /// Read one Objective.
-    Get { objective_id: String },
-    /// List Objectives.
-    List {
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-        /// Continue after the last ID the previous page returned.
-        #[arg(long, default_value = "")]
-        after_id: String,
-    },
     /// List commit review requests and recorded verdicts for an Objective.
-    ListCommitReviews {
+    CommitReviews {
         objective_id: String,
         /// Most entries to return on one page.
         #[arg(long, default_value_t = 50)]
@@ -187,14 +177,57 @@ impl From<Action> for ObjectiveActionRequest {
     }
 }
 
+// Options for `supertag get objectives`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue after the last ID the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    after_id: String,
+}
+
+fn client(channel: ProtocolChannel) -> ObjectivesClient<ProtocolChannel> {
+    ObjectivesClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    objective_id: String,
+) -> Result<Value> {
+    Ok(output(
+        client(channel)
+            .get_objective(request(GetObjectiveRequest { objective_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_objectives(request(
+            ListObjectivesRequest {
+                limit: args.limit,
+                after_id: args.after_id,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(json!({ "objectives": page.objectives.into_iter().map(output).collect::<Vec<_>>() }))
+}
+
 pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = ObjectivesClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let mut requested_actions = None;
     let response = match command {
-        ObjectiveCommand::ListCommitReviews {
+        ObjectiveCommand::CommitReviews {
             objective_id,
             limit,
             before_order,
@@ -251,21 +284,6 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                     &token,
                 )?)
                 .await?
-        }
-        ObjectiveCommand::Get { objective_id } => {
-            client
-                .get_objective(request(GetObjectiveRequest { objective_id }, &token)?)
-                .await?
-        }
-        ObjectiveCommand::List { limit, after_id } => {
-            let page = client
-                .list_objectives(request(ListObjectivesRequest { limit, after_id }, &token)?)
-                .await?
-                .into_inner();
-            for objective in page.objectives {
-                crate::terminal::print_json(&output(objective))?;
-            }
-            return Ok(());
         }
         ObjectiveCommand::SetLimits {
             objective_id,

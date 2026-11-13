@@ -71,7 +71,7 @@ def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor
                 parsed = urlsplit(endpoint)
                 require(parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "::1")
                         and parsed.port, "fixture service did not bind loopback")
-                run([str(cli), "put-tag", "archive-agent", "--instructions", "Packaged archive fixture",
+                run([str(cli), "tag", "put", "archive-agent", "--instructions", "Packaged archive fixture",
                      "--state-directory", str(state)], env)
                 # No --binary or SUPERTAG_TUI_BINARY override: this proves sibling discovery.
                 shell = shlex.join(["env", "-i", f"PATH={os.defpath}", f"HOME={home}",

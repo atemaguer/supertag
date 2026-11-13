@@ -74,7 +74,7 @@ fn operator(group: &[&str], rest: &[&str], gateway: &str, token: &str) -> Comman
 }
 
 fn enroll(gateway: &str, state: &Path, host: &str, key: &str) -> Command {
-    let mut command = binary(&["enroll-host", host, "--gateway", gateway]);
+    let mut command = binary(&["host", "enroll", host, "--gateway", gateway]);
     command
         .arg("--state-directory")
         .arg(state)
@@ -121,7 +121,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     for tag in ["researcher", "trainer"] {
         json(op(
-            &["put-tag", tag, "--instructions", "Train the model"],
+            &["tag", "put", tag, "--instructions", "Train the model"],
             &[],
         ))
         .await?;
@@ -139,7 +139,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         String::from_utf8_lossy(&applied.stderr)
     );
     assert_eq!(
-        json(op(&["get-tag", "trainer"], &[])).await?["runs_on"],
+        json(op(&["get", "tag", "trainer"], &[])).await?["runs_on"],
         json!(["gpu"])
     );
     let researcher = json(op(&["placement"], &["runs-on", "researcher", "gpu", "TPU"])).await?;
@@ -148,7 +148,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     // One reusable key joins both hosts and grants each the same label.
     let issued = json(op(
         &[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "infra-pool",
             "--reusable",
             "--tag",
@@ -175,7 +176,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     ensure!((90 * 86_400_000 - 60_000..=90 * 86_400_000).contains(&lifetime));
     let too_long = output(op(
         &[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "too-long",
             "--reusable",
             "--all-tags",
@@ -195,7 +197,15 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     let submit = |tag: &str, session: &str| {
         op(
-            &["submit", "--tag", tag, "--session", session, "Train"],
+            &[
+                "task",
+                "submit",
+                "--tag",
+                tag,
+                "--session",
+                session,
+                "Train",
+            ],
             &[],
         )
     };
@@ -203,7 +213,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let trainer_id = trainer_task["task_id"].as_str().context("missing Task")?;
     let research_task = json(submit("researcher", "research")).await?;
     let research_id = research_task["task_id"].as_str().context("missing Task")?;
-    let state = |id: &str| op(&["get-task", id], &[]);
+    let state = |id: &str| op(&["get", "task", id], &[]);
 
     // The CPU host carries no gpu label, so both Tasks wait.
     run_once(&public, &cpu_state, &["cpu"]).await?;
@@ -212,7 +222,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         json(state(research_id)).await?["state"],
         "TASK_STATE_QUEUED"
     );
-    let cpu = json(op(&["host"], &["get", "cpu-host"])).await?;
+    let cpu = json(op(&["get"], &["host", "cpu-host"])).await?;
     let labels = cpu["labels"].as_array().context("missing labels")?;
     for label in ["cpu", "team:infra"] {
         ensure!(
@@ -268,11 +278,11 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     );
 
     // Revoking the key stops new joins; hosts that joined keep working.
-    let revoked = json(op(&["revoke-auth-key", "infra-pool"], &[])).await?;
+    let revoked = json(op(&["auth-key", "revoke", "infra-pool"], &[])).await?;
     assert_eq!(revoked["revoked"], true);
     assert_eq!(revoked["phase"], "revoked");
     assert_eq!(
-        json(op(&["get-auth-key", "infra-pool"], &[])).await?,
+        json(op(&["get", "auth-key", "infra-pool"], &[])).await?,
         revoked
     );
     let refused = output(enroll(
@@ -308,7 +318,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     // An ephemeral key marks the hosts that join with it.
     let ephemeral = json(op(
         &[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "labelled-runners",
             "--reusable",
             "--ephemeral",
@@ -326,7 +337,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     ))
     .await?;
     assert_eq!(
-        json(op(&["host"], &["get", "ci-runner"])).await?["ephemeral"],
+        json(op(&["get"], &["host", "ci-runner"])).await?["ephemeral"],
         true
     );
 
@@ -336,7 +347,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 }
 
 async fn host_get(op: &impl Fn(&[&str], &[&str]) -> Command, host: &str) -> Result<Value> {
-    json(op(&["host"], &["get", host])).await
+    json(op(&["get"], &["host", host])).await
 }
 
 /// The real sweep loop removes an ephemeral host that went away, but a Control
@@ -359,10 +370,15 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
         .env("SUPERTAG_OPERATOR_TOKEN", &token);
     let (mut gateway, public) = service(gateway).await?;
     let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
-    json(op(&["put-tag", "builder", "--instructions", "Build"], &[])).await?;
+    json(op(
+        &["tag", "put", "builder", "--instructions", "Build"],
+        &[],
+    ))
+    .await?;
     let issued = json(op(
         &[
-            "create-auth-key",
+            "auth-key",
+            "create",
             "ephemeral-runners",
             "--reusable",
             "--ephemeral",
@@ -432,7 +448,7 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    let listed = json(op(&["host"], &["list"])).await?;
+    let listed = json(op(&["get"], &["hosts"])).await?;
     ensure!(
         !listed["hosts"]
             .as_array()

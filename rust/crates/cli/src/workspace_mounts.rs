@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use serde_json::json;
+use serde_json::{Value, json};
+use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::v2::{
-    GetWorkspaceVolumeRequest, PutWorkspaceVolumeRequest,
+    GetWorkspaceVolumeRequest, PutWorkspaceVolumeRequest, WorkspaceVolume,
     workspace_volumes_client::WorkspaceVolumesClient,
 };
 
@@ -20,8 +21,6 @@ pub enum VolumeCommand {
         #[arg(long, default_value_t = 0)]
         expected_revision: u64,
     },
-    /// Read one Workspace data Volume.
-    Get { volume_id: String },
 }
 
 pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
@@ -44,17 +43,27 @@ pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
                 )?)
                 .await?
         }
-        VolumeCommand::Get { volume_id } => {
-            client
-                .get(request(GetWorkspaceVolumeRequest { volume_id }, &token)?)
-                .await?
-        }
     }
     .into_inner();
-    crate::terminal::print_json(
-        &json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision}),
-    )?;
+    crate::terminal::print_json(&volume_json(&volume))?;
     Ok(())
+}
+
+fn volume_json(volume: &WorkspaceVolume) -> Value {
+    json!({"volume_id":volume.volume_id,"source":volume.source,"revision":volume.revision})
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    volume_id: String,
+) -> Result<Value> {
+    Ok(volume_json(
+        &WorkspaceVolumesClient::new(channel)
+            .get(request(GetWorkspaceVolumeRequest { volume_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
 }
 
 pub fn read_declarations(

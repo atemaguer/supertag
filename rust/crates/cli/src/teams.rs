@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -26,20 +26,6 @@ pub enum TeamCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Read one Team by ID or name.
-    Get { team: String },
-    /// List Teams, optionally for one member Tag.
-    List {
-        /// Only Teams this Tag belongs to.
-        #[arg(long, default_value = "")]
-        member: String,
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 32)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
     /// Replace the selected fields of a Team.
     Update {
         team: String,
@@ -62,13 +48,6 @@ pub enum TeamCommand {
         #[arg(long)]
         operation_id: Option<String>,
     },
-    /// Delete a Team and its Workstream after its Objectives close.
-    Delete {
-        team: String,
-        /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
-        #[arg(long)]
-        operation_id: Option<String>,
-    },
     /// Read the newest Workstream posts or continue from a sequence.
     Posts {
         team: String,
@@ -84,11 +63,78 @@ pub enum TeamCommand {
     },
 }
 
+// Options for `supertag get teams`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Only Teams this Tag belongs to.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    member: String,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 32, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+// Options for `supertag delete team`.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
+    #[arg(long)]
+    operation_id: Option<String>,
+}
+
+fn client(channel: ProtocolChannel) -> teams_client::TeamsClient<ProtocolChannel> {
+    teams_client::TeamsClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, team: String) -> Result<Value> {
+    Ok(team_json(get(&mut client(channel), token, team).await?))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_teams(request(
+            ListTeamsRequest {
+                member_tag_id: args.member,
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({ "teams": page.teams.into_iter().map(team_json).collect::<Vec<_>>(), "next_cursor": page.next_cursor }),
+    )
+}
+
+/// Deletes a Team and its Workstream after its Objectives close.
+pub(crate) async fn delete(
+    connection: Connection,
+    team: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let input = DeleteTeamRequest {
+        team,
+        operation_id: operation(args.operation_id),
+    };
+    Ok(team_json(
+        client(channel)
+            .delete_team(request(input, &token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
 pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
     let (channel, token) = connect_operator(connection).await?;
-    let mut client = teams_client::TeamsClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut client = client(channel);
     let output = match command {
         TeamCommand::Create {
             team_id,
@@ -111,25 +157,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                     .await?
                     .into_inner(),
             )
-        }
-        TeamCommand::Get { team } => team_json(get(&mut client, &token, team).await?),
-        TeamCommand::List {
-            member,
-            limit,
-            cursor,
-        } => {
-            let page = client
-                .list_teams(request(
-                    ListTeamsRequest {
-                        member_tag_id: member,
-                        limit,
-                        cursor,
-                    },
-                    &token,
-                )?)
-                .await?
-                .into_inner();
-            json!({ "teams": page.teams.into_iter().map(team_json).collect::<Vec<_>>(), "next_cursor": page.next_cursor })
         }
         TeamCommand::Update {
             team,
@@ -180,18 +207,6 @@ pub async fn run(connection: Connection, command: TeamCommand) -> Result<()> {
                 (outcome, _) => outcome?,
             };
             team_json(updated.into_inner())
-        }
-        TeamCommand::Delete { team, operation_id } => {
-            let input = DeleteTeamRequest {
-                team,
-                operation_id: operation(operation_id),
-            };
-            team_json(
-                client
-                    .delete_team(request(input, &token)?)
-                    .await?
-                    .into_inner(),
-            )
         }
         TeamCommand::Posts {
             team,

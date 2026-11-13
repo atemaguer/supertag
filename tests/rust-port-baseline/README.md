@@ -81,7 +81,7 @@ The following are differences in how a fact is observed, not in the behavior bei
 | Durable receipt | Attempt `specDigest` | The Task returned by a repeated `SubmitTask` equals the completed Task |
 | Conflicting retry | Same Attempt ID, different Task ID | Same operation ID, different prompt, rejected with `ALREADY_EXISTS` |
 | Workspace isolation | Local execution environments mounting a cloned seed | Worker Hosts with `--workspace-source`, each preparing its own pinned checkout |
-| Patch handoff to the reviewer | Read-only artifact mounts | The operator downloads the producer's patch with `supertag workspace-artifact`, verifies its SHA-256, and passes it in the reviewer Task's prompt. Rust has no cross-Tag artifact handoff outside Objective artifact inputs and commit reviews |
+| Patch handoff to the reviewer | Read-only artifact mounts | The operator downloads the producer's patch with `supertag task download`, verifies its SHA-256, and passes it in the reviewer Task's prompt. Rust has no cross-Tag artifact handoff outside Objective artifact inputs and commit reviews |
 | Verified artifacts | Patch, evidence, and verification file digests | Producer patch and bundle digests and the reviewer's delivered patch digest. The producer's evidence is its Task result |
 
 ## Driver contract

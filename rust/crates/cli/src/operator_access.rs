@@ -22,21 +22,21 @@ pub enum OperatorTokenCommand {
     /// Calls made with it act as the operator token:NAME. It expires 90 days after it is created
     /// or rotated. Names are never reused. Only the admin operator token manages Operator Tokens.
     Create { name: String },
-    /// List Operator Tokens without their secrets.
-    List {
-        /// Most entries to return on one page.
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        /// Continue from the cursor the previous page returned.
-        #[arg(long, default_value = "")]
-        cursor: String,
-    },
-    /// Read one Operator Token without its secret.
-    Get { name: String },
     /// Replace the secret, print the new one once, and refuse the old one from now on.
     Rotate { name: String },
     /// Refuse the token from now on, including in calls and streams already open.
     Revoke { name: String },
+}
+
+// Options for `supertag get operator-tokens`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 50, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -128,27 +128,6 @@ pub async fn run_tokens(connection: Connection, command: OperatorTokenCommand) -
                 .into_inner();
             with_secret(&rotated, secret)
         }
-        OperatorTokenCommand::List { limit, cursor } => {
-            let page = access
-                .list_operator_tokens(request(
-                    ListOperatorTokensRequest { limit, cursor },
-                    &token,
-                )?)
-                .await
-                .map_err(admin_only)?
-                .into_inner();
-            json!({
-                "operator_tokens": page.tokens.iter().map(token_json).collect::<Vec<_>>(),
-                "next_cursor": page.next_cursor,
-            })
-        }
-        OperatorTokenCommand::Get { name } => token_json(
-            &access
-                .get_operator_token(request(GetOperatorTokenRequest { name }, &token)?)
-                .await
-                .map_err(admin_only)?
-                .into_inner(),
-        ),
         OperatorTokenCommand::Revoke { name } => token_json(
             &access
                 .revoke_operator_token(request(RevokeOperatorTokenRequest { name }, &token)?)
@@ -159,6 +138,35 @@ pub async fn run_tokens(connection: Connection, command: OperatorTokenCommand) -
     };
     crate::terminal::print_json(&output)?;
     Ok(())
+}
+
+pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, name: String) -> Result<Value> {
+    Ok(token_json(
+        &client(channel)
+            .get_operator_token(request(GetOperatorTokenRequest { name }, token)?)
+            .await
+            .map_err(admin_only)?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_operator_tokens(request(
+            ListOperatorTokensRequest {
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await
+        .map_err(admin_only)?
+        .into_inner();
+    Ok(json!({
+        "operator_tokens": page.tokens.iter().map(token_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))
 }
 
 fn with_secret(token: &OperatorToken, secret: String) -> Value {

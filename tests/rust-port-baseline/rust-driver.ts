@@ -646,7 +646,7 @@ async function workspace(fixture: Fixture, directory: string) {
   const verified: boolean[] = [];
   const download = async (taskId: string, kind: "patch" | "bundle", expected: string) => {
     const path = join(directory, `${taskId}.${kind}`);
-    await fixture.cli(["workspace-artifact", taskId, "--kind", kind, "--output", path]);
+    await fixture.cli(["task", "download", taskId, "--kind", kind, "--output", path]);
     const bytes = await readFile(path);
     verified.push(createHash("sha256").update(bytes).digest("hex") === expected);
     return bytes;

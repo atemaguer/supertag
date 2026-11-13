@@ -159,10 +159,10 @@ spec: {source: "file:///var/lib/supertag/archive"}
     )
     .await?;
     assert!(error.contains("missing PermissionSet/missing"), "{error}");
-    command(&gateway, &["get-tag", "builder"], false).await?;
+    command(&gateway, &["get", "tag", "builder"], false).await?;
     command(
         &gateway,
-        &["policy", "show", "permission-set", "engineering-read"],
+        &["get", "permission-set", "engineering-read"],
         false,
     )
     .await?;
@@ -182,10 +182,10 @@ spec: {source: "file:///var/lib/supertag/archive"}
     ] {
         assert!(preview.contains(expected), "{preview}");
     }
-    command(&gateway, &["get-tag", "builder"], false).await?;
+    command(&gateway, &["get", "tag", "builder"], false).await?;
     command(&gateway, &["apply", "-f", path], true).await?;
     let objective: Value =
-        serde_json::from_str(&command(&gateway, &["objective", "get", "release"], true).await?)?;
+        serde_json::from_str(&command(&gateway, &["get", "objective", "release"], true).await?)?;
     assert_eq!(objective["owner_tag_id"], "builder");
     let task_id = objective["starting_task_id"]
         .as_str()
@@ -328,9 +328,8 @@ spec: {purpose: Observe releases.}
         .await?,
     )?;
     assert_eq!(assignments["assignments"].as_array().unwrap().len(), 1);
-    let observer: Value = serde_json::from_str(
-        &command(&gateway, &["policy", "show", "role", "Observer"], true).await?,
-    )?;
+    let observer: Value =
+        serde_json::from_str(&command(&gateway, &["get", "role", "Observer"], true).await?)?;
     assert_eq!(
         assignments["assignments"][0]["role_id"],
         observer["role_id"]
@@ -412,8 +411,8 @@ spec: {purpose: Observe releases.}
         .await
         .unwrap_err();
     assert_eq!(rejected.code(), tonic::Code::NotFound);
-    command(&gateway, &["get-tag", "bootstrap-a"], false).await?;
-    command(&gateway, &["get-tag", "bootstrap-b"], false).await?;
+    command(&gateway, &["get", "tag", "bootstrap-a"], false).await?;
+    command(&gateway, &["get", "tag", "bootstrap-b"], false).await?;
     relationship_client
         .provision_tags(authenticated_request(
             ProvisionTagsRequest {
@@ -439,7 +438,7 @@ spec: {purpose: Observe releases.}
 async fn volume_exists(gateway: &str, id: &str) -> Result<bool> {
     let output = timeout(
         Duration::from_secs(12),
-        cli(&["volume", "--gateway", gateway, "get", id]).output(),
+        cli(&["get", "--gateway", gateway, "volume", id]).output(),
     )
     .await??;
     Ok(output.status.success())
@@ -689,7 +688,7 @@ spec: {items: []}
         "{preview}"
     );
     // A diff changes nothing, and an apply without --prune removes nothing.
-    command(gateway, &["get-tag", "set-worker"], true).await?;
+    command(gateway, &["get", "tag", "set-worker"], true).await?;
     assert_eq!(
         command(gateway, &["apply", "-f", path, "--set", "release"], true)
             .await?
@@ -714,7 +713,7 @@ spec: {items: []}
         "{applied}"
     );
     let worker: Value =
-        serde_json::from_str(&command(gateway, &["get-tag", "set-worker"], true).await?)?;
+        serde_json::from_str(&command(gateway, &["get", "tag", "set-worker"], true).await?)?;
     assert!(worker["retired_at_ms"].is_number(), "{worker}");
     assert!(!volume_exists(gateway, "set-a").await?);
     for kept in ["set-keep", "set-b", "archive", "operator-volume", "shared"] {

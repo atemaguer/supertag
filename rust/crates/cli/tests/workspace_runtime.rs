@@ -130,7 +130,8 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
         command
     };
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "owner",
         "--instructions",
         "Review the delivery",
@@ -145,7 +146,8 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     ]))
     .await?;
     json(cli(&[
-        "put-tag",
+        "tag",
+        "put",
         "reviewer",
         "--instructions",
         "Inspect the exact patch",
@@ -179,8 +181,8 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     ))
     .await?;
     let work = json(cli(&[
-        "work-sessions",
-        "list",
+        "get",
+        "sessions",
         "--parent-tag",
         "owner",
         "--parent-session",
@@ -189,12 +191,12 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     .await?;
     let child_id = field(&work["work_sessions"][0], "latest_task_id")?;
     success(credentials.worker(&public, &root.join("child"), Some(&source))).await?;
-    let child = json(cli(&["get-task", child_id])).await?;
+    let child = json(cli(&["get", "task", child_id])).await?;
     assert_eq!(child["state"], "TASK_STATE_SUCCEEDED");
     let commit = field(&child["workspace_delivery"], "head_commit")?;
     assert_ne!(commit, base);
 
-    let list = || cli(&["objective", "list-commit-reviews", "release"]);
+    let list = || cli(&["objective", "commit-reviews", "release"]);
     success(credentials.worker_with_mode(
         &public,
         &root.join("owner-report"),
@@ -262,11 +264,11 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
         &format!("--observe-commit-review={request_id}"),
     ))
     .await?;
-    let notice = json(cli(&["get-task", &notices[0]])).await?;
+    let notice = json(cli(&["get", "task", &notices[0]])).await?;
     assert_eq!(notice["state"], "TASK_STATE_SUCCEEDED");
     assert_eq!(notice["tag_id"], "owner");
     assert_eq!(notice["session_id"], session);
-    let objective = json(cli(&["objective", "get", "release"])).await?;
+    let objective = json(cli(&["get", "objective", "release"])).await?;
     assert_eq!(objective["status"], "OBJECTIVE_STATUS_WORKING");
     gateway.kill().await?;
     plane.kill().await?;
@@ -357,7 +359,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let (mut gateway, public) = service(gateway_command(None)).await?;
     let tag = json(credentials.operator(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "builder",
             "--instructions",
             "Improve the repository",
@@ -374,11 +377,19 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(tag["tag_id"], "builder");
     let submit = |prompt| {
         credentials.operator(
-            &["submit", "--tag", "builder", "--session", "feature", prompt],
+            &[
+                "task",
+                "submit",
+                "--tag",
+                "builder",
+                "--session",
+                "feature",
+                prompt,
+            ],
             &public,
         )
     };
-    let get = |task| credentials.operator(&["get-task", task], &public);
+    let get = |task| credentials.operator(&["get", "task", task], &public);
     let first = json(submit("first")).await?;
     assert_eq!(first["workspace"]["base_commit"], base);
     let first_id = field(&first, "task_id")?;
@@ -414,7 +425,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let bundle = directory.join("review.bundle");
     for (kind, path) in [("patch", &patch), ("bundle", &bundle)] {
         let mut download =
-            credentials.operator(&["workspace-artifact", first_id, "--kind", kind], &public);
+            credentials.operator(&["task", "download", first_id, "--kind", kind], &public);
         download.arg("--output").arg(path);
         let receipt = json(download).await?;
         let bytes = std::fs::read(path)?;
@@ -432,10 +443,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     }
     let patch_bytes = std::fs::read(&patch)?;
     assert!(String::from_utf8_lossy(&patch_bytes).contains("GIT binary patch"));
-    let mut overwrite = credentials.operator(
-        &["workspace-artifact", first_id, "--kind", "patch"],
-        &public,
-    );
+    let mut overwrite =
+        credentials.operator(&["task", "download", first_id, "--kind", "patch"], &public);
     overwrite.arg("--output").arg(&patch);
     assert!(!output(overwrite).await?.status.success());
     assert_eq!(std::fs::read(&patch)?, patch_bytes);
@@ -499,7 +508,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let mut worker = worker.spawn()?;
     let deadline = Instant::now() + WAIT;
     loop {
-        let events = success(credentials.operator(&["task-events", cancelled_id], &public)).await?;
+        let events =
+            success(credentials.operator(&["task", "events", cancelled_id], &public)).await?;
         if String::from_utf8_lossy(&events.stdout).contains("workspace edited") {
             break;
         }
@@ -518,7 +528,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         std::fs::read_to_string(cancelled_checkout.join("workspace.txt"))?
             .contains("cancelled-edit")
     );
-    let cancelled = json(credentials.operator(&["cancel", cancelled_id], &public)).await?;
+    let cancelled = json(credentials.operator(&["task", "cancel", cancelled_id], &public)).await?;
     assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
     ensure!(
         timeout(WAIT, worker.wait()).await??.success(),
@@ -600,7 +610,8 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     let (mut gateway, public) = service(gateway_command(None)).await?;
     json(credentials.operator(
         &[
-            "put-tag",
+            "tag",
+            "put",
             "builder",
             "--instructions",
             "Use bounded evidence",
@@ -619,6 +630,7 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     for prompt in ["produce", "consume"] {
         let task = json(credentials.operator(
             &[
+                "task",
                 "submit",
                 "--tag",
                 "builder",
@@ -637,14 +649,14 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
         ))
         .await?;
         let result =
-            json(credentials.operator(&["get-task", field(&task, "task_id")?], &public)).await?;
+            json(credentials.operator(&["get", "task", field(&task, "task_id")?], &public)).await?;
         assert_eq!(result["state"], "TASK_STATE_SUCCEEDED", "{result}");
         if prompt == "produce" {
             let produced = field(&result, "result")?
                 .strip_prefix("artifact:")
                 .context("missing produced artifact")?;
             let metadata =
-                json(credentials.command(&["artifact", "--gateway", &public, "get", produced]))
+                json(credentials.command(&["get", "--gateway", &public, "artifact", produced]))
                     .await?;
             assert_eq!(
                 metadata["summary"]["description"]["title"],
@@ -667,7 +679,7 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
                 .strip_prefix("derived:")
                 .context("missing derived artifact")?;
             let metadata =
-                json(credentials.command(&["artifact", "--gateway", &public, "get", derived]))
+                json(credentials.command(&["get", "--gateway", &public, "artifact", derived]))
                     .await?;
             assert_eq!(metadata["inputs"].as_array().unwrap().len(), 1);
             assert_eq!(
@@ -676,7 +688,8 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
             );
             let mut command = credentials.operator(
                 &[
-                    "workspace-artifact",
+                    "task",
+                    "download",
                     field(&task, "task_id")?,
                     "--kind",
                     "patch",
@@ -697,6 +710,7 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     );
     let cancelled = json(credentials.operator(
         &[
+            "task",
             "submit",
             "--tag",
             "builder",
@@ -721,7 +735,8 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
     let mut worker = worker.spawn()?;
     let deadline = Instant::now() + WAIT;
     loop {
-        let events = success(credentials.operator(&["task-events", cancelled_id], &public)).await?;
+        let events =
+            success(credentials.operator(&["task", "events", cancelled_id], &public)).await?;
         if String::from_utf8_lossy(&events.stdout).contains("artifact attached") {
             break;
         }
@@ -735,13 +750,13 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
         serde_json::from_slice(&std::fs::read(cancel_state.join("attempt.json"))?)?;
     let checkout = std::path::PathBuf::from(field(&executing["prepared"]["checkout"], "path")?);
     assert!(checkout.join("inputs").exists());
-    json(credentials.operator(&["cancel", cancelled_id], &public)).await?;
+    json(credentials.operator(&["task", "cancel", cancelled_id], &public)).await?;
     ensure!(
         timeout(WAIT, worker.wait()).await??.success(),
         "cancelled artifact consumer did not settle"
     );
     assert!(!checkout.exists() && !cancel_state.join("artifact-inputs").exists());
-    let cancelled = json(credentials.operator(&["get-task", cancelled_id], &public)).await?;
+    let cancelled = json(credentials.operator(&["get", "task", cancelled_id], &public)).await?;
     assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
     assert!(cancelled["workspace_delivery"].is_null());
     assert!(!source.join("evidence.txt").exists() && !source.join("inputs").exists());
