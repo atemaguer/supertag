@@ -5,7 +5,7 @@ use axum::http::HeaderValue;
 use serde_json::Value;
 use tonic::transport::Endpoint;
 
-fn config(directory: &Path) -> SlackConfig {
+pub(super) fn config(directory: &Path) -> SlackConfig {
     SlackConfig {
         account_id: "slack-fixture".into(),
         team_id: "TTEAM1".into(),

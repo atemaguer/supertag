@@ -11,6 +11,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Rate-limit retries stay well inside a reply claim's 30-second lease.
+const RATE_LIMIT_ATTEMPTS: usize = 3;
+const RATE_LIMIT_WAIT: Duration = Duration::from_secs(1);
+const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(3);
 impl Connector {
     pub(super) async fn deliver(&self, shutdown: &CancellationToken) -> Result<()> {
         while !shutdown.is_cancelled() {
@@ -18,9 +22,11 @@ impl Connector {
                 _ = shutdown.cancelled() => break,
                 advance = self.advance_delivery() => advance?,
             };
+            // Progress is presentation only. A refused progress claim or settlement must never
+            // stop final replies: retire that record and continue. Its lease then expires.
             let progressed = tokio::select! {
                 _ = shutdown.cancelled() => break,
-                progressed = self.advance_progress() => progressed?,
+                progressed = self.progress_step() => progressed?,
             };
             let advance = advance || progressed;
             if !advance {
@@ -31,6 +37,19 @@ impl Connector {
             }
         }
         Ok(())
+    }
+
+    /// Progress is presentation only. A refused progress claim or settlement must never stop
+    /// final replies: retire that record and continue. Its lease then expires on its own.
+    pub(super) async fn progress_step(&self) -> Result<bool> {
+        match self.advance_progress().await {
+            Ok(progressed) => Ok(progressed),
+            Err(error) => {
+                eprintln!("Slack reply progress skipped: {error:#}");
+                self.progress_journal.clear()?;
+                Ok(false)
+            }
+        }
     }
 
     async fn advance_delivery(&self) -> Result<bool> {
@@ -182,6 +201,26 @@ impl Connector {
             .await
     }
 
+    /// Retries a write Slack refused for its rate limit, which proves nothing was written,
+    /// after the wait Slack asks for. TypeScript retries outbound replies the same way.
+    pub(super) async fn send_paced(
+        &self,
+        target: Target<'_>,
+        text: &str,
+        attachments: Option<&Value>,
+    ) -> Sent {
+        let mut attempts = 1;
+        loop {
+            match self.send(target, text, attachments).await {
+                Sent::RateLimited(wait) if attempts < RATE_LIMIT_ATTEMPTS => {
+                    attempts += 1;
+                    time::sleep(wait).await;
+                }
+                sent => return sent,
+            }
+        }
+    }
+
     /// TypeScript parity (`postSlackThreadReply`): the card is an attachment beside an unchanged
     /// text fallback, and a payload Slack explicitly rejects as invalid is resent without it.
     async fn send_with_card(
@@ -192,7 +231,7 @@ impl Connector {
     ) -> Outcome {
         if let Some(blocks) = card {
             match self
-                .send(target, text, Some(&json!([{ "blocks": blocks }])))
+                .send_paced(target, text, Some(&json!([{ "blocks": blocks }])))
                 .await
             {
                 Sent::Rejected(error)
@@ -200,7 +239,7 @@ impl Connector {
                 sent => return sent.outcome(),
             }
         }
-        self.send(target, text, None).await.outcome()
+        self.send_paced(target, text, None).await.outcome()
     }
 
     pub(super) async fn send(
@@ -244,7 +283,12 @@ impl Connector {
             return Sent::Uncertain;
         };
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Sent::Rejected("rate_limited".into());
+            let wait = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()?.trim().parse::<u64>().ok())
+                .map_or(RATE_LIMIT_WAIT, Duration::from_secs);
+            return Sent::RateLimited(wait.min(MAX_RATE_LIMIT_WAIT));
         }
         if !response.status().is_success() {
             return Sent::Uncertain;
@@ -272,6 +316,8 @@ pub(super) enum Target<'a> {
 pub(super) enum Sent {
     Delivered(String),
     Rejected(String),
+    /// Slack refused the write for its rate limit; nothing was written.
+    RateLimited(Duration),
     Uncertain,
 }
 
@@ -279,7 +325,7 @@ impl Sent {
     pub(super) fn outcome(self) -> Outcome {
         match self {
             Self::Delivered(provider_receipt) => Outcome::Delivered { provider_receipt },
-            Self::Rejected(_) => Outcome::Failed,
+            Self::Rejected(_) | Self::RateLimited(_) => Outcome::Failed,
             Self::Uncertain => Outcome::Uncertain,
         }
     }
@@ -307,6 +353,9 @@ fn provider_outcome(bytes: &[u8], channel: &str, replaced: Option<&str>) -> Sent
         return Sent::Delivered(ts);
     }
     match response.error {
+        Some(error) if !response.ok && matches!(error.as_str(), "rate_limited" | "ratelimited") => {
+            Sent::RateLimited(RATE_LIMIT_WAIT)
+        }
         Some(error)
             if !response.ok
                 && matches!(
@@ -321,8 +370,6 @@ fn provider_outcome(bytes: &[u8], channel: &str, replaced: Option<&str>) -> Sent
                         | "is_archived"
                         | "cannot_reply_to_message"
                         | "no_text"
-                        | "rate_limited"
-                        | "ratelimited"
                         | "invalid_blocks"
                         | "invalid_attachments"
                         | "message_not_found"
@@ -393,6 +440,14 @@ mod tests {
             assert!(matches!(
                 provider_outcome(body, "C1", None),
                 Sent::Uncertain
+            ));
+        }
+        // A rate limit wrote nothing and may be retried; it is not a final refusal.
+        for error in ["ratelimited", "rate_limited"] {
+            let body = format!(r#"{{"ok":false,"error":"{error}"}}"#);
+            assert!(matches!(
+                provider_outcome(body.as_bytes(), "C1", None),
+                Sent::RateLimited(wait) if wait == RATE_LIMIT_WAIT
             ));
         }
         for error in ["invalid_auth", "invalid_blocks", "message_not_found"] {
@@ -577,6 +632,24 @@ mod tests {
         );
         assert_eq!(calls[1].1["thread_ts"], THREAD);
 
+        // A rate-limited edit is retried in place, never answered beside the acknowledgement.
+        let (endpoint, recorded) =
+            mock(vec![json!({"ok": false, "error": "ratelimited"}), ok(ack)]).await?;
+        let slack = connector(&temporary.path().join("paced"))?.with_test_reply_url(&endpoint)?;
+        assert!(matches!(
+            slack.0.post(&reply("Done", None, Some(ack))).await,
+            Outcome::Delivered { provider_receipt } if provider_receipt == ack
+        ));
+        assert_eq!(
+            recorded
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            ["/api/chat.update", "/api/chat.update"]
+        );
+
         // An ambiguous edit is not followed by a second message.
         let (endpoint, recorded) = mock(vec![json!({"ok": true, "channel": "CCHANNEL1"})]).await?;
         let slack = connector(&temporary.path().join("unknown"))?.with_test_reply_url(&endpoint)?;
@@ -585,6 +658,107 @@ mod tests {
             Outcome::Uncertain
         ));
         assert_eq!(recorded.lock().unwrap().len(), 1);
+        Ok(())
+    }
+
+    /// A Control Plane that refuses every progress call outright.
+    struct RefusingProgress;
+
+    #[tonic::async_trait]
+    impl supertag_protocol::v2::reply_progress_server::ReplyProgress for RefusingProgress {
+        async fn claim(
+            &self,
+            _: tonic::Request<supertag_protocol::v2::ClaimReplyProgressRequest>,
+        ) -> Result<tonic::Response<supertag_protocol::v2::ClaimReplyProgressResponse>, tonic::Status>
+        {
+            Err(tonic::Status::permission_denied("refused"))
+        }
+
+        async fn settle(
+            &self,
+            _: tonic::Request<supertag_protocol::v2::SettleReplyProgressRequest>,
+        ) -> Result<tonic::Response<supertag_protocol::v2::ReplyProgressUpdate>, tonic::Status>
+        {
+            Err(tonic::Status::invalid_argument("refused"))
+        }
+    }
+
+    #[tokio::test]
+    async fn refused_progress_is_retired_without_stopping_final_delivery() -> Result<()> {
+        use tonic::transport::{Endpoint, Server, server::TcpIncoming};
+        let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
+        let address = incoming.local_addr()?;
+        tokio::spawn(
+            Server::builder()
+                .add_service(
+                    supertag_protocol::v2::reply_progress_server::ReplyProgressServer::new(
+                        RefusingProgress,
+                    ),
+                )
+                .serve_with_incoming(incoming),
+        );
+        let temporary = tempfile::tempdir()?;
+        let slack = super::super::Slack::new(
+            crate::slack::tests::config(&temporary.path().join("slack")),
+            Endpoint::from_shared(format!("http://{address}"))?.connect_lazy(),
+            "fixture-gateway-token".into(),
+        )?;
+        let target = Claim {
+            reply_id: "task".into(),
+            lease_token: "lease".into(),
+        };
+        for entry in [
+            Entry::Claim {
+                operation_id: "claim".into(),
+            },
+            Entry::Settle {
+                target,
+                outcome: Outcome::Delivered {
+                    provider_receipt: TS.into(),
+                },
+            },
+        ] {
+            slack.0.progress_journal.save(&entry)?;
+            assert!(slack.0.advance_progress().await.is_err());
+            assert!(
+                !slack
+                    .0
+                    .progress_step()
+                    .await
+                    .is_ok_and(|progressed| progressed)
+            );
+            assert!(slack.0.progress_journal.load()?.is_none());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rate_limited_first_progress_post_is_retried_and_an_update_is_skipped() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let update = |receipt: Option<&str>| supertag_protocol::v2::ReplyProgressUpdate {
+            task_id: "task".into(),
+            account_id: "slack-fixture".into(),
+            destination: Some(ReplyDestination {
+                conversation_id: "CCHANNEL1".into(),
+                thread_id: Some(THREAD.into()),
+            }),
+            text: "Working".into(),
+            revision: 1,
+            provider_receipt: receipt.map(str::to_owned),
+        };
+        let (endpoint, recorded) = mock(vec![
+            json!({"ok": false, "error": "ratelimited"}),
+            json!({"ok": false, "error": "ratelimited"}),
+        ])
+        .await?;
+        let slack =
+            connector(&temporary.path().join("progress"))?.with_test_reply_url(&endpoint)?;
+        assert!(slack.0.write_progress(&update(None)).await.is_none());
+        assert!(matches!(
+            slack.0.write_progress(&update(Some(TS))).await,
+            Some(Outcome::Failed)
+        ));
+        assert_eq!(recorded.lock().unwrap().len(), 2);
         Ok(())
     }
 }

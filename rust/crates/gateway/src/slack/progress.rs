@@ -32,8 +32,12 @@ impl Connector {
         };
         match entry {
             Entry::Claim { operation_id } => {
-                let request =
-                    self.request(ClaimReplyProgressRequest { operation_id }, DELIVERY_TIMEOUT)?;
+                let request = self.request(
+                    ClaimReplyProgressRequest {
+                        operation_id: operation_id.clone(),
+                    },
+                    DELIVERY_TIMEOUT,
+                )?;
                 let Some(claim) = private_call(
                     self.progress.clone().claim(request),
                     "claim Slack reply progress",
@@ -59,7 +63,12 @@ impl Connector {
                 journal.save(&Entry::Sending {
                     target: target.clone(),
                 })?;
-                let outcome = self.write_progress(&update).await;
+                let Some(outcome) = self.write_progress(&update).await else {
+                    // Slack rate-limited the first post and wrote nothing. Keep the claim and
+                    // replay it after the pause; if its lease expires first, progress stops.
+                    journal.save(&Entry::Claim { operation_id })?;
+                    return Ok(false);
+                };
                 journal.save(&Entry::Settle { target, outcome })?;
                 Ok(true)
             }
@@ -96,38 +105,42 @@ impl Connector {
         }
     }
 
-    async fn write_progress(&self, update: &ReplyProgressUpdate) -> Outcome {
+    /// `None` when Slack rate-limited a first post, which wrote nothing and can be retried.
+    pub(super) async fn write_progress(&self, update: &ReplyProgressUpdate) -> Option<Outcome> {
+        let first = update.provider_receipt.is_none();
+        match self.write_progress_once(update).await {
+            Sent::RateLimited(_) if first => None,
+            sent => Some(sent.outcome()),
+        }
+    }
+
+    async fn write_progress_once(&self, update: &ReplyProgressUpdate) -> Sent {
         let config = &self.config;
+        let refused = || Sent::Rejected("invalid_progress".into());
         let Some(destination) = update.destination.as_ref() else {
-            return Outcome::Failed;
+            return refused();
         };
         let Some(thread) = destination
             .thread_id
             .as_deref()
             .filter(|thread| slack_ts(thread))
         else {
-            return Outcome::Failed;
+            return refused();
         };
         if update.account_id != config.account_id
             || destination.conversation_id != config.channel_id
         {
-            return Outcome::Failed;
+            return refused();
         }
         let Some(text) = render::markdown(&update.text) else {
-            return Outcome::Failed;
+            return refused();
         };
         let target = match update.provider_receipt.as_deref() {
             Some(ts) if slack_ts(ts) => Target::Update(ts),
-            Some(_) => return Outcome::Failed,
+            Some(_) => return refused(),
             None => Target::Thread(thread),
         };
-        match self.send(target, &text, None).await {
-            Sent::Delivered(receipt) => Outcome::Delivered {
-                provider_receipt: receipt,
-            },
-            Sent::Rejected(_) => Outcome::Failed,
-            Sent::Uncertain => Outcome::Uncertain,
-        }
+        self.send(target, &text, None).await
     }
 }
 
