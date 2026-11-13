@@ -71,9 +71,7 @@ impl ApiTransfers {
         let response = if attempt {
             self.api.forward_host(request, true, call).await?
         } else {
-            self.api
-                .forward(request, &self.api.credentials.operator, call)
-                .await?
+            self.api.forward(request, call).await?
         };
         Ok(response.into_inner())
     }
@@ -205,11 +203,9 @@ impl artifact_catalog_server::ArtifactCatalog for ApiTransfers {
         request: Request<GetCapturedArtifactRequest>,
     ) -> Result<Response<CapturedArtifact>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { artifact_client(channel).get(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                artifact_client(channel).get(request).await
+            })
             .await
     }
 
@@ -218,11 +214,9 @@ impl artifact_catalog_server::ArtifactCatalog for ApiTransfers {
         request: Request<ListCapturedArtifactsRequest>,
     ) -> Result<Response<ListCapturedArtifactsResponse>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { artifact_client(channel).list(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                artifact_client(channel).list(request).await
+            })
             .await
     }
 }

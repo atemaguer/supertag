@@ -42,7 +42,6 @@ async function verifyRuntime(binary) {
   const children = [];
   const env = {
     SUPERTAG_DATABASE_URL: `sqlite://${join(root, "control.sqlite")}?mode=rwc`,
-    SUPERTAG_GATEWAY_TOKEN: "fixture-private-gateway-token",
     SUPERTAG_OPERATOR_TOKEN: token,
     SUPERTAG_BOOTSTRAP_HOST_TOKEN: hostToken,
   };

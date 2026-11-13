@@ -175,7 +175,7 @@ async fn namespace_isolated_and_recovered_sending_never_reposts() -> Result<()> 
     let dir = tempfile::tempdir()?;
     let linear = connector(dir.path())?;
     assert_eq!(linear.0.config.account_id, "linear/shared");
-    assert_eq!(linear.0.principal, "connector:linear/shared");
+    assert_eq!(linear.0.account, "linear/shared");
     linear.0.journal.save(&Entry::Sending {
         target: Claim {
             reply_id: "reply".into(),

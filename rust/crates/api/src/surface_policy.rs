@@ -27,11 +27,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<PutSurfaceAccountRequest>,
     ) -> Result<Response<SurfaceAccount>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).put_surface_account(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).put_surface_account(request).await
+        })
         .await
     }
 
@@ -39,11 +37,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<GetSurfaceAccountRequest>,
     ) -> Result<Response<SurfaceAccount>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_surface_account(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_surface_account(request).await
+        })
         .await
     }
 
@@ -51,11 +47,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<ListSurfaceAccountsRequest>,
     ) -> Result<Response<ListSurfaceAccountsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_surface_accounts(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_surface_accounts(request).await
+        })
         .await
     }
 
@@ -63,11 +57,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<PutSurfaceLocationRequest>,
     ) -> Result<Response<SurfaceLocation>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).put_surface_location(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).put_surface_location(request).await
+        })
         .await
     }
 
@@ -75,11 +67,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<GetSurfaceLocationRequest>,
     ) -> Result<Response<SurfaceLocation>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_surface_location(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_surface_location(request).await
+        })
         .await
     }
 
@@ -87,11 +77,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<ListSurfaceLocationsRequest>,
     ) -> Result<Response<ListSurfaceLocationsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_surface_locations(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_surface_locations(request).await
+        })
         .await
     }
 
@@ -99,11 +87,9 @@ impl surface_policy_catalog_server::SurfacePolicyCatalog for Api {
         &self,
         request: Request<DeleteSurfaceLocationRequest>,
     ) -> Result<Response<DeletePolicyResourceResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).delete_surface_location(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).delete_surface_location(request).await
+        })
         .await
     }
 }

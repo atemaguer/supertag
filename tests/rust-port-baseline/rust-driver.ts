@@ -74,10 +74,13 @@ async function until<T>(read: () => Promise<T>, accept: (value: T) => boolean, l
   }
 }
 
+/** The bootstrap Gateway and Worker Host present enrolled `stcr_` credentials. */
+const enrolled = () => `stcr_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
+
 const credentials = {
-  gateway: randomUUID(),
+  gateway: enrolled(),
   operator: randomUUID(),
-  host: randomUUID(),
+  host: enrolled(),
 };
 
 /** Only generated credentials and a minimal PATH enter Rust processes. */
@@ -87,7 +90,8 @@ function environment(directory: string, extra: Record<string, string> = {}) {
     HOME: join(directory, "home"),
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
-    SUPERTAG_GATEWAY_TOKEN: credentials.gateway,
+    SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL: credentials.gateway,
+    SUPERTAG_GATEWAY_CREDENTIAL: credentials.gateway,
     SUPERTAG_OPERATOR_TOKEN: credentials.operator,
     SUPERTAG_HOST_TOKEN: credentials.host,
     SUPERTAG_BOOTSTRAP_HOST_TOKEN: credentials.host,

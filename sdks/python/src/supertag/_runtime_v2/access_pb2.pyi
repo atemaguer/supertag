@@ -99,18 +99,6 @@ class OperatorToken(_message.Message):
     created_by: str
     def __init__(self, name: _Optional[str] = ..., operator_id: _Optional[str] = ..., phase: _Optional[_Union[OperatorTokenPhase, str]] = ..., created_at_ms: _Optional[int] = ..., expires_at_ms: _Optional[int] = ..., last_used_at_ms: _Optional[int] = ..., revoked_at_ms: _Optional[int] = ..., rotated_at_ms: _Optional[int] = ..., secret_revision: _Optional[int] = ..., created_by: _Optional[str] = ...) -> None: ...
 
-class AuthenticateOperatorRequest(_message.Message):
-    __slots__ = ("token_digest",)
-    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    token_digest: bytes
-    def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
-
-class OperatorIdentity(_message.Message):
-    __slots__ = ("operator_id",)
-    OPERATOR_ID_FIELD_NUMBER: _ClassVar[int]
-    operator_id: str
-    def __init__(self, operator_id: _Optional[str] = ...) -> None: ...
-
 class AuditEntry(_message.Message):
     __slots__ = ("id", "at_ms", "actor", "action", "target", "outcome", "code", "method")
     ID_FIELD_NUMBER: _ClassVar[int]

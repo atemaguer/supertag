@@ -11,7 +11,7 @@ use std::{
 };
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    authenticated_request,
+    connector_request,
     v2::{RenewReplyRequest, connector_client::ConnectorClient},
 };
 use tempfile::NamedTempFile;
@@ -258,17 +258,17 @@ enum Renewal {
 async fn renew_claim(
     client: &mut ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
-    principal: &str,
+    account: &str,
     target: &Claim,
 ) -> Result<Renewal> {
     let requested_at = time::Instant::now();
-    let mut request = authenticated_request(
+    let mut request = connector_request(
         RenewReplyRequest {
             reply_id: target.reply_id.clone(),
             lease_token: target.lease_token.clone(),
         },
         gateway_token,
-        Some(principal),
+        account,
     )?;
     request.set_timeout(DELIVERY_TIMEOUT);
     match time::timeout(DELIVERY_TIMEOUT, client.renew_reply(request)).await {
@@ -301,7 +301,7 @@ async fn renew_claim(
 async fn maintain_claim_lease(
     client: &mut ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
-    principal: &str,
+    account: &str,
     target: &Claim,
     mut valid_until: time::Instant,
 ) -> Result<()> {
@@ -314,7 +314,7 @@ async fn maintain_claim_lease(
         let renewal = tokio::select! {
             biased;
             _ = time::sleep_until(valid_until) => return Ok(()),
-            result = renew_claim(client, gateway_token, principal, target) => result?,
+            result = renew_claim(client, gateway_token, account, target) => result?,
         };
         match renewal {
             Renewal::Granted(deadline) => valid_until = deadline,
@@ -330,18 +330,18 @@ async fn maintain_claim_lease(
 pub(crate) async fn with_claim_lease<T>(
     mut client: ConnectorClient<ProtocolChannel>,
     gateway_token: &str,
-    principal: &str,
+    account: &str,
     target: &Claim,
     work: impl Future<Output = Result<T>>,
 ) -> Result<Option<T>> {
     let Renewal::Granted(valid_until) =
-        renew_claim(&mut client, gateway_token, principal, target).await?
+        renew_claim(&mut client, gateway_token, account, target).await?
     else {
         return Ok(None);
     };
     tokio::select! {
         biased;
-        result = maintain_claim_lease(&mut client, gateway_token, principal, target, valid_until) => result.map(|()| None),
+        result = maintain_claim_lease(&mut client, gateway_token, account, target, valid_until) => result.map(|()| None),
         result = work => result.map(Some),
     }
 }

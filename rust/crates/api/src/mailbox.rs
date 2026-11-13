@@ -23,17 +23,13 @@ impl mailbox_server::Mailbox for Api {
         &self,
         request: Request<ListMailboxMessagesRequest>,
     ) -> Result<Response<ListMailboxMessagesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                mailbox_client::MailboxClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .list_messages(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            mailbox_client::MailboxClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .list_messages(request)
+                .await
+        })
         .await
     }
 
@@ -41,15 +37,11 @@ impl mailbox_server::Mailbox for Api {
         &self,
         request: Request<ChangeMailboxGrantRequest>,
     ) -> Result<Response<ChangeMailboxGrantResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                mailbox_client::MailboxClient::new(channel)
-                    .change_grant(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            mailbox_client::MailboxClient::new(channel)
+                .change_grant(request)
+                .await
+        })
         .await
     }
 
@@ -57,15 +49,11 @@ impl mailbox_server::Mailbox for Api {
         &self,
         request: Request<ListMailboxGrantsRequest>,
     ) -> Result<Response<ListMailboxGrantsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                mailbox_client::MailboxClient::new(channel)
-                    .list_grants(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            mailbox_client::MailboxClient::new(channel)
+                .list_grants(request)
+                .await
+        })
         .await
     }
 }

@@ -23,11 +23,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<PutPermissionSetRequest>,
     ) -> Result<Response<PermissionSet>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).put_permission_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).put_permission_set(request).await
+        })
         .await
     }
 
@@ -35,11 +33,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<GetPolicyResourceRequest>,
     ) -> Result<Response<PermissionSet>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_permission_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_permission_set(request).await
+        })
         .await
     }
 
@@ -47,11 +43,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<ListPolicyResourcesRequest>,
     ) -> Result<Response<ListPermissionSetsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_permission_sets(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_permission_sets(request).await
+        })
         .await
     }
 
@@ -59,11 +53,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<DeletePolicyResourceRequest>,
     ) -> Result<Response<DeletePolicyResourceResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).delete_permission_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).delete_permission_set(request).await
+        })
         .await
     }
 
@@ -71,11 +63,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<PutContextSetRequest>,
     ) -> Result<Response<ContextSet>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).put_context_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).put_context_set(request).await
+        })
         .await
     }
 
@@ -83,11 +73,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<GetPolicyResourceRequest>,
     ) -> Result<Response<ContextSet>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_context_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_context_set(request).await
+        })
         .await
     }
 
@@ -95,11 +83,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<ListPolicyResourcesRequest>,
     ) -> Result<Response<ListContextSetsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_context_sets(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_context_sets(request).await
+        })
         .await
     }
 
@@ -107,20 +93,16 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<DeletePolicyResourceRequest>,
     ) -> Result<Response<DeletePolicyResourceResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).delete_context_set(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).delete_context_set(request).await
+        })
         .await
     }
 
     async fn put_role(&self, request: Request<PutRoleRequest>) -> Result<Response<Role>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).put_role(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).put_role(request).await
+        })
         .await
     }
 
@@ -128,11 +110,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<GetPolicyResourceRequest>,
     ) -> Result<Response<Role>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_role(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_role(request).await
+        })
         .await
     }
 
@@ -140,11 +120,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<ListPolicyResourcesRequest>,
     ) -> Result<Response<ListRolesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_roles(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_roles(request).await
+        })
         .await
     }
 
@@ -152,11 +130,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<AssignRoleRequest>,
     ) -> Result<Response<RoleAssignment>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).assign_role(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).assign_role(request).await
+        })
         .await
     }
 
@@ -164,11 +140,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<ListRoleAssignmentsRequest>,
     ) -> Result<Response<ListRoleAssignmentsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_role_assignments(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_role_assignments(request).await
+        })
         .await
     }
 
@@ -176,11 +150,9 @@ impl policy_catalog_server::PolicyCatalog for Api {
         &self,
         request: Request<DeactivateRoleAssignmentRequest>,
     ) -> Result<Response<RoleAssignment>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).deactivate_role_assignment(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).deactivate_role_assignment(request).await
+        })
         .await
     }
 }

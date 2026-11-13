@@ -174,10 +174,14 @@ impl Resource for PermissionSet {
         let mut approvers = BTreeSet::new();
         for value in &self.approvers {
             let Some((kind, id)) = value.trim().split_once(':') else {
-                return Err(invalid("approvers must be operator:<id> or tag:<id>"));
+                return Err(invalid(
+                    "approvers must be operator:<id>, client:<name> or tag:<id>",
+                ));
             };
-            if !matches!(kind, "operator" | "tag") {
-                return Err(invalid("approvers must be operator:<id> or tag:<id>"));
+            if !matches!(kind, "operator" | "client" | "tag") {
+                return Err(invalid(
+                    "approvers must be operator:<id>, client:<name> or tag:<id>",
+                ));
             }
             let id = bounded(id, "approver identity", 200, false)?;
             name("approver identity", &id)?;
@@ -1465,7 +1469,13 @@ fn base_runtime_requirement(rule: &ApprovalRule) -> RuntimeApprovalRequirement {
         approvers: rule
             .operator_ids
             .iter()
-            .map(|id| format!("operator:{id}"))
+            .map(|id| {
+                if id.starts_with("client:") {
+                    id.clone()
+                } else {
+                    format!("operator:{id}")
+                }
+            })
             .collect(),
     }
 }
@@ -1533,10 +1543,15 @@ fn project_runtime(
         .filter(|requirement| supported_runtime_gate(&requirement.action))
         .map(|requirement| ApprovalRule {
             action: requirement.action.clone(),
+            // Operators by operator ID; clients by their full `client:NAME` principal.
             operator_ids: requirement
                 .approvers
                 .iter()
-                .filter_map(|id| id.strip_prefix("operator:").map(str::to_owned))
+                .filter_map(|id| {
+                    id.strip_prefix("operator:")
+                        .map(str::to_owned)
+                        .or_else(|| id.starts_with("client:").then(|| id.clone()))
+                })
                 .collect(),
         })
         .collect();

@@ -138,9 +138,11 @@ impl Services {
     async fn start(home: &Path, database_url: &str) -> Result<Self> {
         let mut services = Self {
             home: home.to_owned(),
-            gateway_token: Uuid::new_v4().to_string(),
+            gateway_token: supertag_protocol::new_secret(
+                supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+            ),
             operator_token: Uuid::new_v4().to_string(),
-            host_token: Uuid::new_v4().to_string(),
+            host_token: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             database_url: database_url.to_owned(),
             plane: None,
             public: String::new(),
@@ -155,7 +157,8 @@ impl Services {
     async fn launch(&self, listen: &str, extra: &[(&str, &Path)]) -> Result<(Child, String)> {
         let mut plane = command(&self.home, &["control-plane", "--listen", listen]);
         plane
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host_token)
             .env("SUPERTAG_DATABASE_URL", &self.database_url);
@@ -985,7 +988,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     .await?;
     let account = spec(
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
+        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     ok(
         &home,

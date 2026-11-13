@@ -25,17 +25,13 @@ impl work_sessions_server::WorkSessions for Api {
         &self,
         request: Request<GetWorkSessionRequest>,
     ) -> Result<Response<WorkSession>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                work_sessions_client::WorkSessionsClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .get(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            work_sessions_client::WorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .get(request)
+                .await
+        })
         .await
     }
 
@@ -43,17 +39,13 @@ impl work_sessions_server::WorkSessions for Api {
         &self,
         request: Request<ListWorkSessionsRequest>,
     ) -> Result<Response<ListWorkSessionsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                work_sessions_client::WorkSessionsClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .list(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            work_sessions_client::WorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .list(request)
+                .await
+        })
         .await
     }
 }

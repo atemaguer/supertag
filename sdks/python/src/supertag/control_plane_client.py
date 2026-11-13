@@ -105,7 +105,7 @@ class ControlPlaneProtocolError(RuntimeError):
 
 def _negotiation_request() -> negotiation_pb2.NegotiateProtocolRequest:
     return negotiation_pb2.NegotiateProtocolRequest(
-        role=negotiation_pb2.SERVICE_ROLE_OPERATOR,
+        role=negotiation_pb2.SERVICE_ROLE_CLIENT,
         protocol_versions=_PROTOCOL_VERSIONS,
         build_version="supertag-python",
     )

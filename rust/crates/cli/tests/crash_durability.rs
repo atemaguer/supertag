@@ -155,9 +155,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -166,7 +166,8 @@ impl Credentials {
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -546,6 +547,7 @@ impl<'a> System<'a> {
                             },
                         )),
                     }),
+                    gateway: "local".into(),
                     ..Default::default()
                 }),
                 expected_revision: None,

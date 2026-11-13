@@ -360,7 +360,7 @@ async fn durable_delivery(url: &str) {
     ));
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),

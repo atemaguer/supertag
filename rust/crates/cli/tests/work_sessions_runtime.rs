@@ -156,13 +156,14 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut command = command(&["control-plane"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &alice_token)
             .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
@@ -238,7 +239,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
         .await
         .unwrap_err()
         .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let page = work
         .list(authenticated_request(list.clone(), &alice_token, None)?)
@@ -470,13 +471,14 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut command = command(&["control-plane"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
@@ -503,7 +505,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
             .await
             .expect_err("operator credential used as a Host")
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     assert_eq!(
         attempts
@@ -520,7 +522,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
             .await
             .expect_err("operator credential used as a Host")
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let mut work = work_sessions_client::WorkSessionsClient::new(connected);
     operator
@@ -820,12 +822,13 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
@@ -1060,7 +1063,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
         )?)
         .await
         .expect_err("Host changed Objective ceiling");
-    assert_eq!(denied.code(), Code::Unauthenticated);
+    assert_eq!(denied.code(), Code::PermissionDenied);
     let revision_arg = revision.to_string();
     let clear = [
         "objective",
@@ -1172,12 +1175,13 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_OPERATOR_PRINCIPAL", "operator:alice")
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)

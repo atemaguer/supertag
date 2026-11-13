@@ -460,20 +460,19 @@ struct Notifier {
     senders: Senders,
     control_plane: OperatorNotificationsClient<ProtocolChannel>,
     gateway_token: String,
-    principal: String,
     last_test: tokio::sync::Mutex<Option<Instant>>,
 }
 
 impl OperatorNotifier {
-    /// `principal` is the operator whose Inbox is read: this Gateway's admin operator.
+    /// Delivers the admin operator's notifications as this Gateway, with its enrolled credential.
+    /// The Control Plane renders them; the Gateway never reads the Inbox.
     pub fn new(
         destinations: Vec<Destination>,
         senders: Senders,
         control_plane: ProtocolChannel,
         gateway_token: String,
-        principal: String,
     ) -> Result<Self> {
-        authenticated_request((), &gateway_token, Some(&principal))
+        authenticated_request((), &gateway_token, None)
             .context("invalid operator notification credential")?;
         Ok(Self(Arc::new(Notifier {
             destinations,
@@ -482,7 +481,6 @@ impl OperatorNotifier {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             gateway_token,
-            principal,
             last_test: tokio::sync::Mutex::new(None),
         })))
     }
@@ -525,8 +523,7 @@ impl OperatorNotifier {
     }
 
     fn request<T>(&self, message: T, timeout: Duration) -> Result<Request<T>> {
-        let mut request =
-            authenticated_request(message, &self.0.gateway_token, Some(&self.0.principal))?;
+        let mut request = authenticated_request(message, &self.0.gateway_token, None)?;
         request.set_timeout(timeout);
         Ok(request)
     }

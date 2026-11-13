@@ -166,7 +166,9 @@ async fn read(
             return Ok(());
         };
         let Some(update) = frame.update else {
-            return Err(Status::data_loss("Control Plane Watch returned an incomplete frame").into());
+            return Err(
+                Status::data_loss("Control Plane Watch returned an incomplete frame").into(),
+            );
         };
         let notice = match update {
             watch_event::Update::Heartbeat(_) => None,

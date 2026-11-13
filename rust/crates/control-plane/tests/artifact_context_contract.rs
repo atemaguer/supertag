@@ -21,6 +21,7 @@ fn account(id: &str, team: &str) -> PutSurfaceAccountRequest {
                     },
                 )),
             }),
+            gateway: "local".into(),
             ..Default::default()
         }),
         ..Default::default()
@@ -624,6 +625,7 @@ async fn github_resource(url: &str) {
                         )),
                     }),
                     enabled: true,
+                    gateway: "local".into(),
                     ..Default::default()
                 }),
                 ..Default::default()

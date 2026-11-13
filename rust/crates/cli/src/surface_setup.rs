@@ -78,6 +78,10 @@ pub struct Common {
     /// Defaults to the provider name.
     #[arg(long)]
     name: Option<String>,
+    /// The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local
+    /// services' Gateway is local.
+    #[arg(long, default_value = "local")]
+    gateway: String,
     #[command(flatten)]
     target: Target,
 }
@@ -833,7 +837,11 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
     // Choose where the secrets go before asking for them.
     let vault = context.vault()?;
     let verified = verify(&kind, &prompter, &endpoints).await?;
-    finish(context, vault, name, provider, listen, prior, verified).await
+    let gateway = common.gateway.clone();
+    finish(
+        context, vault, name, gateway, provider, listen, prior, verified,
+    )
+    .await
 }
 
 /// The verification arguments of each provider.
@@ -949,10 +957,12 @@ async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Resu
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn finish(
     context: Local,
     vault: CredentialVault,
     name: String,
+    gateway: String,
     provider: Provider,
     listen: Option<SocketAddr>,
     prior: Option<Surface>,
@@ -1015,6 +1025,7 @@ async fn finish(
                     identity: Some(identity),
                     enabled: true,
                     revision: 0,
+                    gateway: gateway.clone(),
                 }),
             },
             &token,

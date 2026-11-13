@@ -39,13 +39,13 @@ pub async fn server(listen: SocketAddr, websocket: Option<SocketAddr>) -> Result
 /// version every later call names; the Control Plane refuses calls that skip this.
 pub async fn operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
-    Ok(connect(channel, ServiceRole::Operator, ServiceRole::ControlPlane).await?)
+    Ok(connect(channel, ServiceRole::Client, ServiceRole::ControlPlane).await?)
 }
 
 /// Connects to a Gateway as an operator client, for its test notification.
 pub async fn gateway_operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
-    Ok(connect(channel, ServiceRole::Operator, ServiceRole::Gateway).await?)
+    Ok(connect(channel, ServiceRole::Client, ServiceRole::Gateway).await?)
 }
 
 pub async fn endpoint(uri: String) -> Result<Target> {

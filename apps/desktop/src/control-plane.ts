@@ -75,6 +75,8 @@ export interface ControlPlaneActivation {
   controlPlanes: ControlPlaneList;
   connectionId: string;
   tags: Tag[];
+  /** Whom the saved credential acts as, such as `operator:local` or `client:alice-laptop`. */
+  principal: string;
 }
 
 export function controlPlaneSession(connectionId: string): ControlPlane {

@@ -309,7 +309,10 @@ impl Provider {
 }
 
 fn connector_request<T>(message: T, token: &str, principal: &str) -> Result<Request<T>> {
-    let mut request = authenticated_request(message, token, Some(principal))?;
+    let account = principal
+        .strip_prefix("connector:")
+        .context("connector principal")?;
+    let mut request = supertag_protocol::connector_request(message, token, account)?;
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }

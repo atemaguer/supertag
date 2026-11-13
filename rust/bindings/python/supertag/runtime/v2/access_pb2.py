@@ -24,17 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n supertag/runtime/v2/access.proto\x12\x13supertag.runtime.v2\"W\n\x1a\x43reateOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x15\n\rsecret_digest\x18\x03 \x01(\x0c\"\'\n\x17GetOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\":\n\x19ListOperatorTokensRequest\x12\r\n\x05limit\x18\x01 \x01(\r\x12\x0e\n\x06\x63ursor\x18\x02 \x01(\t\"e\n\x1aListOperatorTokensResponse\x12\x32\n\x06tokens\x18\x01 \x03(\x0b\x32\".supertag.runtime.v2.OperatorToken\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t\"W\n\x1aRotateOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x15\n\rsecret_digest\x18\x03 \x01(\x0c\"*\n\x1aRevokeOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"\xd3\x02\n\rOperatorToken\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0boperator_id\x18\x02 \x01(\t\x12\x36\n\x05phase\x18\x03 \x01(\x0e\x32\'.supertag.runtime.v2.OperatorTokenPhase\x12\x15\n\rcreated_at_ms\x18\x04 \x01(\x03\x12\x15\n\rexpires_at_ms\x18\x05 \x01(\x03\x12\x1c\n\x0flast_used_at_ms\x18\x06 \x01(\x03H\x00\x88\x01\x01\x12\x1a\n\rrevoked_at_ms\x18\x07 \x01(\x03H\x01\x88\x01\x01\x12\x1a\n\rrotated_at_ms\x18\x08 \x01(\x03H\x02\x88\x01\x01\x12\x17\n\x0fsecret_revision\x18\t \x01(\x04\x12\x12\n\ncreated_by\x18\n \x01(\tB\x12\n\x10_last_used_at_msB\x10\n\x0e_revoked_at_msB\x10\n\x0e_rotated_at_ms\"3\n\x1b\x41uthenticateOperatorRequest\x12\x14\n\x0ctoken_digest\x18\x01 \x01(\x0c\"\'\n\x10OperatorIdentity\x12\x13\n\x0boperator_id\x18\x01 \x01(\t\"\xa8\x01\n\nAuditEntry\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05\x61t_ms\x18\x02 \x01(\x03\x12\r\n\x05\x61\x63tor\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x0e\n\x06target\x18\x05 \x01(\t\x12\x32\n\x07outcome\x18\x06 \x01(\x0e\x32!.supertag.runtime.v2.AuditOutcome\x12\x0c\n\x04\x63ode\x18\x07 \x01(\t\x12\x0e\n\x06method\x18\x08 \x01(\t\"Y\n\x17ListAuditEntriesRequest\x12\x10\n\x08since_ms\x18\x01 \x01(\x03\x12\r\n\x05\x61\x63tor\x18\x02 \x01(\t\x12\r\n\x05limit\x18\x03 \x01(\r\x12\x0e\n\x06\x63ursor\x18\x04 \x01(\t\"a\n\x18ListAuditEntriesResponse\x12\x30\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x1f.supertag.runtime.v2.AuditEntry\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t*\x9f\x01\n\x12OperatorTokenPhase\x12$\n OPERATOR_TOKEN_PHASE_UNSPECIFIED\x10\x00\x12\x1f\n\x1bOPERATOR_TOKEN_PHASE_ACTIVE\x10\x01\x12 \n\x1cOPERATOR_TOKEN_PHASE_EXPIRED\x10\x02\x12 \n\x1cOPERATOR_TOKEN_PHASE_REVOKED\x10\x03*d\n\x0c\x41uditOutcome\x12\x1d\n\x19\x41UDIT_OUTCOME_UNSPECIFIED\x10\x00\x12\x1b\n\x17\x41UDIT_OUTCOME_SUCCEEDED\x10\x01\x12\x18\n\x14\x41UDIT_OUTCOME_FAILED\x10\x02\x32\xa2\x05\n\x0eOperatorAccess\x12j\n\x13\x43reateOperatorToken\x12/.supertag.runtime.v2.CreateOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12\x64\n\x10GetOperatorToken\x12,.supertag.runtime.v2.GetOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12u\n\x12ListOperatorTokens\x12..supertag.runtime.v2.ListOperatorTokensRequest\x1a/.supertag.runtime.v2.ListOperatorTokensResponse\x12j\n\x13RotateOperatorToken\x12/.supertag.runtime.v2.RotateOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12j\n\x13RevokeOperatorToken\x12/.supertag.runtime.v2.RevokeOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12o\n\x10ListAuditEntries\x12,.supertag.runtime.v2.ListAuditEntriesRequest\x1a-.supertag.runtime.v2.ListAuditEntriesResponse2|\n\x11OperatorDirectory\x12g\n\x0c\x41uthenticate\x12\x30.supertag.runtime.v2.AuthenticateOperatorRequest\x1a%.supertag.runtime.v2.OperatorIdentityb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n supertag/runtime/v2/access.proto\x12\x13supertag.runtime.v2\"W\n\x1a\x43reateOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x15\n\rsecret_digest\x18\x03 \x01(\x0c\"\'\n\x17GetOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\":\n\x19ListOperatorTokensRequest\x12\r\n\x05limit\x18\x01 \x01(\r\x12\x0e\n\x06\x63ursor\x18\x02 \x01(\t\"e\n\x1aListOperatorTokensResponse\x12\x32\n\x06tokens\x18\x01 \x03(\x0b\x32\".supertag.runtime.v2.OperatorToken\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t\"W\n\x1aRotateOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x15\n\rsecret_digest\x18\x03 \x01(\x0c\"*\n\x1aRevokeOperatorTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"\xd3\x02\n\rOperatorToken\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0boperator_id\x18\x02 \x01(\t\x12\x36\n\x05phase\x18\x03 \x01(\x0e\x32\'.supertag.runtime.v2.OperatorTokenPhase\x12\x15\n\rcreated_at_ms\x18\x04 \x01(\x03\x12\x15\n\rexpires_at_ms\x18\x05 \x01(\x03\x12\x1c\n\x0flast_used_at_ms\x18\x06 \x01(\x03H\x00\x88\x01\x01\x12\x1a\n\rrevoked_at_ms\x18\x07 \x01(\x03H\x01\x88\x01\x01\x12\x1a\n\rrotated_at_ms\x18\x08 \x01(\x03H\x02\x88\x01\x01\x12\x17\n\x0fsecret_revision\x18\t \x01(\x04\x12\x12\n\ncreated_by\x18\n \x01(\tB\x12\n\x10_last_used_at_msB\x10\n\x0e_revoked_at_msB\x10\n\x0e_rotated_at_ms\"\xa8\x01\n\nAuditEntry\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05\x61t_ms\x18\x02 \x01(\x03\x12\r\n\x05\x61\x63tor\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x0e\n\x06target\x18\x05 \x01(\t\x12\x32\n\x07outcome\x18\x06 \x01(\x0e\x32!.supertag.runtime.v2.AuditOutcome\x12\x0c\n\x04\x63ode\x18\x07 \x01(\t\x12\x0e\n\x06method\x18\x08 \x01(\t\"Y\n\x17ListAuditEntriesRequest\x12\x10\n\x08since_ms\x18\x01 \x01(\x03\x12\r\n\x05\x61\x63tor\x18\x02 \x01(\t\x12\r\n\x05limit\x18\x03 \x01(\r\x12\x0e\n\x06\x63ursor\x18\x04 \x01(\t\"a\n\x18ListAuditEntriesResponse\x12\x30\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x1f.supertag.runtime.v2.AuditEntry\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t*\x9f\x01\n\x12OperatorTokenPhase\x12$\n OPERATOR_TOKEN_PHASE_UNSPECIFIED\x10\x00\x12\x1f\n\x1bOPERATOR_TOKEN_PHASE_ACTIVE\x10\x01\x12 \n\x1cOPERATOR_TOKEN_PHASE_EXPIRED\x10\x02\x12 \n\x1cOPERATOR_TOKEN_PHASE_REVOKED\x10\x03*d\n\x0c\x41uditOutcome\x12\x1d\n\x19\x41UDIT_OUTCOME_UNSPECIFIED\x10\x00\x12\x1b\n\x17\x41UDIT_OUTCOME_SUCCEEDED\x10\x01\x12\x18\n\x14\x41UDIT_OUTCOME_FAILED\x10\x02\x32\xa2\x05\n\x0eOperatorAccess\x12j\n\x13\x43reateOperatorToken\x12/.supertag.runtime.v2.CreateOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12\x64\n\x10GetOperatorToken\x12,.supertag.runtime.v2.GetOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12u\n\x12ListOperatorTokens\x12..supertag.runtime.v2.ListOperatorTokensRequest\x1a/.supertag.runtime.v2.ListOperatorTokensResponse\x12j\n\x13RotateOperatorToken\x12/.supertag.runtime.v2.RotateOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12j\n\x13RevokeOperatorToken\x12/.supertag.runtime.v2.RevokeOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12o\n\x10ListAuditEntries\x12,.supertag.runtime.v2.ListAuditEntriesRequest\x1a-.supertag.runtime.v2.ListAuditEntriesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag.runtime.v2.access_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_OPERATORTOKENPHASE']._serialized_start=1281
-  _globals['_OPERATORTOKENPHASE']._serialized_end=1440
-  _globals['_AUDITOUTCOME']._serialized_start=1442
-  _globals['_AUDITOUTCOME']._serialized_end=1542
+  _globals['_OPERATORTOKENPHASE']._serialized_start=1187
+  _globals['_OPERATORTOKENPHASE']._serialized_end=1346
+  _globals['_AUDITOUTCOME']._serialized_start=1348
+  _globals['_AUDITOUTCOME']._serialized_end=1448
   _globals['_CREATEOPERATORTOKENREQUEST']._serialized_start=57
   _globals['_CREATEOPERATORTOKENREQUEST']._serialized_end=144
   _globals['_GETOPERATORTOKENREQUEST']._serialized_start=146
@@ -49,18 +49,12 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_REVOKEOPERATORTOKENREQUEST']._serialized_end=481
   _globals['_OPERATORTOKEN']._serialized_start=484
   _globals['_OPERATORTOKEN']._serialized_end=823
-  _globals['_AUTHENTICATEOPERATORREQUEST']._serialized_start=825
-  _globals['_AUTHENTICATEOPERATORREQUEST']._serialized_end=876
-  _globals['_OPERATORIDENTITY']._serialized_start=878
-  _globals['_OPERATORIDENTITY']._serialized_end=917
-  _globals['_AUDITENTRY']._serialized_start=920
-  _globals['_AUDITENTRY']._serialized_end=1088
-  _globals['_LISTAUDITENTRIESREQUEST']._serialized_start=1090
-  _globals['_LISTAUDITENTRIESREQUEST']._serialized_end=1179
-  _globals['_LISTAUDITENTRIESRESPONSE']._serialized_start=1181
-  _globals['_LISTAUDITENTRIESRESPONSE']._serialized_end=1278
-  _globals['_OPERATORACCESS']._serialized_start=1545
-  _globals['_OPERATORACCESS']._serialized_end=2219
-  _globals['_OPERATORDIRECTORY']._serialized_start=2221
-  _globals['_OPERATORDIRECTORY']._serialized_end=2345
+  _globals['_AUDITENTRY']._serialized_start=826
+  _globals['_AUDITENTRY']._serialized_end=994
+  _globals['_LISTAUDITENTRIESREQUEST']._serialized_start=996
+  _globals['_LISTAUDITENTRIESREQUEST']._serialized_end=1085
+  _globals['_LISTAUDITENTRIESRESPONSE']._serialized_start=1087
+  _globals['_LISTAUDITENTRIESRESPONSE']._serialized_end=1184
+  _globals['_OPERATORACCESS']._serialized_start=1451
+  _globals['_OPERATORACCESS']._serialized_end=2125
 # @@protoc_insertion_point(module_scope)

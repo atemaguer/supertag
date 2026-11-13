@@ -48,7 +48,7 @@ class _OldControlPlane(negotiation_pb2_grpc.ProtocolNegotiationServicer):
 
     def Negotiate(self, request, context):  # noqa: N802
         self.calls.append(dict(context.invocation_metadata()).get("authorization", ""))
-        assert request.role == negotiation_pb2.SERVICE_ROLE_OPERATOR
+        assert request.role == negotiation_pb2.SERVICE_ROLE_CLIENT
         assert list(request.protocol_versions) == [2]
         context.abort(
             grpc.StatusCode.FAILED_PRECONDITION,
@@ -211,7 +211,6 @@ def control_plane_url(tmp_path: Path):
     if not binary:
         pytest.skip("requires SUPERTAG_RUST_TEST_CLI pointing to the native SuperTag CLI")
     env = {
-        "SUPERTAG_GATEWAY_TOKEN": "fixture-private-gateway-token",
         "SUPERTAG_OPERATOR_TOKEN": TOKEN,
         "SUPERTAG_DATABASE_URL": f"sqlite://{tmp_path / 'control.sqlite'}?mode=rwc",
         "SUPERTAG_BOOTSTRAP_HOST_TOKEN": HOST_TOKEN,

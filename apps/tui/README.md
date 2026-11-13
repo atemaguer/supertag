@@ -83,8 +83,11 @@ work and latest entry. Enter switches to one. `n` starts a new conversation: typ
 rail state counts the open work Sessions of the conversation it shows. Esc goes back.
 
 Ctrl-P lists the Control Planes you can switch to, when there is more than one: this machine's,
-when it has a local operator credential, and each one saved with `supertag connect control-plane`.
-Enter switches to the one under the cursor, and esc goes back. Switching ends every stream and call
+when it has a local operator credential, and each one saved with `supertag connect`.
+Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
+operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key joins this device as
+`client:HOSTNAME` once; only the device's own credential is saved. A client device sees its own
+conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.

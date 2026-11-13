@@ -1,12 +1,14 @@
 use super::*;
+use crate::PRINCIPAL;
 use std::{
     os::unix::fs::PermissionsExt,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use supertag_protocol::host_generation;
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        host_directory_server::{HostDirectory, HostDirectoryServer},
+        credential_directory_server::{CredentialDirectory, CredentialDirectoryServer},
         transfers_client::TransfersClient,
         workspace_directory_server::{WorkspaceDirectory, WorkspaceDirectoryServer},
     },
@@ -23,30 +25,26 @@ struct Directory {
     deny_after: Arc<AtomicUsize>,
 }
 
+const HOST_TOKEN: &str = "stcr_7777777777777777777777777777777777777777777777777777777777777777";
+
 #[tonic::async_trait]
-impl HostDirectory for Directory {
-    async fn authenticate(
+impl CredentialDirectory for Directory {
+    async fn resolve(
         &self,
-        request: Request<AuthenticateHostRequest>,
-    ) -> Result<Response<HostRecord>, Status> {
+        request: Request<ResolveCredentialRequest>,
+    ) -> Result<Response<ResolvedCredential>, Status> {
         assert_eq!(
             request.metadata().get("authorization").unwrap(),
             "Bearer private-token"
         );
-        if request.into_inner().token_digest != Sha256::digest(b"host-token").to_vec() {
+        if request.into_inner().token_digest != Sha256::digest(HOST_TOKEN).to_vec() {
             return Err(Status::unauthenticated("unknown host"));
         }
-        Ok(Response::new(HostRecord {
-            host_id: "reviewer-host".into(),
+        Ok(Response::new(ResolvedCredential {
+            role: PrincipalRole::Host.into(),
+            name: "reviewer-host".into(),
             generation: 7,
-            revoked: false,
         }))
-    }
-    async fn enroll(
-        &self,
-        _: Request<PrivateEnrollHostRequest>,
-    ) -> Result<Response<HostRecord>, Status> {
-        Err(Status::unimplemented("not used"))
     }
 }
 
@@ -67,7 +65,7 @@ impl WorkspaceDirectory for Directory {
             "Bearer private-token"
         );
         assert_eq!(
-            request.metadata().get("x-supertag-principal").unwrap(),
+            request.metadata().get(PRINCIPAL).unwrap(),
             "host:reviewer-host"
         );
         assert_eq!(host_generation(&request)?, 7);
@@ -138,7 +136,7 @@ fn request(review_id: &str, token: &str, generation: u64) -> Request<GetReviewAr
         .insert(supertag_protocol::HOST_GENERATION_HEADER, generation.into());
     request
         .metadata_mut()
-        .insert("x-supertag-principal", "host:forged".parse().unwrap());
+        .insert(PRINCIPAL, "host:forged".parse().unwrap());
     request
         .metadata_mut()
         .insert("x-forged", "true".parse().unwrap());
@@ -196,7 +194,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     let address = incoming.local_addr()?;
     let _private = ServerTask(tokio::spawn(
         Server::builder()
-            .add_service(HostDirectoryServer::new(state.clone()))
+            .add_service(CredentialDirectoryServer::new(state.clone()))
             .add_service(WorkspaceDirectoryServer::new(state.clone()))
             .serve_with_incoming(incoming),
     ));
@@ -211,9 +209,9 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
         )
         .await?;
         for (token, generation, review, expected) in [
-            ("operator-token", 7, "review", Code::Unauthenticated),
-            ("host-token", 6, "review", Code::PermissionDenied),
-            ("host-token", 7, "another-review", Code::PermissionDenied),
+            ("operator-token", 7, "review", Code::PermissionDenied),
+            (HOST_TOKEN, 6, "review", Code::PermissionDenied),
+            (HOST_TOKEN, 7, "another-review", Code::PermissionDenied),
         ] {
             assert_eq!(
                 client
@@ -225,7 +223,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
             );
         }
         let mut stream = client
-            .download_review_artifact(request("review", "host-token", 7))
+            .download_review_artifact(request("review", HOST_TOKEN, 7))
             .await?
             .into_inner();
         assert_eq!(
@@ -251,7 +249,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     state.reads.store(0, Ordering::SeqCst);
     state.deny_after.store(1, Ordering::SeqCst);
     let mut stream = client
-        .download_review_artifact(request("review", "host-token", 7))
+        .download_review_artifact(request("review", HOST_TOKEN, 7))
         .await?
         .into_inner();
     let failure = loop {
@@ -266,7 +264,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     state.deny_after.store(usize::MAX, Ordering::SeqCst);
     std::fs::write(directory.path().join(&blob.sha256), b"corrupt")?;
     let mut stream = client
-        .download_review_artifact(request("review", "host-token", 7))
+        .download_review_artifact(request("review", HOST_TOKEN, 7))
         .await?
         .into_inner();
     let failure = loop {

@@ -59,7 +59,18 @@ async fn accept(
     principal: &str,
     input: &AcceptEventRequest,
 ) -> Result<Task, Status> {
-    cp.accept_event(authenticated_request(input.clone(), KEY, Some(principal)).unwrap())
+    // The Gateway names the connector account it acts for; the first Gateway to act for an
+    // unmanaged account keeps it.
+    let mut request = authenticated_request(input.clone(), KEY, Some("gateway:fixture")).unwrap();
+    request.metadata_mut().insert(
+        supertag_protocol::CONNECTOR_ACCOUNT_HEADER,
+        principal
+            .strip_prefix("connector:")
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    cp.accept_event(request)
         .await
         .map(tonic::Response::into_inner)
 }
@@ -123,7 +134,9 @@ fn input(task: &Task) -> QueueInputRequest {
 }
 
 async fn contract(url: &str) {
-    let cp = ControlPlane::open(url, KEY.into()).await.unwrap();
+    let cp = ControlPlane::open(url, KEY.into(), "operator:local".into())
+        .await
+        .unwrap();
     let store = Store::open(url).await.unwrap();
     let mut read = sqlx::AnyConnection::connect(url).await.unwrap();
     let range = put_tag(&store, &["first", "chosen"], &["medium", "high"]).await;
@@ -240,7 +253,9 @@ async fn contract(url: &str) {
     let admitted_before_edit = store.get_task(&chosen.task_id).await.unwrap();
     put_tag(&store, &["replacement"], &["low"]).await;
     drop(cp);
-    let cp = ControlPlane::open(url, KEY.into()).await.unwrap();
+    let cp = ControlPlane::open(url, KEY.into(), "operator:local".into())
+        .await
+        .unwrap();
     assert_eq!(
         accept(&cp, CONNECTOR, &chosen_request).await.unwrap(),
         admitted_before_edit

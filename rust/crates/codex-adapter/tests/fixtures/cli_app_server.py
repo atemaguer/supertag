@@ -12,7 +12,7 @@ if sys.argv[1:] == ["--version"]:
 assert sys.argv[1:4] == ["app-server", "--listen", "stdio://"]
 for flag in ['model="fixture-model"', 'sandbox_mode="read-only"', 'features.code_mode_host=false']:
     assert flag in sys.argv
-for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_TOKEN", "SUPERTAG_ADAPTER_STATE_DIRECTORY", "SUPERTAG_ADAPTER_SCRATCH_PARENT"]:
+for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_CREDENTIAL", "SUPERTAG_ADAPTER_STATE_DIRECTORY", "SUPERTAG_ADAPTER_SCRATCH_PARENT"]:
     assert not os.environ.get(name)
 home = Path(os.environ["CODEX_HOME"])
 assert "fixture-native-sign-in" in home.joinpath("auth.json").read_text()

@@ -8,7 +8,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tonic::transport::Endpoint;
 
-use super::{ControlPlaneState, Result, Session, Tag, bearer, endpoint};
+use super::{ControlPlaneState, Result, Session, Tag, bearer, device_name, endpoint};
 
 const STORE_ERROR: &str = "Could not read or save your Control Plane connections.";
 const MAX_STORE_BYTES: u64 = 16 * 1024 * 1024;
@@ -46,12 +46,18 @@ pub struct ControlPlaneActivation {
     control_planes: ControlPlaneList,
     connection_id: String,
     tags: Vec<Tag>,
+    /// Whom the saved credential acts as, such as `operator:local` or `client:alice-laptop`.
+    principal: String,
 }
 
 #[cfg(test)]
 impl ControlPlaneActivation {
     pub(super) fn connection_id(&self) -> &str {
         &self.connection_id
+    }
+
+    pub(super) fn principal(&self) -> &str {
+        &self.principal
     }
 }
 
@@ -169,8 +175,8 @@ fn control_plane_origin(address: &str) -> Result<(String, Endpoint)> {
         return Err("Enter a Control Plane URL of up to 2048 characters.".into());
     }
     let checked = endpoint(address)?;
-    let url =
-        tauri::Url::parse(&checked.uri().to_string()).map_err(|_| "Enter a valid Control Plane URL.")?;
+    let url = tauri::Url::parse(&checked.uri().to_string())
+        .map_err(|_| "Enter a valid Control Plane URL.")?;
     let origin = url.origin().ascii_serialization();
     let endpoint = endpoint(&origin)?;
     Ok((origin, endpoint))
@@ -196,6 +202,16 @@ impl ControlPlaneState {
         if name.chars().count() > 80 || name.chars().any(char::is_control) {
             return Err("Enter a Control Plane name of up to 80 characters.".into());
         }
+        // A client Auth Key joins this device once; only the enrolled credential is saved.
+        let token =
+            if supertag_protocol::is_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX, &token) {
+                Session::connect(endpoint.clone(), &token)
+                    .await?
+                    .enroll(&device_name())
+                    .await?
+            } else {
+                token
+            };
         let mut profiles = Profiles::load(path)?;
         let stored = profiles
             .control_planes
@@ -229,7 +245,11 @@ impl ControlPlaneState {
         }
     }
 
-    pub async fn select_control_plane(&self, path: &Path, origin: String) -> Result<ControlPlaneActivation> {
+    pub async fn select_control_plane(
+        &self,
+        path: &Path,
+        origin: String,
+    ) -> Result<ControlPlaneActivation> {
         let _guard = self.1.lock().await;
         let _file_lock = lock_profiles(path)?;
         let profiles = Profiles::load(path)?;
@@ -257,6 +277,7 @@ impl ControlPlaneState {
     ) -> Result<ControlPlaneActivation> {
         let generation = self.0.read().await.generation;
         let session = Arc::new(Session::connect(endpoint, token).await?);
+        let principal = session.principal().await?;
         let tags = session.tags().await?;
         let mut state = self.0.write().await;
         if state.generation != generation {
@@ -271,10 +292,15 @@ impl ControlPlaneState {
             control_planes: profiles.into(),
             connection_id,
             tags,
+            principal,
         })
     }
 
-    pub async fn clear_control_plane(&self, path: &Path, forget: Option<String>) -> Result<ControlPlaneList> {
+    pub async fn clear_control_plane(
+        &self,
+        path: &Path,
+        forget: Option<String>,
+    ) -> Result<ControlPlaneList> {
         let _guard = self.1.lock().await;
         let _file_lock = lock_profiles(path)?;
         let mut profiles = Profiles::load(path)?;

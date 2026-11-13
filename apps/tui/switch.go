@@ -61,8 +61,8 @@ type app struct {
 	choice    int
 	choiceErr string
 	// palette is the command palette while it shows.
-	palette       *palette
-	files         *taskFilesDialog
+	palette            *palette
+	files              *taskFilesDialog
 	controlPlaneStore  *controlPlaneStore
 	savedControlPlanes []client.Target
 	controlPlaneDialog *controlPlaneDialog
@@ -181,7 +181,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	default:
 		if a.controlPlaneDialog != nil {
-			if _, ok := msg.(controlPlaneCheckedMsg); ok {
+			switch msg.(type) {
+			case controlPlaneCheckedMsg, enrolledMsg:
 				return a, a.controlPlaneMessage(msg)
 			}
 			var cmd tea.Cmd
@@ -214,7 +215,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
-	if _, ok := msg.(controlPlaneCheckedMsg); ok {
+	switch msg.(type) {
+	case controlPlaneCheckedMsg, enrolledMsg:
 		return a.controlPlaneMessage(msg)
 	}
 	if !a.hasTarget {

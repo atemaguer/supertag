@@ -16,45 +16,33 @@ impl github_publications_server::GithubPublications for Api {
         &self,
         request: Request<GetGithubPublicationRequest>,
     ) -> Result<Response<GithubPublication>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_publications_client::GithubPublicationsClient::new(channel)
-                    .get(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_publications_client::GithubPublicationsClient::new(channel)
+                .get(request)
+                .await
+        })
         .await
     }
     async fn list(
         &self,
         request: Request<ListGithubPublicationsRequest>,
     ) -> Result<Response<ListGithubPublicationsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_publications_client::GithubPublicationsClient::new(channel)
-                    .list(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_publications_client::GithubPublicationsClient::new(channel)
+                .list(request)
+                .await
+        })
         .await
     }
     async fn cancel(
         &self,
         request: Request<CancelGithubPublicationRequest>,
     ) -> Result<Response<GithubPublication>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_publications_client::GithubPublicationsClient::new(channel)
-                    .cancel(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_publications_client::GithubPublicationsClient::new(channel)
+                .cancel(request)
+                .await
+        })
         .await
     }
 }

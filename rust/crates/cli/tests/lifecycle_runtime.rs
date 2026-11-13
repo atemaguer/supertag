@@ -726,7 +726,9 @@ impl SplitServices {
     fn start(database: &str) -> Result<Self> {
         let temp = TempDir::new()?;
         let token = || format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let (gateway_token, operator, host) = (token(), token(), token());
+        let enrolled =
+            || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+        let (gateway_token, operator, host) = (enrolled(), token(), enrolled());
         let base = |args: &[&str]| {
             let mut command = Command::new(BIN);
             command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
@@ -735,7 +737,8 @@ impl SplitServices {
         let mut plane = base(&["control-plane"]);
         plane
             .env("SUPERTAG_DATABASE_URL", database)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host);
         let (plane, endpoint) = spawn_ready(plane, &temp.path().join("plane.log"))?;
@@ -827,7 +830,7 @@ fn exercise_status(database: &str) -> Result<()> {
         ),
         "{text}"
     );
-    // Without a Gateway token, status fails without echoing anything secret.
+    // Without an operator token, status fails without echoing anything secret.
     let output = Command::new(BIN)
         .args(["status", "--control-plane", &gateway])
         .env_clear()

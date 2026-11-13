@@ -21,11 +21,9 @@ Plane's public endpoint, the same URL operators and Worker Hosts use:
 | `wss://HOST[:PORT][/PATH]` | gRPC inside a WebSocket tunnel; the Control Plane's TLS runs end to end inside it |
 | `http://127.0.0.1:PORT` | Cleartext, loopback only |
 
-Over TLS, the connector must present a client certificate that the Control Plane verifies, so a
-Control Plane that serves connectors or Gateways requires client certificates
-(`SUPERTAG_TLS_CLIENT_CA_FILE`). Without one, the Control Plane refuses the Gateway token with
-`PERMISSION_DENIED`. Over loopback cleartext, no certificate is needed. Every call also carries
-the bearer credential below.
+A connector presents a client certificate only when the Control Plane requires one from every
+caller (`SUPERTAG_TLS_CLIENT_CA_FILE`), an optional network filter. Its identity comes from the
+bearer credential below.
 
 ## Protocol negotiation
 
@@ -36,19 +34,31 @@ Before any other call, the connector calls `ProtocolNegotiation.Negotiate` with 
 
 ## Credentials
 
-Every call carries two headers:
+A connector is an enrolled Gateway. An operator creates a gateway Auth Key, and the connector
+enrolls once:
+
+```sh
+supertag auth-key create discord-acme --role gateway
+supertag gateway enroll discord-acme --control-plane https://cp.example.com \
+  --state-directory /var/lib/discord-acme --auth-key file:/run/secrets/auth-key
+```
+
+Enrolling stores the connector's own credential, `stcr_` and 64 hex digits, in its state
+directory. The Control Plane keeps only its digest. Every call then carries two headers:
 
 | Header | Value |
 | --- | --- |
-| `authorization` | `Bearer` and the deployment's Gateway token (`SUPERTAG_GATEWAY_TOKEN`) |
-| `x-supertag-principal` | `connector:ACCOUNT`, where `ACCOUNT` is the account the call acts for |
+| `authorization` | `Bearer` and the connector's enrolled credential |
+| `x-supertag-connector-account` | `ACCOUNT`, the connector account the call acts for |
 
-The Control Plane takes the principal as the connector names it. `AcceptEvent` refuses an
-`account_id` that differs from the principal's account with `PERMISSION_DENIED`, but that only
-checks the request against its own header: whoever holds the Gateway token can name any account,
-and any operator for the operator notification calls. The Gateway token is shared by every Gateway
-and connector of a deployment. Give it only to processes you trust with every account, and keep it
-as private as the Control Plane's database credential.
+The Control Plane authenticates the credential as `gateway:NAME` and checks the account against
+it. A Surface Account names the Gateway that serves it (`gateway: NAME`), and calls for its
+locations from any other Gateway fail with `PERMISSION_DENIED`. An account no Surface Account
+names belongs to the first Gateway that acts for it, until that Gateway is revoked.
+`AcceptEvent` also refuses an `account_id` that differs from the header's account. A Gateway
+calls only the Connector, reply progress, and operator notification services. It cannot read the
+Inbox, submit work, or administer anything. Rotate its credential with
+`supertag gateway rotate-credential`, and revoke it with `supertag gateway revoke NAME`.
 
 ## Admitting an event
 

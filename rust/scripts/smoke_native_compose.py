@@ -27,13 +27,16 @@ def smoke(control_image, gateway_image, fixture):
         # Only synthetic credentials are used, and each role holds only its own key.
         for name in ("gateway-client.pem", "gateway-client.key"):
             shutil.copy2(tls / name, tls / "control" / name)
-        credentials = {name: secrets.token_hex(32) for name in ("gateway", "operator", "worker", "database")}
+        credentials = {name: secrets.token_hex(32) for name in ("operator", "database")}
+        # The deployment's own Gateway and Worker Host present enrolled credentials the
+        # Control Plane seeds at startup.
+        credentials.update({name: "stcr_" + secrets.token_hex(32) for name in ("gateway", "worker")})
         postgres_env = env_file(root / "postgres.env", {
             "POSTGRES_DB": "supertag", "POSTGRES_USER": "supertag", "POSTGRES_PASSWORD": credentials["database"],
         })
         control_env = env_file(root / "control.env", {
             "SUPERTAG_DATABASE_URL": f"postgresql://supertag:{credentials['database']}@postgres:5432/supertag",
-            "SUPERTAG_GATEWAY_TOKEN": credentials["gateway"],
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL": credentials["gateway"],
             "SUPERTAG_OPERATOR_TOKEN": credentials["operator"],
             "SUPERTAG_BOOTSTRAP_HOST_TOKEN": credentials["worker"],
             "SUPERTAG_TLS_CERT_FILE": f"{TLS}/control-plane.pem", "SUPERTAG_TLS_KEY_FILE": f"{TLS}/control-plane.key",
@@ -42,7 +45,7 @@ def smoke(control_image, gateway_image, fixture):
         })
         # The Gateway holds no operator credential; operator commands below pass it explicitly.
         gateway_env = env_file(root / "gateway.env", {
-            "SUPERTAG_GATEWAY_TOKEN": credentials["gateway"],
+            "SUPERTAG_GATEWAY_CREDENTIAL": credentials["gateway"],
             "SUPERTAG_SERVER_CA_FILE": f"{TLS}/ca.pem", "SUPERTAG_CLIENT_CERT_FILE": f"{TLS}/gateway-client.pem",
             "SUPERTAG_CLIENT_KEY_FILE": f"{TLS}/gateway-client.key",
         })

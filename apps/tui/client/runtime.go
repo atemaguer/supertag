@@ -31,6 +31,7 @@ type runtimeClient struct {
 	workSessions  runtimev2connect.WorkSessionsClient
 	artifacts     runtimev2connect.ArtifactCatalogClient
 	artifactFiles runtimev2connect.ArtifactTransfersClient
+	enrollments   runtimev2connect.EnrollmentsClient
 }
 
 // NewRuntimeV2 connects to the public Control Plane over binary gRPC and HTTP/2. The first call
@@ -66,7 +67,7 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		return nil, errors.New("Control Plane URL must use http or https")
 	}
 	if target.Token == "" {
-		return nil, errors.New("Control Plane operator credential required")
+		return nil, errors.New("Control Plane credential required")
 	}
 	httpClient := &http.Client{
 		Transport: transport,
@@ -97,6 +98,7 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		workSessions:  runtimev2connect.NewWorkSessionsClient(httpClient, origin, options...),
 		artifacts:     runtimev2connect.NewArtifactCatalogClient(httpClient, origin, options...),
 		artifactFiles: runtimev2connect.NewArtifactTransfersClient(httpClient, origin, options...),
+		enrollments:   runtimev2connect.NewEnrollmentsClient(httpClient, origin, options...),
 	}
 	return c, nil
 }

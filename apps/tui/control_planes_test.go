@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +156,13 @@ func controlPlaneFixture(t *testing.T, name, token string) (client.Target, *atom
 		}
 		return connect.NewResponse(&v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: name, Name: name}}}), nil
 	}))
+	mux.Handle(rpc.EnrollmentsWhoAmIProcedure, connect.NewUnaryHandler(rpc.EnrollmentsWhoAmIProcedure, func(ctx context.Context, r *connect.Request[v2.WhoAmIRequest]) (*connect.Response[v2.WhoAmIResponse], error) {
+		if r.Header().Get("Authorization") != "Bearer "+token {
+			bad.Add(1)
+			return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("untrusted provider error with %s", r.Header().Get("Authorization")))
+		}
+		return connect.NewResponse(&v2.WhoAmIResponse{Role: v2.PrincipalRole_PRINCIPAL_ROLE_OPERATOR, Principal: "operator:local", Admin: true}), nil
+	}))
 	handleNegotiation(mux)
 	server := httptest.NewUnstartedServer(mux)
 	server.Config.Protocols = new(http.Protocols)
@@ -161,6 +170,62 @@ func controlPlaneFixture(t *testing.T, name, token string) (client.Target, *atom
 	server.Start()
 	t.Cleanup(server.Close)
 	return client.Target{Name: name, URL: server.URL, Token: token}, bad
+}
+
+// A pasted client Auth Key enrolls this device once and only the enrolled credential is saved;
+// the device then sees no Worker Host status.
+func TestAddingAControlPlaneWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredential(t *testing.T) {
+	key := "stak_" + strings.Repeat("ab", 32)
+	var credential atomic.Value
+	var enrolledName atomic.Value
+	mux := http.NewServeMux()
+	handleNegotiation(mux)
+	mux.Handle(rpc.EnrollmentsEnrollProcedure, connect.NewUnaryHandler(rpc.EnrollmentsEnrollProcedure, func(ctx context.Context, r *connect.Request[v2.EnrollRequest]) (*connect.Response[v2.Enrollment], error) {
+		if r.Header().Get("Authorization") != "Bearer "+key || r.Msg.GetRole() != v2.PrincipalRole_PRINCIPAL_ROLE_CLIENT || len(r.Msg.GetTokenDigest()) != 32 {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("refused"))
+		}
+		enrolledName.Store(r.Msg.GetName())
+		credential.Store(r.Msg.GetTokenDigest())
+		return connect.NewResponse(&v2.Enrollment{Role: v2.PrincipalRole_PRINCIPAL_ROLE_CLIENT, Name: r.Msg.GetName(), Principal: "client:" + r.Msg.GetName(), CredentialRevision: 1}), nil
+	}))
+	mux.Handle(rpc.EnrollmentsWhoAmIProcedure, connect.NewUnaryHandler(rpc.EnrollmentsWhoAmIProcedure, func(ctx context.Context, r *connect.Request[v2.WhoAmIRequest]) (*connect.Response[v2.WhoAmIResponse], error) {
+		presented := strings.TrimPrefix(r.Header().Get("Authorization"), "Bearer ")
+		digest := sha256.Sum256([]byte(presented))
+		if want, _ := credential.Load().([]byte); !client.IsClientCredential(presented) || string(want) != string(digest[:]) {
+			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("valid bearer credential required"))
+		}
+		return connect.NewResponse(&v2.WhoAmIResponse{Role: v2.PrincipalRole_PRINCIPAL_ROLE_CLIENT, Principal: "client:" + enrolledName.Load().(string)}), nil
+	}))
+	mux.Handle(rpc.OperatorListHostsProcedure, connect.NewUnaryHandler(rpc.OperatorListHostsProcedure, func(ctx context.Context, r *connect.Request[v2.ListHostsRequest]) (*connect.Response[v2.ListHostsResponse], error) {
+		t.Error("a client device read Worker Host status")
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("refused"))
+	}))
+	server := httptest.NewUnstartedServer(mux)
+	server.Config.Protocols = new(http.Protocols)
+	server.Config.Protocols.SetUnencryptedHTTP2(true)
+	server.Start()
+	defer server.Close()
+
+	a := controlPlaneTestApp(t, nil)
+	fillControlPlane(a, client.Target{Name: "work", URL: server.URL, Token: key})
+	_, verify := a.Update(a.checkControlPlane()())
+	if a.controlPlaneDialog == nil || !strings.Contains(a.controlPlaneDialog.note, "Connected as client:"+client.DeviceName()) {
+		t.Fatal("the dialog did not say which client this device joined as")
+	}
+	if a.controlPlaneDialog.inputs[2].Value() == key || verify == nil {
+		t.Fatal("the Auth Key stayed in the credential field")
+	}
+	a.Update(verify())
+	profiles, err := a.controlPlaneStore.load()
+	if err != nil || len(profiles.ControlPlanes) != 1 {
+		t.Fatal("the enrolled connection was not saved")
+	}
+	if saved := profiles.ControlPlanes[0].Token; saved == key || !client.IsClientCredential(saved) {
+		t.Fatal("only the enrolled client credential may be saved")
+	}
+	if !a.hasTarget || a.inner.reloadHosts() != nil {
+		t.Fatal("a client device must not read Worker Host status")
+	}
 }
 
 func controlPlaneTestApp(t *testing.T, targets []client.Target) *app {

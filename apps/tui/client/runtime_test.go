@@ -73,7 +73,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 	mux := http.NewServeMux()
 	testRPC(mux, rpc.ProtocolNegotiationNegotiateProcedure, func(_ context.Context, req *v2.NegotiateProtocolRequest) (*v2.NegotiateProtocolResponse, error) {
-		if req.GetRole() != v2.ServiceRole_SERVICE_ROLE_OPERATOR || req.GetBuildVersion() != "test-version" {
+		if req.GetRole() != v2.ServiceRole_SERVICE_ROLE_CLIENT || req.GetBuildVersion() != "test-version" {
 			t.Errorf("negotiation request = %v", req)
 		}
 		for _, version := range versions {

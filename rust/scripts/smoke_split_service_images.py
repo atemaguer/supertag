@@ -77,7 +77,7 @@ def smoke(control_image, gateway_image, fixture):
     identifier = "supertag-split-" + uuid.uuid4().hex[:12]
     control, gateway, worker = [f"{identifier}-{kind}" for kind in ("control-plane", "gateway", "worker")]
     control_state, gateway_state = [f"{identifier}-{kind}-state" for kind in ("control", "gateway")]
-    credentials = {"gateway": secrets.token_urlsafe(32), "operator": secrets.token_urlsafe(32), "worker": secrets.token_urlsafe(32)}
+    credentials = {"gateway": "stcr_" + secrets.token_hex(32), "operator": secrets.token_urlsafe(32), "worker": "stcr_" + secrets.token_hex(32)}
     with tempfile.TemporaryDirectory(prefix="supertag-split-smoke-", dir="/tmp") as temporary:
         root = Path(temporary).resolve()
         tls = root / "tls"
@@ -85,7 +85,7 @@ def smoke(control_image, gateway_image, fixture):
         def network(role):
             return ["--network", identifier, "--mount", f"type=bind,src={tls / role},dst={TLS},readonly"]
         control_env = env_file(root / "control.env", {
-            "SUPERTAG_GATEWAY_TOKEN": credentials["gateway"],
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL": credentials["gateway"],
             "SUPERTAG_OPERATOR_TOKEN": credentials["operator"],
             "SUPERTAG_BOOTSTRAP_HOST_TOKEN": credentials["worker"],
             "SUPERTAG_TLS_CERT_FILE": f"{TLS}/control-plane.pem",
@@ -94,7 +94,7 @@ def smoke(control_image, gateway_image, fixture):
         })
         # The Gateway holds no operator credential; operator commands below pass it explicitly.
         gateway_env = env_file(root / "gateway.env", {
-            "SUPERTAG_GATEWAY_TOKEN": credentials["gateway"],
+            "SUPERTAG_GATEWAY_CREDENTIAL": credentials["gateway"],
             "SUPERTAG_SERVER_CA_FILE": f"{TLS}/ca.pem",
             "SUPERTAG_CLIENT_CERT_FILE": f"{TLS}/gateway-client.pem",
             "SUPERTAG_CLIENT_KEY_FILE": f"{TLS}/gateway-client.key",

@@ -31,9 +31,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
@@ -42,7 +42,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)

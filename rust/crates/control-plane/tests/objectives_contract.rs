@@ -236,7 +236,11 @@ async fn review_lifecycle(
     let ready = finish(&running, ObjectiveSignal::ReadyForReview);
     store.finish_task(host, &ready).await.unwrap();
     assert_eq!(
-        store.get_objective("finite").await.unwrap().status,
+        store
+            .get_objective("operator:local", "finite")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::ReadyForReview as i32
     );
     store
@@ -330,7 +334,7 @@ async fn review_lifecycle(
     store.finish_task(host, &completion).await.unwrap();
     assert_eq!(
         store
-            .get_objective(&finite.objective_id)
+            .get_objective("operator:local", &finite.objective_id)
             .await
             .unwrap()
             .status,
@@ -386,7 +390,7 @@ async fn budget_and_deadline(
     store.report_attempt_usage(host, &usage).await.unwrap();
     assert_eq!(
         store
-            .get_objective("budget")
+            .get_objective("operator:local", "budget")
             .await
             .unwrap()
             .reported_spend_minor,
@@ -395,7 +399,10 @@ async fn budget_and_deadline(
     usage.sequence = 3;
     usage.amount_minor = Some(1_200);
     store.report_attempt_usage(host, &usage).await.unwrap();
-    let exhausted = store.get_objective("budget").await.unwrap();
+    let exhausted = store
+        .get_objective("operator:local", "budget")
+        .await
+        .unwrap();
     assert_eq!(exhausted.reported_spend_minor, Some(1_200));
     assert_eq!(exhausted.status, ObjectiveStatus::Working as i32);
     assert_eq!(
@@ -433,7 +440,11 @@ async fn budget_and_deadline(
         .await
         .unwrap();
     assert_eq!(
-        store.get_objective("budget").await.unwrap().status,
+        store
+            .get_objective("operator:local", "budget")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Limited as i32
     );
     store.close().await;
@@ -535,7 +546,11 @@ async fn budget_and_deadline(
     assert_eq!(after_cancel.state, TaskState::Cancelled as i32);
     assert!(after_cancel.result.is_none());
     assert_eq!(
-        store.get_objective("deadline").await.unwrap().status,
+        store
+            .get_objective("operator:local", "deadline")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Limited as i32
     );
     store.sweep_objectives().await.unwrap();
@@ -559,7 +574,11 @@ async fn idle_and_unstarted_claims(
     let first_finish = finish(&first_attempt, ObjectiveSignal::Progress);
     store.finish_task(host, &first_finish).await.unwrap();
     assert_eq!(
-        store.get_objective("idle").await.unwrap().status,
+        store
+            .get_objective("operator:local", "idle")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Working as i32
     );
     store.close().await;
@@ -599,7 +618,11 @@ async fn idle_and_unstarted_claims(
         .await
         .unwrap();
     assert_eq!(
-        store.get_objective("idle").await.unwrap().status,
+        store
+            .get_objective("operator:local", "idle")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Blocked as i32
     );
     assert_no_claim(&store, host).await;
@@ -619,7 +642,11 @@ async fn idle_and_unstarted_claims(
         .await
         .unwrap();
     assert_eq!(
-        store.get_objective("idle").await.unwrap().status,
+        store
+            .get_objective("operator:local", "idle")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Working as i32
     );
     let directed_attempt = claim_start(&store, host, &directed.task_id).await;
@@ -640,7 +667,11 @@ async fn idle_and_unstarted_claims(
         .await
         .unwrap();
     assert_eq!(
-        store.get_objective("ongoing-idle").await.unwrap().status,
+        store
+            .get_objective("operator:local", "ongoing-idle")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Working as i32
     );
     assert_no_claim(&store, host).await;
@@ -982,7 +1013,11 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
         TaskState::Cancelled as i32
     );
     assert_eq!(
-        store.get_objective("renew-grace").await.unwrap().status,
+        store
+            .get_objective("operator:local", "renew-grace")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Limited as i32
     );
     assert_no_claim(&store, host).await;
@@ -1045,10 +1080,13 @@ async fn audit_objectives(
     connection.close().await.unwrap();
     let store = open(url, clock).await;
     let all = store
-        .list_objectives(&ListObjectivesRequest {
-            limit: 100,
-            after_id: String::new(),
-        })
+        .list_objectives(
+            "operator:local",
+            &ListObjectivesRequest {
+                limit: 100,
+                after_id: String::new(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1057,18 +1095,24 @@ async fn audit_objectives(
         "bounded responses cap pages even when a caller requests more"
     );
     let tail = store
-        .list_objectives(&ListObjectivesRequest {
-            limit: 100,
-            after_id: all.last().unwrap().objective_id.clone(),
-        })
+        .list_objectives(
+            "operator:local",
+            &ListObjectivesRequest {
+                limit: 100,
+                after_id: all.last().unwrap().objective_id.clone(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(tail.len(), 1);
     let page = store
-        .list_objectives(&ListObjectivesRequest {
-            limit: 2,
-            after_id: all[1].objective_id.clone(),
-        })
+        .list_objectives(
+            "operator:local",
+            &ListObjectivesRequest {
+                limit: 2,
+                after_id: all[1].objective_id.clone(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page, all[2..4]);

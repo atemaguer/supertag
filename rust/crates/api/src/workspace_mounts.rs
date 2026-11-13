@@ -22,18 +22,20 @@ impl WorkspaceVolumes for Api {
         &self,
         request: Request<PutWorkspaceVolumeRequest>,
     ) -> Result<Response<WorkspaceVolume>, Status> {
-        self.forward(request, &self.credentials.operator, |channel, request| async move {
+        self.forward(request, |channel, request| async move {
             WorkspaceVolumesClient::new(channel).put(request).await
-        }).await
+        })
+        .await
     }
 
     async fn get(
         &self,
         request: Request<GetWorkspaceVolumeRequest>,
     ) -> Result<Response<WorkspaceVolume>, Status> {
-        self.forward(request, &self.credentials.operator, |channel, request| async move {
+        self.forward(request, |channel, request| async move {
             WorkspaceVolumesClient::new(channel).get(request).await
-        }).await
+        })
+        .await
     }
 }
 

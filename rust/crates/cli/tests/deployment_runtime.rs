@@ -326,7 +326,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     let operator_token = operator_env["SUPERTAG_OPERATOR_TOKEN"].clone();
     for secret in [
         &operator_token,
-        &gateway_env["SUPERTAG_GATEWAY_TOKEN"],
+        &gateway_env["SUPERTAG_GATEWAY_CREDENTIAL"],
         &setup_database,
     ] {
         assert!(!message.contains(secret.as_str()), "setup printed a secret");
@@ -334,8 +334,12 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     assert_eq!(control_env["SUPERTAG_DATABASE_URL"], setup_database);
     assert!(!gateway_env.contains_key("SUPERTAG_DATABASE_URL"));
     assert_eq!(
-        gateway_env["SUPERTAG_OPERATOR_PRINCIPAL"],
+        control_env["SUPERTAG_OPERATOR_PRINCIPAL"],
         "operator:deploy"
+    );
+    assert_eq!(
+        control_env["SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"],
+        gateway_env["SUPERTAG_GATEWAY_CREDENTIAL"]
     );
     // Setup never replaces an existing directory.
     let before = std::fs::read(output.join("gateway.env"))?;
@@ -455,11 +459,10 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     health.env("SUPERTAG_SERVER_CA_FILE", public.ca());
     succeed(health).await?;
 
-    // The Gateway connects to the public Control Plane as an ordinary client and holds no
-    // operator credential. This Control Plane requires no client certificates, so it refuses
-    // the Gateway credential (deploy/native/README.md: a Gateway needs client certificates);
-    // the Gateway's test notification, which resolves the operator's token through the Control
-    // Plane, says so.
+    // The Gateway connects to the public Control Plane as an ordinary client, gateway:local, and
+    // holds no operator credential. Identity is in the bearer, so it needs no client
+    // certificate. Its test notification asks the Control Plane whose token the operator
+    // presented, and a token that resolves to no operator is refused.
     assert!(!gateway_env.contains_key("SUPERTAG_OPERATOR_TOKEN"));
     let state = root.join("gateway-state");
     std::fs::create_dir(&state)?;
@@ -480,18 +483,25 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         .env("SUPERTAG_STATE_DIR", &state)
         .env("SUPERTAG_SERVER_CA_FILE", public.ca());
     let (_gateway, gateway_address) = service(gateway, &root.join("gateway.log")).await?;
-    let refused = fail(command(
-        &home,
-        &[
-            "test",
-            "notification",
-            "--gateway",
-            &format!("http://{gateway_address}"),
-        ],
-        &[("SUPERTAG_OPERATOR_TOKEN", operator_token.as_str())],
-    ))
-    .await?;
-    assert!(refused.contains("client certificate"), "{refused}");
+    let notify = |token: &str| {
+        command(
+            &home,
+            &[
+                "test",
+                "notification",
+                "--gateway",
+                &format!("http://{gateway_address}"),
+            ],
+            &[("SUPERTAG_OPERATOR_TOKEN", token)],
+        )
+    };
+    let sent = succeed(notify(&operator_token)).await?;
+    assert!(sent.contains("not configured"), "{sent}");
+    let refused = fail(notify(&"x".repeat(43))).await?;
+    assert!(
+        refused.contains("valid bearer credential required"),
+        "{refused}"
+    );
 
     // Verify the deployment through its public URL only.
     let verify = |url: &str, env: &[(&str, &str)], extra: &[&str]| {
@@ -588,7 +598,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ] {
         let issued: Value = serde_json::from_str(
             &succeed(operator(&[
-                "auth-key", "create", host, "--host", host, "--label", host, "--tag", tag,
+                "auth-key", "create", host, "--role", "host", "--label", host, "--tag", tag,
             ]))
             .await?,
         )?;

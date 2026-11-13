@@ -151,6 +151,7 @@ async fn control_plane_fixture(
     let cp = ControlPlane::open(
         &format!("sqlite://{}?mode=rwc", database.display()),
         "private-test-token".into(),
+        "operator:desktop-test".into(),
     )
     .await
     .unwrap();
@@ -159,6 +160,8 @@ async fn control_plane_fixture(
     let cp_task = tokio::spawn(
         Server::builder()
             .add_service(OperatorServer::new(cp.clone()))
+            .add_service(cp.credential_directory_service())
+            .add_service(cp.enrollments_service())
             .add_service(ConversationsServer::new(cp))
             .serve_with_incoming(TcpListenerStream::new(cp_listener)),
     );
@@ -181,8 +184,10 @@ async fn control_plane_fixture(
             .layer(supertag_protocol::negotiation::fence(
                 v2::ServiceRole::ControlPlane,
             ))
+            .layer(control_plane.authorize())
             .add_service(control_plane.negotiation_service())
             .add_service(control_plane.operator_service())
+            .add_service(control_plane.enrollments_service())
             .add_service(control_plane.conversations_service())
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
@@ -193,7 +198,7 @@ async fn control_plane_fixture(
                 .connect()
                 .await
                 .unwrap(),
-            v2::ServiceRole::Operator,
+            v2::ServiceRole::Client,
             v2::ServiceRole::ControlPlane,
         )
         .await
@@ -242,7 +247,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
             )
             .await
             .unwrap_err(),
-        "The Control Plane rejected the operator token."
+        "The Control Plane rejected the saved credential."
     );
     assert!(!profiles.exists());
     let first_connection = client
@@ -425,7 +430,10 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         serde_json::json!({"origin": second, "name": "Second"})
     );
     let resumed = ControlPlaneState::default();
-    let a = resumed.select_control_plane(&store, first.clone()).await.unwrap();
+    let a = resumed
+        .select_control_plane(&store, first.clone())
+        .await
+        .unwrap();
     assert_eq!(
         resumed.tags(a.connection_id()).await.unwrap()[0].tag_id,
         "first-tag"
@@ -460,9 +468,108 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         std::os::unix::fs::symlink(&store, &alias).unwrap();
         assert!(resumed.saved_control_planes(&alias).await.is_err());
     }
-    for server in [first_control_plane, first_plane, second_control_plane, second_plane] {
+    for server in [
+        first_control_plane,
+        first_plane,
+        second_control_plane,
+        second_plane,
+    ] {
         server.abort();
     }
+}
+
+/// A client Auth Key joins this device once as client:NAME: only the enrolled credential is saved,
+/// and the app connects as that client, limited to the Tags its key allows.
+#[tokio::test]
+async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("control-planes.json");
+    let (address, control_plane, plane) = control_plane_fixture(
+        &directory.path().join("state.sqlite"),
+        "allowed-tag",
+        "join-operator",
+    )
+    .await;
+    let mut operator = OperatorClient::new(
+        supertag_protocol::negotiation::connect(
+            Endpoint::from_shared(address.clone())
+                .unwrap()
+                .connect()
+                .await
+                .unwrap(),
+            v2::ServiceRole::Client,
+            v2::ServiceRole::ControlPlane,
+        )
+        .await
+        .unwrap(),
+    );
+    operator
+        .put_tag(
+            authenticated_request(
+                v2::PutTagRequest {
+                    tag_id: "hidden-tag".into(),
+                    instructions: "Not for this device".into(),
+                    ..Default::default()
+                },
+                "join-operator",
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
+    operator
+        .create_auth_key(
+            authenticated_request(
+                v2::CreateAuthKeyRequest {
+                    name: "laptops".into(),
+                    role: v2::PrincipalRole::Client.into(),
+                    operation_id: "laptops".into(),
+                    key_digest: Sha256::digest(key.as_bytes()).to_vec(),
+                    allowed_tag_ids: vec!["allowed-tag".into()],
+                    ..Default::default()
+                },
+                "join-operator",
+                None,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let state = ControlPlaneState::default();
+    let joined = state
+        .save_control_plane(&store, address.clone(), "Work".into(), key.clone())
+        .await
+        .unwrap();
+    assert_eq!(joined.principal(), format!("client:{}", device_name()));
+    let tags = state.tags(joined.connection_id()).await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|tag| tag.tag_id.as_str())
+            .collect::<Vec<_>>(),
+        ["allowed-tag"]
+    );
+    let saved = std::fs::read_to_string(&store).unwrap();
+    assert!(!saved.contains(&key), "the Auth Key was saved");
+    assert!(saved.contains(supertag_protocol::CREDENTIAL_SECRET_PREFIX));
+    // The one-time key admits no second device.
+    let second = ControlPlaneState::default();
+    assert!(
+        second
+            .save_control_plane(
+                &directory.path().join("other.json"),
+                address,
+                "Again".into(),
+                key,
+            )
+            .await
+            .is_err()
+    );
+    control_plane.abort();
+    plane.abort();
 }
 
 #[tokio::test]

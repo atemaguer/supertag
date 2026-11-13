@@ -511,7 +511,7 @@ async fn question_report_contract(
     );
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),
@@ -750,7 +750,11 @@ async fn report_objectives(
     ));
     store.finish_task(other, &finish(&attempt)).await.unwrap();
     assert_eq!(
-        store.get_objective("objective").await.unwrap().status,
+        store
+            .get_objective("operator:local", "objective")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Working as i32
     );
     let idle: i64 = sqlx::query_scalar(
@@ -792,7 +796,11 @@ async fn report_objectives(
         .await
         .unwrap();
     assert_eq!(
-        store.get_objective("objective").await.unwrap().status,
+        store
+            .get_objective("operator:local", "objective")
+            .await
+            .unwrap()
+            .status,
         ObjectiveStatus::Blocked as i32
     );
     routed_report(store, pool, host).await;

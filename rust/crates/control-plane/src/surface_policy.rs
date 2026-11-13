@@ -219,7 +219,13 @@ pub(crate) async fn reject_generic_in(tx: &mut Transaction<'_, Any>, account: &s
 
 pub fn validate_manifest_account(account: &SurfaceAccount) -> Result<()> {
     provider_identity(account)?;
-    Ok(())
+    serving_gateway(account)
+}
+
+/// A Surface Account names the enrolled Gateway that serves it.
+pub(crate) fn serving_gateway(account: &SurfaceAccount) -> Result<()> {
+    crate::store::enrollee_name(&account.gateway)
+        .map_err(|_| invalid("a Surface Account names the Gateway that serves it: gateway NAME"))
 }
 
 pub fn validate_manifest_location(

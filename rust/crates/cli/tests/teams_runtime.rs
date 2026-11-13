@@ -80,12 +80,13 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut cmd = command(&["control-plane"]);
-        cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        cmd.env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
@@ -495,12 +496,13 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
@@ -587,7 +589,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let task = |operation: &str| SubmitTaskRequest {
         output_policy: None,
@@ -656,12 +658,13 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
@@ -858,7 +861,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let decision_args = [
         "approval",
@@ -946,12 +949,13 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
 async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     database: String,
 ) -> Result<()> {
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
@@ -1047,7 +1051,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated,
+        Code::PermissionDenied,
     );
     let host = worker
         .register_host(authenticated_request(
@@ -1095,7 +1099,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated,
+        Code::PermissionDenied,
     );
     assert_eq!(
         attempts
@@ -1184,7 +1188,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let pending = mailbox
         .list_messages(authenticated_request(list.clone(), &operator_token, None)?)
@@ -1308,12 +1312,13 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
 async fn objective_questions_survive_control_plane_restart_and_answer_once(
     database: String,
 ) -> Result<()> {
-    let service_token = Uuid::new_v4().to_string();
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let plane_command = || {
         let mut cmd = command(&["control-plane"]);
-        cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        cmd.env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
@@ -1408,7 +1413,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     let staged = worker
         .ask_question(host_request(ask.clone(), &host_token, host.generation)?)
@@ -1468,7 +1473,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
             .await
             .unwrap_err()
             .code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
     // The durable question is owned by the Control Plane and remains answerable
     // after the Control Plane process is replaced.

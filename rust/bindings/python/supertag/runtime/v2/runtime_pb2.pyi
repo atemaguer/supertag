@@ -136,6 +136,14 @@ class LiveInputReceipt(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     LIVE_INPUT_RECEIPT_UNKNOWN: _ClassVar[LiveInputReceipt]
     LIVE_INPUT_RECEIPT_WITHDRAWN: _ClassVar[LiveInputReceipt]
 
+class PrincipalRole(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    PRINCIPAL_ROLE_UNSPECIFIED: _ClassVar[PrincipalRole]
+    PRINCIPAL_ROLE_OPERATOR: _ClassVar[PrincipalRole]
+    PRINCIPAL_ROLE_HOST: _ClassVar[PrincipalRole]
+    PRINCIPAL_ROLE_GATEWAY: _ClassVar[PrincipalRole]
+    PRINCIPAL_ROLE_CLIENT: _ClassVar[PrincipalRole]
+
 class TaskState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     TASK_STATE_UNSPECIFIED: _ClassVar[TaskState]
@@ -331,6 +339,11 @@ LIVE_INPUT_RECEIPT_ACCEPTED: LiveInputReceipt
 LIVE_INPUT_RECEIPT_REJECTED: LiveInputReceipt
 LIVE_INPUT_RECEIPT_UNKNOWN: LiveInputReceipt
 LIVE_INPUT_RECEIPT_WITHDRAWN: LiveInputReceipt
+PRINCIPAL_ROLE_UNSPECIFIED: PrincipalRole
+PRINCIPAL_ROLE_OPERATOR: PrincipalRole
+PRINCIPAL_ROLE_HOST: PrincipalRole
+PRINCIPAL_ROLE_GATEWAY: PrincipalRole
+PRINCIPAL_ROLE_CLIENT: PrincipalRole
 TASK_STATE_UNSPECIFIED: TaskState
 TASK_STATE_QUEUED: TaskState
 TASK_STATE_RUNNING: TaskState
@@ -1643,8 +1656,7 @@ class SettleInputRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., input_id: _Optional[str] = ..., receipt: _Optional[_Union[LiveInputReceipt, str]] = ...) -> None: ...
 
 class CreateAuthKeyRequest(_message.Message):
-    __slots__ = ("host_id", "operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "name")
-    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "name", "role")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     KEY_DIGEST_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_IN_MS_FIELD_NUMBER: _ClassVar[int]
@@ -1654,7 +1666,7 @@ class CreateAuthKeyRequest(_message.Message):
     EPHEMERAL_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
-    host_id: str
+    ROLE_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     key_digest: bytes
     expires_in_ms: int
@@ -1664,11 +1676,11 @@ class CreateAuthKeyRequest(_message.Message):
     ephemeral: bool
     labels: _containers.RepeatedScalarFieldContainer[str]
     name: str
-    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., name: _Optional[str] = ...) -> None: ...
+    role: PrincipalRole
+    def __init__(self, operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., name: _Optional[str] = ..., role: _Optional[_Union[PrincipalRole, str]] = ...) -> None: ...
 
 class AuthKey(_message.Message):
-    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "revoked", "name", "created_at_ms", "used")
-    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("expires_at_ms", "allowed_tag_ids", "all_tags", "reusable", "ephemeral", "labels", "revoked", "name", "created_at_ms", "used", "role")
     EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
     ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
@@ -1679,7 +1691,7 @@ class AuthKey(_message.Message):
     NAME_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     USED_FIELD_NUMBER: _ClassVar[int]
-    host_id: str
+    ROLE_FIELD_NUMBER: _ClassVar[int]
     expires_at_ms: int
     allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     all_tags: bool
@@ -1690,13 +1702,8 @@ class AuthKey(_message.Message):
     name: str
     created_at_ms: int
     used: bool
-    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., revoked: _Optional[bool] = ..., name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., used: _Optional[bool] = ...) -> None: ...
-
-class RevokeHostRequest(_message.Message):
-    __slots__ = ("host_id",)
-    HOST_ID_FIELD_NUMBER: _ClassVar[int]
-    host_id: str
-    def __init__(self, host_id: _Optional[str] = ...) -> None: ...
+    role: PrincipalRole
+    def __init__(self, expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ..., reusable: _Optional[bool] = ..., ephemeral: _Optional[bool] = ..., labels: _Optional[_Iterable[str]] = ..., revoked: _Optional[bool] = ..., name: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., used: _Optional[bool] = ..., role: _Optional[_Union[PrincipalRole, str]] = ...) -> None: ...
 
 class RegisterHostRequest(_message.Message):
     __slots__ = ("incarnation_id",)
@@ -1713,30 +1720,6 @@ class HostRecord(_message.Message):
     generation: int
     revoked: bool
     def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
-
-class EnrollHostRequest(_message.Message):
-    __slots__ = ("host_id", "operation_id", "token_digest")
-    HOST_ID_FIELD_NUMBER: _ClassVar[int]
-    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
-    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    host_id: str
-    operation_id: str
-    token_digest: bytes
-    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., token_digest: _Optional[bytes] = ...) -> None: ...
-
-class PrivateEnrollHostRequest(_message.Message):
-    __slots__ = ("enrollment", "key_digest")
-    ENROLLMENT_FIELD_NUMBER: _ClassVar[int]
-    KEY_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    enrollment: EnrollHostRequest
-    key_digest: bytes
-    def __init__(self, enrollment: _Optional[_Union[EnrollHostRequest, _Mapping]] = ..., key_digest: _Optional[bytes] = ...) -> None: ...
-
-class AuthenticateHostRequest(_message.Message):
-    __slots__ = ("token_digest",)
-    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    token_digest: bytes
-    def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
     __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision")
@@ -2889,7 +2872,7 @@ class RuntimeActions(_message.Message):
     def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2908,6 +2891,7 @@ class Objective(_message.Message):
     COMPLETION_SUMMARY_FIELD_NUMBER: _ClassVar[int]
     CANCELLED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     CANCELLATION_REASON_FIELD_NUMBER: _ClassVar[int]
+    CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -2926,7 +2910,8 @@ class Objective(_message.Message):
     completion_summary: str
     cancelled_at_ms: int
     cancellation_reason: str
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ...) -> None: ...
+    created_by: str
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ...) -> None: ...
 
 class Team(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")

@@ -18,11 +18,9 @@ impl conversations_server::Conversations for Api {
         &self,
         request: Request<ListConversationsRequest>,
     ) -> Result<Response<ListConversationsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { client(channel).list_conversations(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            client(channel).list_conversations(request).await
+        })
         .await
     }
 
@@ -30,11 +28,9 @@ impl conversations_server::Conversations for Api {
         &self,
         request: Request<ListMessagesRequest>,
     ) -> Result<Response<ListMessagesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { client(channel).list_messages(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            client(channel).list_messages(request).await
+        })
         .await
     }
 
@@ -42,11 +38,9 @@ impl conversations_server::Conversations for Api {
         &self,
         request: Request<SendMessageRequest>,
     ) -> Result<Response<ConversationMessage>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { client(channel).send_message(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            client(channel).send_message(request).await
+        })
         .await
     }
 
@@ -54,11 +48,9 @@ impl conversations_server::Conversations for Api {
         &self,
         request: Request<GetMessageRequest>,
     ) -> Result<Response<ConversationMessage>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { client(channel).get_message(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            client(channel).get_message(request).await
+        })
         .await
     }
 
@@ -66,11 +58,9 @@ impl conversations_server::Conversations for Api {
         &self,
         request: Request<ListMessageEventsRequest>,
     ) -> Result<Response<ListEventsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { client(channel).list_message_events(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            client(channel).list_message_events(request).await
+        })
         .await
     }
 }

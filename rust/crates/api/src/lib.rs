@@ -1,21 +1,21 @@
 //! The Control Plane's public API tier.
 //!
-//! This tier holds no durable state. It authenticates operator clients and Worker Hosts, serves
-//! Watch fan-out and transfers (checkpoints, workspace bundles, artifacts), and forwards every call
-//! to the state owner over a [`ProtocolChannel`]. The state owner and its controllers live in
+//! This tier holds no durable state. It authenticates every caller (operators, Worker Hosts,
+//! Gateways and clients) in one authorization layer ([`authorize`]), serves Watch fan-out and
+//! transfers (checkpoints, workspace bundles, artifacts), and forwards every call to the state
+//! owner over a [`ProtocolChannel`]. The state owner and its controllers live in
 //! `supertag-control-plane`. One process serves both, over an in-process channel ([`in_process`]).
 //! This tier keeps nothing but transfer files, so it could later run as replicas in front of one
 //! state owner that share the transfer directory; no process runs it alone yet.
 //!
-//! [`Api::routes`] lists every public service. The process serving them puts its layers, the
-//! protocol fence first, in front of all of them at once, which is where one authorization layer
-//! covers the whole public surface. Until that layer exists, each service authenticates its own
-//! callers here: operators and Worker Hosts in this module, and Gateways in [`gateway_access`].
+//! [`Api::routes`] lists every public service. The process serving them puts the protocol fence
+//! and then [`Api::authorize`] in front of all of them at once.
 
 mod artifact_publications;
 mod attempt_safety;
+pub mod authorize;
 mod conversations;
-mod gateway_access;
+mod enrollments;
 mod github_publications;
 mod github_workspaces;
 pub mod in_process;
@@ -39,19 +39,14 @@ mod watch;
 mod work_sessions;
 mod workspace_mounts;
 
+pub use authorize::{Caller, Role};
 pub use watch::ApiWatch;
-
-use operator_access::OperatorCredential;
 
 use std::{future::Future, sync::Arc, time::Duration};
 
 use anyhow::{Context, ensure};
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::v2::{
-    host_directory_client::HostDirectoryClient,
-    host_enrollment_server::{HostEnrollment, HostEnrollmentServer},
     objectives_client::ObjectivesClient,
     objectives_server::{Objectives, ObjectivesServer},
     operator_client::OperatorClient,
@@ -60,16 +55,16 @@ use supertag_protocol::v2::{
     worker_host_server::{WorkerHost, WorkerHostServer},
     *,
 };
-use supertag_protocol::{HOST_GENERATION_HEADER, host_generation};
+use supertag_protocol::{HOST_GENERATION_HEADER, INTERNAL_PRINCIPAL_HEADER, host_generation};
 use tonic::{
-    Code, Request, Response, Status,
+    Request, Response, Status,
     metadata::{Ascii, MetadataValue},
 };
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 const AUTHORIZATION: &str = "authorization";
-const PRINCIPAL: &str = "x-supertag-principal";
+const PRINCIPAL: &str = INTERNAL_PRINCIPAL_HEADER;
 const TIMEOUT: &str = "grpc-timeout";
 
 #[derive(Clone)]
@@ -79,44 +74,48 @@ pub struct Api {
 }
 
 struct Credentials {
-    service: MetadataValue<Ascii>,
-    operator: Principal,
-    /// SHA-256 of the admin operator token, for Gateways resolving a presented credential.
-    operator_digest: Vec<u8>,
-    gateway: Arc<gateway_access::GatewayAccess>,
-}
-
-struct Principal {
-    authorization: MetadataValue<Ascii>,
-    identity: MetadataValue<Ascii>,
+    /// This process's internal credential for the state owner.
+    internal: MetadataValue<Ascii>,
+    /// The admin operator token, as a bearer header value.
+    admin: MetadataValue<Ascii>,
+    /// The admin operator's principal, such as `operator:local`.
+    admin_principal: String,
 }
 
 impl Api {
-    /// The operator and private service tokens come from process configuration.
-    /// The Control Plane authenticates enrolled Worker Host credentials.
+    /// `internal_token` reaches the state owner; the admin operator token and principal come from
+    /// process configuration. Every other credential is resolved by the state owner on each call.
     pub fn new(
         control_plane: ProtocolChannel,
-        service_token: String,
-        operator_token: String,
-        operator_principal: String,
+        internal_token: String,
+        admin_token: String,
+        admin_principal: String,
     ) -> anyhow::Result<Self> {
         ensure!(
-            service_token != operator_token,
-            "service and operator tokens must be distinct"
+            internal_token != admin_token,
+            "internal and operator tokens must be distinct"
         );
         ensure!(
-            !operator_principal.starts_with("operator:token:"),
-            "the admin operator principal must not name an Operator Token"
+            admin_principal.strip_prefix("operator:").is_some_and(|id| {
+                !id.is_empty()
+                    && !id.starts_with("token:")
+                    && id.len() <= 255
+                    && id.bytes().all(|byte| byte.is_ascii_graphic())
+            }),
+            "the admin operator principal must be operator:ID and not name an Operator Token"
         );
-        let service = bearer(&service_token).context("invalid service credential")?;
+        ensure!(
+            !admin_token.starts_with(supertag_protocol::OPERATOR_TOKEN_SECRET_PREFIX)
+                && !admin_token.starts_with(supertag_protocol::AUTH_KEY_SECRET_PREFIX)
+                && !admin_token.starts_with(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            "the admin operator token must not look like an issued credential"
+        );
         Ok(Self {
             control_plane,
             credentials: Arc::new(Credentials {
-                gateway: Arc::new(gateway_access::GatewayAccess::new(service.clone())),
-                service,
-                operator: Principal::new(&operator_token, &operator_principal, "operator:")
-                    .context("invalid operator configuration")?,
-                operator_digest: Sha256::digest(operator_token.as_bytes()).to_vec(),
+                internal: bearer(&internal_token).context("invalid internal credential")?,
+                admin: bearer(&admin_token).context("invalid operator token")?,
+                admin_principal,
             }),
         })
     }
@@ -133,9 +132,9 @@ impl Api {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    /// Worker Hosts and operator clients negotiate their protocol version here
-    /// before any other call; [`supertag_protocol::negotiation::fence`] refuses
-    /// a call that did not.
+    /// Worker Hosts, Gateways and clients negotiate their protocol version here before any other
+    /// call; [`supertag_protocol::negotiation::fence`] refuses a call that did not. Negotiation
+    /// carries no credential, so the negotiated role grants nothing.
     pub fn negotiation_service(
         &self,
     ) -> protocol_negotiation_server::ProtocolNegotiationServer<
@@ -145,16 +144,16 @@ impl Api {
             ServiceRole::ControlPlane,
             &[
                 ServiceRole::WorkerHost,
-                ServiceRole::Operator,
+                ServiceRole::Client,
                 ServiceRole::Gateway,
             ],
         )
         .service()
     }
 
-    /// Every service of the public listener: the operator and Worker Host API, transfers, Watch
-    /// fan-out, health, and the Gateway services. Gateway calls are admitted here and relayed to
-    /// the state owner over `state_owner`. `shutdown` ends open Watch streams.
+    /// Every service of the public listener: the operator, client, Worker Host and Gateway API,
+    /// enrollment, transfers, Watch fan-out, and health. Gateway services are relayed to the state
+    /// owner over `state_owner`. `shutdown` ends open Watch streams.
     pub async fn routes(
         &self,
         transfers: transfers::ApiTransfers,
@@ -163,7 +162,6 @@ impl Api {
     ) -> tonic::service::Routes {
         use passthrough::Passthrough;
         use tonic::server::NamedService;
-        let gateway = self.credentials.gateway.clone();
         let (health, health_service) = tonic_health::server::health_reporter();
         let mut names = Vec::new();
         let mut routes = tonic::service::Routes::builder();
@@ -177,19 +175,19 @@ impl Api {
                 routes.add_service(service);
             })*};
         }
+        let internal = self.credentials.internal.clone();
         add!(
             self.negotiation_service(),
             self.operator_service(),
             self.operator_access_service(),
+            self.enrollments_service(),
             self.conversations_service(),
             self.worker_host_service(),
-            self.host_enrollment_service(),
             transfers.artifact_catalog_service(),
             transfers.artifact_volumes_service(),
             self.workspace_volumes_service(),
             self.placement_service(),
             self.auth_keys_service(),
-            self.host_credentials_service(),
             self.attempt_workspace_mounts_service(),
             transfers.attempt_artifacts_service(),
             transfers.artifact_transfer_service(),
@@ -217,18 +215,17 @@ impl Api {
             self.metrics_service(),
             self.objective_overview_service(),
             self.operator_events_service(shutdown),
-            self.operator_directory_service(),
             Passthrough::<connector_server::ConnectorServer<()>>::new(
                 state_owner.clone(),
-                gateway.clone()
+                internal.clone()
             ),
             Passthrough::<reply_progress_server::ReplyProgressServer<()>>::new(
                 state_owner.clone(),
-                gateway.clone()
+                internal.clone()
             ),
             Passthrough::<operator_notifications_server::OperatorNotificationsServer<()>>::new(
                 state_owner,
-                gateway
+                internal
             ),
         );
         for name in names {
@@ -240,46 +237,38 @@ impl Api {
         routes.routes()
     }
 
-    pub fn host_enrollment_service(&self) -> HostEnrollmentServer<Self> {
-        HostEnrollmentServer::new(self.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
-    }
-
     pub fn objectives_service(&self) -> ObjectivesServer<Self> {
         ObjectivesServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
+    /// Forwards a call with the caller's principal. A host caller's call also carries its
+    /// registered generation.
     async fn forward<T, R, F>(
         &self,
         request: Request<T>,
-        principal: &Principal,
         call: impl FnOnce(ProtocolChannel, Request<T>) -> F,
     ) -> Result<Response<R>, Status>
     where
         F: Future<Output = Result<Response<R>, Status>>,
     {
-        let presented = self.credentials.presented_operator(&request)?;
-        let OperatorCredential::Token(token_digest) = presented else {
-            let (request, timeout) = self.credentials.forwarded(request, principal)?;
-            return tokio::time::timeout(timeout, call(self.control_plane.clone(), request))
-                .await
-                .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
-                .map_err(supertag_protocol::upstream_status);
-        };
         let timeout = request_budget(&request)?;
         let deadline = tokio::time::Instant::now() + timeout;
         tokio::time::timeout_at(deadline, async {
-            let identity = self.authenticate_operator(token_digest, timeout).await?;
+            let caller = self.caller(&request).await?;
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 return Err(Status::deadline_exceeded("Control Plane request timed out"));
             }
-            let upstream = self
-                .credentials
-                .upstream(request.into_inner(), identity, remaining);
+            let mut upstream =
+                self.credentials
+                    .upstream(request.into_inner(), caller.identity()?, remaining);
+            if caller.role == Role::Host {
+                upstream
+                    .metadata_mut()
+                    .insert(HOST_GENERATION_HEADER, caller.generation.into());
+            }
             call(self.control_plane.clone(), upstream).await
         })
         .await
@@ -287,6 +276,7 @@ impl Api {
         .map_err(supertag_protocol::upstream_status)
     }
 
+    /// Forwards a Worker Host call. A `registered` call must name the host's current generation.
     async fn forward_host<T, R, F>(
         &self,
         request: Request<T>,
@@ -296,26 +286,27 @@ impl Api {
     where
         F: Future<Output = Result<Response<R>, Status>>,
     {
-        let token_digest = self.credentials.host_credential_digest(&request)?;
         let timeout = request_budget(&request)?;
         let deadline = tokio::time::Instant::now() + timeout;
         tokio::time::timeout_at(deadline, async {
-            let host = self.authenticate_host(token_digest, timeout).await?;
+            let host = self.caller(&request).await?;
+            if host.role != Role::Host {
+                return Err(Status::permission_denied(
+                    "caller is not allowed to use this method",
+                ));
+            }
             if registered && host_generation(&request)? != host.generation {
                 return Err(Status::permission_denied(
                     "Worker Host generation is no longer current",
                 ));
             }
-            let identity = format!("host:{}", host.host_id)
-                .parse()
-                .map_err(|_| Status::internal("invalid enrolled Worker Host identity"))?;
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 return Err(Status::deadline_exceeded("Control Plane request timed out"));
             }
-            let mut upstream = self
-                .credentials
-                .upstream(request.into_inner(), identity, remaining);
+            let mut upstream =
+                self.credentials
+                    .upstream(request.into_inner(), host.identity()?, remaining);
             if registered {
                 upstream
                     .metadata_mut()
@@ -329,24 +320,12 @@ impl Api {
         .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
     }
 
-    async fn authenticate_host(
-        &self,
-        token_digest: Vec<u8>,
-        timeout: Duration,
-    ) -> Result<HostRecord, Status> {
-        let request = self.credentials.upstream(
-            AuthenticateHostRequest { token_digest },
-            MetadataValue::from_static("service:gateway"),
-            timeout,
-        );
-        let host = host_directory_client(self.control_plane.clone())
-            .authenticate(request)
-            .await
-            .map_err(host_authentication_error)?
-            .into_inner();
-        if host.revoked {
-            return Err(Status::unauthenticated(
-                "valid Worker Host credential required",
+    /// Checks that a Worker Host call names its current generation, for calls that do not forward.
+    pub(crate) async fn registered_host<T>(&self, request: &Request<T>) -> Result<Caller, Status> {
+        let host = self.caller(request).await?;
+        if host.role != Role::Host || host_generation(request)? != host.generation {
+            return Err(Status::permission_denied(
+                "Worker Host generation is no longer current",
             ));
         }
         Ok(host)
@@ -354,98 +333,20 @@ impl Api {
 }
 
 impl Credentials {
-    fn forwarded<T>(
-        &self,
-        request: Request<T>,
-        principal: &Principal,
-    ) -> Result<(Request<T>, Duration), Status> {
-        principal.authorize(&request)?;
-        let timeout = request_budget(&request)?;
-        Ok((
-            self.upstream(request.into_inner(), principal.identity.clone(), timeout),
-            timeout,
-        ))
-    }
-
     fn upstream<T>(
         &self,
         message: T,
         identity: MetadataValue<Ascii>,
         timeout: Duration,
     ) -> Request<T> {
-        let mut upstream = self.authenticated(message, identity);
-        upstream.set_timeout(timeout);
-        upstream
-    }
-
-    fn authenticated<T>(&self, message: T, identity: MetadataValue<Ascii>) -> Request<T> {
         // Rebuild metadata and extensions so caller claims are never forwarded.
         let mut upstream = Request::new(message);
         upstream
             .metadata_mut()
-            .insert(AUTHORIZATION, self.service.clone());
+            .insert(AUTHORIZATION, self.internal.clone());
         upstream.metadata_mut().insert(PRINCIPAL, identity);
+        upstream.set_timeout(timeout);
         upstream
-    }
-
-    fn host_credential_digest<T>(&self, request: &Request<T>) -> Result<Vec<u8>, Status> {
-        let mut values = request.metadata().get_all(AUTHORIZATION).iter();
-        let invalid = || Status::unauthenticated("valid bearer credential required");
-        let value = values.next().ok_or_else(invalid)?;
-        if values.next().is_some()
-            || bool::from(
-                value
-                    .as_encoded_bytes()
-                    .ct_eq(self.service.as_encoded_bytes()),
-            )
-            || bool::from(
-                value
-                    .as_encoded_bytes()
-                    .ct_eq(self.operator.authorization.as_encoded_bytes()),
-            )
-        {
-            return Err(invalid());
-        }
-        let token = value
-            .to_str()
-            .ok()
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .filter(|token| valid_bearer_token(token))
-            .ok_or_else(invalid)?;
-        Ok(Sha256::digest(token.as_bytes()).to_vec())
-    }
-}
-
-impl Principal {
-    fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
-        let values = request.metadata().get_all(AUTHORIZATION);
-        let mut entries = values.iter();
-        let valid = entries.next().is_some_and(|value| {
-            bool::from(
-                value
-                    .as_encoded_bytes()
-                    .ct_eq(self.authorization.as_encoded_bytes()),
-            )
-        });
-        if !valid || entries.next().is_some() {
-            return Err(Status::unauthenticated("valid bearer credential required"));
-        }
-        Ok(())
-    }
-}
-
-impl Principal {
-    fn new(token: &str, identity: &str, prefix: &str) -> anyhow::Result<Self> {
-        ensure!(
-            identity.strip_prefix(prefix).is_some_and(|id| {
-                !id.is_empty() && id.len() <= 255 && id.bytes().all(|byte| byte.is_ascii_graphic())
-            }),
-            "principal has invalid role or identity"
-        );
-        Ok(Self {
-            authorization: bearer(token)?,
-            identity: identity.parse().context("invalid principal metadata")?,
-        })
     }
 }
 
@@ -473,16 +374,6 @@ fn request_budget<T>(request: &Request<T>) -> Result<Duration, Status> {
         return Err(Status::deadline_exceeded("request deadline elapsed"));
     }
     Ok(timeout)
-}
-
-fn host_authentication_error(error: Status) -> Status {
-    let error = supertag_protocol::upstream_status(error);
-    match error.code() {
-        Code::PermissionDenied | Code::Unauthenticated => {
-            Status::unauthenticated("valid Worker Host credential required")
-        }
-        _ => error,
-    }
 }
 
 fn client_timeout<T>(request: &Request<T>) -> Result<Duration, Status> {
@@ -528,12 +419,6 @@ fn worker_host_client(channel: ProtocolChannel) -> WorkerHostClient<ProtocolChan
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-fn host_directory_client(channel: ProtocolChannel) -> HostDirectoryClient<ProtocolChannel> {
-    HostDirectoryClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES)
-}
-
 fn objectives_client(channel: ProtocolChannel) -> ObjectivesClient<ProtocolChannel> {
     ObjectivesClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -546,11 +431,9 @@ impl Objectives for Api {
         &self,
         request: Request<CreateObjectiveRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).create_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).create_objective(request).await
+        })
         .await
     }
 
@@ -558,11 +441,9 @@ impl Objectives for Api {
         &self,
         request: Request<GetObjectiveRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).get_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).get_objective(request).await
+        })
         .await
     }
 
@@ -570,11 +451,9 @@ impl Objectives for Api {
         &self,
         request: Request<ListObjectivesRequest>,
     ) -> Result<Response<ListObjectivesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).list_objectives(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).list_objectives(request).await
+        })
         .await
     }
 
@@ -582,15 +461,11 @@ impl Objectives for Api {
         &self,
         request: Request<ListObjectiveCommitReviewsRequest>,
     ) -> Result<Response<ListObjectiveCommitReviewsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                objectives_client(channel)
-                    .list_commit_reviews(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel)
+                .list_commit_reviews(request)
+                .await
+        })
         .await
     }
 
@@ -598,11 +473,9 @@ impl Objectives for Api {
         &self,
         request: Request<SetObjectiveLimitsRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).set_limits(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).set_limits(request).await
+        })
         .await
     }
 
@@ -610,15 +483,11 @@ impl Objectives for Api {
         &self,
         request: Request<SetObjectiveRuntimeActionsRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                objectives_client(channel)
-                    .set_runtime_actions(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel)
+                .set_runtime_actions(request)
+                .await
+        })
         .await
     }
 
@@ -626,11 +495,9 @@ impl Objectives for Api {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).pause_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).pause_objective(request).await
+        })
         .await
     }
 
@@ -638,11 +505,9 @@ impl Objectives for Api {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).resume_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).resume_objective(request).await
+        })
         .await
     }
 
@@ -650,11 +515,9 @@ impl Objectives for Api {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).cancel_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).cancel_objective(request).await
+        })
         .await
     }
 
@@ -662,11 +525,9 @@ impl Objectives for Api {
         &self,
         request: Request<ReviewObjectiveRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { objectives_client(channel).review_objective(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).review_objective(request).await
+        })
         .await
     }
 
@@ -674,13 +535,9 @@ impl Objectives for Api {
         &self,
         request: Request<CompleteObjectiveRequest>,
     ) -> Result<Response<Objective>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                objectives_client(channel).complete_objective(request).await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            objectives_client(channel).complete_objective(request).await
+        })
         .await
     }
 }
@@ -691,11 +548,9 @@ impl Operator for Api {
         &self,
         request: Request<GetReplyDeliveryRequest>,
     ) -> Result<Response<ReplyDelivery>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).get_reply_delivery(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).get_reply_delivery(request).await
+        })
         .await
     }
 
@@ -703,15 +558,11 @@ impl Operator for Api {
         &self,
         request: Request<ListReplyDeliveriesRequest>,
     ) -> Result<Response<ListReplyDeliveriesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                operator_client(channel)
-                    .list_reply_deliveries(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel)
+                .list_reply_deliveries(request)
+                .await
+        })
         .await
     }
 
@@ -719,11 +570,9 @@ impl Operator for Api {
         &self,
         request: Request<ResolveReplyRequest>,
     ) -> Result<Response<ReplyDelivery>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).resolve_reply(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).resolve_reply(request).await
+        })
         .await
     }
 
@@ -731,11 +580,9 @@ impl Operator for Api {
         &self,
         request: Request<ListHostsRequest>,
     ) -> Result<Response<ListHostsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).list_hosts(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).list_hosts(request).await
+        })
         .await
     }
 
@@ -743,11 +590,9 @@ impl Operator for Api {
         &self,
         request: Request<GetHostRequest>,
     ) -> Result<Response<WorkerHostStatus>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).get_host(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).get_host(request).await
+        })
         .await
     }
 
@@ -755,11 +600,9 @@ impl Operator for Api {
         &self,
         request: Request<SetHostDrainingRequest>,
     ) -> Result<Response<WorkerHostStatus>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).set_host_draining(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).set_host_draining(request).await
+        })
         .await
     }
 
@@ -767,41 +610,23 @@ impl Operator for Api {
         &self,
         request: Request<CreateAuthKeyRequest>,
     ) -> Result<Response<AuthKey>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).create_auth_key(request).await },
-        )
-        .await
-    }
-
-    async fn revoke_host(
-        &self,
-        request: Request<RevokeHostRequest>,
-    ) -> Result<Response<HostRecord>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).revoke_host(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).create_auth_key(request).await
+        })
         .await
     }
 
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).put_tag(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).put_tag(request).await
+        })
         .await
     }
 
     async fn get_tag(&self, request: Request<GetTagRequest>) -> Result<Response<Tag>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).get_tag(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).get_tag(request).await
+        })
         .await
     }
 
@@ -809,11 +634,9 @@ impl Operator for Api {
         &self,
         request: Request<RetireTagRequest>,
     ) -> Result<Response<RetireTagResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).retire_tag(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).retire_tag(request).await
+        })
         .await
     }
 
@@ -821,11 +644,9 @@ impl Operator for Api {
         &self,
         request: Request<ListTagsRequest>,
     ) -> Result<Response<ListTagsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).list_tags(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).list_tags(request).await
+        })
         .await
     }
 
@@ -835,22 +656,18 @@ impl Operator for Api {
     ) -> Result<Response<Task>, Status> {
         supertag_protocol::crash_point("api.submit", "before-forward");
         let task = self
-            .forward(
-                request,
-                &self.credentials.operator,
-                |channel, request| async { operator_client(channel).submit_task(request).await },
-            )
+            .forward(request, |channel, request| async {
+                operator_client(channel).submit_task(request).await
+            })
             .await?;
         supertag_protocol::crash_point("api.submit", "after-forward");
         Ok(task)
     }
 
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).get_task(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).get_task(request).await
+        })
         .await
     }
 
@@ -858,13 +675,9 @@ impl Operator for Api {
         &self,
         request: Request<GetSessionDeliveryRequest>,
     ) -> Result<Response<SessionDelivery>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                operator_client(channel).get_session_delivery(request).await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).get_session_delivery(request).await
+        })
         .await
     }
 
@@ -872,11 +685,9 @@ impl Operator for Api {
         &self,
         request: Request<ListNativeUsageRequest>,
     ) -> Result<Response<ListNativeUsageResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).list_native_usage(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).list_native_usage(request).await
+        })
         .await
     }
 
@@ -884,11 +695,9 @@ impl Operator for Api {
         &self,
         request: Request<ListEventsRequest>,
     ) -> Result<Response<ListEventsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).list_events(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).list_events(request).await
+        })
         .await
     }
 
@@ -896,11 +705,9 @@ impl Operator for Api {
         &self,
         request: Request<CancelTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).cancel_task(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).cancel_task(request).await
+        })
         .await
     }
 
@@ -908,38 +715,10 @@ impl Operator for Api {
         &self,
         request: Request<ResolveAttemptRequest>,
     ) -> Result<Response<AttemptResolution>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { operator_client(channel).resolve_attempt(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            operator_client(channel).resolve_attempt(request).await
+        })
         .await
-    }
-}
-
-#[tonic::async_trait]
-impl HostEnrollment for Api {
-    async fn enroll_host(
-        &self,
-        request: Request<EnrollHostRequest>,
-    ) -> Result<Response<HostRecord>, Status> {
-        let key_digest = self.credentials.host_credential_digest(&request)?;
-        let timeout = request_budget(&request)?;
-        let upstream = self.credentials.upstream(
-            PrivateEnrollHostRequest {
-                enrollment: Some(request.into_inner()),
-                key_digest,
-            },
-            MetadataValue::from_static("service:gateway"),
-            timeout,
-        );
-        tokio::time::timeout(
-            timeout,
-            host_directory_client(self.control_plane.clone()).enroll(upstream),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
-        .map_err(host_authentication_error)
     }
 }
 

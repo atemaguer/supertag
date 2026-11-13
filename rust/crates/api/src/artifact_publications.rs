@@ -24,99 +24,81 @@ impl artifact_publications_server::ArtifactPublications for Api {
         &self,
         request: Request<PublishArtifactRequest>,
     ) -> Result<Response<ArtifactPublication>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).publish(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).publish(request).await
+        })
         .await
     }
     async fn consume(
         &self,
         request: Request<ConsumeArtifactPublicationRequest>,
     ) -> Result<Response<ArtifactConsumptionApproval>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).consume(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).consume(request).await
+        })
         .await
     }
     async fn withdraw_publication(
         &self,
         request: Request<WithdrawArtifactApprovalRequest>,
     ) -> Result<Response<ArtifactPublication>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).withdraw_publication(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).withdraw_publication(request).await
+        })
         .await
     }
     async fn withdraw_consumption(
         &self,
         request: Request<WithdrawArtifactApprovalRequest>,
     ) -> Result<Response<ArtifactConsumptionApproval>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).withdraw_consumption(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).withdraw_consumption(request).await
+        })
         .await
     }
     async fn get_publication(
         &self,
         request: Request<GetArtifactApprovalRequest>,
     ) -> Result<Response<ArtifactPublication>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_publication(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_publication(request).await
+        })
         .await
     }
     async fn get_consumption(
         &self,
         request: Request<GetArtifactApprovalRequest>,
     ) -> Result<Response<ArtifactConsumptionApproval>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_consumption(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_consumption(request).await
+        })
         .await
     }
     async fn list_publications(
         &self,
         request: Request<ListObjectiveArtifactApprovalsRequest>,
     ) -> Result<Response<ListArtifactPublicationsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_publications(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_publications(request).await
+        })
         .await
     }
     async fn list_consumptions(
         &self,
         request: Request<ListObjectiveArtifactApprovalsRequest>,
     ) -> Result<Response<ListArtifactConsumptionsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_consumptions(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_consumptions(request).await
+        })
         .await
     }
     async fn list_audit(
         &self,
         request: Request<ListArtifactApprovalAuditRequest>,
     ) -> Result<Response<ListArtifactApprovalAuditResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_audit(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_audit(request).await
+        })
         .await
     }
 }

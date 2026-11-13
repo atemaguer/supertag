@@ -27,14 +27,15 @@ use tokio::{
 
 const CLI: &str = env!("CARGO_BIN_EXE_supertag");
 const OPERATOR: &str = "fixture-operator-token";
-const GATEWAY: &str = "fixture-private-gateway-token";
+const GATEWAY: &str = "stcr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn cli(args: &[&str]) -> Command {
     let mut command = Command::new(CLI);
     command
         .args(args)
         .env_clear()
-        .env("SUPERTAG_GATEWAY_TOKEN", GATEWAY)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", GATEWAY)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", GATEWAY)
         .env("SUPERTAG_OPERATOR_TOKEN", OPERATOR)
         .stdin(Stdio::null())
         .kill_on_drop(true);

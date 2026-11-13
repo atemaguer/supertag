@@ -28,7 +28,6 @@ Commands:
   context-set           Define reusable Context Sets and apply them at surface locations
   surface-account       Record verified connector accounts for surface policy
   surface-location      Bind a connector account's locations to a Tag and its policy
-  gateway-credential    Store or delete Gateway collaboration credentials in the configured credential vault
   host                  Enroll, drain, resume, and revoke Worker Hosts, and rotate their credentials
   placement             Choose which labelled Worker Hosts run a Tag, and explain waiting Tasks
   question              Answer questions Objective Tasks ask the operator
@@ -48,11 +47,12 @@ Commands:
   version               Print this CLI's version and the version of the running local services
   config                Print the resolved supertag.yaml that supertag up runs
   control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
-  gateway               Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as a client of the Control Plane
+  gateway               Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke, and rotate the credentials of Gateways
   tui                   Open the terminal UI for a saved or explicitly configured Control Plane
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
-  auth-key              Create and revoke Auth Keys that enroll Worker Hosts
-  connect               Check an operator token against a Control Plane, then save the Control Plane under a name for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+  client                Revoke client devices and rotate their credentials
+  auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
+  connect               Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
   tag                   Set up and retire Tags
   task                  Submit, cancel, and steer Tasks, and read their events, usage, and published results
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
@@ -138,7 +138,7 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
+Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
 ```
 
 ## `supertag setup surface`
@@ -170,6 +170,8 @@ Usage: supertag setup surface slack [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <GATEWAY>
+          The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local services' Gateway is local [default: local]
       --control-plane <URL|NAME>
           Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
@@ -200,6 +202,8 @@ Usage: supertag setup surface github [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <GATEWAY>
+          The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local services' Gateway is local [default: local]
       --control-plane <URL|NAME>
           Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
@@ -236,6 +240,8 @@ Usage: supertag setup surface linear [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <GATEWAY>
+          The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local services' Gateway is local [default: local]
       --control-plane <URL|NAME>
           Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
@@ -265,6 +271,8 @@ Usage: supertag setup surface lark [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <GATEWAY>
+          The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local services' Gateway is local [default: local]
       --control-plane <URL|NAME>
           Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
@@ -294,6 +302,8 @@ Usage: supertag setup surface teams [OPTIONS]
 Options:
       --name <NAME>
           The Surface Account name, used in supertag.yaml and the credential vault. Defaults to the provider name
+      --gateway <GATEWAY>
+          The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local services' Gateway is local [default: local]
       --control-plane <URL|NAME>
           Control Plane URL or saved Control Plane name. Defaults to this machine's running local services
       --state-directory <STATE_DIRECTORY>
@@ -1010,50 +1020,6 @@ Options:
           Print help
 ```
 
-## `supertag gateway-credential`
-
-```text
-Store or delete Gateway collaboration credentials in the configured credential vault
-
-Usage: supertag gateway-credential <COMMAND>
-
-Commands:
-  store   Store or replace a credential from a JSON object of strings on standard input, such as `{"botToken":"...","signingSecret":"..."}` for `surface/slack/<account>`
-  delete  Delete a credential. Deleting a missing credential succeeds
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
-```
-
-## `supertag gateway-credential store`
-
-```text
-Store or replace a credential from a JSON object of strings on standard input, such as `{"botToken":"...","signingSecret":"..."}` for `surface/slack/<account>`
-
-Usage: supertag gateway-credential store <CREDENTIAL_ID>
-
-Arguments:
-  <CREDENTIAL_ID>  
-
-Options:
-  -h, --help  Print help
-```
-
-## `supertag gateway-credential delete`
-
-```text
-Delete a credential. Deleting a missing credential succeeds
-
-Usage: supertag gateway-credential delete <CREDENTIAL_ID>
-
-Arguments:
-  <CREDENTIAL_ID>  
-
-Options:
-  -h, --help  Print help
-```
-
 ## `supertag host`
 
 ```text
@@ -1064,9 +1030,9 @@ Usage: supertag host [OPTIONS] <COMMAND>
 Commands:
   drain              Stop assigning new Tasks while the Worker Host finishes current work
   resume             Allow the Worker Host to claim new Tasks again
-  enroll             Enroll this installation with a one-time Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
+  enroll             Enroll this installation with a host Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
   revoke             Revoke a Worker Host and its execution authority
-  rotate-credential  Replace an enrolled Worker Host's credential. The previous one stops working at once
+  rotate-credential  Replace a Worker Host's credential: this machine's own stopped host with --host-state-directory, or any host as an operator with HOST and --out. The previous one stops working at once
   help               Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1119,12 +1085,12 @@ Options:
 ## `supertag host enroll`
 
 ```text
-Enroll this installation with a one-time Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
+Enroll this installation with a host Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the new Worker Host's state
 
 Usage: supertag host enroll [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY> <HOST_ID>
 
 Arguments:
-  <HOST_ID>  
+  <HOST_ID>  The host's ID: it acts as host:ID. IDs are never reused
 
 Options:
       --control-plane <CONTROL_PLANE>
@@ -1159,12 +1125,12 @@ Options:
 ## `supertag host rotate-credential`
 
 ```text
-Replace an enrolled Worker Host's credential. The previous one stops working at once
+Replace a Worker Host's credential: this machine's own stopped host with --host-state-directory, or any host as an operator with HOST and --out. The previous one stops working at once
 
-Usage: supertag host rotate-credential [OPTIONS] <HOST_ID>
+Usage: supertag host rotate-credential [OPTIONS] [HOST_ID]
 
 Arguments:
-  <HOST_ID>  
+  [HOST_ID]  The host to rotate as an operator
 
 Options:
       --control-plane <URL|NAME>
@@ -1172,7 +1138,7 @@ Options:
       --out <OUT>
           Write the new credential to this new owner-only file, for a host that reads SUPERTAG_HOST_TOKEN from its own secret manager
       --host-state-directory <HOST_STATE_DIRECTORY>
-          Install the new credential in the state directory of this machine's stopped, enrolled Worker Host. It uses the credential when it next starts
+          Rotate the credential in the state directory of this machine's stopped, enrolled Worker Host, presenting its current one. It uses the new one when it next starts
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
   -h, --help
@@ -1935,9 +1901,17 @@ Options:
 ## `supertag gateway`
 
 ```text
-Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as a client of the Control Plane
+Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke, and rotate the credentials of Gateways
 
 Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
+       supertag gateway <COMMAND>
+
+Commands:
+  credential         Store or delete this machine's Gateway collaboration credentials in the configured credential vault
+  enroll             Enroll this Gateway with a gateway Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the Gateway's private state, which `supertag gateway --state-directory` then reads
+  revoke             Revoke a Gateway. Its credential is refused at once, and the connector accounts it served alone pass to the next Gateway that serves them
+  rotate-credential  Replace a Gateway's credential: this machine's own stopped Gateway with --gateway-state-directory, or any Gateway as an operator with NAME and --out
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --listen <LISTEN>
@@ -1950,6 +1924,9 @@ Options:
 
       --control-plane <CONTROL_PLANE>
           Control Plane URL this Gateway connects to
+
+      --state-directory <STATE_DIRECTORY>
+          Private directory holding the credential from `supertag gateway enroll`. Without it the Gateway reads SUPERTAG_GATEWAY_CREDENTIAL
 
       --slack-listen <SLACK_LISTEN>
           Address for Slack webhooks. Requires the Slack state directory
@@ -1983,6 +1960,109 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+```
+
+## `supertag gateway credential`
+
+```text
+Store or delete this machine's Gateway collaboration credentials in the configured credential vault
+
+Usage: supertag gateway credential <COMMAND>
+
+Commands:
+  store   Store or replace a credential from a JSON object of strings on standard input, such as `{"botToken":"...","signingSecret":"..."}` for `surface/slack/<account>`
+  delete  Delete a credential. Deleting a missing credential succeeds
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag gateway credential store`
+
+```text
+Store or replace a credential from a JSON object of strings on standard input, such as `{"botToken":"...","signingSecret":"..."}` for `surface/slack/<account>`
+
+Usage: supertag gateway credential store <CREDENTIAL_ID>
+
+Arguments:
+  <CREDENTIAL_ID>  
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag gateway credential delete`
+
+```text
+Delete a credential. Deleting a missing credential succeeds
+
+Usage: supertag gateway credential delete <CREDENTIAL_ID>
+
+Arguments:
+  <CREDENTIAL_ID>  
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag gateway enroll`
+
+```text
+Enroll this Gateway with a gateway Auth Key. Its own --control-plane and --state-directory name the Control Plane to enroll with and the Gateway's private state, which `supertag gateway --state-directory` then reads
+
+Usage: supertag gateway enroll [OPTIONS] --control-plane <CONTROL_PLANE> --state-directory <STATE_DIRECTORY> <NAME>
+
+Arguments:
+  <NAME>  The Gateway's name: it acts as gateway:NAME. Names are never reused
+
+Options:
+      --control-plane <CONTROL_PLANE>      Control Plane URL to enroll with
+      --state-directory <STATE_DIRECTORY>  Private directory for this Gateway's enrolled credential
+      --auth-key <AUTH_KEY>                Auth Key or file:PATH. Also reads SUPERTAG_AUTH_KEY
+  -h, --help                               Print help
+```
+
+## `supertag gateway revoke`
+
+```text
+Revoke a Gateway. Its credential is refused at once, and the connector accounts it served alone pass to the next Gateway that serves them
+
+Usage: supertag gateway revoke [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+  -h, --help
+          Print help
+```
+
+## `supertag gateway rotate-credential`
+
+```text
+Replace a Gateway's credential: this machine's own stopped Gateway with --gateway-state-directory, or any Gateway as an operator with NAME and --out
+
+Usage: supertag gateway rotate-credential [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  The Gateway to rotate as an operator
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+      --out <OUT>
+          Write the new credential to this new owner-only file, for a Gateway that reads SUPERTAG_GATEWAY_CREDENTIAL from its own secret manager
+      --gateway-state-directory <GATEWAY_STATE_DIRECTORY>
+          Install the new credential in the state directory of this machine's stopped, enrolled Gateway. It uses the credential when it next starts
+  -h, --help
+          Print help
 ```
 
 ## `supertag tui`
@@ -2163,16 +2243,72 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `supertag client`
+
+```text
+Revoke client devices and rotate their credentials
+
+Usage: supertag client <COMMAND>
+
+Commands:
+  revoke             Revoke a client device. Its credential is refused at once. Its history stays under its name, which is never reused
+  rotate-credential  Replace a client credential: this device's own, saved under --control-plane NAME, or any client's as an operator with NAME and --out
+  help               Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## `supertag client revoke`
+
+```text
+Revoke a client device. Its credential is refused at once. Its history stays under its name, which is never reused
+
+Usage: supertag client revoke [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+  -h, --help
+          Print help
+```
+
+## `supertag client rotate-credential`
+
+```text
+Replace a client credential: this device's own, saved under --control-plane NAME, or any client's as an operator with NAME and --out
+
+Usage: supertag client rotate-credential [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  The client to rotate as an operator. Omit to rotate this device's saved credential
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+      --out <OUT>
+          Write the new credential to this new owner-only file
+  -h, --help
+          Print help
+```
+
 ## `supertag auth-key`
 
 ```text
-Create and revoke Auth Keys that enroll Worker Hosts
+Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
 
 Usage: supertag auth-key [OPTIONS] <COMMAND>
 
 Commands:
-  create  Create a named, scoped Auth Key: one-time for a named Worker Host, or reusable
-  revoke  Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled
+  create  Create a named Auth Key for one role: one-time for a single enrollee, or reusable. Every enrollee chooses its own name
+  revoke  Stop an Auth Key from enrolling anyone else. Principals that joined stay enrolled
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2187,40 +2323,55 @@ Options:
 ## `supertag auth-key create`
 
 ```text
-Create a named, scoped Auth Key: one-time for a named Worker Host, or reusable
+Create a named Auth Key for one role: one-time for a single enrollee, or reusable. Every enrollee chooses its own name
 
-Usage: supertag auth-key create [OPTIONS] <NAME>
+Usage: supertag auth-key create [OPTIONS] --role <ROLE> <NAME>
 
 Arguments:
-  <NAME>  The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused
+  <NAME>
+          The key's name: 1-63 lowercase letters, digits, hyphens or underscores. Never reused
 
 Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --host <HOST_ID>
-          Worker Host ID a one-time key enrolls. Omit with --reusable
+
+      --role <ROLE>
+          The role every enrollee takes. It never changes
+
+          Possible values:
+          - host:    Worker Hosts, with `supertag host enroll`
+          - gateway: Gateways, with `supertag gateway enroll`
+          - client:  Clients (a device running the CLI, terminal UI, or desktop app), with `supertag connect`
+
       --reusable
-          Enroll any number of Worker Hosts, each choosing its own ID
+          Enroll any number of principals instead of one
+
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
+
       --ephemeral
-          Remove hosts that join with this key once they go offline
+          Host keys only: remove hosts that join with this key once they go offline
+
       --label <LABELS>
-          Label granted to every host that joins. Repeat for more labels
+          Host keys only: a label granted to every host that joins. Repeat for more labels
+
       --expires-in-seconds <EXPIRES_IN_SECONDS>
           Shorter lifetime. Defaults to the maximum: one hour, or 90 days with --reusable
+
       --tag <TAG>
-          Tag whose Tasks hosts enrolled with this key may run. Repeat for more Tags
+          Host and client keys: a Tag the enrollee may run (host) or talk to (client). Repeat for more Tags
+
       --all-tags
-          Let hosts enrolled with this key run Tasks for every Tag
+          Host and client keys: every Tag
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag auth-key revoke`
 
 ```text
-Stop an Auth Key from enrolling more Worker Hosts. Hosts that joined stay enrolled
+Stop an Auth Key from enrolling anyone else. Principals that joined stay enrolled
 
 Usage: supertag auth-key revoke [OPTIONS] <NAME>
 
@@ -2239,7 +2390,7 @@ Options:
 ## `supertag connect`
 
 ```text
-Check an operator token against a Control Plane, then save the Control Plane under a name for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set
+Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as client:NAME and saves only the resulting credential
 
 Usage: supertag connect [OPTIONS] --name <NAME> <URL>
 
@@ -2249,6 +2400,8 @@ Arguments:
 Options:
       --name <NAME>
           The name to save it under
+      --client-name <CLIENT_NAME>
+          The client name this device enrolls as with an Auth Key. Defaults to its host name
       --replace
           Replace a Control Plane already saved under this name for the same origin
       --server-ca-file <SERVER_CA_FILE>
@@ -3098,6 +3251,8 @@ Commands:
   objective             Read one Objective, or list Objectives [alias: objectives]
   team                  Read one Team by ID or name, or list Teams, optionally for one member Tag [alias: teams]
   host                  Read one Worker Host, or list Worker Hosts and their readiness [alias: hosts]
+  gateway               Read one enrolled Gateway, or list them, revoked ones included [alias: gateways]
+  client                Read one enrolled client device, or list them, revoked ones included [alias: clients]
   session               Read one Work Session, its latest Task, and its report, or list the Work Sessions started from a parent Session [alias: sessions]
   role                  Read a Role by ID or name, or list Roles [alias: roles]
   permission-set        Read a Permission Set by ID or name, or list Permission Sets [alias: permission-sets]
@@ -3243,6 +3398,52 @@ Options:
           Most entries to return on one page [default: 32]
       --cursor <CURSOR>
           Continue from the cursor the previous page returned [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+  -h, --help
+          Print help
+```
+
+## `supertag get gateway`
+
+```text
+Read one enrolled Gateway, or list them, revoked ones included
+
+Usage: supertag get gateway [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Gateway name. Omit to list
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --limit <LIMIT>
+          Most entries to return on one page [default: 100]
+      --cursor <CURSOR>
+          The next_cursor of the previous page [default: ""]
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Control Plane URL
+  -h, --help
+          Print help
+```
+
+## `supertag get client`
+
+```text
+Read one enrolled client device, or list them, revoked ones included
+
+Usage: supertag get client [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Client name. Omit to list
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --limit <LIMIT>
+          Most entries to return on one page [default: 100]
+      --cursor <CURSOR>
+          The next_cursor of the previous page [default: ""]
       --state-directory <STATE_DIRECTORY>
           Use the local services in this state directory instead of a Control Plane URL
   -h, --help
@@ -3853,7 +4054,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question]
   <ID>    The resource's ID or name
 
 Options:

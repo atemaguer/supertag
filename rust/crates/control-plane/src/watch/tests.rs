@@ -41,7 +41,7 @@ async fn postgres_watch_contract() -> anyhow::Result<()> {
 
 async fn contract(url: &str) -> anyhow::Result<()> {
     const SECRET: &str = "local-watch-test-secret";
-    let plane = ControlPlane::open(url, SECRET.into()).await?;
+    let plane = ControlPlane::open(url, SECRET.into(), "operator:local".into()).await?;
     let store = &plane.store;
     let initial = store.watch_page(0).await?;
     assert_eq!(initial.head, 0);

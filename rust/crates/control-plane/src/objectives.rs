@@ -182,6 +182,39 @@ fn operator(principal: &str) -> Result<()> {
     Ok(())
 }
 
+/// An operator or a client: the principals that create and direct Objectives.
+fn actor(principal: &str) -> Result<()> {
+    name("principal", principal)?;
+    if !["operator:", "client:"].iter().any(|prefix| {
+        principal
+            .strip_prefix(prefix)
+            .is_some_and(|id| !id.is_empty())
+    }) {
+        return Err(StoreError::PermissionDenied);
+    }
+    Ok(())
+}
+
+/// Operators see every Objective; a client sees only the Objectives it created.
+pub(crate) async fn ensure_objective_access_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    objective_id: &str,
+) -> Result<()> {
+    if principal.starts_with("operator:") {
+        return Ok(());
+    }
+    let created_by: Option<String> =
+        sqlx::query_scalar("SELECT created_by FROM supertag_v2_objectives WHERE objective_id=$1")
+            .bind(objective_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if created_by.as_deref() != Some(principal) {
+        return Err(StoreError::NotFound("Objective was not found".into()));
+    }
+    Ok(())
+}
+
 pub(crate) fn digest(kind: &str, request: &impl Message) -> String {
     let mut hash = Sha256::new();
     hash.update(kind);
@@ -232,6 +265,7 @@ fn record_row(row: &AnyRow) -> Result<Record> {
             completion_summary: None,
             cancelled_at_ms: None,
             cancellation_reason: None,
+            created_by: row.try_get("created_by")?,
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -413,10 +447,12 @@ impl Store {
         principal: &str,
         input: &CreateObjectiveRequest,
     ) -> Result<Objective> {
-        operator(principal)?;
+        actor(principal)?;
         name("operation ID", &input.operation_id)?;
         validate_manifest_objective(input)?;
         let fingerprint = digest("create", input);
+        self.ensure_client_tag(principal, &input.owner_tag_id)
+            .await?;
         let (mut tx, order) = self.write().await?;
         let now_ms = self.execution_now_ms();
         if let Some(prior) =
@@ -456,9 +492,9 @@ impl Store {
                 at: timestamp(now_ms)?,
             });
         }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13)")
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14)")
             .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).execute(&mut *tx).await?;
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
         let prompt = format!(
@@ -498,17 +534,33 @@ impl Store {
         Ok(record.value)
     }
 
-    pub async fn get_objective(&self, objective_id: &str) -> Result<Objective> {
+    pub async fn get_objective(&self, principal: &str, objective_id: &str) -> Result<Objective> {
+        actor(principal)?;
         name("Objective ID", objective_id)?;
         let row = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id=$1")
             .bind(objective_id)
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::NotFound("Objective was not found".into()))?;
-        Ok(record_row(&row)?.value)
+        let objective = record_row(&row)?.value;
+        if !principal.starts_with("operator:") && objective.created_by != principal {
+            return Err(StoreError::NotFound("Objective was not found".into()));
+        }
+        Ok(objective)
     }
 
-    pub async fn list_objectives(&self, input: &ListObjectivesRequest) -> Result<Vec<Objective>> {
+    /// Operators list every Objective; a client lists only the Objectives it created.
+    pub async fn list_objectives(
+        &self,
+        principal: &str,
+        input: &ListObjectivesRequest,
+    ) -> Result<Vec<Objective>> {
+        actor(principal)?;
+        let creator = if principal.starts_with("operator:") {
+            ""
+        } else {
+            principal
+        };
         if !input.after_id.is_empty() {
             name("Objective cursor", &input.after_id)?;
         }
@@ -519,8 +571,8 @@ impl Store {
             input.limit.min(12)
         } as i64;
         // A completion summary may hold 256 KiB; Get and the overview carry it, a page does not.
-        sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id>$1 ORDER BY objective_id LIMIT $2")
-            .bind(&input.after_id).bind(count).fetch_all(&self.pool).await?.iter().map(|row| {
+        sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id>$1 AND ($3='' OR created_by=$3) ORDER BY objective_id LIMIT $2")
+            .bind(&input.after_id).bind(count).bind(creator).fetch_all(&self.pool).await?.iter().map(|row| {
                 let mut value = record_row(row)?.value;
                 value.completion_summary = None;
                 Ok(value)
@@ -745,12 +797,13 @@ impl Store {
         input: &ObjectiveActionRequest,
         action: &str,
     ) -> Result<Objective> {
-        operator(principal)?;
+        actor(principal)?;
         name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("reason", &input.reason, 16_384)?;
         let fingerprint = digest(action, input);
         let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
         let now_ms = self.execution_now_ms();
         if let Some(prior) =
             replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
@@ -768,12 +821,13 @@ impl Store {
         principal: &str,
         input: &ReviewObjectiveRequest,
     ) -> Result<Objective> {
-        operator(principal)?;
+        actor(principal)?;
         name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("feedback", &input.feedback, 65_536)?;
         let fingerprint = digest("review", input);
         let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
         let now_ms = self.execution_now_ms();
         if let Some(prior) =
             replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
@@ -793,7 +847,7 @@ impl Store {
         principal: &str,
         input: &CompleteObjectiveRequest,
     ) -> Result<Objective> {
-        operator(principal)?;
+        actor(principal)?;
         name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("summary", &input.summary, 65_536)?;
@@ -1474,7 +1528,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<CreateObjectiveRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .create_objective(&principal, &request.into_inner())
@@ -1485,10 +1539,10 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<GetObjectiveRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
-                .get_objective(&request.into_inner().objective_id)
+                .get_objective(&principal, &request.into_inner().objective_id)
                 .await?,
         ))
     }
@@ -1496,19 +1550,22 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<ListObjectivesRequest>,
     ) -> std::result::Result<Response<ListObjectivesResponse>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(ListObjectivesResponse {
-            objectives: self.store.list_objectives(&request.into_inner()).await?,
+            objectives: self
+                .store
+                .list_objectives(&principal, &request.into_inner())
+                .await?,
         }))
     }
     async fn list_commit_reviews(
         &self,
         request: Request<ListObjectiveCommitReviewsRequest>,
     ) -> std::result::Result<Response<ListObjectiveCommitReviewsResponse>, Status> {
-        self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
-                .list_objective_commit_reviews(&request.into_inner())
+                .list_objective_commit_reviews(&principal, &request.into_inner())
                 .await?,
         ))
     }
@@ -1538,7 +1595,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .pause_objective(&principal, &request.into_inner())
@@ -1549,7 +1606,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .resume_objective(&principal, &request.into_inner())
@@ -1560,7 +1617,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<ObjectiveActionRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .cancel_objective(&principal, &request.into_inner())
@@ -1571,7 +1628,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<ReviewObjectiveRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .review_objective(&principal, &request.into_inner())
@@ -1582,7 +1639,7 @@ impl objectives_server::Objectives for ControlPlane {
         &self,
         request: Request<CompleteObjectiveRequest>,
     ) -> std::result::Result<Response<Objective>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .complete_objective(&principal, &request.into_inner())

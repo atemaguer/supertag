@@ -27,7 +27,7 @@ const MAX_LIMIT: u32 = 500;
 /// The result of resolving a presented Operator Token digest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperatorAuthentication {
-    /// The bare operator ID, such as `token:laptop-2`.
+    /// The principal, such as `operator:token:laptop-2`.
     Authenticated(String),
     Invalid,
     Expired,
@@ -131,7 +131,7 @@ fn token_row(row: &AnyRow, now: i64) -> Result<OperatorToken> {
         OperatorTokenPhase::Active
     };
     Ok(OperatorToken {
-        operator_id: format!("{OPERATOR_TOKEN_PREFIX}{name}"),
+        operator_id: format!("operator:{OPERATOR_TOKEN_PREFIX}{name}"),
         name,
         phase: phase.into(),
         created_at_ms: row.try_get("created_at_ms")?,
@@ -148,7 +148,7 @@ fn token_row(row: &AnyRow, now: i64) -> Result<OperatorToken> {
 const TOKEN_COLUMNS: &str = "name, created_by, created_at_ms, expires_at_ms, rotated_at_ms, last_used_at_ms, revoked_at_ms, secret_revision, secret_digest, operation_id";
 
 impl Store {
-    /// Records a new Operator Token. `created_by` is the bare admin operator ID.
+    /// Records a new Operator Token. `created_by` is the admin operator's principal.
     pub async fn create_operator_token(
         &self,
         created_by: &str,
@@ -544,15 +544,15 @@ impl ControlPlane {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    pub fn operator_directory_service(
+    pub fn credential_directory_service(
         &self,
-    ) -> operator_directory_server::OperatorDirectoryServer<Self> {
-        operator_directory_server::OperatorDirectoryServer::new(self.clone())
+    ) -> credential_directory_server::CredentialDirectoryServer<Self> {
+        credential_directory_server::CredentialDirectoryServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    /// The bare admin operator ID, or a refusal for an Operator Token.
+    /// The admin operator's principal, or a refusal for an Operator Token.
     fn admin<T>(&self, request: &Request<T>) -> std::result::Result<String, Status> {
         let principal = self.principal(request, "operator:")?;
         if !is_admin(&principal) {
@@ -560,7 +560,8 @@ impl ControlPlane {
                 "Only the admin operator token manages Operator Tokens",
             ));
         }
-        Ok(operator_id(&principal)?.to_owned())
+        operator_id(&principal)?;
+        Ok(principal)
     }
 }
 
@@ -633,34 +634,51 @@ impl operator_access_server::OperatorAccess for ControlPlane {
     }
 }
 
+/// The API tier resolves every presented Operator Token and enrolled credential here, on every
+/// call, so revocation and rotation take effect on the next call.
 #[tonic::async_trait]
-impl operator_directory_server::OperatorDirectory for ControlPlane {
-    async fn authenticate(
+impl credential_directory_server::CredentialDirectory for ControlPlane {
+    async fn resolve(
         &self,
-        request: Request<AuthenticateOperatorRequest>,
-    ) -> std::result::Result<Response<OperatorIdentity>, Status> {
-        if self.principal(&request, "service:")? != "service:gateway" {
+        request: Request<ResolveCredentialRequest>,
+    ) -> std::result::Result<Response<ResolvedCredential>, Status> {
+        if self.principal(&request, "control-plane:")? != "control-plane:api" {
             return Err(Status::permission_denied(
                 "caller is not allowed to use this service",
             ));
         }
-        match self
-            .store
-            .authenticate_operator_token(&request.get_ref().token_digest)
-            .await?
-        {
-            OperatorAuthentication::Authenticated(operator_id) => {
-                Ok(Response::new(OperatorIdentity { operator_id }))
-            }
-            OperatorAuthentication::Revoked => {
-                Err(Status::unauthenticated("Operator Token was revoked"))
-            }
-            OperatorAuthentication::Expired => {
-                Err(Status::unauthenticated("Operator Token expired"))
-            }
-            OperatorAuthentication::Invalid => {
-                Err(Status::unauthenticated("valid bearer credential required"))
-            }
+        let input = request.into_inner();
+        if input.kind == PrincipalRole::Operator as i32 {
+            return match self
+                .store
+                .authenticate_operator_token(&input.token_digest)
+                .await?
+            {
+                OperatorAuthentication::Authenticated(principal) => {
+                    Ok(Response::new(ResolvedCredential {
+                        role: PrincipalRole::Operator.into(),
+                        name: principal
+                            .strip_prefix("operator:")
+                            .unwrap_or(&principal)
+                            .to_owned(),
+                        generation: 0,
+                    }))
+                }
+                OperatorAuthentication::Revoked => {
+                    Err(Status::unauthenticated("Operator Token was revoked"))
+                }
+                OperatorAuthentication::Expired => {
+                    Err(Status::unauthenticated("Operator Token expired"))
+                }
+                OperatorAuthentication::Invalid => {
+                    Err(Status::unauthenticated("valid bearer credential required"))
+                }
+            };
         }
+        self.store
+            .resolve_credential(&input.token_digest)
+            .await?
+            .map(Response::new)
+            .ok_or_else(|| Status::unauthenticated("valid bearer credential required"))
     }
 }

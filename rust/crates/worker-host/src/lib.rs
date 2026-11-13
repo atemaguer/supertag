@@ -24,8 +24,7 @@ mod workspaces;
 pub use artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::{
-    PendingRotation, abandon_credential_rotation, begin_credential_rotation, enroll,
-    finish_credential_rotation,
+    EnrolledRole, credential, enroll, enrolled_control_plane, rotate_own_credential,
 };
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::{

@@ -36,7 +36,8 @@ fn command(program: &str, args: &[&str], tokens: &Tokens) -> Command {
     command
         .args(args)
         .env_clear()
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
         .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_HOST_TOKEN", &tokens.host)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &tokens.host)
@@ -78,9 +79,9 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let tokens = Tokens {
-        gateway: Uuid::new_v4().to_string(),
+        gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         operator: Uuid::new_v4().to_string(),
-        host: Uuid::new_v4().to_string(),
+        host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
     };
     let mut plane = command(BINARY, &["control-plane"], &tokens);
     plane.env("SUPERTAG_DATABASE_URL", &database);
@@ -120,8 +121,7 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
     let task_id = accepted["task_id"].as_str().context("task_id")?.to_owned();
     assert_eq!(json(accept()).await?["task_id"], task_id.as_str());
 
-    // A connector without the Gateway credential is refused. Whoever holds that credential may
-    // name any account (see docs/reference/connector-contract.md), so it is no account boundary.
+    // A connector without an enrolled Gateway credential is refused.
     let mut forged = command(
         CONNECTOR,
         &[
@@ -136,11 +136,53 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
         ],
         &tokens,
     );
-    forged.env("SUPERTAG_GATEWAY_TOKEN", Uuid::new_v4().to_string());
+    forged.env(
+        "SUPERTAG_GATEWAY_CREDENTIAL",
+        supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+    );
     let refused = timeout(WAIT, forged.output()).await??;
     ensure!(
         !refused.status.success(),
-        "a connector without the Gateway credential was admitted"
+        "a connector without an enrolled Gateway credential was admitted"
+    );
+
+    // A second, enrolled Gateway cannot act for the account the first one serves.
+    let key = json(operator(&[
+        "auth-key",
+        "create",
+        "second-connector",
+        "--role",
+        "gateway",
+    ]))
+    .await?;
+    let key = key["auth_key"].as_str().context("auth_key")?;
+    let second_state = directory.path().join("second-gateway");
+    let mut enroll = command(
+        BINARY,
+        &[
+            "gateway",
+            "enroll",
+            "second",
+            "--control-plane",
+            &url,
+            "--state-directory",
+            second_state.to_str().context("state path")?,
+        ],
+        &tokens,
+    );
+    enroll.env("SUPERTAG_AUTH_KEY", key);
+    assert_eq!(json(enroll).await?["principal"], "gateway:second");
+    let enrollment: Value =
+        serde_json::from_slice(&std::fs::read(second_state.join("enrollment.json"))?)?;
+    let second = enrollment["token"].as_str().context("token")?.to_owned();
+    let mut rival = accept();
+    rival.env("SUPERTAG_GATEWAY_CREDENTIAL", &second);
+    let refused = timeout(WAIT, rival.output()).await??;
+    ensure!(
+        !refused.status.success()
+            && String::from_utf8_lossy(&refused.stderr).contains("permission"),
+        "a second Gateway acted for another Gateway's account: {}",
+        String::from_utf8_lossy(&refused.stderr)
     );
 
     let mut host = command(

@@ -6,10 +6,10 @@ use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
-use crate::{
-    Api, MAX_MESSAGE_BYTES, TIMEOUT, client_timeout, operator_access::OPERATOR_RECHECK,
-    request_budget,
-};
+use crate::{Api, MAX_MESSAGE_BYTES, TIMEOUT, client_timeout, request_budget};
+
+/// How often an open Watch rechecks its caller's credential.
+const RECHECK: std::time::Duration = std::time::Duration::from_secs(1);
 
 type Updates = Pin<Box<dyn Stream<Item = Result<WatchEvent, Status>> + Send>>;
 
@@ -45,17 +45,16 @@ impl operator_events_server::OperatorEvents for ApiWatch {
         request: Request<WatchRequest>,
     ) -> Result<Response<Self::WatchStream>, Status> {
         let credentials = &self.api.credentials;
-        let caller = self
-            .api
-            .operator_caller(&request, &credentials.operator)
-            .await?;
+        let caller = self.api.caller(&request).await?;
         let startup = request_budget(&request)?;
         let timeout = request
             .metadata()
             .contains_key(TIMEOUT)
             .then(|| client_timeout(&request))
             .transpose()?;
-        let mut outgoing = credentials.authenticated(request.into_inner(), caller.identity.clone());
+        let mut outgoing = credentials.upstream(request.into_inner(), caller.identity()?, startup);
+        // The stream itself has no deadline unless the caller set one.
+        outgoing.metadata_mut().remove(TIMEOUT);
         if let Some(timeout) = timeout {
             outgoing.set_timeout(timeout);
         }
@@ -72,8 +71,8 @@ impl operator_events_server::OperatorEvents for ApiWatch {
                 .into_inner(),
         };
         let output = async_stream::try_stream! {
-            // An Operator Token stream ends within a second of its revocation or rotation.
-            let mut recheck = tokio::time::interval(OPERATOR_RECHECK);
+            // A stream ends within a second of its credential's revocation or rotation.
+            let mut recheck = tokio::time::interval(RECHECK);
             recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             recheck.tick().await;
             loop {
@@ -84,7 +83,7 @@ impl operator_events_server::OperatorEvents for ApiWatch {
                     message = upstream.message() => message.map(Some),
                 };
                 match read {
-                    Ok(None) => api.recheck_operator(&caller).await?,
+                    Ok(None) => api.recheck(&caller).await?,
                     Ok(Some(Some(event))) => yield event,
                     Ok(Some(None)) => break,
                     Err(error) => Err(error)?,

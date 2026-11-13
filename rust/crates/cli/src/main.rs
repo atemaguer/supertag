@@ -5,6 +5,7 @@ mod artifacts;
 mod auth_keys;
 mod delivery_branches;
 mod deployment;
+mod enrollments;
 mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
@@ -72,16 +73,16 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::{Negotiator, ProtocolChannel, connect, fence},
     v2::{
-        HarnessKind, LarkDomain, ListTagsRequest, ServiceRole, Tag, Task,
+        HarnessKind, LarkDomain, ServiceRole, Tag, Task,
         artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
         attempt_inputs_server::AttemptInputsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
-        conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
-        live_inputs_server::LiveInputsServer, objectives_server::ObjectivesServer,
-        operator_client::OperatorClient, operator_server::OperatorServer,
-        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
+        conversations_server::ConversationsServer, live_inputs_server::LiveInputsServer,
+        objectives_server::ObjectivesServer, operator_client::OperatorClient,
+        operator_server::OperatorServer, worker_host_server::WorkerHostServer,
+        workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -224,11 +225,6 @@ enum Command {
         #[command(subcommand)]
         command: surface_policy::LocationCommand,
     },
-    /// Store or delete Gateway collaboration credentials in the configured credential vault.
-    GatewayCredential {
-        #[command(subcommand)]
-        command: gateway_credentials::GatewayCredentialCommand,
-    },
     /// Enroll, drain, resume, and revoke Worker Hosts, and rotate their credentials.
     Host {
         #[command(flatten)]
@@ -368,8 +364,12 @@ enum Command {
         github_workspace_directory: Option<PathBuf>,
     },
     /// Run a Gateway: collaboration surface webhooks and connections, reply delivery, and
-    /// operator notifications, as a client of the Control Plane.
+    /// operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke,
+    /// and rotate the credentials of Gateways.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Gateway {
+        #[command(subcommand)]
+        command: Option<enrollments::GatewayCommand>,
         /// Address for the test notification. Port 0 picks a free port.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
@@ -379,8 +379,12 @@ enum Command {
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
         /// Control Plane URL this Gateway connects to.
+        #[arg(long, required = true)]
+        control_plane: Option<String>,
+        /// Private directory holding the credential from `supertag gateway enroll`. Without it
+        /// the Gateway reads SUPERTAG_GATEWAY_CREDENTIAL.
         #[arg(long)]
-        control_plane: String,
+        state_directory: Option<PathBuf>,
         /// Address for Slack webhooks. Requires the Slack state directory.
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
@@ -531,22 +535,31 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[arg(long)]
         wait_for_recovery: bool,
     },
-    /// Create and revoke Auth Keys that enroll Worker Hosts.
+    /// Revoke client devices and rotate their credentials.
+    Client {
+        #[command(subcommand)]
+        command: enrollments::ClientCommand,
+    },
+    /// Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients.
     AuthKey {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
         command: auth_keys::AuthKeyCommand,
     },
-    /// Check an operator token against a Control Plane, then save the Control Plane under a name
-    /// for `--control-plane NAME` and the terminal UI. The token is read from SUPERTAG_OPERATOR_TOKEN, or
-    /// from standard input when that is not set.
+    /// Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one
+    /// secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set: an
+    /// operator token is checked and saved; a client Auth Key (stak_...) enrolls this device as
+    /// client:NAME and saves only the resulting credential.
     Connect {
         /// The Control Plane origin, such as https://supertag.example.com.
         url: String,
         /// The name to save it under.
         #[arg(long)]
         name: String,
+        /// The client name this device enrolls as with an Auth Key. Defaults to its host name.
+        #[arg(long)]
+        client_name: Option<String>,
         /// Replace a Control Plane already saved under this name for the same origin.
         #[arg(long)]
         replace: bool,
@@ -763,7 +776,10 @@ fn dispatch(cli: Cli) -> Result<()> {
                     | Command::Verify { .. }
                     | Command::Up { .. }
                     | Command::ControlPlane { .. }
-                    | Command::Gateway { .. }
+                    | Command::Gateway {
+                        command: None | Some(enrollments::GatewayCommand::Enroll { .. }),
+                        ..
+                    }
                     | Command::WorkerHost { .. }
                     | Command::Host {
                         command: host_status::HostCommand::Enroll { .. },
@@ -842,7 +858,6 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => surface_policy::run_location(connection, command).await?,
-        Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
         Command::Setup {
             command: SetupCommand::Surface(command),
         } => surface_setup::setup(command).await?,
@@ -854,6 +869,7 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => host_status::run(connection, command).await?,
+        Command::Client { command } => enrollments::run_client(command).await?,
         Command::Reply {
             connection,
             command,
@@ -975,9 +991,15 @@ async fn run(command: Command) -> Result<()> {
             .await?
         }
         Command::Gateway {
+            command: Some(command),
+            ..
+        } => enrollments::run_gateway(command).await?,
+        Command::Gateway {
+            command: None,
             listen,
             websocket_listen,
             control_plane,
+            state_directory,
             slack_listen,
             slack_state_directory,
             github_listen,
@@ -992,7 +1014,8 @@ async fn run(command: Command) -> Result<()> {
             gateway(
                 listen,
                 websocket_listen,
-                control_plane,
+                control_plane.context("pass --control-plane URL")?,
+                state_directory,
                 GatewayConnectors {
                     slack: slack_listen.zip(slack_state_directory),
                     github: github_listen.zip(github_state_directory),
@@ -1241,6 +1264,7 @@ async fn run(command: Command) -> Result<()> {
         Command::Connect {
             url,
             name,
+            client_name,
             replace,
             server_ca_file,
             client_cert_file,
@@ -1255,6 +1279,7 @@ async fn run(command: Command) -> Result<()> {
                     client_cert_file,
                     client_key_file,
                 },
+                client_name,
                 replace,
             )
             .await?;
@@ -1321,20 +1346,37 @@ async fn control_plane(
     options: ControlPlaneOptions,
 ) -> Result<()> {
     let builder = network::server(listen, websocket).await?;
-    let service_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
+    // The API tier's credential for the state owner, which has no network listener. It is new for
+    // every process and never configured.
+    let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+    let operator_principal =
+        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
     let plane = ControlPlane::open(
         &required_env("SUPERTAG_DATABASE_URL")?,
         service_token.clone(),
+        operator_principal.clone(),
     )
     .await?;
-    if let Ok(token) = std::env::var("SUPERTAG_BOOTSTRAP_HOST_TOKEN") {
-        ensure!(
-            token.len() >= 32,
-            "invalid bootstrap Worker Host credential"
-        );
-        plane
-            .seed_host("local", &Sha256::digest(token.as_bytes()))
-            .await?;
+    // A single-machine deployment's own Worker Host and Gateway start enrolled.
+    for (variable, role) in [
+        (
+            "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
+            supertag_control_plane::Role::Host,
+        ),
+        (
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+            supertag_control_plane::Role::Gateway,
+        ),
+    ] {
+        if let Ok(token) = std::env::var(variable) {
+            ensure!(
+                supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, &token),
+                "{variable} must be stcr_ and 64 hex digits"
+            );
+            plane
+                .seed_enrollment(role, "local", &Sha256::digest(token.as_bytes()))
+                .await?;
+        }
     }
     let (connector, incoming) = supertag_api::in_process::pair();
     let owner_shutdown = CancellationToken::new();
@@ -1346,8 +1388,6 @@ async fn control_plane(
         ServiceRole::ControlPlane,
     )
     .await?;
-    let operator_principal =
-        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
     let api = Api::new(
         channel.clone(),
         service_token.clone(),
@@ -1391,11 +1431,12 @@ async fn control_plane(
     });
     let shutdown = CancellationToken::new();
     let routes = api.routes(transfers, internal, shutdown.clone()).await;
-    // Refuse every call from a peer that skipped protocol negotiation. An authorization layer
-    // for the whole public API goes beside this fence.
+    // Refuse every call from a peer that skipped protocol negotiation, then authenticate the
+    // caller and check its role against the one authorization table.
     let grpc = async {
         let result = builder
             .layer(fence(ServiceRole::ControlPlane))
+            .layer(api.authorize())
             .add_routes(routes)
             .serve_with_incoming_shutdown(
                 supertag_transport::incoming(listener, tunnel),
@@ -1507,7 +1548,8 @@ async fn state_owner(
         .layer(plane.audit_layer());
     builder
         .add_service(plane.operator_access_service())
-        .add_service(plane.operator_directory_service())
+        .add_service(plane.credential_directory_service())
+        .add_service(plane.enrollments_service())
         .add_service(
             Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Gateway]).service(),
         )
@@ -1523,11 +1565,6 @@ async fn state_owner(
         )
         .add_service(
             WorkerHostServer::new(plane.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
-        )
-        .add_service(
-            HostDirectoryServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
@@ -1549,7 +1586,6 @@ async fn state_owner(
         .add_service(supertag_protocol::v2::workspace_volumes_server::WorkspaceVolumesServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::placement_server::PlacementServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::auth_keys_server::AuthKeysServer::new(plane.clone()))
-        .add_service(supertag_protocol::v2::host_credentials_server::HostCredentialsServer::new(plane.clone()))
         .add_service(supertag_protocol::v2::attempt_workspace_mounts_server::AttemptWorkspaceMountsServer::new(plane.clone()))
         .add_service(
             ArtifactDirectoryServer::new(plane.clone())
@@ -1634,17 +1670,19 @@ async fn gateway(
     listen: SocketAddr,
     websocket: Option<SocketAddr>,
     control_plane: String,
+    credential_directory: Option<PathBuf>,
     connectors: GatewayConnectors,
 ) -> Result<()> {
     // Refuse every call from a peer that skipped protocol negotiation.
     let mut builder = network::server(listen, websocket)
         .await?
         .layer(fence(ServiceRole::Gateway));
-    let channel = network::endpoint(control_plane).await?.connect().await?;
+    let control_plane_target = network::endpoint(control_plane).await?;
+    let channel = control_plane_target.connect().await?;
     // Refuse an incompatible Control Plane before accepting any public traffic,
     // and name the selected version on every call to it.
     let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
-    let gateway_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
+    let gateway_token = gateway_credential(&control_plane_target, credential_directory)?;
     let slack = match connectors.slack {
         Some((address, state_directory)) => {
             ensure!(
@@ -1700,16 +1738,13 @@ async fn gateway(
         }
         None => None,
     };
-    let operator_principal =
-        std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into());
     let notifier = operator_notifier(
         &connectors.notify,
         slack.as_ref().map(|(slack, _)| slack.operator_sender()),
         channel.clone(),
-        gateway_token.clone(),
-        operator_principal,
+        gateway_token,
     )?;
-    let auth = supertag_gateway::operator_auth::OperatorAuth::new(channel, gateway_token);
+    let auth = supertag_gateway::operator_auth::OperatorAuth::new(channel);
     let (health, health_service) = tonic_health::server::health_reporter();
     health
         .set_serving::<supertag_protocol::v2::operator_notification_test_server::OperatorNotificationTestServer<supertag_gateway::notifications::TestNotifications>>()
@@ -1732,7 +1767,7 @@ async fn gateway(
     let shutdown = CancellationToken::new();
     let router = builder
         .add_service(health_service)
-        .add_service(Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Operator]).service())
+        .add_service(Negotiator::new(ServiceRole::Gateway, &[ServiceRole::Client]).service())
         .add_service(notifier.test_service(auth));
     let grpc = async {
         let result = router
@@ -1824,6 +1859,32 @@ async fn gateway(
     }
 }
 
+/// The Gateway's enrolled credential: from its `--state-directory`, or from
+/// SUPERTAG_GATEWAY_CREDENTIAL for a Gateway whose credential comes from its own secret manager.
+fn gateway_credential(
+    control_plane: &supertag_transport::Target,
+    directory: Option<PathBuf>,
+) -> Result<String> {
+    let token = match directory {
+        Some(directory) => {
+            supertag_worker_host::credential(
+                &directory,
+                control_plane,
+                supertag_worker_host::EnrolledRole::Gateway,
+            )?
+            .1
+        }
+        None => required_env("SUPERTAG_GATEWAY_CREDENTIAL").context(
+            "enroll the Gateway with supertag gateway enroll and pass --state-directory, or set SUPERTAG_GATEWAY_CREDENTIAL",
+        )?,
+    };
+    ensure!(
+        supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, &token),
+        "the Gateway credential must be stcr_ and 64 hex digits"
+    );
+    Ok(token)
+}
+
 /// The `--notify` destinations and their senders. Webhook secrets come from
 /// `SUPERTAG_NOTIFY_SECRET_<NAME>`, with the name uppercased and `-` written as `_`.
 fn operator_notifier(
@@ -1831,7 +1892,6 @@ fn operator_notifier(
     slack: Option<supertag_gateway::notifications::SlackSender>,
     channel: ProtocolChannel,
     gateway_token: String,
-    principal: String,
 ) -> Result<supertag_gateway::notifications::OperatorNotifier> {
     use supertag_gateway::notifications::{Desktop, OperatorNotifier, Senders, parse_destinations};
     // Test builds never show real desktop notifications.
@@ -1857,7 +1917,6 @@ fn operator_notifier(
         Senders::new(slack, secrets, desktop)?,
         channel,
         gateway_token,
-        principal,
     )
 }
 
@@ -2387,15 +2446,21 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
     })
 }
 
-/// Reads the operator token, proves it against the Control Plane, and saves it by name.
-async fn connect_control_plane(mut saved: profiles::NewControlPlane, replace: bool) -> Result<()> {
+/// Reads one secret and saves the Control Plane by name. An operator token is proven against the
+/// Control Plane and saved; a client Auth Key enrolls this device and only the enrolled credential
+/// is saved.
+async fn connect_control_plane(
+    mut saved: profiles::NewControlPlane,
+    client_name: Option<String>,
+    replace: bool,
+) -> Result<()> {
     saved.token = match std::env::var("SUPERTAG_OPERATOR_TOKEN") {
         Ok(token) => token,
         Err(_) => {
             let mut line = String::new();
             std::io::stdin()
                 .read_line(&mut line)
-                .context("read the operator token from standard input")?;
+                .context("read the operator token or Auth Key from standard input")?;
             line
         }
     }
@@ -2403,7 +2468,13 @@ async fn connect_control_plane(mut saved: profiles::NewControlPlane, replace: bo
     .to_owned();
     ensure!(
         !saved.token.is_empty(),
-        "the operator token must not be empty"
+        "the operator token or Auth Key must not be empty"
+    );
+    let auth_key =
+        supertag_protocol::is_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX, &saved.token);
+    ensure!(
+        auth_key || client_name.is_none(),
+        "--client-name applies only when connecting with a client Auth Key"
     );
     // The token goes only to the origin that would be saved.
     saved.url = profiles::checked_origin(&saved)?;
@@ -2419,20 +2490,42 @@ async fn connect_control_plane(mut saved: profiles::NewControlPlane, replace: bo
     let channel = network::operator_channel(&target.endpoint(Duration::from_secs(15)).await?)
         .await
         .with_context(|| format!("could not reach the Control Plane at {}", saved.url))?;
-    OperatorClient::new(channel)
-        .list_tags(request(
-            ListTagsRequest {
-                limit: 1,
-                ..Default::default()
-            },
-            &target.token,
+    if auth_key {
+        let name = match client_name {
+            Some(name) => name,
+            None => enrollments::device_name()?,
+        };
+        let (credential, _) =
+            enrollments::enroll_client(channel.clone(), &saved.token, &name).await?;
+        // The Auth Key is used once and never saved.
+        saved.token = credential;
+    }
+    let caller = supertag_protocol::v2::enrollments_client::EnrollmentsClient::new(channel)
+        .who_am_i(request(
+            supertag_protocol::v2::WhoAmIRequest {},
+            &saved.token,
         )?)
         .await
-        .context("the Control Plane refused the operator token")?;
+        .context("the Control Plane refused the credential")?
+        .into_inner();
+    ensure!(
+        matches!(
+            caller.principal.split_once(':'),
+            Some(("operator" | "client", _))
+        ),
+        "connect with an operator token or a client Auth Key, not a {} credential",
+        caller
+            .principal
+            .split_once(':')
+            .map_or("", |(role, _)| role)
+    );
     let store = profiles::save(&saved, replace)?;
-    crate::terminal::print_json(
-        &json!({"name": saved.name, "saved_in": store.display().to_string(), "active": true}),
-    )?;
+    crate::terminal::print_json(&json!({
+        "name": saved.name,
+        "saved_in": store.display().to_string(),
+        "active": true,
+        "connected_as": caller.principal,
+    }))?;
     Ok(())
 }
 
@@ -2596,26 +2689,17 @@ mod tests {
     ];
 
     /// Top-level groups that are not a resource kind: deployment and surface setup and checks,
-    /// placement rules, this host's MCP catalog, local vault credentials, and test sends. Every
-    /// other group is named after a kind in `resources::KINDS`.
-    const OTHER_GROUPS: [&str; 7] = [
-        "setup",
-        "check",
-        "verify",
-        "placement",
-        "mcp",
-        "gateway-credential",
-        "test",
-    ];
+    /// placement rules, this host's MCP catalog, and test sends. Every other group is named after
+    /// a kind in `resources::KINDS`.
+    const OTHER_GROUPS: [&str; 6] = ["setup", "check", "verify", "placement", "mcp", "test"];
 
     /// Groups of this machine's local state rather than Control Plane resources, which `get` does
-    /// not read: `mcp list` lists the host's MCP catalog, `gateway-credential delete` removes a
-    /// vault entry.
-    const LOCAL_GROUPS: [&str; 2] = ["mcp", "gateway-credential"];
+    /// not read: `mcp list` lists the host's MCP catalog.
+    const LOCAL_GROUPS: [&str; 1] = ["mcp"];
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 19] = [
+    const OPERATIONS: [&str; 18] = [
         "health",
         "init",
         "sign-in",
@@ -2627,7 +2711,6 @@ mod tests {
         "version",
         "config",
         "control-plane",
-        "gateway",
         "tui",
         "worker-host",
         "connect",

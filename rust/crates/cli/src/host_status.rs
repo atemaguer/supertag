@@ -14,7 +14,7 @@ pub enum HostCommand {
     Drain { host_id: String },
     /// Allow the Worker Host to claim new Tasks again.
     Resume { host_id: String },
-    /// Enroll this installation with a one-time Auth Key. Its own --control-plane and
+    /// Enroll this installation with a host Auth Key. Its own --control-plane and
     /// --state-directory name the Control Plane to enroll with and the new Worker Host's state.
     Enroll {
         /// Control Plane URL to enroll with.
@@ -23,6 +23,7 @@ pub enum HostCommand {
         /// Private directory for this Worker Host's enrollment and execution journal.
         #[arg(long)]
         state_directory: PathBuf,
+        /// The host's ID: it acts as host:ID. IDs are never reused.
         host_id: String,
         /// Auth Key or file:PATH. Also reads SUPERTAG_AUTH_KEY.
         #[arg(long)]
@@ -30,9 +31,13 @@ pub enum HostCommand {
     },
     /// Revoke a Worker Host and its execution authority.
     Revoke { host_id: String },
-    /// Replace an enrolled Worker Host's credential. The previous one stops working at once.
+    /// Replace a Worker Host's credential: this machine's own stopped host with
+    /// --host-state-directory, or any host as an operator with HOST and --out. The previous one
+    /// stops working at once.
     RotateCredential {
-        host_id: String,
+        /// The host to rotate as an operator.
+        #[arg(required_unless_present = "host_state_directory")]
+        host_id: Option<String>,
         /// Write the new credential to this new owner-only file, for a host that reads
         /// SUPERTAG_HOST_TOKEN from its own secret manager.
         #[arg(
@@ -41,8 +46,8 @@ pub enum HostCommand {
             conflicts_with = "host_state_directory"
         )]
         out: Option<PathBuf>,
-        /// Install the new credential in the state directory of this machine's stopped,
-        /// enrolled Worker Host. It uses the credential when it next starts.
+        /// Rotate the credential in the state directory of this machine's stopped, enrolled
+        /// Worker Host, presenting its current one. It uses the new one when it next starts.
         #[arg(long)]
         host_state_directory: Option<PathBuf>,
     },
@@ -76,47 +81,55 @@ pub async fn run(connection: Connection, command: HostCommand) -> Result<()> {
             auth_key,
         } => {
             let control_plane = crate::network::endpoint(control_plane).await?;
-            let auth_key = auth_key.or_else(|| std::env::var("SUPERTAG_AUTH_KEY").ok());
-            let auth_key = match auth_key {
-                Some(key) if key.starts_with("file:") => {
-                    let path = key.strip_prefix("file:").expect("checked prefix");
-                    let contents = tokio::fs::read_to_string(path)
-                        .await
-                        .context("read Auth Key file")?;
-                    Some(contents.trim().to_owned())
-                }
-                other => other,
-            };
-            let record = supertag_worker_host::enroll(
+            let auth_key = crate::enrollments::auth_key(auth_key).await?;
+            let enrollment = supertag_worker_host::enroll(
                 control_plane,
                 &state_directory,
+                supertag_worker_host::EnrolledRole::Host,
                 host_id,
                 auth_key.as_deref(),
             )
             .await?;
-            json!({ "host_id": record.host_id, "generation": record.generation })
+            json!({ "host_id": enrollment.name, "principal": enrollment.principal })
         }
         HostCommand::Revoke { host_id } => {
             let (channel, token) = connect_operator(connection).await?;
-            let record = client(channel)
-                .revoke_host(request(RevokeHostRequest { host_id }, &token)?)
-                .await?
-                .into_inner();
-            json!({ "host_id": record.host_id, "revoked": record.revoked })
+            let enrollment =
+                supertag_protocol::v2::enrollments_client::EnrollmentsClient::new(channel)
+                    .revoke_enrollment(request(
+                        RevokeEnrollmentRequest {
+                            role: PrincipalRole::Host.into(),
+                            name: host_id,
+                        },
+                        &token,
+                    )?)
+                    .await?
+                    .into_inner();
+            json!({ "host_id": enrollment.name, "revoked": enrollment.revoked_at_ms.is_some() })
         }
         HostCommand::RotateCredential {
             host_id,
             out,
             host_state_directory,
-        } => {
-            return crate::placement::rotate_host_credential(
-                connection,
-                host_id,
-                out,
-                host_state_directory,
-            )
-            .await;
-        }
+        } => match host_state_directory {
+            Some(directory) => {
+                crate::enrollments::rotate_own(
+                    &directory,
+                    supertag_worker_host::EnrolledRole::Host,
+                    host_id,
+                )
+                .await?
+            }
+            None => {
+                crate::enrollments::rotate_other(
+                    connection,
+                    PrincipalRole::Host,
+                    host_id.context("name the Worker Host to rotate")?,
+                    &out.context("choose --out or --host-state-directory")?,
+                )
+                .await?
+            }
+        },
     };
     crate::terminal::print_json(&output)?;
     Ok(())

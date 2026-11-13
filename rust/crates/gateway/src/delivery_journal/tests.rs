@@ -135,13 +135,7 @@ async fn transient_renewals_do_not_pause_or_abandon_held_provider_io() -> Result
     };
     let result = time::timeout(
         Duration::from_secs(13),
-        with_claim_lease(
-            client,
-            "private-gateway-token",
-            "connector:account",
-            &target(),
-            work,
-        ),
+        with_claim_lease(client, "private-gateway-token", "account", &target(), work),
     )
     .await??;
     assert_eq!(result, Some("receipt"));
@@ -165,7 +159,7 @@ async fn initial_renewal_must_prove_authority_before_provider_poll() -> Result<(
         let result = with_claim_lease(
             client,
             "private-gateway-token",
-            "connector:account",
+            "account",
             &target(),
             async {
                 polled.store(true, Ordering::SeqCst);
@@ -192,7 +186,7 @@ async fn explicit_revocation_drops_pending_provider_without_waiting_for_expiry()
         with_claim_lease(
             client,
             "private-gateway-token",
-            "connector:account",
+            "account",
             &target(),
             std::future::pending::<Result<()>>(),
         ),
@@ -213,7 +207,7 @@ async fn renewal_timeouts_retry_without_extending_last_proven_deadline() -> Resu
         with_claim_lease(
             client,
             "private-gateway-token",
-            "connector:account",
+            "account",
             &target(),
             std::future::pending::<Result<()>>(),
         ),
@@ -295,8 +289,11 @@ impl supertag_protocol::v2::connector_server::Connector for Fixture {
             "Bearer private-gateway-token"
         );
         assert_eq!(
-            request.metadata().get("x-supertag-principal").unwrap(),
-            "connector:account"
+            request
+                .metadata()
+                .get(supertag_protocol::CONNECTOR_ACCOUNT_HEADER)
+                .unwrap(),
+            "account"
         );
         assert_eq!(request.get_ref().reply_id, "reply");
         assert_eq!(request.get_ref().lease_token, "lease");

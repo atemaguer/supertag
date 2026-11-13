@@ -26,20 +26,16 @@ impl teams_server::Teams for Api {
         &self,
         request: Request<CreateTeamRequest>,
     ) -> Result<Response<Team>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).create_team(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).create_team(request).await
+        })
         .await
     }
 
     async fn get_team(&self, request: Request<GetTeamRequest>) -> Result<Response<Team>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).get_team(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).get_team(request).await
+        })
         .await
     }
 
@@ -47,11 +43,9 @@ impl teams_server::Teams for Api {
         &self,
         request: Request<ListTeamsRequest>,
     ) -> Result<Response<ListTeamsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).list_teams(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).list_teams(request).await
+        })
         .await
     }
 
@@ -59,11 +53,9 @@ impl teams_server::Teams for Api {
         &self,
         request: Request<UpdateTeamRequest>,
     ) -> Result<Response<Team>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).update_team(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).update_team(request).await
+        })
         .await
     }
 
@@ -71,11 +63,9 @@ impl teams_server::Teams for Api {
         &self,
         request: Request<DeleteTeamRequest>,
     ) -> Result<Response<Team>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).delete_team(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).delete_team(request).await
+        })
         .await
     }
 
@@ -83,11 +73,9 @@ impl teams_server::Teams for Api {
         &self,
         request: Request<ListWorkstreamPostsRequest>,
     ) -> Result<Response<ListWorkstreamPostsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { teams(channel).list_workstream_posts(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            teams(channel).list_workstream_posts(request).await
+        })
         .await
     }
 }

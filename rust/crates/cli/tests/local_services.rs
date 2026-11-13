@@ -329,12 +329,12 @@ async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     let mut operator = client(&endpoint).await?;
     let mut keys = Vec::new();
     for name in ["env-host", "file-host"] {
-        let key = Uuid::new_v4().to_string();
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
                     name: name.into(),
-                    host_id: name.into(),
+                    role: supertag_protocol::v2::PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600000,
@@ -709,7 +709,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     let env_file = temp.path().join("services.env");
     fs::write(
         &env_file,
-        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_TOKEN=file-gateway-token\n",
+        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\n",
     )?;
     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
     let file = temp.path().join("supertag.yaml");
@@ -769,15 +769,15 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     assert_eq!(
         names(&roles["control-plane"]),
         expected(&[
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
             "SUPERTAG_DATABASE_URL",
-            "SUPERTAG_GATEWAY_TOKEN",
             "SUPERTAG_OPERATOR_TOKEN"
         ])
     );
-    // The Gateway holds no operator credential.
+    // The Gateway holds no operator credential, only its own enrolled one.
     assert_eq!(
         names(&roles["gateway"]),
-        expected(&["SUPERTAG_GATEWAY_TOKEN"])
+        expected(&["SUPERTAG_GATEWAY_CREDENTIAL"])
     );
     // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
     // Each lane presents its Host credential; the guardian never passes it to a harness.
@@ -901,7 +901,8 @@ struct Central {
 impl Central {
     fn start(database: &str) -> Result<Self> {
         let checkpoints = tempfile::tempdir()?;
-        let gateway_token = Uuid::new_v4().simple().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator = Uuid::new_v4().simple().to_string();
         let listen = |child: &mut Child| -> Result<String> {
             let mut line = String::new();
@@ -916,7 +917,8 @@ impl Central {
             .arg(checkpoints.path().join("checkpoints"))
             .env_clear()
             .env("SUPERTAG_DATABASE_URL", database)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -1039,12 +1041,12 @@ impl SharedHost {
         )?;
         fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
         let mut operator = client(&central.public).await?;
-        let key = Uuid::new_v4().to_string();
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
         operator
             .create_auth_key(authenticated_request(
                 CreateAuthKeyRequest {
                     name: "shared".into(),
-                    host_id: "shared".into(),
+                    role: supertag_protocol::v2::PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600000,

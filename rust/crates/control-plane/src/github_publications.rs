@@ -804,7 +804,7 @@ impl Store {
         }
         let limit = if input.limit == 0 { 50 } else { input.limit } as usize;
         let mut tx = self.pool.begin().await?;
-        let rows=sqlx::query("SELECT p.* FROM supertag_v2_github_publications p WHERE ($1='' OR p.task_id=$1) AND ($2=0 OR p.created_order<$2) AND EXISTS(SELECT 1 FROM supertag_v2_task_audience a WHERE a.task_id=p.task_id AND a.owner IN ('',$3)) ORDER BY p.created_order DESC LIMIT $4")
+        let rows=sqlx::query(&format!("SELECT p.* FROM supertag_v2_github_publications p WHERE ($1='' OR p.task_id=$1) AND ($2=0 OR p.created_order<$2) AND EXISTS(SELECT 1 FROM supertag_v2_task_audience a WHERE a.task_id=p.task_id AND {}) ORDER BY p.created_order DESC LIMIT $4", crate::store::sees_owner_sql("a.owner", "$3")))
             .bind(&input.task_id).bind(input.before_order).bind(principal).bind((limit+1) as i64).fetch_all(&mut *tx).await?;
         let mut bytes = 0;
         let mut response = ListGithubPublicationsResponse::default();

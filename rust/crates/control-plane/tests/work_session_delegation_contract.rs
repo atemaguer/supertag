@@ -30,7 +30,7 @@ async fn enroll_scoped(store: &Store, host: &str, tag: &str) {
             OPERATOR,
             &CreateAuthKeyRequest {
                 name: host.into(),
-                host_id: host.into(),
+                role: PrincipalRole::Host.into(),
                 operation_id: format!("issue-{host}"),
                 key_digest: key.clone(),
                 expires_in_ms: 30_000,
@@ -42,17 +42,18 @@ async fn enroll_scoped(store: &Store, host: &str, tag: &str) {
         .await
         .unwrap();
     let result = store
-        .enroll_host(
-            &EnrollHostRequest {
-                host_id: host.into(),
+        .enroll(
+            &key,
+            &EnrollRequest {
+                role: PrincipalRole::Host.into(),
+                name: host.into(),
                 operation_id: format!("enroll-{host}"),
                 token_digest: Sha256::digest(format!("delegation credential: {host}")).to_vec(),
             },
-            &key,
         )
         .await
         .unwrap();
-    assert_eq!(result.generation, 0);
+    assert_eq!(result.credential_revision, 1);
 }
 
 async fn register(store: &Store, host: &str) -> HostAuthority {
@@ -626,7 +627,7 @@ async fn contract(url: &str) {
     assert_eq!(report.session_id, objective.session_id);
     assert_eq!(
         store
-            .get_objective(&objective.objective_id)
+            .get_objective("operator:local", &objective.objective_id)
             .await
             .unwrap()
             .status(),

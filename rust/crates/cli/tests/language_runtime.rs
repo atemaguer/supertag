@@ -80,7 +80,7 @@ else
   test -z "${OPENAI_API_KEY:-}"
   test -n "${HOME:-}"
 fi
-test -z "${SUPERTAG_HOST_TOKEN:-}${SUPERTAG_BOOTSTRAP_HOST_TOKEN:-}${SUPERTAG_GATEWAY_TOKEN:-}${SUPERTAG_OPERATOR_TOKEN:-}${PYTHONPATH:-}${CODEX_API_KEY:-}"
+test -z "${SUPERTAG_HOST_TOKEN:-}${SUPERTAG_BOOTSTRAP_HOST_TOKEN:-}${SUPERTAG_GATEWAY_CREDENTIAL:-}${SUPERTAG_OPERATOR_TOKEN:-}${PYTHONPATH:-}${CODEX_API_KEY:-}"
 test -n "$SUPERTAG_ADAPTER_STATE_DIRECTORY"
 test "$SUPERTAG_WORKSPACE_DIRECTORY" = "$SUPERTAG_ADAPTER_STATE_DIRECTORY/workspace"
 test "$TMPDIR" = "$SUPERTAG_ADAPTER_STATE_DIRECTORY/tmp"
@@ -129,12 +129,13 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut control = command(&["control-plane"]);
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
     control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
@@ -201,7 +202,8 @@ async fn language_profiles_route_tasks_and_limit_credentials_and_scratch(
             .env("HOME", directory.path())
             .env("SUPERTAG_HOST_TOKEN", &host_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("OPENAI_API_KEY", "python-fixture-key")
             .env("ANTHROPIC_API_KEY", "claude-fixture-key")
@@ -249,14 +251,16 @@ impl LanguageServices {
         database: &str,
         volume: Option<&Path>,
     ) -> Result<Self> {
-        let gateway_token = Uuid::new_v4().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator_token = Uuid::new_v4().to_string();
-        let host_token = Uuid::new_v4().to_string();
+        let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut control = command(&["control-plane"]);
         control
             .arg("--transfer-directory")
             .arg(directory.join("blobs"))
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", database);

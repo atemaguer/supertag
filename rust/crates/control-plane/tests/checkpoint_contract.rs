@@ -397,7 +397,10 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
     ));
     // Cost sequence one is separate from native sequence one. Measured tokens
     // alone never invent monetary spend or an observed provider model.
-    let objective = store.get_objective("usage").await.unwrap();
+    let objective = store
+        .get_objective("operator:local", "usage")
+        .await
+        .unwrap();
     assert_eq!(objective.reported_spend_minor, Some(0));
     let cost = ReportAttemptUsageRequest {
         attempt: Some(attempt.clone()),
@@ -415,7 +418,7 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
     store.report_attempt_usage(host, &second).await.unwrap();
     assert_eq!(
         store
-            .get_objective("usage")
+            .get_objective("operator:local", "usage")
             .await
             .unwrap()
             .reported_spend_minor,

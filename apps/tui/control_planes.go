@@ -30,6 +30,14 @@ type controlPlaneCheckedMsg struct {
 	err    error
 }
 
+// enrolledMsg is a client Auth Key exchanged for this device's enrolled credential.
+type enrolledMsg struct {
+	dialog    *controlPlaneDialog
+	target    client.Target
+	principal string
+	err       error
+}
+
 func (a *app) manageControlPlanes() bool { return !a.hasTarget || a.inner.client.RuntimeV2() }
 
 func (a *app) closeControlPlaneDialog() {
@@ -58,7 +66,7 @@ func (a *app) editControlPlane(target client.Target) tea.Cmd {
 	}
 	a.closeControlPlaneDialog()
 	d := &controlPlaneDialog{}
-	for _, placeholder := range []string{"Name", "Control Plane URL", "Operator token", "Server CA file (optional)", "Client certificate file (optional)", "Client key file (optional)"} {
+	for _, placeholder := range []string{"Name", "Control Plane URL", "Operator token or client Auth Key", "Server CA file (optional)", "Client certificate file (optional)", "Client key file (optional)"} {
 		input := textinput.New()
 		input.Prompt = "> "
 		input.Placeholder = placeholder
@@ -148,19 +156,54 @@ func (a *app) checkControlPlane() tea.Cmd {
 	ctx, cancel := context.WithTimeout(a.root, 10*time.Second)
 	d.cancel, d.busy, d.note = cancel, true, ""
 	d.inputs[d.field].Blur()
+	if client.IsAuthKey(target.Token) {
+		// The key joins this device as client:NAME once; only the resulting credential is kept.
+		return a.scope(func() tea.Msg {
+			defer cancel()
+			enrolled, principal, err := client.Enroll(ctx, target, "", client.DeviceName())
+			return enrolledMsg{dialog: d, target: enrolled, principal: principal, err: err}
+		})
+	}
+	return a.verifyControlPlane(ctx, cancel, d, target)
+}
+
+// verifyControlPlane proves the credential by asking the Control Plane whose it is.
+func (a *app) verifyControlPlane(ctx context.Context, cancel context.CancelFunc, d *controlPlaneDialog, target client.Target) tea.Cmd {
 	connectTarget := a.connect
 	return a.scope(func() tea.Msg {
 		defer cancel()
 		candidate, err := connectTarget(ctx, target)
 		if err == nil {
 			defer candidate.client.Close()
-			_, err = candidate.client.ListTags(ctx)
+			_, err = candidate.client.WhoAmI(ctx)
 		}
 		return controlPlaneCheckedMsg{dialog: d, target: target, err: err}
 	})
 }
 
 func (a *app) controlPlaneMessage(msg tea.Msg) tea.Cmd {
+	if enrolled, ok := msg.(enrolledMsg); ok {
+		if a.controlPlaneDialog != enrolled.dialog {
+			return nil
+		}
+		d := a.controlPlaneDialog
+		if enrolled.err != nil {
+			d.busy = false
+			switch connect.CodeOf(enrolled.err) {
+			case connect.CodeUnauthenticated, connect.CodePermissionDenied, connect.CodeFailedPrecondition:
+				d.note = "The Control Plane refused this Auth Key: " + enrolled.err.Error()
+			default:
+				d.note = "Could not connect to the Control Plane. Check its URL, Auth Key and TLS files."
+			}
+			return d.inputs[d.field].Focus()
+		}
+		// Only the enrolled credential replaces the key, in the dialog and in what is saved.
+		d.inputs[2].SetValue(enrolled.target.Token)
+		d.note = "Connected as " + enrolled.principal
+		ctx, cancel := context.WithTimeout(a.root, 10*time.Second)
+		d.cancel = cancel
+		return a.verifyControlPlane(ctx, cancel, d, enrolled.target)
+	}
 	checked, ok := msg.(controlPlaneCheckedMsg)
 	if !ok || a.controlPlaneDialog != checked.dialog {
 		return nil
@@ -170,7 +213,7 @@ func (a *app) controlPlaneMessage(msg tea.Msg) tea.Cmd {
 	if checked.err != nil {
 		switch connect.CodeOf(checked.err) {
 		case connect.CodeUnauthenticated, connect.CodePermissionDenied:
-			d.note = "The Control Plane refused this operator credential."
+			d.note = "The Control Plane refused this credential."
 		default:
 			d.note = "Could not connect to the Control Plane. Check its URL, credential and TLS files."
 		}
@@ -259,8 +302,8 @@ func (a *app) rememberControlPlane() {
 func (a *app) renderControlPlaneDialog() string {
 	d := a.controlPlaneDialog
 	height, width := max(a.height-1, 2), max(a.width-2, 10)
-	lines := []string{headerStyle.Render("Save a Control Plane"), "Connect with an operator token. The token is saved privately on this machine.", ""}
-	for i, label := range []string{"Name", "Control Plane URL", "Operator token", "Server CA file · optional", "Client certificate file · optional", "Client key file · optional"} {
+	lines := []string{headerStyle.Render("Save a Control Plane"), "Connect with an operator token, or join this device with a client Auth Key (stak_…). Only the token or the device's own credential is saved, privately on this machine.", ""}
+	for i, label := range []string{"Name", "Control Plane URL", "Operator token or client Auth Key", "Server CA file · optional", "Client certificate file · optional", "Client key file · optional"} {
 		style := faint
 		if i == d.field {
 			style = headerStyle

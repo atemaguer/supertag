@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/negotiation.proto.
  */
 export const file_supertag_runtime_v2_negotiation: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdXBlcnRhZy9ydW50aW1lL3YyL25lZ290aWF0aW9uLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyInwKGE5lZ290aWF0ZVByb3RvY29sUmVxdWVzdBIuCgRyb2xlGAEgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5TZXJ2aWNlUm9sZRIZChFwcm90b2NvbF92ZXJzaW9ucxgCIAMoDRIVCg1idWlsZF92ZXJzaW9uGAMgASgJIpcBChlOZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlEi4KBHJvbGUYASABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLlNlcnZpY2VSb2xlEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SGQoRcHJvdG9jb2xfdmVyc2lvbnMYAyADKA0SFQoNYnVpbGRfdmVyc2lvbhgEIAEoCSqeAQoLU2VydmljZVJvbGUSHAoYU0VSVklDRV9ST0xFX1VOU1BFQ0lGSUVEEAASHgoaU0VSVklDRV9ST0xFX0NPTlRST0xfUExBTkUQARIYChRTRVJWSUNFX1JPTEVfR0FURVdBWRACEhwKGFNFUlZJQ0VfUk9MRV9XT1JLRVJfSE9TVBADEhkKFVNFUlZJQ0VfUk9MRV9PUEVSQVRPUhAEMoEBChNQcm90b2NvbE5lZ290aWF0aW9uEmoKCU5lZ290aWF0ZRItLnN1cGVydGFnLnJ1bnRpbWUudjIuTmVnb3RpYXRlUHJvdG9jb2xSZXF1ZXN0Gi4uc3VwZXJ0YWcucnVudGltZS52Mi5OZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("CiVzdXBlcnRhZy9ydW50aW1lL3YyL25lZ290aWF0aW9uLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyInwKGE5lZ290aWF0ZVByb3RvY29sUmVxdWVzdBIuCgRyb2xlGAEgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5TZXJ2aWNlUm9sZRIZChFwcm90b2NvbF92ZXJzaW9ucxgCIAMoDRIVCg1idWlsZF92ZXJzaW9uGAMgASgJIpcBChlOZWdvdGlhdGVQcm90b2NvbFJlc3BvbnNlEi4KBHJvbGUYASABKA4yIC5zdXBlcnRhZy5ydW50aW1lLnYyLlNlcnZpY2VSb2xlEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SGQoRcHJvdG9jb2xfdmVyc2lvbnMYAyADKA0SFQoNYnVpbGRfdmVyc2lvbhgEIAEoCSqcAQoLU2VydmljZVJvbGUSHAoYU0VSVklDRV9ST0xFX1VOU1BFQ0lGSUVEEAASHgoaU0VSVklDRV9ST0xFX0NPTlRST0xfUExBTkUQARIYChRTRVJWSUNFX1JPTEVfR0FURVdBWRACEhwKGFNFUlZJQ0VfUk9MRV9XT1JLRVJfSE9TVBADEhcKE1NFUlZJQ0VfUk9MRV9DTElFTlQQBDKBAQoTUHJvdG9jb2xOZWdvdGlhdGlvbhJqCglOZWdvdGlhdGUSLS5zdXBlcnRhZy5ydW50aW1lLnYyLk5lZ290aWF0ZVByb3RvY29sUmVxdWVzdBouLnN1cGVydGFnLnJ1bnRpbWUudjIuTmVnb3RpYXRlUHJvdG9jb2xSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message supertag.runtime.v2.NegotiateProtocolRequest
@@ -108,11 +108,12 @@ export enum ServiceRole {
   WORKER_HOST = 3,
 
   /**
-   * An operator client: the CLI, the TUI, the desktop app, or an SDK client.
+   * A client of the Control Plane's API: the CLI, the TUI, the desktop app, or
+   * an SDK client, acting for an operator or an enrolled client.
    *
-   * @generated from enum value: SERVICE_ROLE_OPERATOR = 4;
+   * @generated from enum value: SERVICE_ROLE_CLIENT = 4;
    */
-  OPERATOR = 4,
+  CLIENT = 4,
 }
 
 /**

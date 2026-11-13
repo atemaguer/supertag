@@ -10,7 +10,7 @@ if sys.argv[1:] == ["--version"]:
     sys.exit(0)
 assert sys.argv[1:4] == ["app-server", "--listen", "stdio://"]
 assert 'sandbox_mode="read-only"' in sys.argv
-for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_TOKEN"]:
+for name in ["SUPERTAG_HOST_TOKEN", "SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_GATEWAY_CREDENTIAL"]:
     assert not os.environ.get(name)
 MARKER = "Read-only Workspace data is available at these paths: "
 thread = "mount-thread"

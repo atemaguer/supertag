@@ -496,7 +496,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .get_objective("overflow")
+                .get_objective("operator:local", "overflow")
                 .await
                 .unwrap()
                 .reported_spend_minor,

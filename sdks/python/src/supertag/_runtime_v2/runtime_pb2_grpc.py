@@ -27,9 +27,9 @@ if _version_not_supported:
 
 
 class OperatorStub:
-    """The Control Plane's public endpoint serves these services to operators and
-    enrolled hosts. Its API tier authenticates them and calls the state owner
-    with the same messages.
+    """The Control Plane's public endpoint serves these services to operators,
+    clients and enrolled hosts. Its API tier authenticates every caller and calls
+    the state owner with the same messages.
     """
 
     def __init__(self, channel):
@@ -42,11 +42,6 @@ class OperatorStub:
                 '/supertag.runtime.v2.Operator/CreateAuthKey',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
-                _registered_method=True)
-        self.RevokeHost = channel.unary_unary(
-                '/supertag.runtime.v2.Operator/RevokeHost',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
                 _registered_method=True)
         self.ListHosts = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/ListHosts',
@@ -136,18 +131,12 @@ class OperatorStub:
 
 
 class OperatorServicer:
-    """The Control Plane's public endpoint serves these services to operators and
-    enrolled hosts. Its API tier authenticates them and calls the state owner
-    with the same messages.
+    """The Control Plane's public endpoint serves these services to operators,
+    clients and enrolled hosts. Its API tier authenticates every caller and calls
+    the state owner with the same messages.
     """
 
     def CreateAuthKey(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def RevokeHost(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -263,11 +252,6 @@ def add_OperatorServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.SerializeToString,
             ),
-            'RevokeHost': grpc.unary_unary_rpc_method_handler(
-                    servicer.RevokeHost,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
-            ),
             'ListHosts': grpc.unary_unary_rpc_method_handler(
                     servicer.ListHosts,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHostsRequest.FromString,
@@ -362,9 +346,9 @@ def add_OperatorServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Operator:
-    """The Control Plane's public endpoint serves these services to operators and
-    enrolled hosts. Its API tier authenticates them and calls the state owner
-    with the same messages.
+    """The Control Plane's public endpoint serves these services to operators,
+    clients and enrolled hosts. Its API tier authenticates every caller and calls
+    the state owner with the same messages.
     """
 
     @staticmethod
@@ -384,33 +368,6 @@ class Operator:
             '/supertag.runtime.v2.Operator/CreateAuthKey',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def RevokeHost(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Operator/RevokeHost',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
             options,
             channel_credentials,
             insecure,
@@ -4060,205 +4017,11 @@ class AttemptInputs:
             _registered_method=True)
 
 
-class HostEnrollmentStub:
-    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.EnrollHost = channel.unary_unary(
-                '/supertag.runtime.v2.HostEnrollment/EnrollHost',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-                _registered_method=True)
-
-
-class HostEnrollmentServicer:
-    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
-    """
-
-    def EnrollHost(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_HostEnrollmentServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'EnrollHost': grpc.unary_unary_rpc_method_handler(
-                    servicer.EnrollHost,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.HostEnrollment', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.HostEnrollment', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class HostEnrollment:
-    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
-    """
-
-    @staticmethod
-    def EnrollHost(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.HostEnrollment/EnrollHost',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
-class HostDirectoryStub:
-    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
-    Hosts with the state owner.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.Enroll = channel.unary_unary(
-                '/supertag.runtime.v2.HostDirectory/Enroll',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-                _registered_method=True)
-        self.Authenticate = channel.unary_unary(
-                '/supertag.runtime.v2.HostDirectory/Authenticate',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-                _registered_method=True)
-
-
-class HostDirectoryServicer:
-    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
-    Hosts with the state owner.
-    """
-
-    def Enroll(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def Authenticate(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_HostDirectoryServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'Enroll': grpc.unary_unary_rpc_method_handler(
-                    servicer.Enroll,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
-            ),
-            'Authenticate': grpc.unary_unary_rpc_method_handler(
-                    servicer.Authenticate,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.HostDirectory', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.HostDirectory', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class HostDirectory:
-    """Internal to the Control Plane: its API tier enrolls and authenticates Worker
-    Hosts with the state owner.
-    """
-
-    @staticmethod
-    def Enroll(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.HostDirectory/Enroll',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def Authenticate(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.HostDirectory/Authenticate',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
 class ConnectorStub:
-    """Gateway and connector calls to the Control Plane. The connector principal
-    identifies the account; provider request bodies cannot select it. See
+    """Gateway calls to the Control Plane. Each call names the connector account it
+    acts for in the `x-supertag-connector-account` metadata header, and the
+    Control Plane refuses an account that is not bound to the calling Gateway;
+    provider request bodies cannot select it. See
     docs/reference/connector-contract.md.
     """
 
@@ -4336,8 +4099,10 @@ class ConnectorStub:
 
 
 class ConnectorServicer:
-    """Gateway and connector calls to the Control Plane. The connector principal
-    identifies the account; provider request bodies cannot select it. See
+    """Gateway calls to the Control Plane. Each call names the connector account it
+    acts for in the `x-supertag-connector-account` metadata header, and the
+    Control Plane refuses an account that is not bound to the calling Gateway;
+    provider request bodies cannot select it. See
     docs/reference/connector-contract.md.
     """
 
@@ -4498,8 +4263,10 @@ def add_ConnectorServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Connector:
-    """Gateway and connector calls to the Control Plane. The connector principal
-    identifies the account; provider request bodies cannot select it. See
+    """Gateway calls to the Control Plane. Each call names the connector account it
+    acts for in the `x-supertag-connector-account` metadata header, and the
+    Control Plane refuses an account that is not bound to the calling Gateway;
+    provider request bodies cannot select it. See
     docs/reference/connector-contract.md.
     """
 

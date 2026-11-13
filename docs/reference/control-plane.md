@@ -97,6 +97,39 @@ The active connection is used automatically. Names remain optional for the first
 become useful when an operator manages several deployments. This concept is intentionally called a
 connection rather than a context; Context Sets already describe knowledge admitted to Tag work.
 
+## Callers and roles
+
+Every caller of the Control Plane authenticates with its own bearer credential. One
+default-deny table at the API Server maps every RPC to the roles allowed to call it; an RPC
+missing from the table is refused.
+
+| Principal | Credential | Obtained with |
+| --- | --- | --- |
+| `operator:local` (admin), `operator:token:NAME` | The admin operator token, or an Operator Token (`stop_…`) | Deployment configuration; `supertag operator-token create` |
+| `host:NAME` | Enrolled credential (`stcr_…`) | `supertag host enroll NAME` with a host Auth Key |
+| `gateway:NAME` | Enrolled credential (`stcr_…`) | `supertag gateway enroll NAME` with a gateway Auth Key |
+| `client:NAME` | Enrolled credential (`stcr_…`) | `supertag connect URL` with a client Auth Key, or the terminal UI or desktop app |
+
+An Auth Key (`stak_…`) admits one role, chosen when an operator creates it with
+`supertag auth-key create NAME --role host|gateway|client`. It is accepted only to enroll. The
+enrollee generates its credential, and the Control Plane stores only its digest. An enrollee
+rotates its own credential, an operator rotates or revokes anyone's, and a revoked or replaced
+credential is refused on the next call and ends open streams within about a second.
+
+| Role | May call |
+| --- | --- |
+| Admin operator | Everything an operator may, plus Operator Tokens |
+| Operator | Configuration, fleet, recovery, audit, Auth Keys and enrollments, and all work |
+| Client | Tags and Teams its Auth Key allows, its own conversations and Objectives, its Inbox items |
+| Worker Host | Execution of the work it claims, for its current generation |
+| Gateway | Connector, reply progress, and operator notification calls, for the Surface Accounts that name it |
+
+A client is a device. It sees only the work it started, never work without an owner, and never
+Worker Host status. It starts work only through conversations and Objectives. It decides an
+approval only when a Permission Set names it as `client:NAME`. The audit log records every
+caller by its full principal, and an enrollment by the Auth Key that admitted it,
+`auth-key:NAME`. Client certificates are an optional network filter in front of all of this.
+
 ## Resources
 
 Control Plane resources use `apiVersion`, `kind`, `metadata`, `spec`, and `status`.

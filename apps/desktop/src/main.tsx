@@ -23,6 +23,7 @@ interface Connection {
   preview: boolean;
   id?: string;
   origin?: string;
+  principal?: string;
 }
 
 function App({ initialConnection }: { initialConnection?: Connection }) {
@@ -37,16 +38,20 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
 
-  const activate = useCallback(({ controlPlanes, connectionId, tags }: ControlPlaneActivation) => {
-    setControlPlanes(controlPlanes);
-    setConnection({
-      controlPlane: controlPlaneSession(connectionId),
-      tags,
-      preview: false,
-      id: connectionId,
-      origin: controlPlanes.active ?? undefined,
-    });
-  }, []);
+  const activate = useCallback(
+    ({ controlPlanes, connectionId, tags, principal }: ControlPlaneActivation) => {
+      setControlPlanes(controlPlanes);
+      setConnection({
+        controlPlane: controlPlaneSession(connectionId),
+        tags,
+        preview: false,
+        id: connectionId,
+        origin: controlPlanes.active ?? undefined,
+        principal,
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (initialConnection) return;
@@ -118,6 +123,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const selector = (
     <ControlPlaneSelector
       active={connection?.origin}
+      principal={connection?.principal}
       profiles={controlPlanes.profiles}
       preview={connection?.preview}
       busy={writing}

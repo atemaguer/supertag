@@ -16,7 +16,9 @@ async fn enroll(
     directory: &Path,
 ) -> Result<()> {
     let issued = json(credentials.operator(
-        &["auth-key", "create", id, "--host", id, "--tag", "builder"],
+        &[
+            "auth-key", "create", id, "--role", "host", "--tag", "builder",
+        ],
         gateway,
     ))
     .await?;

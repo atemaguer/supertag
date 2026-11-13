@@ -39,9 +39,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             admin: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -60,7 +60,8 @@ impl Credentials {
             .args(args)
             .env_clear()
             .stdin(Stdio::null())
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.admin)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host);
@@ -205,9 +206,9 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
         secret.starts_with("stop_") && secret.len() == 69,
         "{secret}"
     );
-    assert_eq!(created["operator_id"], "token:laptop-2");
+    assert_eq!(created["operator_id"], "operator:token:laptop-2");
     assert_eq!(created["phase"], "active");
-    assert_eq!(created["created_by"], "local");
+    assert_eq!(created["created_by"], "operator:local");
     let listed = cli(&credentials, &admin, &public, &["get", "operator-tokens"])?;
     assert!(!listed.contains(&secret));
     assert_eq!(json(&listed)?["operator_tokens"][0]["name"], "laptop-2");
@@ -238,17 +239,19 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
         )?
         .contains("Only the admin operator token manages Operator Tokens")
     );
-    for forged in [
-        format!("stop_{}", "0".repeat(64)),
-        "stop_short".into(),
-        credentials.gateway.clone(),
-    ] {
+    for forged in [format!("stop_{}", "0".repeat(64)), "stop_short".into()] {
         let status = operator
             .list_tags(request(ListTagsRequest::default(), &forged)?)
             .await
             .unwrap_err();
         assert_eq!(status.code(), Code::Unauthenticated, "{forged}");
     }
+    // An enrolled Gateway is authenticated, and refused as a Gateway.
+    let status = operator
+        .list_tags(request(ListTagsRequest::default(), &credentials.gateway)?)
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), Code::PermissionDenied);
 
     // A Watch opened with the token is ended by revocation while it is open.
     let mut events = operator_events_client::OperatorEventsClient::new(channel.clone());
@@ -379,42 +382,46 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
         })
         .collect();
     let expected = [
-        ("token:ci", "tag.retire", "Tag", "failed"),
-        ("token:ci", "tag.put", "Tag/builder", "succeeded"),
+        ("operator:token:ci", "tag.retire", "Tag", "failed"),
+        ("operator:token:ci", "tag.put", "Tag/builder", "succeeded"),
         (
-            "local",
+            "operator:local",
             "operator-token.rotate",
             "OperatorToken/ci",
             "succeeded",
         ),
         (
-            "local",
+            "operator:local",
             "operator-token.create",
             "OperatorToken/ci",
             "succeeded",
         ),
-        ("local", "operator-token.create", "OperatorToken", "failed"),
         (
-            "local",
-            "operator-token.revoke",
-            "OperatorToken/laptop-2",
-            "succeeded",
-        ),
-        (
-            "local",
-            "operator-token.revoke",
-            "OperatorToken/laptop-2",
-            "succeeded",
-        ),
-        (
-            "token:laptop-2",
+            "operator:local",
             "operator-token.create",
             "OperatorToken",
             "failed",
         ),
-        ("token:laptop-2", "tag.put", "Tag/reviewer", "succeeded"),
         (
-            "local",
+            "operator:local",
+            "operator-token.revoke",
+            "OperatorToken/laptop-2",
+            "succeeded",
+        ),
+        (
+            "operator:local",
+            "operator-token.revoke",
+            "OperatorToken/laptop-2",
+            "succeeded",
+        ),
+        (
+            "operator:token:laptop-2",
+            "tag.put",
+            "Tag/reviewer",
+            "succeeded",
+        ),
+        (
+            "operator:local",
             "operator-token.create",
             "OperatorToken/laptop-2",
             "succeeded",
@@ -428,13 +435,19 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
         &credentials,
         &admin,
         &public,
-        &["audit", "--actor", "token:ci", "--since", "2020-01-01"],
+        &[
+            "audit",
+            "--actor",
+            "operator:token:ci",
+            "--since",
+            "2020-01-01",
+        ],
     )?;
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
     assert!(lines[0].starts_with("TIME"));
     assert!(
-        lines[1].contains("token:ci") && lines[1].ends_with("failed (NOT_FOUND)"),
+        lines[1].contains("operator:token:ci") && lines[1].ends_with("failed (NOT_FOUND)"),
         "{text}"
     );
     assert!(
@@ -526,7 +539,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
         manifest_relationships_client::ManifestRelationshipsClient::new(channel.clone());
     let mut teams = teams_client::TeamsClient::new(channel.clone());
     let secret = create_token(&credentials, &services.public, "auditor")?;
-    let actor = "token:auditor";
+    let actor = "operator:token:auditor";
 
     // IDs at the 256-byte limit still name their resource: the target is longer than any one ID.
     let long_tag = "t".repeat(253);
@@ -657,7 +670,7 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
 
     let entries = audit_entries(&credentials, &services.public)?;
     let mut expected = vec![entry(
-        "local",
+        "operator:local",
         "operator-token.create",
         "OperatorToken/auditor",
         "succeeded",

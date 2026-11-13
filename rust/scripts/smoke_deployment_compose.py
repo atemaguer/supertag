@@ -422,7 +422,7 @@ def rehearse(args):
             hosted = root / "hosted-deployment"
             supertag("setup", "deployment", "fly", "--non-interactive", "--output", str(hosted), env={
                 "SUPERTAG_DATABASE_URL": compose_control["SUPERTAG_DATABASE_URL"],
-                "SUPERTAG_GATEWAY_TOKEN": compose_control["SUPERTAG_GATEWAY_TOKEN"],
+                "SUPERTAG_GATEWAY_CREDENTIAL": compose_control["SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"],
                 "SUPERTAG_OPERATOR_TOKEN": compose_control["SUPERTAG_OPERATOR_TOKEN"],
             })
             supertag("check", "deployment", "fly", "--directory", str(hosted))

@@ -224,7 +224,8 @@ A host in the same file as its Control Plane joins on its own. SuperTag enrolls 
 machine's local operator credential and stores the host's own Worker Host credential. The host
 joins under its service name, or `NAME-2` when that name is taken.
 
-A host of a shared Control Plane joins with its `auth-key` secret on its first `supertag up`.
+A host of a shared Control Plane joins with its `auth-key` secret, a host Auth Key, on its first
+`supertag up`.
 A missing or rejected key fails on the terminal. After the first join, the host uses its stored
 credential and ignores the key. Without `auth-key`, it uses `SUPERTAG_AUTH_KEY` from the
 environment.

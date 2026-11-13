@@ -200,7 +200,7 @@ async fn contract(url: &str) {
     tag(&store, "bob").await;
     let approve = decision(&approval.approval_id, "approve", true, ApprovalScope::Once);
     let granted = store.decide_approval(ALICE, &approve).await.unwrap();
-    assert_eq!(granted.decided_by.as_deref(), Some("alice"));
+    assert_eq!(granted.decided_by.as_deref(), Some("operator:alice"));
     assert_eq!(
         store.decide_approval(ALICE, &approve).await.unwrap(),
         granted

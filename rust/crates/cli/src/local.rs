@@ -308,7 +308,10 @@ impl Children {
             .arg("--transfer-directory")
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_DATABASE_URL", database_url)
-            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
+            .env(
+                "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+                &credentials.gateway,
+            )
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
@@ -343,7 +346,7 @@ impl Children {
         let mut gateway = command(executable, "gateway");
         gateway
             .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
-            .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
         let mut needed = !self.notify.0.is_empty();
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
@@ -702,6 +705,8 @@ fn successful_exit(exit: ExitStatus) -> Result<()> {
     Ok(())
 }
 
+/// The local services' own credentials: the admin operator token, and the enrolled credentials
+/// of `gateway:local` and `host:local`, which the Control Plane seeds at startup.
 pub(crate) struct Credentials {
     gateway: String,
     pub(crate) operator: String,
@@ -714,20 +719,25 @@ impl Credentials {
         // Parsing errors stay generic because this file contains credentials.
         let value: Value = serde_json::from_str(&value)
             .map_err(|_| anyhow::anyhow!("invalid local credential bundle"))?;
-        let token = |key| {
+        let field = |key, valid: fn(&str) -> bool| {
             value
                 .get(key)
                 .and_then(Value::as_str)
-                .filter(|token| {
-                    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
-                })
+                .filter(|token| valid(token))
                 .map(str::to_owned)
-                .context("invalid local credential bundle")
+                .context(
+                    "invalid local credential bundle; remove it with the local services stopped to create a new one",
+                )
+        };
+        let hex =
+            |token: &str| token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let enrolled = |token: &str| {
+            supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, token)
         };
         let credentials = Self {
-            gateway: token("gateway_token")?,
-            operator: token("operator_token")?,
-            host: token("host_token")?,
+            gateway: field("gateway_credential", enrolled)?,
+            operator: field("operator_token", hex)?,
+            host: field("host_credential", enrolled)?,
         };
         ensure!(
             credentials.gateway != credentials.operator
@@ -743,16 +753,17 @@ impl Credentials {
         match fs::symlink_metadata(&path) {
             Ok(_) => Self::load(directory),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let token = || format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+                let enrolled =
+                    || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
                 let credentials = Self {
-                    gateway: token(),
-                    operator: token(),
-                    host: token(),
+                    gateway: enrolled(),
+                    operator: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+                    host: enrolled(),
                 };
                 let bytes = serde_json::to_vec(&json!({
-                    "gateway_token": credentials.gateway,
+                    "gateway_credential": credentials.gateway,
                     "operator_token": credentials.operator,
-                    "host_token": credentials.host,
+                    "host_credential": credentials.host,
                 }))?;
                 write_private(directory, CREDENTIALS, &bytes)?;
                 Ok(credentials)
@@ -1559,8 +1570,14 @@ async fn enroll_configured(
     local: Option<&Credentials>,
 ) -> Result<()> {
     let control_plane = crate::network::endpoint(endpoint.into()).await?;
-    match supertag_worker_host::enroll(control_plane.clone(), state, definition.name.clone(), None)
-        .await
+    match supertag_worker_host::enroll(
+        control_plane.clone(),
+        state,
+        supertag_worker_host::EnrolledRole::Host,
+        definition.name.clone(),
+        None,
+    )
+    .await
     {
         Ok(_) => return Ok(()),
         // The enrollment helper checks any stored receipt before asking for an Auth Key.
@@ -1570,13 +1587,15 @@ async fn enroll_configured(
     }
     let key = if let Some(credentials) = local {
         use sha2::{Digest, Sha256};
-        use supertag_protocol::v2::{CreateAuthKeyRequest, operator_client::OperatorClient};
-        let key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        use supertag_protocol::v2::{
+            CreateAuthKeyRequest, PrincipalRole, operator_client::OperatorClient,
+        };
+        let key = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
         OperatorClient::new(crate::network::operator_channel(&control_plane).await?)
             .create_auth_key(crate::request(
                 CreateAuthKeyRequest {
                     name: join_key_name(&definition.name),
-                    host_id: definition.name.clone(),
+                    role: PrincipalRole::Host.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     key_digest: Sha256::digest(key.as_bytes()).to_vec(),
                     expires_in_ms: 600_000,
@@ -1595,7 +1614,14 @@ async fn enroll_configured(
             .context("remote Worker Host needs an Auth Key secret for its first enrollment")?
             .read(environment)?
     };
-    supertag_worker_host::enroll(control_plane, state, definition.name.clone(), Some(&key)).await?;
+    supertag_worker_host::enroll(
+        control_plane,
+        state,
+        supertag_worker_host::EnrolledRole::Host,
+        definition.name.clone(),
+        Some(&key),
+    )
+    .await?;
     Ok(())
 }
 /// A fresh name for the one-time key that joins a configured host, since names are never reused.

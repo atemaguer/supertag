@@ -552,7 +552,14 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     }
     let deleted = store.delete_team(OPERATOR, &delete).await.unwrap();
     assert_eq!(store.delete_team(OPERATOR, &delete).await.unwrap(), deleted);
-    assert_eq!(store.get_objective("first").await.unwrap().team_id, None);
+    assert_eq!(
+        store
+            .get_objective("operator:local", "first")
+            .await
+            .unwrap()
+            .team_id,
+        None
+    );
     assert!(matches!(
         store.get_team(OPERATOR, "release").await,
         Err(StoreError::NotFound(_))

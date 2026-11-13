@@ -30,7 +30,7 @@ class OperatorAccessStub:
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -78,7 +78,7 @@ class OperatorAccessServicer:
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -172,7 +172,7 @@ class OperatorAccess:
 
     An Operator Token is a named, revocable credential that one teammate or
     machine presents instead of the admin operator token. Calls made with it act
-    as the operator `token:NAME`. Only the admin operator token creates, lists,
+    as `operator:token:NAME`. Only the admin operator token creates, lists,
     reads, rotates, and revokes Operator Tokens. Every operator may read the
     audit log.
     """
@@ -329,87 +329,6 @@ class OperatorAccess:
             '/supertag.runtime.v2.OperatorAccess/ListAuditEntries',
             supertag_dot_runtime_dot_v2_dot_access__pb2.ListAuditEntriesRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_access__pb2.ListAuditEntriesResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
-class OperatorDirectoryStub:
-    """Gateway resolution of an operator credential presented to it: the admin
-    operator token or an Operator Token, sent as the SHA-256 of its secret. The
-    Gateway holds no operator credential itself.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.Authenticate = channel.unary_unary(
-                '/supertag.runtime.v2.OperatorDirectory/Authenticate',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.FromString,
-                _registered_method=True)
-
-
-class OperatorDirectoryServicer:
-    """Gateway resolution of an operator credential presented to it: the admin
-    operator token or an Operator Token, sent as the SHA-256 of its secret. The
-    Gateway holds no operator credential itself.
-    """
-
-    def Authenticate(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_OperatorDirectoryServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'Authenticate': grpc.unary_unary_rpc_method_handler(
-                    servicer.Authenticate,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.OperatorDirectory', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.OperatorDirectory', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class OperatorDirectory:
-    """Gateway resolution of an operator credential presented to it: the admin
-    operator token or an Operator Token, sent as the SHA-256 of its secret. The
-    Gateway holds no operator credential itself.
-    """
-
-    @staticmethod
-    def Authenticate(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.OperatorDirectory/Authenticate',
-            supertag_dot_runtime_dot_v2_dot_access__pb2.AuthenticateOperatorRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_access__pb2.OperatorIdentity.FromString,
             options,
             channel_credentials,
             insecure,

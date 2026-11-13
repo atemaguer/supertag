@@ -88,7 +88,7 @@ impl Store {
     }
 
     pub async fn get_team(&self, principal: &str, reference: &str) -> Result<Team> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         let mut tx = self.pool.begin().await?;
         let team = team_by_reference_in(&mut tx, reference).await?;
         tx.commit().await?;
@@ -100,7 +100,7 @@ impl Store {
         principal: &str,
         input: &ListTeamsRequest,
     ) -> Result<ListTeamsResponse> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         if !input.cursor.is_empty() {
             team_name(&input.cursor)?;
         }
@@ -574,7 +574,7 @@ impl teams_server::Teams for ControlPlane {
         &self,
         request: Request<GetTeamRequest>,
     ) -> std::result::Result<Response<Team>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_team(&principal, &request.into_inner().team)
@@ -586,7 +586,7 @@ impl teams_server::Teams for ControlPlane {
         &self,
         request: Request<ListTeamsRequest>,
     ) -> std::result::Result<Response<ListTeamsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_teams(&principal, &request.into_inner())

@@ -339,9 +339,9 @@ async fn scenario(
     let _server = Server(tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     }));
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let command = |args: &[&str]| {
         let mut command = Command::new(BINARY);
         command
@@ -349,7 +349,8 @@ async fn scenario(
             .env_clear()
             .stdin(Stdio::null())
             .kill_on_drop(true)
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
             .env("SUPERTAG_HOST_TOKEN", &host_token)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token);
@@ -385,7 +386,7 @@ async fn scenario(
     };
     let account = spec(
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
+        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     json(cli(&["surface-account", "put", &account])).await?;
     let mut create_source = cli(&[
@@ -484,7 +485,7 @@ async fn scenario(
     fs::write(
         &adapter,
         format!(
-            "#!/bin/sh\nset -eu\nfor name in SUPERTAG_GITHUB_TOKEN SUPERTAG_GATEWAY_TOKEN SUPERTAG_OPERATOR_TOKEN SUPERTAG_HOST_TOKEN GIT_CONFIG_VALUE_0; do\n eval 'test -z \"${{'\"$name\"'+x}}\"' || exit 22\ndone\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\nset -eu\nfor name in SUPERTAG_GITHUB_TOKEN SUPERTAG_GATEWAY_CREDENTIAL SUPERTAG_OPERATOR_TOKEN SUPERTAG_HOST_TOKEN GIT_CONFIG_VALUE_0; do\n eval 'test -z \"${{'\"$name\"'+x}}\"' || exit 22\ndone\nexec '{}' \"$@\"\n",
             ADAPTER
         ),
     )?;

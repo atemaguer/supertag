@@ -17,17 +17,13 @@ impl spend_server::Spend for Api {
         &self,
         request: Request<GetSpendRequest>,
     ) -> Result<Response<SpendReport>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                spend_client::SpendClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .get_spend(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            spend_client::SpendClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .get_spend(request)
+                .await
+        })
         .await
     }
 }
@@ -48,17 +44,13 @@ impl objective_overviews_server::ObjectiveOverviews for Api {
         &self,
         request: Request<GetObjectiveOverviewRequest>,
     ) -> Result<Response<ObjectiveOverview>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                objective_overviews_client::ObjectiveOverviewsClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .get_objective_overview(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            objective_overviews_client::ObjectiveOverviewsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .get_objective_overview(request)
+                .await
+        })
         .await
     }
 }

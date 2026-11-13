@@ -33,11 +33,9 @@ impl LiveInputs for Api {
         &self,
         request: Request<QueueInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { live_client(channel).queue_input(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            live_client(channel).queue_input(request).await
+        })
         .await
     }
 
@@ -45,11 +43,9 @@ impl LiveInputs for Api {
         &self,
         request: Request<GetInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { live_client(channel).get_input(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            live_client(channel).get_input(request).await
+        })
         .await
     }
 
@@ -57,11 +53,9 @@ impl LiveInputs for Api {
         &self,
         request: Request<ResolveInputRequest>,
     ) -> Result<Response<LiveInput>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async move { live_client(channel).resolve_input(request).await },
-        )
+        self.forward(request, |channel, request| async move {
+            live_client(channel).resolve_input(request).await
+        })
         .await
     }
 }

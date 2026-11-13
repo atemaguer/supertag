@@ -225,7 +225,9 @@ async fn exercise(url: &str) {
     let reserved = a.unwrap();
     assert_eq!(reserved, b.unwrap());
     assert_eq!(reserved.state(), ArtifactVolumeCopyState::Reserved);
-    let plane = ControlPlane::open(url, "private-key".into()).await.unwrap();
+    let plane = ControlPlane::open(url, "private-key".into(), "operator:local".into())
+        .await
+        .unwrap();
     assert!(
         locations(&plane, OP, &copy.artifact_id, "report.txt")
             .await
@@ -376,7 +378,9 @@ async fn exercise(url: &str) {
     // Verified and reserved receipts survive a restart.
     store.close().await;
     let store = Store::open(url).await.unwrap();
-    let plane = ControlPlane::open(url, "private-key".into()).await.unwrap();
+    let plane = ControlPlane::open(url, "private-key".into(), "operator:local".into())
+        .await
+        .unwrap();
     assert_eq!(
         locations(&plane, OP, &copy.artifact_id, "report.txt")
             .await

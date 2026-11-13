@@ -71,12 +71,13 @@ database_tests! {
 
 async fn metrics_count_every_record_beyond_list_pages(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let gateway_token = Uuid::new_v4().to_string();
+    let gateway_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
     control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
         .env("SUPERTAG_DATABASE_URL", &database);
     control.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);

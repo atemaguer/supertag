@@ -120,6 +120,7 @@ async fn contract(url: String) {
                 operation_id: "github-account".into(),
                 account: Some(SurfaceAccount {
                     account_id: GITHUB.into(),
+                    gateway: "local".into(),
                     identity: Some(SurfaceAccountIdentity {
                         provider: Some(Identity::Github(GithubSurfaceIdentity {
                             external_account_id: "installation-12".into(),

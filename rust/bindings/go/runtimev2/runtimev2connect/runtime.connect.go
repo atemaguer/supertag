@@ -51,10 +51,6 @@ const (
 	LiveInputsName = "supertag.runtime.v2.LiveInputs"
 	// AttemptInputsName is the fully-qualified name of the AttemptInputs service.
 	AttemptInputsName = "supertag.runtime.v2.AttemptInputs"
-	// HostEnrollmentName is the fully-qualified name of the HostEnrollment service.
-	HostEnrollmentName = "supertag.runtime.v2.HostEnrollment"
-	// HostDirectoryName is the fully-qualified name of the HostDirectory service.
-	HostDirectoryName = "supertag.runtime.v2.HostDirectory"
 	// ConnectorName is the fully-qualified name of the Connector service.
 	ConnectorName = "supertag.runtime.v2.Connector"
 	// TransfersName is the fully-qualified name of the Transfers service.
@@ -91,8 +87,6 @@ const (
 const (
 	// OperatorCreateAuthKeyProcedure is the fully-qualified name of the Operator's CreateAuthKey RPC.
 	OperatorCreateAuthKeyProcedure = "/supertag.runtime.v2.Operator/CreateAuthKey"
-	// OperatorRevokeHostProcedure is the fully-qualified name of the Operator's RevokeHost RPC.
-	OperatorRevokeHostProcedure = "/supertag.runtime.v2.Operator/RevokeHost"
 	// OperatorListHostsProcedure is the fully-qualified name of the Operator's ListHosts RPC.
 	OperatorListHostsProcedure = "/supertag.runtime.v2.Operator/ListHosts"
 	// OperatorGetHostProcedure is the fully-qualified name of the Operator's GetHost RPC.
@@ -292,14 +286,6 @@ const (
 	// AttemptInputsSettleInputProcedure is the fully-qualified name of the AttemptInputs's SettleInput
 	// RPC.
 	AttemptInputsSettleInputProcedure = "/supertag.runtime.v2.AttemptInputs/SettleInput"
-	// HostEnrollmentEnrollHostProcedure is the fully-qualified name of the HostEnrollment's EnrollHost
-	// RPC.
-	HostEnrollmentEnrollHostProcedure = "/supertag.runtime.v2.HostEnrollment/EnrollHost"
-	// HostDirectoryEnrollProcedure is the fully-qualified name of the HostDirectory's Enroll RPC.
-	HostDirectoryEnrollProcedure = "/supertag.runtime.v2.HostDirectory/Enroll"
-	// HostDirectoryAuthenticateProcedure is the fully-qualified name of the HostDirectory's
-	// Authenticate RPC.
-	HostDirectoryAuthenticateProcedure = "/supertag.runtime.v2.HostDirectory/Authenticate"
 	// ConnectorAcceptEventProcedure is the fully-qualified name of the Connector's AcceptEvent RPC.
 	ConnectorAcceptEventProcedure = "/supertag.runtime.v2.Connector/AcceptEvent"
 	// ConnectorAcceptSlackEventProcedure is the fully-qualified name of the Connector's
@@ -456,7 +442,6 @@ const (
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
 type OperatorClient interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
-	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error)
 	GetHost(context.Context, *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	SetHostDraining(context.Context, *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
@@ -491,12 +476,6 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			httpClient,
 			baseURL+OperatorCreateAuthKeyProcedure,
 			connect.WithSchema(operatorMethods.ByName("CreateAuthKey")),
-			connect.WithClientOptions(opts...),
-		),
-		revokeHost: connect.NewClient[runtimev2.RevokeHostRequest, runtimev2.HostRecord](
-			httpClient,
-			baseURL+OperatorRevokeHostProcedure,
-			connect.WithSchema(operatorMethods.ByName("RevokeHost")),
 			connect.WithClientOptions(opts...),
 		),
 		listHosts: connect.NewClient[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse](
@@ -607,7 +586,6 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 // operatorClient implements OperatorClient.
 type operatorClient struct {
 	createAuthKey       *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
-	revokeHost          *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
 	listHosts           *connect.Client[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse]
 	getHost             *connect.Client[runtimev2.GetHostRequest, runtimev2.WorkerHostStatus]
 	setHostDraining     *connect.Client[runtimev2.SetHostDrainingRequest, runtimev2.WorkerHostStatus]
@@ -630,11 +608,6 @@ type operatorClient struct {
 // CreateAuthKey calls supertag.runtime.v2.Operator.CreateAuthKey.
 func (c *operatorClient) CreateAuthKey(ctx context.Context, req *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
 	return c.createAuthKey.CallUnary(ctx, req)
-}
-
-// RevokeHost calls supertag.runtime.v2.Operator.RevokeHost.
-func (c *operatorClient) RevokeHost(ctx context.Context, req *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return c.revokeHost.CallUnary(ctx, req)
 }
 
 // ListHosts calls supertag.runtime.v2.Operator.ListHosts.
@@ -725,7 +698,6 @@ func (c *operatorClient) ResolveReply(ctx context.Context, req *connect.Request[
 // OperatorHandler is an implementation of the supertag.runtime.v2.Operator service.
 type OperatorHandler interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
-	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error)
 	GetHost(context.Context, *connect.Request[runtimev2.GetHostRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
 	SetHostDraining(context.Context, *connect.Request[runtimev2.SetHostDrainingRequest]) (*connect.Response[runtimev2.WorkerHostStatus], error)
@@ -756,12 +728,6 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		OperatorCreateAuthKeyProcedure,
 		svc.CreateAuthKey,
 		connect.WithSchema(operatorMethods.ByName("CreateAuthKey")),
-		connect.WithHandlerOptions(opts...),
-	)
-	operatorRevokeHostHandler := connect.NewUnaryHandler(
-		OperatorRevokeHostProcedure,
-		svc.RevokeHost,
-		connect.WithSchema(operatorMethods.ByName("RevokeHost")),
 		connect.WithHandlerOptions(opts...),
 	)
 	operatorListHostsHandler := connect.NewUnaryHandler(
@@ -870,8 +836,6 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		switch r.URL.Path {
 		case OperatorCreateAuthKeyProcedure:
 			operatorCreateAuthKeyHandler.ServeHTTP(w, r)
-		case OperatorRevokeHostProcedure:
-			operatorRevokeHostHandler.ServeHTTP(w, r)
 		case OperatorListHostsProcedure:
 			operatorListHostsHandler.ServeHTTP(w, r)
 		case OperatorGetHostProcedure:
@@ -917,10 +881,6 @@ type UnimplementedOperatorHandler struct{}
 
 func (UnimplementedOperatorHandler) CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.CreateAuthKey is not implemented"))
-}
-
-func (UnimplementedOperatorHandler) RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.RevokeHost is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) ListHosts(context.Context, *connect.Request[runtimev2.ListHostsRequest]) (*connect.Response[runtimev2.ListHostsResponse], error) {
@@ -3279,172 +3239,6 @@ func (UnimplementedAttemptInputsHandler) TakeInput(context.Context, *connect.Req
 
 func (UnimplementedAttemptInputsHandler) SettleInput(context.Context, *connect.Request[runtimev2.SettleInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptInputs.SettleInput is not implemented"))
-}
-
-// HostEnrollmentClient is a client for the supertag.runtime.v2.HostEnrollment service.
-type HostEnrollmentClient interface {
-	EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-}
-
-// NewHostEnrollmentClient constructs a client for the supertag.runtime.v2.HostEnrollment service.
-// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
-// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
-// connect.WithGRPC() or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewHostEnrollmentClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostEnrollmentClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	hostEnrollmentMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostEnrollment").Methods()
-	return &hostEnrollmentClient{
-		enrollHost: connect.NewClient[runtimev2.EnrollHostRequest, runtimev2.HostRecord](
-			httpClient,
-			baseURL+HostEnrollmentEnrollHostProcedure,
-			connect.WithSchema(hostEnrollmentMethods.ByName("EnrollHost")),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// hostEnrollmentClient implements HostEnrollmentClient.
-type hostEnrollmentClient struct {
-	enrollHost *connect.Client[runtimev2.EnrollHostRequest, runtimev2.HostRecord]
-}
-
-// EnrollHost calls supertag.runtime.v2.HostEnrollment.EnrollHost.
-func (c *hostEnrollmentClient) EnrollHost(ctx context.Context, req *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return c.enrollHost.CallUnary(ctx, req)
-}
-
-// HostEnrollmentHandler is an implementation of the supertag.runtime.v2.HostEnrollment service.
-type HostEnrollmentHandler interface {
-	EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-}
-
-// NewHostEnrollmentHandler builds an HTTP handler from the service implementation. It returns the
-// path on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewHostEnrollmentHandler(svc HostEnrollmentHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	hostEnrollmentMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostEnrollment").Methods()
-	hostEnrollmentEnrollHostHandler := connect.NewUnaryHandler(
-		HostEnrollmentEnrollHostProcedure,
-		svc.EnrollHost,
-		connect.WithSchema(hostEnrollmentMethods.ByName("EnrollHost")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/supertag.runtime.v2.HostEnrollment/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case HostEnrollmentEnrollHostProcedure:
-			hostEnrollmentEnrollHostHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-}
-
-// UnimplementedHostEnrollmentHandler returns CodeUnimplemented from all methods.
-type UnimplementedHostEnrollmentHandler struct{}
-
-func (UnimplementedHostEnrollmentHandler) EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostEnrollment.EnrollHost is not implemented"))
-}
-
-// HostDirectoryClient is a client for the supertag.runtime.v2.HostDirectory service.
-type HostDirectoryClient interface {
-	Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-}
-
-// NewHostDirectoryClient constructs a client for the supertag.runtime.v2.HostDirectory service. By
-// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
-// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
-// connect.WithGRPC() or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewHostDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostDirectoryClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	hostDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostDirectory").Methods()
-	return &hostDirectoryClient{
-		enroll: connect.NewClient[runtimev2.PrivateEnrollHostRequest, runtimev2.HostRecord](
-			httpClient,
-			baseURL+HostDirectoryEnrollProcedure,
-			connect.WithSchema(hostDirectoryMethods.ByName("Enroll")),
-			connect.WithClientOptions(opts...),
-		),
-		authenticate: connect.NewClient[runtimev2.AuthenticateHostRequest, runtimev2.HostRecord](
-			httpClient,
-			baseURL+HostDirectoryAuthenticateProcedure,
-			connect.WithSchema(hostDirectoryMethods.ByName("Authenticate")),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// hostDirectoryClient implements HostDirectoryClient.
-type hostDirectoryClient struct {
-	enroll       *connect.Client[runtimev2.PrivateEnrollHostRequest, runtimev2.HostRecord]
-	authenticate *connect.Client[runtimev2.AuthenticateHostRequest, runtimev2.HostRecord]
-}
-
-// Enroll calls supertag.runtime.v2.HostDirectory.Enroll.
-func (c *hostDirectoryClient) Enroll(ctx context.Context, req *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return c.enroll.CallUnary(ctx, req)
-}
-
-// Authenticate calls supertag.runtime.v2.HostDirectory.Authenticate.
-func (c *hostDirectoryClient) Authenticate(ctx context.Context, req *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return c.authenticate.CallUnary(ctx, req)
-}
-
-// HostDirectoryHandler is an implementation of the supertag.runtime.v2.HostDirectory service.
-type HostDirectoryHandler interface {
-	Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
-}
-
-// NewHostDirectoryHandler builds an HTTP handler from the service implementation. It returns the
-// path on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewHostDirectoryHandler(svc HostDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	hostDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostDirectory").Methods()
-	hostDirectoryEnrollHandler := connect.NewUnaryHandler(
-		HostDirectoryEnrollProcedure,
-		svc.Enroll,
-		connect.WithSchema(hostDirectoryMethods.ByName("Enroll")),
-		connect.WithHandlerOptions(opts...),
-	)
-	hostDirectoryAuthenticateHandler := connect.NewUnaryHandler(
-		HostDirectoryAuthenticateProcedure,
-		svc.Authenticate,
-		connect.WithSchema(hostDirectoryMethods.ByName("Authenticate")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/supertag.runtime.v2.HostDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case HostDirectoryEnrollProcedure:
-			hostDirectoryEnrollHandler.ServeHTTP(w, r)
-		case HostDirectoryAuthenticateProcedure:
-			hostDirectoryAuthenticateHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-}
-
-// UnimplementedHostDirectoryHandler returns CodeUnimplemented from all methods.
-type UnimplementedHostDirectoryHandler struct{}
-
-func (UnimplementedHostDirectoryHandler) Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostDirectory.Enroll is not implemented"))
-}
-
-func (UnimplementedHostDirectoryHandler) Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostDirectory.Authenticate is not implemented"))
 }
 
 // ConnectorClient is a client for the supertag.runtime.v2.Connector service.

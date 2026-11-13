@@ -60,6 +60,10 @@ message SurfaceAccount {
   SurfaceAccountIdentity identity = 2;
   bool enabled = 3;
   uint64 revision = 4;
+  // Required: the enrolled Gateway, `gateway:NAME` by its NAME, that serves the
+  // account. Connector and reply calls for the account's locations are refused
+  // from any other Gateway.
+  string gateway = 4100;
 }
 message SlackSurfaceChannel { string channel_id = 1; }
 message GithubSurfaceRepository { uint64 repository_id = 1; }

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/access.proto.
  */
 export const file_supertag_runtime_v2_access: GenFile = /*@__PURE__*/
-  fileDesc("CiBzdXBlcnRhZy9ydW50aW1lL3YyL2FjY2Vzcy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiJXChpDcmVhdGVPcGVyYXRvclRva2VuUmVxdWVzdBIMCgRuYW1lGAEgASgJEhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIVCg1zZWNyZXRfZGlnZXN0GAMgASgMIicKF0dldE9wZXJhdG9yVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkiOgoZTGlzdE9wZXJhdG9yVG9rZW5zUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkiZQoaTGlzdE9wZXJhdG9yVG9rZW5zUmVzcG9uc2USMgoGdG9rZW5zGAEgAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEhMKC25leHRfY3Vyc29yGAIgASgJIlcKGlJvdGF0ZU9wZXJhdG9yVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhUKDXNlY3JldF9kaWdlc3QYAyABKAwiKgoaUmV2b2tlT3BlcmF0b3JUb2tlblJlcXVlc3QSDAoEbmFtZRgBIAEoCSLTAgoNT3BlcmF0b3JUb2tlbhIMCgRuYW1lGAEgASgJEhMKC29wZXJhdG9yX2lkGAIgASgJEjYKBXBoYXNlGAMgASgOMicuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuUGhhc2USFQoNY3JlYXRlZF9hdF9tcxgEIAEoAxIVCg1leHBpcmVzX2F0X21zGAUgASgDEhwKD2xhc3RfdXNlZF9hdF9tcxgGIAEoA0gAiAEBEhoKDXJldm9rZWRfYXRfbXMYByABKANIAYgBARIaCg1yb3RhdGVkX2F0X21zGAggASgDSAKIAQESFwoPc2VjcmV0X3JldmlzaW9uGAkgASgEEhIKCmNyZWF0ZWRfYnkYCiABKAlCEgoQX2xhc3RfdXNlZF9hdF9tc0IQCg5fcmV2b2tlZF9hdF9tc0IQCg5fcm90YXRlZF9hdF9tcyIzChtBdXRoZW50aWNhdGVPcGVyYXRvclJlcXVlc3QSFAoMdG9rZW5fZGlnZXN0GAEgASgMIicKEE9wZXJhdG9ySWRlbnRpdHkSEwoLb3BlcmF0b3JfaWQYASABKAkiqAEKCkF1ZGl0RW50cnkSCgoCaWQYASABKAkSDQoFYXRfbXMYAiABKAMSDQoFYWN0b3IYAyABKAkSDgoGYWN0aW9uGAQgASgJEg4KBnRhcmdldBgFIAEoCRIyCgdvdXRjb21lGAYgASgOMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BdWRpdE91dGNvbWUSDAoEY29kZRgHIAEoCRIOCgZtZXRob2QYCCABKAkiWQoXTGlzdEF1ZGl0RW50cmllc1JlcXVlc3QSEAoIc2luY2VfbXMYASABKAMSDQoFYWN0b3IYAiABKAkSDQoFbGltaXQYAyABKA0SDgoGY3Vyc29yGAQgASgJImEKGExpc3RBdWRpdEVudHJpZXNSZXNwb25zZRIwCgdlbnRyaWVzGAEgAygLMh8uc3VwZXJ0YWcucnVudGltZS52Mi5BdWRpdEVudHJ5EhMKC25leHRfY3Vyc29yGAIgASgJKp8BChJPcGVyYXRvclRva2VuUGhhc2USJAogT1BFUkFUT1JfVE9LRU5fUEhBU0VfVU5TUEVDSUZJRUQQABIfChtPUEVSQVRPUl9UT0tFTl9QSEFTRV9BQ1RJVkUQARIgChxPUEVSQVRPUl9UT0tFTl9QSEFTRV9FWFBJUkVEEAISIAocT1BFUkFUT1JfVE9LRU5fUEhBU0VfUkVWT0tFRBADKmQKDEF1ZGl0T3V0Y29tZRIdChlBVURJVF9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGwoXQVVESVRfT1VUQ09NRV9TVUNDRUVERUQQARIYChRBVURJVF9PVVRDT01FX0ZBSUxFRBACMqIFCg5PcGVyYXRvckFjY2VzcxJqChNDcmVhdGVPcGVyYXRvclRva2VuEi8uc3VwZXJ0YWcucnVudGltZS52Mi5DcmVhdGVPcGVyYXRvclRva2VuUmVxdWVzdBoiLnN1cGVydGFnLnJ1bnRpbWUudjIuT3BlcmF0b3JUb2tlbhJkChBHZXRPcGVyYXRvclRva2VuEiwuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRPcGVyYXRvclRva2VuUmVxdWVzdBoiLnN1cGVydGFnLnJ1bnRpbWUudjIuT3BlcmF0b3JUb2tlbhJ1ChJMaXN0T3BlcmF0b3JUb2tlbnMSLi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RPcGVyYXRvclRva2Vuc1JlcXVlc3QaLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RPcGVyYXRvclRva2Vuc1Jlc3BvbnNlEmoKE1JvdGF0ZU9wZXJhdG9yVG9rZW4SLy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvdGF0ZU9wZXJhdG9yVG9rZW5SZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEmoKE1Jldm9rZU9wZXJhdG9yVG9rZW4SLy5zdXBlcnRhZy5ydW50aW1lLnYyLlJldm9rZU9wZXJhdG9yVG9rZW5SZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEm8KEExpc3RBdWRpdEVudHJpZXMSLC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBdWRpdEVudHJpZXNSZXF1ZXN0Gi0uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0QXVkaXRFbnRyaWVzUmVzcG9uc2UyfAoRT3BlcmF0b3JEaXJlY3RvcnkSZwoMQXV0aGVudGljYXRlEjAuc3VwZXJ0YWcucnVudGltZS52Mi5BdXRoZW50aWNhdGVPcGVyYXRvclJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLk9wZXJhdG9ySWRlbnRpdHliBnByb3RvMw");
+  fileDesc("CiBzdXBlcnRhZy9ydW50aW1lL3YyL2FjY2Vzcy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiJXChpDcmVhdGVPcGVyYXRvclRva2VuUmVxdWVzdBIMCgRuYW1lGAEgASgJEhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIVCg1zZWNyZXRfZGlnZXN0GAMgASgMIicKF0dldE9wZXJhdG9yVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkiOgoZTGlzdE9wZXJhdG9yVG9rZW5zUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkiZQoaTGlzdE9wZXJhdG9yVG9rZW5zUmVzcG9uc2USMgoGdG9rZW5zGAEgAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEhMKC25leHRfY3Vyc29yGAIgASgJIlcKGlJvdGF0ZU9wZXJhdG9yVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhUKDXNlY3JldF9kaWdlc3QYAyABKAwiKgoaUmV2b2tlT3BlcmF0b3JUb2tlblJlcXVlc3QSDAoEbmFtZRgBIAEoCSLTAgoNT3BlcmF0b3JUb2tlbhIMCgRuYW1lGAEgASgJEhMKC29wZXJhdG9yX2lkGAIgASgJEjYKBXBoYXNlGAMgASgOMicuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuUGhhc2USFQoNY3JlYXRlZF9hdF9tcxgEIAEoAxIVCg1leHBpcmVzX2F0X21zGAUgASgDEhwKD2xhc3RfdXNlZF9hdF9tcxgGIAEoA0gAiAEBEhoKDXJldm9rZWRfYXRfbXMYByABKANIAYgBARIaCg1yb3RhdGVkX2F0X21zGAggASgDSAKIAQESFwoPc2VjcmV0X3JldmlzaW9uGAkgASgEEhIKCmNyZWF0ZWRfYnkYCiABKAlCEgoQX2xhc3RfdXNlZF9hdF9tc0IQCg5fcmV2b2tlZF9hdF9tc0IQCg5fcm90YXRlZF9hdF9tcyKoAQoKQXVkaXRFbnRyeRIKCgJpZBgBIAEoCRINCgVhdF9tcxgCIAEoAxINCgVhY3RvchgDIAEoCRIOCgZhY3Rpb24YBCABKAkSDgoGdGFyZ2V0GAUgASgJEjIKB291dGNvbWUYBiABKA4yIS5zdXBlcnRhZy5ydW50aW1lLnYyLkF1ZGl0T3V0Y29tZRIMCgRjb2RlGAcgASgJEg4KBm1ldGhvZBgIIAEoCSJZChdMaXN0QXVkaXRFbnRyaWVzUmVxdWVzdBIQCghzaW5jZV9tcxgBIAEoAxINCgVhY3RvchgCIAEoCRINCgVsaW1pdBgDIAEoDRIOCgZjdXJzb3IYBCABKAkiYQoYTGlzdEF1ZGl0RW50cmllc1Jlc3BvbnNlEjAKB2VudHJpZXMYASADKAsyHy5zdXBlcnRhZy5ydW50aW1lLnYyLkF1ZGl0RW50cnkSEwoLbmV4dF9jdXJzb3IYAiABKAkqnwEKEk9wZXJhdG9yVG9rZW5QaGFzZRIkCiBPUEVSQVRPUl9UT0tFTl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG09QRVJBVE9SX1RPS0VOX1BIQVNFX0FDVElWRRABEiAKHE9QRVJBVE9SX1RPS0VOX1BIQVNFX0VYUElSRUQQAhIgChxPUEVSQVRPUl9UT0tFTl9QSEFTRV9SRVZPS0VEEAMqZAoMQXVkaXRPdXRjb21lEh0KGUFVRElUX09VVENPTUVfVU5TUEVDSUZJRUQQABIbChdBVURJVF9PVVRDT01FX1NVQ0NFRURFRBABEhgKFEFVRElUX09VVENPTUVfRkFJTEVEEAIyogUKDk9wZXJhdG9yQWNjZXNzEmoKE0NyZWF0ZU9wZXJhdG9yVG9rZW4SLy5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWF0ZU9wZXJhdG9yVG9rZW5SZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEmQKEEdldE9wZXJhdG9yVG9rZW4SLC5zdXBlcnRhZy5ydW50aW1lLnYyLkdldE9wZXJhdG9yVG9rZW5SZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5PcGVyYXRvclRva2VuEnUKEkxpc3RPcGVyYXRvclRva2VucxIuLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdE9wZXJhdG9yVG9rZW5zUmVxdWVzdBovLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdE9wZXJhdG9yVG9rZW5zUmVzcG9uc2USagoTUm90YXRlT3BlcmF0b3JUb2tlbhIvLnN1cGVydGFnLnJ1bnRpbWUudjIuUm90YXRlT3BlcmF0b3JUb2tlblJlcXVlc3QaIi5zdXBlcnRhZy5ydW50aW1lLnYyLk9wZXJhdG9yVG9rZW4SagoTUmV2b2tlT3BlcmF0b3JUb2tlbhIvLnN1cGVydGFnLnJ1bnRpbWUudjIuUmV2b2tlT3BlcmF0b3JUb2tlblJlcXVlc3QaIi5zdXBlcnRhZy5ydW50aW1lLnYyLk9wZXJhdG9yVG9rZW4SbwoQTGlzdEF1ZGl0RW50cmllcxIsLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEF1ZGl0RW50cmllc1JlcXVlc3QaLS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RBdWRpdEVudHJpZXNSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message supertag.runtime.v2.CreateOperatorTokenRequest
@@ -167,7 +167,7 @@ export type OperatorToken = Message<"supertag.runtime.v2.OperatorToken"> & {
   name: string;
 
   /**
-   * The operator calls made with it act as, such as `token:laptop-2`.
+   * The principal calls made with it act as, such as `operator:token:laptop-2`.
    *
    * @generated from field: string operator_id = 2;
    */
@@ -213,7 +213,7 @@ export type OperatorToken = Message<"supertag.runtime.v2.OperatorToken"> & {
   secretRevision: bigint;
 
   /**
-   * The bare operator ID that created it.
+   * The principal that created it, the admin operator.
    *
    * @generated from field: string created_by = 10;
    */
@@ -228,46 +228,8 @@ export const OperatorTokenSchema: GenMessage<OperatorToken> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_access, 6);
 
 /**
- * @generated from message supertag.runtime.v2.AuthenticateOperatorRequest
- */
-export type AuthenticateOperatorRequest = Message<"supertag.runtime.v2.AuthenticateOperatorRequest"> & {
-  /**
-   * SHA-256 of the presented bearer secret.
-   *
-   * @generated from field: bytes token_digest = 1;
-   */
-  tokenDigest: Uint8Array;
-};
-
-/**
- * Describes the message supertag.runtime.v2.AuthenticateOperatorRequest.
- * Use `create(AuthenticateOperatorRequestSchema)` to create a new message.
- */
-export const AuthenticateOperatorRequestSchema: GenMessage<AuthenticateOperatorRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_access, 7);
-
-/**
- * @generated from message supertag.runtime.v2.OperatorIdentity
- */
-export type OperatorIdentity = Message<"supertag.runtime.v2.OperatorIdentity"> & {
-  /**
-   * The bare operator ID, such as `token:laptop-2`.
-   *
-   * @generated from field: string operator_id = 1;
-   */
-  operatorId: string;
-};
-
-/**
- * Describes the message supertag.runtime.v2.OperatorIdentity.
- * Use `create(OperatorIdentitySchema)` to create a new message.
- */
-export const OperatorIdentitySchema: GenMessage<OperatorIdentity> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_access, 8);
-
-/**
- * One administrative or authority-changing operator call. It names who acted
- * and on what, never a credential, digest, or request body.
+ * One administrative or authority-changing call. It names who acted and on
+ * what, never a credential, digest, or request body.
  *
  * @generated from message supertag.runtime.v2.AuditEntry
  */
@@ -285,7 +247,9 @@ export type AuditEntry = Message<"supertag.runtime.v2.AuditEntry"> & {
   atMs: bigint;
 
   /**
-   * The bare operator ID, such as `local` or `token:laptop-2`.
+   * The full principal, such as `operator:local`, `operator:token:laptop-2`,
+   * `client:alice-laptop`, `gateway:edge`, `host:builder`, or
+   * `auth-key:NAME` for an enrollment.
    *
    * @generated from field: string actor = 3;
    */
@@ -330,7 +294,7 @@ export type AuditEntry = Message<"supertag.runtime.v2.AuditEntry"> & {
  * Use `create(AuditEntrySchema)` to create a new message.
  */
 export const AuditEntrySchema: GenMessage<AuditEntry> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_access, 9);
+  messageDesc(file_supertag_runtime_v2_access, 7);
 
 /**
  * @generated from message supertag.runtime.v2.ListAuditEntriesRequest
@@ -344,7 +308,7 @@ export type ListAuditEntriesRequest = Message<"supertag.runtime.v2.ListAuditEntr
   sinceMs: bigint;
 
   /**
-   * Only entries by this exact bare operator ID. Empty lists every operator's.
+   * Only entries by this exact principal. Empty lists every actor's.
    *
    * @generated from field: string actor = 2;
    */
@@ -370,7 +334,7 @@ export type ListAuditEntriesRequest = Message<"supertag.runtime.v2.ListAuditEntr
  * Use `create(ListAuditEntriesRequestSchema)` to create a new message.
  */
 export const ListAuditEntriesRequestSchema: GenMessage<ListAuditEntriesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_access, 10);
+  messageDesc(file_supertag_runtime_v2_access, 8);
 
 /**
  * @generated from message supertag.runtime.v2.ListAuditEntriesResponse
@@ -392,7 +356,7 @@ export type ListAuditEntriesResponse = Message<"supertag.runtime.v2.ListAuditEnt
  * Use `create(ListAuditEntriesResponseSchema)` to create a new message.
  */
 export const ListAuditEntriesResponseSchema: GenMessage<ListAuditEntriesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_access, 11);
+  messageDesc(file_supertag_runtime_v2_access, 9);
 
 /**
  * An Operator Token's phase. Revocation wins over expiry.
@@ -458,7 +422,7 @@ export const AuditOutcomeSchema: GenEnum<AuditOutcome> = /*@__PURE__*/
  *
  * An Operator Token is a named, revocable credential that one teammate or
  * machine presents instead of the admin operator token. Calls made with it act
- * as the operator `token:NAME`. Only the admin operator token creates, lists,
+ * as `operator:token:NAME`. Only the admin operator token creates, lists,
  * reads, rotates, and revokes Operator Tokens. Every operator may read the
  * audit log.
  *
@@ -526,22 +490,3 @@ export const OperatorAccess: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_access, 0);
-
-/**
- * Gateway resolution of an operator credential presented to it: the admin
- * operator token or an Operator Token, sent as the SHA-256 of its secret. The
- * Gateway holds no operator credential itself.
- *
- * @generated from service supertag.runtime.v2.OperatorDirectory
- */
-export const OperatorDirectory: GenService<{
-  /**
-   * @generated from rpc supertag.runtime.v2.OperatorDirectory.Authenticate
-   */
-  authenticate: {
-    methodKind: "unary";
-    input: typeof AuthenticateOperatorRequestSchema;
-    output: typeof OperatorIdentitySchema;
-  },
-}> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_access, 1);

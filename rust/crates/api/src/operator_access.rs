@@ -1,168 +1,20 @@
-//! Operator authentication with the admin operator token or an issued Operator Token, and the
-//! public Operator Token and audit API.
-//!
-//! The admin token is compared in constant time with the Control Plane's configuration. An Operator
-//! Token is resolved by the Control Plane on every call, never cached, so revocation and rotation
-//! take effect on the next call. Open streams recheck their token at least once a second.
+//! The public Operator Token and audit API. Callers are authenticated by [`crate::authorize`];
+//! only the admin operator manages Operator Tokens.
 
-use std::time::Duration;
-
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
-use supertag_protocol::is_operator_token_secret;
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    v2::{
-        operator_access_client::OperatorAccessClient, operator_access_server,
-        operator_directory_client::OperatorDirectoryClient, *,
-    },
+    v2::{operator_access_client::OperatorAccessClient, operator_access_server, *},
 };
-use tonic::{
-    Code, Request, Response, Status,
-    metadata::{Ascii, MetadataValue},
-};
+use tonic::{Request, Response, Status};
 
-use crate::{AUTHORIZATION, Api, Credentials, Principal, request_budget};
-
-/// How often an open operator stream rechecks an Operator Token.
-pub(crate) const OPERATOR_RECHECK: Duration = Duration::from_secs(1);
-
-/// The credential an operator call presented.
-pub(crate) enum OperatorCredential {
-    Admin,
-    /// SHA-256 of a well-formed Operator Token secret.
-    Token(Vec<u8>),
-}
-
-/// The private identity an operator call acts as, and how to recheck it.
-pub(crate) struct OperatorCaller {
-    pub(crate) identity: MetadataValue<Ascii>,
-    token_digest: Option<Vec<u8>>,
-}
-
-fn unauthenticated() -> Status {
-    Status::unauthenticated("valid bearer credential required")
-}
-
-impl Credentials {
-    /// Classifies the single bearer credential of an operator call without contacting the
-    /// Control Plane. The private service credential and malformed values are refused here.
-    pub(crate) fn presented_operator<T>(
-        &self,
-        request: &Request<T>,
-    ) -> Result<OperatorCredential, Status> {
-        let mut values = request.metadata().get_all(AUTHORIZATION).iter();
-        let value = values.next().ok_or_else(unauthenticated)?;
-        if values.next().is_some() {
-            return Err(unauthenticated());
-        }
-        let bytes = value.as_encoded_bytes();
-        if bool::from(bytes.ct_eq(self.operator.authorization.as_encoded_bytes())) {
-            return Ok(OperatorCredential::Admin);
-        }
-        if bool::from(bytes.ct_eq(self.service.as_encoded_bytes())) {
-            return Err(unauthenticated());
-        }
-        let secret = value
-            .to_str()
-            .ok()
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .filter(|secret| is_operator_token_secret(secret))
-            .ok_or_else(unauthenticated)?;
-        Ok(OperatorCredential::Token(
-            Sha256::digest(secret.as_bytes()).to_vec(),
-        ))
-    }
-}
+use crate::Api;
 
 impl Api {
     pub fn operator_access_service(&self) -> operator_access_server::OperatorAccessServer<Self> {
         operator_access_server::OperatorAccessServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
-    }
-
-    /// Resolves an Operator Token digest to its private `operator:token:NAME` identity.
-    pub(crate) async fn authenticate_operator(
-        &self,
-        token_digest: Vec<u8>,
-        timeout: Duration,
-    ) -> Result<MetadataValue<Ascii>, Status> {
-        let request = self.credentials.upstream(
-            AuthenticateOperatorRequest { token_digest },
-            MetadataValue::from_static("service:gateway"),
-            timeout,
-        );
-        let identity = OperatorDirectoryClient::new(self.control_plane.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
-            .authenticate(request)
-            .await
-            .map_err(|error| match error.code() {
-                // Revoked and expired tokens name why; anything else stays generic.
-                Code::Unauthenticated => Status::unauthenticated(error.message().to_owned()),
-                Code::PermissionDenied => unauthenticated(),
-                _ => error,
-            })?
-            .into_inner();
-        let valid = identity
-            .operator_id
-            .strip_prefix("token:")
-            .is_some_and(|name| {
-                !name.is_empty()
-                    && name.len() <= 63
-                    && name.bytes().all(|byte| byte.is_ascii_graphic())
-            });
-        if !valid {
-            return Err(Status::internal("invalid Operator Token identity"));
-        }
-        format!("operator:{}", identity.operator_id)
-            .parse()
-            .map_err(|_| Status::internal("invalid Operator Token identity"))
-    }
-
-    /// Authenticates an operator call that does not go through `forward`, such as a stream.
-    pub(crate) async fn operator_caller<T>(
-        &self,
-        request: &Request<T>,
-        principal: &Principal,
-    ) -> Result<OperatorCaller, Status> {
-        match self.credentials.presented_operator(request)? {
-            OperatorCredential::Admin => Ok(OperatorCaller {
-                identity: principal.identity.clone(),
-                token_digest: None,
-            }),
-            OperatorCredential::Token(digest) => {
-                let timeout = request_budget(request)?;
-                let identity = tokio::time::timeout(
-                    timeout,
-                    self.authenticate_operator(digest.clone(), timeout),
-                )
-                .await
-                .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))??;
-                Ok(OperatorCaller {
-                    identity,
-                    token_digest: Some(digest),
-                })
-            }
-        }
-    }
-
-    /// Confirms that the caller's Operator Token is still valid. The admin token always is.
-    pub(crate) async fn recheck_operator(&self, caller: &OperatorCaller) -> Result<(), Status> {
-        let Some(digest) = &caller.token_digest else {
-            return Ok(());
-        };
-        let timeout = Duration::from_secs(5);
-        let identity =
-            tokio::time::timeout(timeout, self.authenticate_operator(digest.clone(), timeout))
-                .await
-                .map_err(|_| Status::unavailable("could not recheck the Operator Token"))??;
-        if identity != caller.identity {
-            return Err(unauthenticated());
-        }
-        Ok(())
     }
 }
 
@@ -178,11 +30,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<CreateOperatorTokenRequest>,
     ) -> Result<Response<OperatorToken>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).create_operator_token(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).create_operator_token(request).await
+        })
         .await
     }
 
@@ -190,11 +40,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<GetOperatorTokenRequest>,
     ) -> Result<Response<OperatorToken>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).get_operator_token(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).get_operator_token(request).await
+        })
         .await
     }
 
@@ -202,11 +50,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<ListOperatorTokensRequest>,
     ) -> Result<Response<ListOperatorTokensResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).list_operator_tokens(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).list_operator_tokens(request).await
+        })
         .await
     }
 
@@ -214,11 +60,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<RotateOperatorTokenRequest>,
     ) -> Result<Response<OperatorToken>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).rotate_operator_token(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).rotate_operator_token(request).await
+        })
         .await
     }
 
@@ -226,11 +70,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<RevokeOperatorTokenRequest>,
     ) -> Result<Response<OperatorToken>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).revoke_operator_token(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).revoke_operator_token(request).await
+        })
         .await
     }
 
@@ -238,52 +80,9 @@ impl operator_access_server::OperatorAccess for Api {
         &self,
         request: Request<ListAuditEntriesRequest>,
     ) -> Result<Response<ListAuditEntriesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { access(channel).list_audit_entries(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            access(channel).list_audit_entries(request).await
+        })
         .await
-    }
-}
-
-impl Api {
-    pub fn operator_directory_service(
-        &self,
-    ) -> operator_directory_server::OperatorDirectoryServer<Self> {
-        operator_directory_server::OperatorDirectoryServer::new(self.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
-    }
-}
-
-/// Gateways resolve the credential an operator presented to them (for the test notification), so
-/// a Gateway never holds the admin operator token. The digest of the admin token resolves to the
-/// admin operator; any other digest is looked up as an Operator Token.
-#[tonic::async_trait]
-impl operator_directory_server::OperatorDirectory for Api {
-    async fn authenticate(
-        &self,
-        request: Request<AuthenticateOperatorRequest>,
-    ) -> Result<Response<OperatorIdentity>, Status> {
-        self.credentials
-            .gateway
-            .authorize(request.metadata().as_ref(), request.extensions())?;
-        let timeout = request_budget(&request)?;
-        let digest = request.into_inner().token_digest;
-        let identity = if bool::from(digest.ct_eq(&self.credentials.operator_digest)) {
-            self.credentials.operator.identity.clone()
-        } else {
-            tokio::time::timeout(timeout, self.authenticate_operator(digest, timeout))
-                .await
-                .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))??
-        };
-        let operator_id = identity
-            .to_str()
-            .ok()
-            .and_then(|identity| identity.strip_prefix("operator:"))
-            .ok_or_else(|| Status::internal("invalid operator identity"))?
-            .to_owned();
-        Ok(Response::new(OperatorIdentity { operator_id }))
     }
 }

@@ -60,12 +60,17 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
 impl OperatorServices {
     pub async fn start(database_url: &str) -> Result<Self> {
         let home = tempfile::tempdir()?;
-        let gateway_token = Uuid::new_v4().to_string();
+        let gateway_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator_token = Uuid::new_v4().to_string();
         let mut plane = command(home.path(), &["control-plane"]);
         plane
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", Uuid::new_v4().to_string())
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
+            .env(
+                "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
+                supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            )
             .env("SUPERTAG_DATABASE_URL", database_url);
         plane.env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         let (plane, gateway_url) = service(plane).await?;

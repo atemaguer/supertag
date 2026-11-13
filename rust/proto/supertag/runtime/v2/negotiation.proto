@@ -21,8 +21,9 @@ enum ServiceRole {
   SERVICE_ROLE_CONTROL_PLANE = 1;
   SERVICE_ROLE_GATEWAY = 2;
   SERVICE_ROLE_WORKER_HOST = 3;
-  // An operator client: the CLI, the TUI, the desktop app, or an SDK client.
-  SERVICE_ROLE_OPERATOR = 4;
+  // A client of the Control Plane's API: the CLI, the TUI, the desktop app, or
+  // an SDK client, acting for an operator or an enrolled client.
+  SERVICE_ROLE_CLIENT = 4;
 }
 
 message NegotiateProtocolRequest {

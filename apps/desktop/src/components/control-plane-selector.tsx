@@ -18,6 +18,8 @@ import type { ControlPlaneProfile } from "../control-plane";
 
 interface ControlPlaneSelectorProps {
   active?: string;
+  /** Whom the active connection acts as; a client device shows it. */
+  principal?: string;
   profiles: ControlPlaneProfile[];
   preview?: boolean;
   busy: boolean;
@@ -30,6 +32,7 @@ interface ControlPlaneSelectorProps {
 
 export function ControlPlaneSelector({
   active,
+  principal,
   profiles,
   preview,
   busy,
@@ -41,6 +44,7 @@ export function ControlPlaneSelector({
 }: ControlPlaneSelectorProps) {
   const selected = profiles.find((profile) => profile.origin === active);
   const connected = Boolean(selected || preview);
+  const client = selected && principal?.startsWith("client:") ? principal : undefined;
   const name = switching
     ? "Connecting…"
     : (selected?.name ?? (preview ? "Preview workspace" : "Select Control Plane"));
@@ -54,12 +58,17 @@ export function ControlPlaneSelector({
           className="connection"
           data-connected={connected}
           aria-label={connected ? "Switch Control Plane" : "Select Control Plane"}
-          aria-description={selected ? `Current Control Plane is ${selected.name}` : undefined}
-          title={selected?.origin}
+          aria-description={
+            selected
+              ? `Current Control Plane is ${selected.name}${client ? `, connected as ${client}` : ""}`
+              : undefined
+          }
+          title={client ? `${selected?.origin} · connected as ${client}` : selected?.origin}
           disabled={busy || switching}
         >
           <span className="connection-dot" aria-hidden />
           <span className="row-title">{name}</span>
+          {client && <small className="connection-principal">{client}</small>}
           <ChevronsUpDown className="connection-arrow" size={15} aria-hidden />
         </Button>
       </DropdownMenuTrigger>

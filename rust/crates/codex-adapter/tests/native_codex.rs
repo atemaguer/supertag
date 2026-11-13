@@ -1163,7 +1163,7 @@ impl NativeFixture {
                     "must-not-reach-native-host-secret".into(),
                 ),
                 (
-                    "SUPERTAG_GATEWAY_TOKEN".into(),
+                    "SUPERTAG_GATEWAY_CREDENTIAL".into(),
                     "must-not-reach-native-gateway-secret".into(),
                 ),
                 (

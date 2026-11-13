@@ -45,7 +45,7 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 	defer cancel()
 	// The exchange carries no credentials.
 	res, err := p.client.Negotiate(ctx, connect.NewRequest(&v2.NegotiateProtocolRequest{
-		Role:             v2.ServiceRole_SERVICE_ROLE_OPERATOR,
+		Role:             v2.ServiceRole_SERVICE_ROLE_CLIENT,
 		ProtocolVersions: protocolVersions,
 		BuildVersion:     p.build,
 	}))

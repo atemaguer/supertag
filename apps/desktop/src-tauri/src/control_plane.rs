@@ -6,7 +6,7 @@ use supertag_protocol::{
     negotiation::{NegotiationError, ProtocolChannel, connect},
     v2::{
         self, ServiceRole, conversations_client::ConversationsClient,
-        operator_client::OperatorClient,
+        enrollments_client::EnrollmentsClient, operator_client::OperatorClient,
     },
 };
 use tokio::sync::{Mutex, RwLock};
@@ -60,10 +60,11 @@ impl Session {
     async fn connect(endpoint: Endpoint, token: &str) -> Result<Self> {
         let authorization = bearer(token)?;
         let channel = endpoint.connect().await.map_err(|_| {
-            "Could not connect to the Control Plane. Check its address and TLS certificate.".to_owned()
+            "Could not connect to the Control Plane. Check its address and TLS certificate."
+                .to_owned()
         })?;
         // The Control Plane refuses every call that does not name a negotiated version.
-        let channel = connect(channel, ServiceRole::Operator, ServiceRole::ControlPlane)
+        let channel = connect(channel, ServiceRole::Client, ServiceRole::ControlPlane)
             .await
             .map_err(|error| match error {
                 NegotiationError::Unavailable(_) => {
@@ -99,6 +100,47 @@ impl Session {
         OperatorClient::new(self.channel.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    fn enrollments(&self) -> EnrollmentsClient<ProtocolChannel> {
+        EnrollmentsClient::new(self.channel.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    /// Whom the Control Plane resolves this session's credential to, such as `operator:local` or
+    /// `client:alice-laptop`.
+    async fn principal(&self) -> Result<String> {
+        Ok(self
+            .enrollments()
+            .who_am_i(self.request(v2::WhoAmIRequest {}))
+            .await
+            .map_err(rpc_error)?
+            .into_inner()
+            .principal)
+    }
+
+    /// Joins this device as `client:NAME` with a client Auth Key, this session's bearer, and
+    /// returns its new enrolled credential. The key is presented once and never kept.
+    async fn enroll(&self, name: &str) -> Result<String> {
+        use sha2::Digest as _;
+        let credential = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+        self.enrollments()
+            .enroll(self.request(v2::EnrollRequest {
+                role: v2::PrincipalRole::Client.into(),
+                name: name.to_owned(),
+                operation_id: supertag_protocol::new_secret(""),
+                token_digest: sha2::Sha256::digest(credential.as_bytes()).to_vec(),
+            }))
+            .await
+            .map_err(|status| match status.code() {
+                Code::PermissionDenied | Code::FailedPrecondition | Code::Unauthenticated => {
+                    "The Control Plane refused this Auth Key. Ask an operator for a new client Auth Key."
+                        .to_owned()
+                }
+                _ => rpc_error(status),
+            })?;
+        Ok(credential)
     }
 
     fn conversations(&self) -> ConversationsClient<ProtocolChannel> {
@@ -140,7 +182,10 @@ impl ControlPlaneState {
 
     async fn session(&self, connection_id: &str) -> Result<Arc<Session>> {
         let state = self.0.read().await;
-        let session = state.session.clone().ok_or("Connect to a Control Plane first.")?;
+        let session = state
+            .session
+            .clone()
+            .ok_or("Connect to a Control Plane first.")?;
         if state.generation.to_string() != connection_id {
             return Err("The connection changed. Refresh this view.".into());
         }
@@ -335,7 +380,8 @@ fn endpoint(control_plane: &str) -> Result<Endpoint> {
                 .is_ok_and(|ip| ip.is_loopback())
             {
                 return Err(
-                    "HTTP requires a loopback IP address. Use HTTPS for a remote Control Plane.".into(),
+                    "HTTP requires a loopback IP address. Use HTTPS for a remote Control Plane."
+                        .into(),
                 );
             }
             false
@@ -354,14 +400,50 @@ fn endpoint(control_plane: &str) -> Result<Endpoint> {
     }
 }
 
+/// This machine's host name as a client name: letters, digits, hyphens, underscores and dots.
+fn device_name() -> String {
+    let name: String = host_name()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(250)
+        .collect();
+    if name.is_empty() {
+        "device".into()
+    } else {
+        name
+    }
+}
+
+fn host_name() -> String {
+    #[cfg(unix)]
+    {
+        let mut buffer = [0_u8; 256];
+        // SAFETY: the buffer is valid for its length, and gethostname terminates or truncates.
+        if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } == 0 {
+            let end = buffer
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(buffer.len());
+            return String::from_utf8_lossy(&buffer[..end]).into_owned();
+        }
+    }
+    std::env::var("COMPUTERNAME").unwrap_or_default()
+}
+
 fn bearer(token: &str) -> Result<MetadataValue<Ascii>> {
     if token.is_empty() || token.len() > 8192 || !token.bytes().all(|byte| byte.is_ascii_graphic())
     {
-        return Err("Enter a valid operator token.".into());
+        return Err("Enter a valid operator token or Auth Key.".into());
     }
     let mut value: MetadataValue<Ascii> = format!("Bearer {token}")
         .parse()
-        .map_err(|_| "Enter a valid operator token.".to_owned())?;
+        .map_err(|_| "Enter a valid operator token or Auth Key.".to_owned())?;
     value.set_sensitive(true);
     Ok(value)
 }
@@ -370,8 +452,8 @@ fn rpc_error(status: Status) -> String {
     // Never surface an arbitrary upstream status message: it can contain request
     // data, backend details, or credentials echoed by an unexpected server.
     match status.code() {
-        Code::Unauthenticated => "The Control Plane rejected the operator token.",
-        Code::PermissionDenied => "This operator cannot access that resource.",
+        Code::Unauthenticated => "The Control Plane rejected the saved credential.",
+        Code::PermissionDenied => "This connection cannot access that resource.",
         Code::NotFound => "The requested resource is no longer available.",
         Code::AlreadyExists => "This operation conflicts with an earlier request.",
         Code::InvalidArgument => "The Control Plane rejected this request. Check its values.",

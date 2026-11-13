@@ -21,6 +21,24 @@ fn digest(secret: &str) -> Vec<u8> {
     Sha256::digest(secret).to_vec()
 }
 
+/// The host a presented credential resolves to, and its generation.
+async fn authenticated(store: &Store, token: &[u8]) -> Option<(String, u64)> {
+    store
+        .resolve_credential(token)
+        .await
+        .unwrap()
+        .map(|resolved| (resolved.name, resolved.generation))
+}
+
+fn host_join(name: &str, operation: &str, token: &[u8]) -> EnrollRequest {
+    EnrollRequest {
+        role: PrincipalRole::Host.into(),
+        name: name.into(),
+        operation_id: operation.into(),
+        token_digest: token.to_vec(),
+    }
+}
+
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
@@ -46,6 +64,7 @@ async fn key(
             OPERATOR,
             &CreateAuthKeyRequest {
                 name: name.into(),
+                role: PrincipalRole::Host.into(),
                 operation_id: format!("issue-{name}"),
                 key_digest: secret.clone(),
                 expires_in_ms: 3_600_000,
@@ -59,23 +78,23 @@ async fn key(
         .await
         .unwrap();
     assert!(issued.reusable);
-    assert!(issued.host_id.is_empty());
+    assert_eq!(issued.role, PrincipalRole::Host as i32);
     secret
 }
 
 async fn join(store: &Store, key: &[u8], host: &str) -> HostAuthority {
     let record = store
-        .enroll_host(
-            &EnrollHostRequest {
-                host_id: host.into(),
-                operation_id: format!("join-{host}"),
-                token_digest: digest(&format!("token:{host}")),
-            },
+        .enroll(
             key,
+            &host_join(
+                host,
+                &format!("join-{host}"),
+                &digest(&format!("token:{host}")),
+            ),
         )
         .await
         .unwrap();
-    assert_eq!(record.generation, 0);
+    assert_eq!(record.credential_revision, 1);
     let record = store
         .register_host(host, &format!("{host}-incarnation"))
         .await
@@ -186,19 +205,22 @@ async fn placement_contract(url: &str) {
     );
     assert!(runs_on(&store, "trainer", &[]).await.runs_on.is_empty());
 
-    // A reusable key cannot name a host, and keys cannot grant reserved labels.
-    for (host_id, labels) in [("named", vec![]), ("", strings(&["mcp:github"]))] {
+    // Only host keys grant labels, and keys cannot grant reserved labels.
+    for (role, labels) in [
+        (PrincipalRole::Gateway, strings(&["gpu"])),
+        (PrincipalRole::Host, strings(&["mcp:github"])),
+    ] {
         assert!(matches!(
             store
                 .create_auth_key(
                     OPERATOR,
                     &CreateAuthKeyRequest {
-                        name: format!("bad-{}", host_id.len()),
-                        host_id: host_id.into(),
-                        operation_id: format!("bad-{host_id}"),
-                        key_digest: digest(&format!("bad-{host_id}")),
+                        name: format!("bad-{}", role.as_str_name().len()),
+                        role: role.into(),
+                        operation_id: format!("bad-{}", role.as_str_name()),
+                        key_digest: digest(&format!("bad-{}", role.as_str_name())),
                         expires_in_ms: 60_000,
-                        all_tags: true,
+                        all_tags: role == PrincipalRole::Host,
                         reusable: true,
                         labels,
                         ..Default::default()
@@ -223,27 +245,19 @@ async fn placement_contract(url: &str) {
     let cpu = join(&store, &plain_key, "cpu-host").await;
     let cpu_2 = join(&store, &plain_key, "cpu-host-2").await;
     // A lost response replays the same enrollment; a different credential cannot.
-    let replay = EnrollHostRequest {
-        host_id: "cpu-host".into(),
-        operation_id: "join-cpu-host".into(),
-        token_digest: digest("token:cpu-host"),
-    };
+    let replay = host_join("cpu-host", "join-cpu-host", &digest("token:cpu-host"));
     assert_eq!(
-        store
-            .enroll_host(&replay, &plain_key)
-            .await
-            .unwrap()
-            .host_id,
+        store.enroll(&plain_key, &replay).await.unwrap().name,
         "cpu-host"
     );
     assert!(matches!(
         store
-            .enroll_host(
-                &EnrollHostRequest {
+            .enroll(
+                &plain_key,
+                &EnrollRequest {
                     token_digest: digest("stolen"),
                     ..replay.clone()
                 },
-                &plain_key,
             )
             .await,
         Err(StoreError::PermissionDenied)
@@ -251,13 +265,9 @@ async fn placement_contract(url: &str) {
     // A host ID enrolled with another key stays taken.
     assert!(matches!(
         store
-            .enroll_host(
-                &EnrollHostRequest {
-                    host_id: "gpu-host".into(),
-                    operation_id: "join-again".into(),
-                    token_digest: digest("token:other"),
-                },
+            .enroll(
                 &plain_key,
+                &host_join("gpu-host", "join-again", &digest("token:other"))
             )
             .await,
         Err(StoreError::Conflict(_))
@@ -417,14 +427,7 @@ async fn ephemeral_contract(url: &str) {
     assert_eq!(start_running(&store, &runner, "runner-1").await, task);
     // Joined at the same instant, never came online.
     store
-        .enroll_host(
-            &EnrollHostRequest {
-                host_id: "idle".into(),
-                operation_id: "join-idle".into(),
-                token_digest: digest("token:idle"),
-            },
-            &ci,
-        )
+        .enroll(&ci, &host_join("idle", "join-idle", &digest("token:idle")))
         .await
         .unwrap();
 
@@ -455,10 +458,7 @@ async fn ephemeral_contract(url: &str) {
             .collect::<Vec<_>>(),
         ["idle", "laptop"]
     );
-    assert!(matches!(
-        store.authenticate_host(&digest("token:runner")).await,
-        Err(StoreError::PermissionDenied)
-    ));
+    assert_eq!(authenticated(&store, &digest("token:runner")).await, None);
     let diagnosis = store.diagnose_task_placement(&task).await.unwrap();
     assert_eq!(
         diagnosis
@@ -523,15 +523,10 @@ async fn ephemeral_restart_contract(url: &str) {
     store.close().await;
 }
 
-fn create(
-    operation: &str,
-    host_id: &str,
-    reusable: bool,
-    expires_in_ms: u64,
-) -> CreateAuthKeyRequest {
+fn create(operation: &str, reusable: bool, expires_in_ms: u64) -> CreateAuthKeyRequest {
     CreateAuthKeyRequest {
         name: operation.into(),
-        host_id: host_id.into(),
+        role: PrincipalRole::Host.into(),
         operation_id: operation.into(),
         key_digest: digest(&format!("key:{operation}")),
         expires_in_ms,
@@ -550,15 +545,15 @@ async fn auth_key_lifecycle_contract(url: &str) {
 
     // Lifetimes are capped: one hour for a one-time key, 90 days for a reusable key.
     for request in [
-        create("long-reusable", "", true, NINETY_DAYS + 1),
-        create("long-one-time", "named", false, HOUR + 1),
+        create("long-reusable", true, NINETY_DAYS + 1),
+        create("long-one-time", false, HOUR + 1),
     ] {
         assert!(matches!(
             store.create_auth_key(OPERATOR, &request).await,
             Err(StoreError::InvalidArgument(_))
         ));
     }
-    let pool = create("pool", "", true, 0);
+    let pool = create("pool", true, 0);
     let issued = store.create_auth_key(OPERATOR, &pool).await.unwrap();
     assert_eq!(issued.expires_at_ms, NOW + NINETY_DAYS as i64);
     assert_eq!(issued.name, "pool");
@@ -566,7 +561,7 @@ async fn auth_key_lifecycle_contract(url: &str) {
     assert!(!issued.revoked);
     assert_eq!(
         store
-            .create_auth_key(OPERATOR, &create("one-time", "one-time-host", false, 0))
+            .create_auth_key(OPERATOR, &create("one-time", false, 0))
             .await
             .unwrap()
             .expires_at_ms,
@@ -574,40 +569,32 @@ async fn auth_key_lifecycle_contract(url: &str) {
     );
 
     // An expired reusable key enrolls nothing.
-    let short = create("short", "", true, 1_000);
+    let short = create("short", true, 1_000);
     store.create_auth_key(OPERATOR, &short).await.unwrap();
     clock.store(NOW + 1_000, Ordering::SeqCst);
     assert!(matches!(
         store
-            .enroll_host(
-                &EnrollHostRequest {
-                    host_id: "late".into(),
-                    operation_id: "join-late".into(),
-                    token_digest: digest("token:late"),
-                },
+            .enroll(
                 &short.key_digest,
+                &host_join("late", "join-late", &digest("token:late"))
             )
             .await,
         Err(StoreError::PermissionDenied)
     ));
 
-    // A pending one-time key reserves its host ID against reusable joins.
-    let reserved = create("reserved", "reserved-host", false, 0);
+    // A one-time key enrolls whatever name its enrollee chooses, but a taken name stays taken.
+    let reserved = create("reserved", false, 0);
     store.create_auth_key(OPERATOR, &reserved).await.unwrap();
+    join(&store, &reserved.key_digest, "reserved-host").await;
     assert!(matches!(
         store
-            .enroll_host(
-                &EnrollHostRequest {
-                    host_id: "reserved-host".into(),
-                    operation_id: "steal".into(),
-                    token_digest: digest("token:steal"),
-                },
+            .enroll(
                 &pool.key_digest,
+                &host_join("reserved-host", "steal", &digest("token:steal")),
             )
             .await,
         Err(StoreError::Conflict(_))
     ));
-    join(&store, &reserved.key_digest, "reserved-host").await;
 
     // Revocation blocks new joins and replays; joined hosts stay enrolled.
     join(&store, &pool.key_digest, "first").await;
@@ -638,24 +625,19 @@ async fn auth_key_lifecycle_contract(url: &str) {
     for (host, operation) in [("second", "join-second"), ("first", "join-first")] {
         assert!(matches!(
             store
-                .enroll_host(
-                    &EnrollHostRequest {
-                        host_id: host.into(),
-                        operation_id: operation.into(),
-                        token_digest: digest(&format!("token:{host}")),
-                    },
+                .enroll(
                     &pool.key_digest,
+                    &host_join(host, operation, &digest(&format!("token:{host}")))
                 )
                 .await,
             Err(StoreError::PermissionDenied)
         ));
     }
     assert_eq!(
-        store
-            .authenticate_host(&digest("token:first"))
+        authenticated(&store, &digest("token:first"))
             .await
             .unwrap()
-            .host_id,
+            .0,
         "first"
     );
     store.close().await;
@@ -670,7 +652,7 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     store.put_tag("builder", "Build", vec![]).await.unwrap();
 
     // Names are validated, and never reused: not after revocation, expiry or use.
-    let mut invalid = create("invalid", "", true, 0);
+    let mut invalid = create("invalid", true, 0);
     for name in ["", "CI", "_ci", "ci key", "ci.key", &"c".repeat(64)] {
         invalid.name = name.into();
         assert!(matches!(
@@ -678,16 +660,16 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
             Err(StoreError::InvalidArgument(_))
         ));
     }
-    let mut longest = create("longest", "", true, 0);
+    let mut longest = create("longest", true, 0);
     longest.name = format!("9{}", "_".repeat(62));
     store.create_auth_key(OPERATOR, &longest).await.unwrap();
-    let laptop = create("laptop", "laptop-host", false, 0);
+    let laptop = create("laptop", false, 0);
     let issued = store.create_auth_key(OPERATOR, &laptop).await.unwrap();
     assert_eq!(
         (issued.name.as_str(), issued.used, issued.revoked),
         ("laptop", false, false)
     );
-    let mut reused = create("laptop-again", "", true, 0);
+    let mut reused = create("laptop-again", true, 0);
     reused.name = "laptop".into();
     assert!(matches!(
         store.create_auth_key(OPERATOR, &reused).await,
@@ -702,12 +684,12 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     ));
     clock.store(NOW + 1, Ordering::SeqCst);
     store
-        .create_auth_key(OPERATOR, &create("ci", "", true, 0))
+        .create_auth_key(OPERATOR, &create("ci", true, 0))
         .await
         .unwrap();
     clock.store(NOW + 2, Ordering::SeqCst);
     store
-        .create_auth_key(OPERATOR, &create("brief", "brief-host", false, 1))
+        .create_auth_key(OPERATOR, &create("brief", false, 1))
         .await
         .unwrap();
 
@@ -724,7 +706,7 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     ));
     store.revoke_auth_key(OPERATOR, "ci").await.unwrap();
     clock.store(NOW + HOUR, Ordering::SeqCst);
-    let mut again = create("ci-again", "", true, 0);
+    let mut again = create("ci-again", true, 0);
     again.name = "ci".into();
     assert!(matches!(
         store.create_auth_key(OPERATOR, &again).await,
@@ -793,26 +775,27 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
             .credential_revision,
         1
     );
-    let rotate = |revision: u64, secret: &str| RotateHostCredentialRequest {
-        host_id: "laptop-host".into(),
+    let rotate = |revision: u64, secret: &str| RotateCredentialRequest {
+        role: PrincipalRole::Host.into(),
+        name: "laptop-host".into(),
         expected_credential_revision: revision,
         token_digest: digest(secret),
     };
     assert!(matches!(
         store
-            .rotate_host_credential("host:laptop-host", &rotate(1, "token:rotated"))
+            .rotate_credential("host:laptop-host", &rotate(1, "token:rotated"))
             .await,
         Err(StoreError::PermissionDenied)
     ));
     assert!(matches!(
         store
-            .rotate_host_credential(OPERATOR, &rotate(0, "token:rotated"))
+            .rotate_credential(OPERATOR, &rotate(0, "token:rotated"))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     assert!(matches!(
         store
-            .rotate_host_credential(OPERATOR, &rotate(2, "token:rotated"))
+            .rotate_credential(OPERATOR, &rotate(2, "token:rotated"))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -820,43 +803,37 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     join(&store, &store_key(&store, "spare").await, "spare-host").await;
     for secret in ["token:spare-host", "key:laptop"] {
         assert!(matches!(
-            store
-                .rotate_host_credential(OPERATOR, &rotate(1, secret))
-                .await,
+            store.rotate_credential(OPERATOR, &rotate(1, secret)).await,
             Err(StoreError::Conflict(_))
         ));
     }
     let rotated = store
-        .rotate_host_credential(OPERATOR, &rotate(1, "token:rotated"))
+        .rotate_credential(OPERATOR, &rotate(1, "token:rotated"))
         .await
         .unwrap();
     assert_eq!(rotated.credential_revision, 2);
     // A repeat of the applied rotation answers the same; a stale one is refused.
     assert_eq!(
         store
-            .rotate_host_credential(OPERATOR, &rotate(1, "token:rotated"))
+            .rotate_credential(OPERATOR, &rotate(1, "token:rotated"))
             .await
             .unwrap(),
         rotated
     );
     assert!(matches!(
         store
-            .rotate_host_credential(OPERATOR, &rotate(1, "token:other"))
+            .rotate_credential(OPERATOR, &rotate(1, "token:other"))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    assert!(matches!(
-        store.authenticate_host(&digest("token:laptop-host")).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    let record = store
-        .authenticate_host(&digest("token:rotated"))
-        .await
-        .unwrap();
+    assert_eq!(
+        authenticated(&store, &digest("token:laptop-host")).await,
+        None
+    );
     // The registration and its running work are unchanged until the host restarts.
     assert_eq!(
-        (record.host_id.as_str(), record.generation),
-        ("laptop-host", 1)
+        authenticated(&store, &digest("token:rotated")).await,
+        Some(("laptop-host".into(), 1))
     );
     assert_eq!(
         store
@@ -874,10 +851,11 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
         .unwrap();
     assert!(matches!(
         store
-            .rotate_host_credential(
+            .rotate_credential(
                 OPERATOR,
-                &RotateHostCredentialRequest {
-                    host_id: "local".into(),
+                &RotateCredentialRequest {
+                    role: PrincipalRole::Host.into(),
+                    name: "local".into(),
                     expected_credential_revision: 1,
                     token_digest: digest("token:local-rotated"),
                 },
@@ -887,10 +865,11 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     ));
     assert!(matches!(
         store
-            .rotate_host_credential(
+            .rotate_credential(
                 OPERATOR,
-                &RotateHostCredentialRequest {
-                    host_id: "missing".into(),
+                &RotateCredentialRequest {
+                    role: PrincipalRole::Host.into(),
+                    name: "missing".into(),
                     expected_credential_revision: 1,
                     token_digest: digest("token:missing"),
                 },
@@ -902,7 +881,7 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
     store.revoke_host("laptop-host").await.unwrap();
     assert!(matches!(
         store
-            .rotate_host_credential(OPERATOR, &rotate(2, "token:after-revoke"))
+            .rotate_credential(OPERATOR, &rotate(2, "token:after-revoke"))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -910,7 +889,7 @@ async fn auth_key_names_and_host_credentials_contract(url: &str) {
 }
 
 async fn store_key(store: &Store, name: &str) -> Vec<u8> {
-    let request = create(name, "", true, 0);
+    let request = create(name, true, 0);
     store.create_auth_key(OPERATOR, &request).await.unwrap();
     request.key_digest
 }

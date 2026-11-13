@@ -59,7 +59,8 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
 fn control_plane(secret: &str, token: &str, identity: &str) -> Command {
     let mut command = command(&["control-plane"]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", secret)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", secret)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", secret)
         .env("SUPERTAG_OPERATOR_TOKEN", token)
         .env("SUPERTAG_OPERATOR_PRINCIPAL", identity);
     command
@@ -105,7 +106,7 @@ database_tests! {
 }
 
 async fn retirement_removes_tag_from_roster_and_preserves_identity(database: String) -> Result<()> {
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
     let mut control = control_plane(&secret, &token, "operator:alice");
     control.env("SUPERTAG_DATABASE_URL", &database);
@@ -186,9 +187,9 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
         .tempdir_in("/tmp")?;
     let database = directory.path().join("control.db");
     let blobs = directory.path().join("blobs");
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let create_control = || {
         let mut control = control_plane(&secret, &token, "operator:alice");
         control
@@ -519,9 +520,9 @@ fn artifact_host_request<T>(input: T, token: &str, generation: u64) -> Result<to
 
 async fn conversation_scope_survives_api_forwards_and_task_reads(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
-    let host_token = Uuid::new_v4().to_string();
+    let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut control = control_plane(&secret, &alice_token, "operator:alice");
     control
         .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
@@ -687,7 +688,7 @@ fn fixture(path: &Path, version: &str) -> Result<()> {
         format!(
             r#"#!/bin/sh
 set -eu
-test -z "${{SUPERTAG_OPERATOR_TOKEN:-}}${{SUPERTAG_GATEWAY_TOKEN:-}}${{OPENAI_API_KEY:-}}"
+test -z "${{SUPERTAG_OPERATOR_TOKEN:-}}${{SUPERTAG_GATEWAY_CREDENTIAL:-}}${{OPENAI_API_KEY:-}}"
 if [ "${{1:-}}" = "--version" ]; then
   printf '%s\n' "{version}"
   exit 0
@@ -717,7 +718,8 @@ async fn tui_handover_uses_descriptor_three_and_version_match() -> Result<()> {
         .arg("--binary")
         .arg(&launcher)
         .env("SUPERTAG_OPERATOR_TOKEN", token)
-        .env("SUPERTAG_GATEWAY_TOKEN", "never-forward")
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", "never-forward")
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", "never-forward")
         .env("OPENAI_API_KEY", "never-forward");
     fixture(&launcher, env!("CARGO_PKG_VERSION"))?;
     let output = timeout(WAIT, command.output()).await??;
@@ -1347,7 +1349,7 @@ async fn watch_replays_private_conversations_after_services_restart(
         Ok(())
     }
 
-    let secret = Uuid::new_v4().to_string();
+    let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
     let control_command = || {
         let mut control = control_plane(&secret, &alice_token, "operator:alice");

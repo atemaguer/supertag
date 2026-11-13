@@ -20,66 +20,54 @@ impl inbox_server::Inbox for Api {
         &self,
         request: Request<ListInboxItemsRequest>,
     ) -> Result<Response<ListInboxItemsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_items(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_items(request).await
+        })
         .await
     }
     async fn get_question(
         &self,
         request: Request<GetQuestionRequest>,
     ) -> Result<Response<ObjectiveQuestion>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_question(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_question(request).await
+        })
         .await
     }
     async fn answer_question(
         &self,
         request: Request<AnswerQuestionRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).answer_question(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).answer_question(request).await
+        })
         .await
     }
     async fn get_approval(
         &self,
         request: Request<GetApprovalRequest>,
     ) -> Result<Response<Approval>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).get_approval(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).get_approval(request).await
+        })
         .await
     }
     async fn list_approvals(
         &self,
         request: Request<ListApprovalsRequest>,
     ) -> Result<Response<ListApprovalsResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).list_approvals(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).list_approvals(request).await
+        })
         .await
     }
     async fn decide_approval(
         &self,
         request: Request<DecideApprovalRequest>,
     ) -> Result<Response<Approval>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async { client(channel).decide_approval(request).await },
-        )
+        self.forward(request, |channel, request| async {
+            client(channel).decide_approval(request).await
+        })
         .await
     }
 }

@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+
+	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
 const railWidth = 24
@@ -288,7 +290,9 @@ func railState(tag *operatorv1.Tag, open int) string {
 // palette and to switch to another Control Plane when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
 	left := " " + contextLabel(m.client.Target()) + "  "
-	if hosts := m.hostSummary(); hosts != "" {
+	if client.IsClientCredential(m.client.Target().Token) {
+		left += "client device  "
+	} else if hosts := m.hostSummary(); hosts != "" {
 		left += hosts + "  "
 	}
 	left += "ctrl+k commands  "

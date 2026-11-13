@@ -53,7 +53,10 @@ async fn contract(url: String) {
         .await
         .unwrap()
         .with_execution_clock(|| NOW);
-    let legacy = store.get_objective("legacy").await.unwrap();
+    let legacy = store
+        .get_objective("operator:local", "legacy")
+        .await
+        .unwrap();
     assert_eq!(
         granted(&legacy),
         ["files:read"],
@@ -230,7 +233,12 @@ async fn contract(url: String) {
         .await
         .unwrap();
     assert_eq!(
-        granted(&store.get_objective("default").await.unwrap()),
+        granted(
+            &store
+                .get_objective("operator:local", "default")
+                .await
+                .unwrap()
+        ),
         granted(&default)
     );
     assert_eq!(
@@ -418,7 +426,12 @@ async fn contract(url: String) {
         .await
         .unwrap();
     assert_eq!(
-        granted(&store.get_objective("narrow").await.unwrap()),
+        granted(
+            &store
+                .get_objective("operator:local", "narrow")
+                .await
+                .unwrap()
+        ),
         ["files:write"]
     );
     assert_eq!(
@@ -451,7 +464,10 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let closed = store.get_objective(&clamped.objective_id).await.unwrap();
+    let closed = store
+        .get_objective("operator:local", &clamped.objective_id)
+        .await
+        .unwrap();
     assert!(matches!(
         store
             .set_objective_runtime_actions(

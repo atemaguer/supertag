@@ -105,12 +105,9 @@ async fn run_once(gateway: &str, state: &Path, labels: &[&str]) -> Result<()> {
 }
 
 async fn exercise(database: &str, directory: &Path) -> Result<()> {
-    let gateway_token = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let mut control = binary(&["control-plane"]);
-    control
-        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
-        .env("SUPERTAG_DATABASE_URL", database);
+    control.env("SUPERTAG_DATABASE_URL", database);
     control.env("SUPERTAG_OPERATOR_TOKEN", &token);
     let (mut control, public) = service(control).await?;
     let op = |group: &[&str], rest: &[&str]| operator(group, rest, &public, &token);
@@ -147,6 +144,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             "auth-key",
             "create",
             "infra-pool",
+            "--role",
+            "host",
             "--reusable",
             "--tag",
             "trainer",
@@ -158,7 +157,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         &[],
     ))
     .await?;
-    assert_eq!(issued["host_id"], "");
+    assert_eq!(issued["role"], "host");
     assert_eq!(issued["reusable"], true);
     assert_eq!(issued["labels"], json!(["team:infra"]));
     let key = issued["auth_key"].as_str().context("missing Auth Key")?;
@@ -175,6 +174,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             "auth-key",
             "create",
             "too-long",
+            "--role",
+            "host",
             "--reusable",
             "--all-tags",
             "--expires-in-seconds",
@@ -317,6 +318,8 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
             "auth-key",
             "create",
             "labelled-runners",
+            "--role",
+            "host",
             "--reusable",
             "--ephemeral",
             "--all-tags",
@@ -348,12 +351,10 @@ async fn host_get(op: &impl Fn(&[&str], &[&str]) -> Command, host: &str) -> Resu
 /// Plane restart, however long, does not count as the host being offline.
 async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
     std::fs::create_dir_all(directory)?;
-    let gateway_token = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let control_command = |listen: &str| {
         let mut control = binary(&["control-plane", "--listen", listen]);
         control
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &token)
             .env("SUPERTAG_DATABASE_URL", database);
         control
@@ -371,6 +372,8 @@ async fn ephemeral(database: &str, directory: &Path) -> Result<()> {
             "auth-key",
             "create",
             "ephemeral-runners",
+            "--role",
+            "host",
             "--reusable",
             "--ephemeral",
             "--all-tags",

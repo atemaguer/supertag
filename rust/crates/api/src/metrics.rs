@@ -17,17 +17,13 @@ impl metrics_server::Metrics for Api {
         &self,
         request: Request<GetMetricsRequest>,
     ) -> Result<Response<MetricSnapshot>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                metrics_client::MetricsClient::new(channel)
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                    .get_metrics(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            metrics_client::MetricsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .get_metrics(request)
+                .await
+        })
         .await
     }
 }

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%supertag/runtime/v2/negotiation.proto\x12\x13supertag.runtime.v2\"|\n\x18NegotiateProtocolRequest\x12.\n\x04role\x18\x01 \x01(\x0e\x32 .supertag.runtime.v2.ServiceRole\x12\x19\n\x11protocol_versions\x18\x02 \x03(\r\x12\x15\n\rbuild_version\x18\x03 \x01(\t\"\x97\x01\n\x19NegotiateProtocolResponse\x12.\n\x04role\x18\x01 \x01(\x0e\x32 .supertag.runtime.v2.ServiceRole\x12\x18\n\x10protocol_version\x18\x02 \x01(\r\x12\x19\n\x11protocol_versions\x18\x03 \x03(\r\x12\x15\n\rbuild_version\x18\x04 \x01(\t*\x9e\x01\n\x0bServiceRole\x12\x1c\n\x18SERVICE_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aSERVICE_ROLE_CONTROL_PLANE\x10\x01\x12\x18\n\x14SERVICE_ROLE_GATEWAY\x10\x02\x12\x1c\n\x18SERVICE_ROLE_WORKER_HOST\x10\x03\x12\x19\n\x15SERVICE_ROLE_OPERATOR\x10\x04\x32\x81\x01\n\x13ProtocolNegotiation\x12j\n\tNegotiate\x12-.supertag.runtime.v2.NegotiateProtocolRequest\x1a..supertag.runtime.v2.NegotiateProtocolResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%supertag/runtime/v2/negotiation.proto\x12\x13supertag.runtime.v2\"|\n\x18NegotiateProtocolRequest\x12.\n\x04role\x18\x01 \x01(\x0e\x32 .supertag.runtime.v2.ServiceRole\x12\x19\n\x11protocol_versions\x18\x02 \x03(\r\x12\x15\n\rbuild_version\x18\x03 \x01(\t\"\x97\x01\n\x19NegotiateProtocolResponse\x12.\n\x04role\x18\x01 \x01(\x0e\x32 .supertag.runtime.v2.ServiceRole\x12\x18\n\x10protocol_version\x18\x02 \x01(\r\x12\x19\n\x11protocol_versions\x18\x03 \x03(\r\x12\x15\n\rbuild_version\x18\x04 \x01(\t*\x9c\x01\n\x0bServiceRole\x12\x1c\n\x18SERVICE_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aSERVICE_ROLE_CONTROL_PLANE\x10\x01\x12\x18\n\x14SERVICE_ROLE_GATEWAY\x10\x02\x12\x1c\n\x18SERVICE_ROLE_WORKER_HOST\x10\x03\x12\x17\n\x13SERVICE_ROLE_CLIENT\x10\x04\x32\x81\x01\n\x13ProtocolNegotiation\x12j\n\tNegotiate\x12-.supertag.runtime.v2.NegotiateProtocolRequest\x1a..supertag.runtime.v2.NegotiateProtocolResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,11 +32,11 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag._runtime_v2.negoti
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_SERVICEROLE']._serialized_start=343
-  _globals['_SERVICEROLE']._serialized_end=501
+  _globals['_SERVICEROLE']._serialized_end=499
   _globals['_NEGOTIATEPROTOCOLREQUEST']._serialized_start=62
   _globals['_NEGOTIATEPROTOCOLREQUEST']._serialized_end=186
   _globals['_NEGOTIATEPROTOCOLRESPONSE']._serialized_start=189
   _globals['_NEGOTIATEPROTOCOLRESPONSE']._serialized_end=340
-  _globals['_PROTOCOLNEGOTIATION']._serialized_start=504
-  _globals['_PROTOCOLNEGOTIATION']._serialized_end=633
+  _globals['_PROTOCOLNEGOTIATION']._serialized_start=502
+  _globals['_PROTOCOLNEGOTIATION']._serialized_end=631
 # @@protoc_insertion_point(module_scope)

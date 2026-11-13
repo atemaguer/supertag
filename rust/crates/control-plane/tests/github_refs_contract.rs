@@ -25,6 +25,7 @@ async fn setup(store: &Store) {
                             },
                         )),
                     }),
+                    gateway: "local".into(),
                     ..Default::default()
                 }),
                 ..Default::default()

@@ -137,7 +137,7 @@ export function createControlPlaneClient(options: ControlPlaneClientOptions) {
       try {
         answer = await negotiation.negotiate(
           {
-            role: ServiceRole.OPERATOR,
+            role: ServiceRole.CLIENT,
             protocolVersions: PROTOCOL_VERSIONS,
             buildVersion: "supertag-ai",
           },

@@ -1,7 +1,8 @@
 //! A minimal connector that runs as its own process, as any external surface integration does.
 //! It uses only the public Connector contract on the Control Plane: protocol negotiation as a
 //! Gateway, `AcceptEvent` to turn a surface event into a Task, and connector ownership with
-//! `ClaimReply` and `SettleReply` to deliver the Task's reply. See
+//! `ClaimReply` and `SettleReply` to deliver the Task's reply. It acts as an enrolled
+//! `gateway:NAME` and names its connector account on every call. See
 //! `docs/reference/connector-contract.md`.
 //!
 //! ```text
@@ -9,12 +10,13 @@
 //! supertag-example-connector deliver URL ACCOUNT
 //! ```
 //!
-//! The Gateway credential comes from `SUPERTAG_GATEWAY_TOKEN`. Each command prints one JSON line.
+//! The enrolled Gateway credential comes from `SUPERTAG_GATEWAY_CREDENTIAL`. Each command prints
+//! one JSON line.
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use supertag_protocol::{
-    authenticated_request,
+    connector_request,
     negotiation::{ProtocolChannel, connect},
     v2::{
         AcceptEventRequest, ClaimConnectorRequest, ClaimReplyRequest, ReleaseConnectorRequest,
@@ -24,11 +26,11 @@ use supertag_protocol::{
 };
 use tonic::{Request, transport::Endpoint};
 
-/// The Connector client acting for `connector:ACCOUNT`.
+/// The Connector client acting for one connector account.
 struct Connector {
     client: ConnectorClient<ProtocolChannel>,
     token: String,
-    principal: String,
+    account: String,
 }
 
 impl Connector {
@@ -42,17 +44,14 @@ impl Connector {
         let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
         Ok(Self {
             client: ConnectorClient::new(channel),
-            token: std::env::var("SUPERTAG_GATEWAY_TOKEN").context("set SUPERTAG_GATEWAY_TOKEN")?,
-            principal: format!("connector:{account}"),
+            token: std::env::var("SUPERTAG_GATEWAY_CREDENTIAL")
+                .context("set SUPERTAG_GATEWAY_CREDENTIAL")?,
+            account: account.to_owned(),
         })
     }
 
     fn request<T>(&self, message: T) -> Result<Request<T>> {
-        Ok(authenticated_request(
-            message,
-            &self.token,
-            Some(&self.principal),
-        )?)
+        Ok(connector_request(message, &self.token, &self.account)?)
     }
 }
 

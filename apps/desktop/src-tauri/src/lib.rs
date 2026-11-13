@@ -3,8 +3,8 @@ mod control_plane;
 use std::path::PathBuf;
 
 use control_plane::{
-    Conversation, Event, ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Message, Messages, Tag,
-    WatchUpdate,
+    ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Conversation, Event, Message,
+    Messages, Tag, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -21,7 +21,9 @@ async fn list_control_planes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, ControlPlaneState>,
 ) -> Result<ControlPlaneList, String> {
-    state.saved_control_planes(&control_plane_store(&app)?).await
+    state
+        .saved_control_planes(&control_plane_store(&app)?)
+        .await
 }
 
 #[tauri::command]
@@ -43,7 +45,9 @@ async fn select_control_plane<R: tauri::Runtime>(
     state: State<'_, ControlPlaneState>,
     origin: String,
 ) -> Result<ControlPlaneActivation, String> {
-    state.select_control_plane(&control_plane_store(&app)?, origin).await
+    state
+        .select_control_plane(&control_plane_store(&app)?, origin)
+        .await
 }
 
 #[tauri::command]
@@ -52,7 +56,9 @@ async fn clear_control_plane<R: tauri::Runtime>(
     state: State<'_, ControlPlaneState>,
     forget: Option<String>,
 ) -> Result<ControlPlaneList, String> {
-    state.clear_control_plane(&control_plane_store(&app)?, forget).await
+    state
+        .clear_control_plane(&control_plane_store(&app)?, forget)
+        .await
 }
 
 #[tauri::command]

@@ -61,7 +61,7 @@ const TLS_KEYS: [&str; 6] = [
 /// read its secret from are optional Control Plane settings.
 const CONTROL_PLANE_KEYS: [&str; 18] = [
     "SUPERTAG_DATABASE_URL",
-    "SUPERTAG_GATEWAY_TOKEN",
+    "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
     "SUPERTAG_OPERATOR_TOKEN",
     "SUPERTAG_OPERATOR_PRINCIPAL",
     "SUPERTAG_STATE_DIR",
@@ -79,11 +79,10 @@ const CONTROL_PLANE_KEYS: [&str; 18] = [
     "SUPERTAG_VAULT_MOUNT",
     "SUPERTAG_VAULT_PATH_PREFIX",
 ];
-/// The Gateway holds no operator credential: it reads Inbox notifications for
-/// `SUPERTAG_OPERATOR_PRINCIPAL` with the Gateway credential.
-const GATEWAY_KEYS: [&str; 9] = [
-    "SUPERTAG_GATEWAY_TOKEN",
-    "SUPERTAG_OPERATOR_PRINCIPAL",
+/// The Gateway holds no operator credential: it acts as `gateway:local` with the enrolled
+/// credential the Control Plane seeds from `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`.
+const GATEWAY_KEYS: [&str; 8] = [
+    "SUPERTAG_GATEWAY_CREDENTIAL",
     "SUPERTAG_STATE_DIR",
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
@@ -94,9 +93,10 @@ const GATEWAY_KEYS: [&str; 9] = [
 ];
 const OPERATOR_KEYS: [&str; 1] = ["SUPERTAG_OPERATOR_TOKEN"];
 const POSTGRES_KEYS: [&str; 3] = ["POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"];
-const SECRET_KEYS: [&str; 5] = [
+const SECRET_KEYS: [&str; 6] = [
     "SUPERTAG_DATABASE_URL",
-    "SUPERTAG_GATEWAY_TOKEN",
+    "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+    "SUPERTAG_GATEWAY_CREDENTIAL",
     "SUPERTAG_OPERATOR_TOKEN",
     "VAULT_TOKEN",
     "POSTGRES_PASSWORD",
@@ -172,7 +172,7 @@ pub enum VerifyCommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
+    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_CREDENTIAL, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
 )]
 pub struct SetupArgs {
     platform: Platform,
@@ -289,22 +289,28 @@ pub fn configure(
         }
         (_, None) => required("SUPERTAG_DATABASE_URL")?,
     };
-    let gateway_token = supplied("SUPERTAG_GATEWAY_TOKEN").unwrap_or_else(token);
+    // The deployment's own Gateway is `gateway:local`: the Control Plane seeds its enrolled
+    // credential at startup, and only the Gateway presents it.
+    let gateway_credential = supplied("SUPERTAG_GATEWAY_CREDENTIAL").unwrap_or_else(|| {
+        supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX)
+    });
     let operator_token = supplied("SUPERTAG_OPERATOR_TOKEN").unwrap_or_else(token);
 
     let mut control_plane = Environment::from([
         ("SUPERTAG_DATABASE_URL".into(), database),
-        ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token.clone()),
+        (
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
+            gateway_credential.clone(),
+        ),
         ("SUPERTAG_OPERATOR_TOKEN".into(), operator_token.clone()),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
     ]);
     let mut gateway = Environment::from([
-        ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token),
+        ("SUPERTAG_GATEWAY_CREDENTIAL".into(), gateway_credential),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
     ]);
     if let Some(principal) = supplied("SUPERTAG_OPERATOR_PRINCIPAL") {
-        control_plane.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal.clone());
-        gateway.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
+        control_plane.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
     }
     let vault = supplied("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_else(|| "file".into());
     if vault == "vault" {
@@ -384,43 +390,49 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
         )),
         Some(_) => {}
     }
+    match control("SUPERTAG_OPERATOR_TOKEN") {
+        None => issues.push(format!(
+            "{CONTROL_PLANE_FILE}: Missing SUPERTAG_OPERATOR_TOKEN"
+        )),
+        Some(token) if !strong_token(token) => issues.push(format!(
+            "{CONTROL_PLANE_FILE}: SUPERTAG_OPERATOR_TOKEN must be at least 32 characters of letters, digits, and -._~+/"
+        )),
+        Some(token) if token.starts_with("stop_") || token.starts_with("stak_") || token.starts_with("stcr_") => {
+            issues.push(format!(
+                "{CONTROL_PLANE_FILE}: SUPERTAG_OPERATOR_TOKEN must not look like an issued credential"
+            ))
+        }
+        Some(_) => {}
+    }
     for (file, key, value) in [
         (
             CONTROL_PLANE_FILE,
-            "SUPERTAG_GATEWAY_TOKEN",
-            control("SUPERTAG_GATEWAY_TOKEN"),
-        ),
-        (
-            CONTROL_PLANE_FILE,
-            "SUPERTAG_OPERATOR_TOKEN",
-            control("SUPERTAG_OPERATOR_TOKEN"),
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
+            control("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"),
         ),
         (
             GATEWAY_FILE,
-            "SUPERTAG_GATEWAY_TOKEN",
-            gateway("SUPERTAG_GATEWAY_TOKEN"),
+            "SUPERTAG_GATEWAY_CREDENTIAL",
+            gateway("SUPERTAG_GATEWAY_CREDENTIAL"),
         ),
     ] {
         match value {
             None => issues.push(format!("{file}: Missing {key}")),
-            Some(token) if !strong_token(token) => issues.push(format!(
-                "{file}: {key} must be at least 32 characters of letters, digits, and -._~+/"
-            )),
+            Some(credential)
+                if !supertag_protocol::is_secret(
+                    supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+                    credential,
+                ) =>
+            {
+                issues.push(format!("{file}: {key} must be stcr_ and 64 hex digits"))
+            }
             Some(_) => {}
         }
     }
-    if control("SUPERTAG_GATEWAY_TOKEN") != gateway("SUPERTAG_GATEWAY_TOKEN") {
-        issues.push("SUPERTAG_GATEWAY_TOKEN differs between the Control Plane and Gateway".into());
-    }
-    if control("SUPERTAG_OPERATOR_PRINCIPAL") != gateway("SUPERTAG_OPERATOR_PRINCIPAL") {
+    if control("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL") != gateway("SUPERTAG_GATEWAY_CREDENTIAL") {
         issues.push(
-            "SUPERTAG_OPERATOR_PRINCIPAL differs between the Control Plane and Gateway".into(),
+            "the Gateway's SUPERTAG_GATEWAY_CREDENTIAL differs from the Control Plane's SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
         );
-    }
-    if control("SUPERTAG_GATEWAY_TOKEN").is_some()
-        && control("SUPERTAG_GATEWAY_TOKEN") == control("SUPERTAG_OPERATOR_TOKEN")
-    {
-        issues.push("SUPERTAG_OPERATOR_TOKEN must differ from SUPERTAG_GATEWAY_TOKEN".into());
     }
     if files
         .operator
@@ -432,10 +444,7 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
             "{OPERATOR_FILE}: SUPERTAG_OPERATOR_TOKEN differs from the Control Plane's"
         ));
     }
-    for (file, principal) in [
-        (CONTROL_PLANE_FILE, control("SUPERTAG_OPERATOR_PRINCIPAL")),
-        (GATEWAY_FILE, gateway("SUPERTAG_OPERATOR_PRINCIPAL")),
-    ] {
+    for (file, principal) in [(CONTROL_PLANE_FILE, control("SUPERTAG_OPERATOR_PRINCIPAL"))] {
         if let Some(principal) = principal
             && !principal.strip_prefix("operator:").is_some_and(|id| {
                 !id.is_empty() && id.len() <= 255 && id.bytes().all(|byte| byte.is_ascii_graphic())
@@ -938,18 +947,21 @@ mod tests {
         for platform in [Platform::Compose, Platform::Fly, Platform::Railway] {
             let files = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])?;
             assert_eq!(files.control_plane["SUPERTAG_DATABASE_URL"], DATABASE);
+            // The deployment's Gateway is gateway:local: the Control Plane seeds the credential
+            // only that Gateway presents.
             assert_eq!(
-                files.control_plane["SUPERTAG_GATEWAY_TOKEN"],
-                files.gateway["SUPERTAG_GATEWAY_TOKEN"]
+                files.control_plane["SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"],
+                files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"]
             );
+            assert!(supertag_protocol::is_secret(
+                supertag_protocol::CREDENTIAL_SECRET_PREFIX,
+                &files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"]
+            ));
             assert_eq!(
                 files.operator["SUPERTAG_OPERATOR_TOKEN"],
                 files.control_plane["SUPERTAG_OPERATOR_TOKEN"]
             );
-            assert_ne!(
-                files.control_plane["SUPERTAG_OPERATOR_TOKEN"],
-                files.control_plane["SUPERTAG_GATEWAY_TOKEN"]
-            );
+            assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_PRINCIPAL"));
             // A Gateway never holds an operator credential.
             assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_TOKEN"));
             assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "file");
@@ -980,11 +992,11 @@ mod tests {
 
     #[test]
     fn compose_generates_its_database_and_supplied_tokens_are_kept() -> Result<()> {
-        let token = "a".repeat(40);
+        let token = format!("stcr_{}", "a".repeat(64));
         let files = configured(
             Platform::Compose,
             &[
-                ("SUPERTAG_GATEWAY_TOKEN", &token),
+                ("SUPERTAG_GATEWAY_CREDENTIAL", &token),
                 ("SUPERTAG_OPERATOR_PRINCIPAL", "operator:ops"),
             ],
         )?;
@@ -996,8 +1008,7 @@ mod tests {
                 postgres["POSTGRES_PASSWORD"]
             )
         );
-        assert_eq!(files.gateway["SUPERTAG_GATEWAY_TOKEN"], token);
-        assert_eq!(files.gateway["SUPERTAG_OPERATOR_PRINCIPAL"], "operator:ops");
+        assert_eq!(files.gateway["SUPERTAG_GATEWAY_CREDENTIAL"], token);
         assert_eq!(
             files.control_plane["SUPERTAG_OPERATOR_PRINCIPAL"],
             "operator:ops"
@@ -1058,9 +1069,14 @@ mod tests {
                 "hosted deployments require PostgreSQL",
             ),
             (
-                "SUPERTAG_GATEWAY_TOKEN",
+                "SUPERTAG_GATEWAY_CREDENTIAL",
                 "private-short",
-                "SUPERTAG_GATEWAY_TOKEN must be at least 32 characters",
+                "SUPERTAG_GATEWAY_CREDENTIAL must be stcr_ and 64 hex digits",
+            ),
+            (
+                "SUPERTAG_OPERATOR_TOKEN",
+                "private-short",
+                "SUPERTAG_OPERATOR_TOKEN must be at least 32 characters",
             ),
             (
                 "SUPERTAG_CREDENTIAL_VAULT",
@@ -1095,18 +1111,20 @@ mod tests {
         .to_string();
         assert!(error.contains("VAULT_ADDR must be an HTTPS URL"), "{error}");
         assert!(!error.contains("private-"), "{error}");
-        let same = "b".repeat(40);
+        let issued = format!("stop_{}", "b".repeat(64));
         let error = configured(
             Platform::Fly,
             &[
                 ("SUPERTAG_DATABASE_URL", DATABASE),
-                ("SUPERTAG_GATEWAY_TOKEN", &same),
-                ("SUPERTAG_OPERATOR_TOKEN", &same),
+                ("SUPERTAG_OPERATOR_TOKEN", &issued),
             ],
         )
         .unwrap_err()
         .to_string();
-        assert!(error.contains("must differ"), "{error}");
+        assert!(
+            error.contains("must not look like an issued credential"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1140,13 +1158,14 @@ mod tests {
         files
             .operator
             .insert("SUPERTAG_OPERATOR_TOKEN".into(), "c".repeat(40));
-        files
-            .control_plane
-            .insert("SUPERTAG_GATEWAY_TOKEN".into(), "d".repeat(40));
-        let error = validate(Platform::Fly, &files).unwrap_err().to_string();
-        assert!(
-            error.contains("SUPERTAG_GATEWAY_TOKEN differs between the Control Plane and Gateway")
+        files.control_plane.insert(
+            "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL".into(),
+            format!("stcr_{}", "d".repeat(64)),
         );
+        let error = validate(Platform::Fly, &files).unwrap_err().to_string();
+        assert!(error.contains(
+            "SUPERTAG_GATEWAY_CREDENTIAL differs from the Control Plane's SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL"
+        ));
         assert!(error.contains("operator.env: SUPERTAG_OPERATOR_TOKEN differs"));
         files.postgres = Some(Environment::new());
         assert!(validate(Platform::Fly, &files).is_err());

@@ -11,13 +11,11 @@
 //!
 //! Differences: reconciliation runs inside each Gateway claim instead of a separate Control Plane
 //! loop, because only the Gateway knows its destinations; the Control Plane stores destination
-//! keys, never webhook URLs. Activity is checked against the Inbox read by the same claim. Each
-//! operator principal has its own outbox, because several Gateways acting for different
-//! operators can share one Control Plane and name the same destination key (`desktop` on
-//! every machine, or one Slack channel): an operator's messages, rendered from that operator's
-//! Inbox, are only recorded, claimed, and settled by a Gateway acting for that operator.
-//! TypeScript reads one admin Inbox in one process and has no such case. A message whose lease
-//! lapses on its last attempt fails instead of being claimed again.
+//! keys, never webhook URLs. Activity is checked against the Inbox read by the same claim. Gateways
+//! claim and settle as `gateway:NAME` and never read the Inbox themselves: the Control Plane renders
+//! the admin operator's Inbox into the outbox, which is keyed by that operator's principal, as
+//! TypeScript reads one admin Inbox. A message whose lease lapses on its last attempt fails instead
+//! of being claimed again.
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -742,10 +740,11 @@ impl operator_notifications_server::OperatorNotifications for crate::ControlPlan
         request: tonic::Request<ClaimOperatorNotificationRequest>,
     ) -> std::result::Result<tonic::Response<ClaimOperatorNotificationResponse>, tonic::Status>
     {
-        let principal = self.principal(&request, "operator:")?;
+        // A Gateway delivers the admin operator's notifications; it never reads the Inbox itself.
+        self.principal(&request, "gateway:")?;
         Ok(tonic::Response::new(
             self.store
-                .claim_operator_notification(&principal, request.get_ref())
+                .claim_operator_notification(&self.admin_operator, request.get_ref())
                 .await?,
         ))
     }
@@ -754,10 +753,10 @@ impl operator_notifications_server::OperatorNotifications for crate::ControlPlan
         &self,
         request: tonic::Request<SettleOperatorNotificationRequest>,
     ) -> std::result::Result<tonic::Response<OperatorNotification>, tonic::Status> {
-        let principal = self.principal(&request, "operator:")?;
+        self.principal(&request, "gateway:")?;
         Ok(tonic::Response::new(
             self.store
-                .settle_operator_notification(&principal, request.get_ref())
+                .settle_operator_notification(&self.admin_operator, request.get_ref())
                 .await?,
         ))
     }

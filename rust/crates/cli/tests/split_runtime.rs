@@ -57,9 +57,9 @@ struct Credentials {
 impl Credentials {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
-            host: Uuid::new_v4().to_string(),
+            host: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
         }
     }
 
@@ -68,7 +68,8 @@ impl Credentials {
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()
-            .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
@@ -683,9 +684,9 @@ fn local_credentials(state: &Path) -> Result<Credentials> {
             .into())
     };
     Ok(Credentials {
-        gateway: token("gateway_token")?,
+        gateway: token("gateway_credential")?,
         operator: token("operator_token")?,
-        host: token("host_token")?,
+        host: token("host_credential")?,
     })
 }
 
@@ -1485,11 +1486,8 @@ async fn slack_gateway_with(
 }
 
 fn connector_request<T>(credentials: &Credentials, message: T) -> Result<Request<T>> {
-    let mut request = authenticated_request(
-        message,
-        &credentials.gateway,
-        Some(&format!("connector:{SLACK_ACCOUNT}")),
-    )?;
+    let mut request =
+        supertag_protocol::connector_request(message, &credentials.gateway, SLACK_ACCOUNT)?;
     request.set_timeout(Duration::from_secs(3));
     Ok(request)
 }
@@ -1569,6 +1567,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
                         },
                     )),
                 }),
+                gateway: "local".into(),
                 ..Default::default()
             }),
             expected_revision: None,
@@ -1896,6 +1895,7 @@ async fn configure_slack_surface(services: &Services, credentials: &Credentials)
                         },
                     )),
                 }),
+                gateway: "local".into(),
                 ..Default::default()
             }),
             expected_revision: None,

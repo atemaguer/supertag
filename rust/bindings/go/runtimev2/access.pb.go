@@ -445,7 +445,7 @@ func (x *RevokeOperatorTokenRequest) GetName() string {
 type OperatorToken struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// The operator calls made with it act as, such as `token:laptop-2`.
+	// The principal calls made with it act as, such as `operator:token:laptop-2`.
 	OperatorId  string             `protobuf:"bytes,2,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
 	Phase       OperatorTokenPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=supertag.runtime.v2.OperatorTokenPhase" json:"phase,omitempty"`
 	CreatedAtMs int64              `protobuf:"varint,4,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
@@ -456,7 +456,7 @@ type OperatorToken struct {
 	RotatedAtMs  *int64 `protobuf:"varint,8,opt,name=rotated_at_ms,json=rotatedAtMs,proto3,oneof" json:"rotated_at_ms,omitempty"`
 	// 1 for the first secret; increases with each rotation.
 	SecretRevision uint64 `protobuf:"varint,9,opt,name=secret_revision,json=secretRevision,proto3" json:"secret_revision,omitempty"`
-	// The bare operator ID that created it.
+	// The principal that created it, the admin operator.
 	CreatedBy     string `protobuf:"bytes,10,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -562,104 +562,16 @@ func (x *OperatorToken) GetCreatedBy() string {
 	return ""
 }
 
-type AuthenticateOperatorRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// SHA-256 of the presented bearer secret.
-	TokenDigest   []byte `protobuf:"bytes,1,opt,name=token_digest,json=tokenDigest,proto3" json:"token_digest,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AuthenticateOperatorRequest) Reset() {
-	*x = AuthenticateOperatorRequest{}
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AuthenticateOperatorRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AuthenticateOperatorRequest) ProtoMessage() {}
-
-func (x *AuthenticateOperatorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AuthenticateOperatorRequest.ProtoReflect.Descriptor instead.
-func (*AuthenticateOperatorRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *AuthenticateOperatorRequest) GetTokenDigest() []byte {
-	if x != nil {
-		return x.TokenDigest
-	}
-	return nil
-}
-
-type OperatorIdentity struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The bare operator ID, such as `token:laptop-2`.
-	OperatorId    string `protobuf:"bytes,1,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *OperatorIdentity) Reset() {
-	*x = OperatorIdentity{}
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *OperatorIdentity) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*OperatorIdentity) ProtoMessage() {}
-
-func (x *OperatorIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use OperatorIdentity.ProtoReflect.Descriptor instead.
-func (*OperatorIdentity) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *OperatorIdentity) GetOperatorId() string {
-	if x != nil {
-		return x.OperatorId
-	}
-	return ""
-}
-
-// One administrative or authority-changing operator call. It names who acted
-// and on what, never a credential, digest, or request body.
+// One administrative or authority-changing call. It names who acted and on
+// what, never a credential, digest, or request body.
 type AuditEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// When the Control Plane finished handling the call.
 	AtMs int64 `protobuf:"varint,2,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
-	// The bare operator ID, such as `local` or `token:laptop-2`.
+	// The full principal, such as `operator:local`, `operator:token:laptop-2`,
+	// `client:alice-laptop`, `gateway:edge`, `host:builder`, or
+	// `auth-key:NAME` for an enrollment.
 	Actor string `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
 	// Such as `tag.put`, `operator-token.revoke`, or `approval.decide`.
 	Action string `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"`
@@ -676,7 +588,7 @@ type AuditEntry struct {
 
 func (x *AuditEntry) Reset() {
 	*x = AuditEntry{}
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +600,7 @@ func (x *AuditEntry) String() string {
 func (*AuditEntry) ProtoMessage() {}
 
 func (x *AuditEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +613,7 @@ func (x *AuditEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuditEntry.ProtoReflect.Descriptor instead.
 func (*AuditEntry) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AuditEntry) GetId() string {
@@ -764,7 +676,7 @@ type ListAuditEntriesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Only entries at or after this time. 0 lists from the oldest.
 	SinceMs int64 `protobuf:"varint,1,opt,name=since_ms,json=sinceMs,proto3" json:"since_ms,omitempty"`
-	// Only entries by this exact bare operator ID. Empty lists every operator's.
+	// Only entries by this exact principal. Empty lists every actor's.
 	Actor string `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
 	// 0 means 50; more than 500 is refused.
 	Limit uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
@@ -776,7 +688,7 @@ type ListAuditEntriesRequest struct {
 
 func (x *ListAuditEntriesRequest) Reset() {
 	*x = ListAuditEntriesRequest{}
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -788,7 +700,7 @@ func (x *ListAuditEntriesRequest) String() string {
 func (*ListAuditEntriesRequest) ProtoMessage() {}
 
 func (x *ListAuditEntriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -801,7 +713,7 @@ func (x *ListAuditEntriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditEntriesRequest.ProtoReflect.Descriptor instead.
 func (*ListAuditEntriesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListAuditEntriesRequest) GetSinceMs() int64 {
@@ -842,7 +754,7 @@ type ListAuditEntriesResponse struct {
 
 func (x *ListAuditEntriesResponse) Reset() {
 	*x = ListAuditEntriesResponse{}
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -854,7 +766,7 @@ func (x *ListAuditEntriesResponse) String() string {
 func (*ListAuditEntriesResponse) ProtoMessage() {}
 
 func (x *ListAuditEntriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_access_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_access_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -867,7 +779,7 @@ func (x *ListAuditEntriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditEntriesResponse.ProtoReflect.Descriptor instead.
 func (*ListAuditEntriesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_access_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListAuditEntriesResponse) GetEntries() []*AuditEntry {
@@ -924,12 +836,7 @@ const file_supertag_runtime_v2_access_proto_rawDesc = "" +
 	" \x01(\tR\tcreatedByB\x12\n" +
 	"\x10_last_used_at_msB\x10\n" +
 	"\x0e_revoked_at_msB\x10\n" +
-	"\x0e_rotated_at_ms\"@\n" +
-	"\x1bAuthenticateOperatorRequest\x12!\n" +
-	"\ftoken_digest\x18\x01 \x01(\fR\vtokenDigest\"3\n" +
-	"\x10OperatorIdentity\x12\x1f\n" +
-	"\voperator_id\x18\x01 \x01(\tR\n" +
-	"operatorId\"\xe0\x01\n" +
+	"\x0e_rotated_at_ms\"\xe0\x01\n" +
 	"\n" +
 	"AuditEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x13\n" +
@@ -964,9 +871,7 @@ const file_supertag_runtime_v2_access_proto_rawDesc = "" +
 	"\x12ListOperatorTokens\x12..supertag.runtime.v2.ListOperatorTokensRequest\x1a/.supertag.runtime.v2.ListOperatorTokensResponse\x12j\n" +
 	"\x13RotateOperatorToken\x12/.supertag.runtime.v2.RotateOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12j\n" +
 	"\x13RevokeOperatorToken\x12/.supertag.runtime.v2.RevokeOperatorTokenRequest\x1a\".supertag.runtime.v2.OperatorToken\x12o\n" +
-	"\x10ListAuditEntries\x12,.supertag.runtime.v2.ListAuditEntriesRequest\x1a-.supertag.runtime.v2.ListAuditEntriesResponse2|\n" +
-	"\x11OperatorDirectory\x12g\n" +
-	"\fAuthenticate\x120.supertag.runtime.v2.AuthenticateOperatorRequest\x1a%.supertag.runtime.v2.OperatorIdentityb\x06proto3"
+	"\x10ListAuditEntries\x12,.supertag.runtime.v2.ListAuditEntriesRequest\x1a-.supertag.runtime.v2.ListAuditEntriesResponseb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_access_proto_rawDescOnce sync.Once
@@ -981,44 +886,40 @@ func file_supertag_runtime_v2_access_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_access_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_supertag_runtime_v2_access_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_supertag_runtime_v2_access_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_supertag_runtime_v2_access_proto_goTypes = []any{
-	(OperatorTokenPhase)(0),             // 0: supertag.runtime.v2.OperatorTokenPhase
-	(AuditOutcome)(0),                   // 1: supertag.runtime.v2.AuditOutcome
-	(*CreateOperatorTokenRequest)(nil),  // 2: supertag.runtime.v2.CreateOperatorTokenRequest
-	(*GetOperatorTokenRequest)(nil),     // 3: supertag.runtime.v2.GetOperatorTokenRequest
-	(*ListOperatorTokensRequest)(nil),   // 4: supertag.runtime.v2.ListOperatorTokensRequest
-	(*ListOperatorTokensResponse)(nil),  // 5: supertag.runtime.v2.ListOperatorTokensResponse
-	(*RotateOperatorTokenRequest)(nil),  // 6: supertag.runtime.v2.RotateOperatorTokenRequest
-	(*RevokeOperatorTokenRequest)(nil),  // 7: supertag.runtime.v2.RevokeOperatorTokenRequest
-	(*OperatorToken)(nil),               // 8: supertag.runtime.v2.OperatorToken
-	(*AuthenticateOperatorRequest)(nil), // 9: supertag.runtime.v2.AuthenticateOperatorRequest
-	(*OperatorIdentity)(nil),            // 10: supertag.runtime.v2.OperatorIdentity
-	(*AuditEntry)(nil),                  // 11: supertag.runtime.v2.AuditEntry
-	(*ListAuditEntriesRequest)(nil),     // 12: supertag.runtime.v2.ListAuditEntriesRequest
-	(*ListAuditEntriesResponse)(nil),    // 13: supertag.runtime.v2.ListAuditEntriesResponse
+	(OperatorTokenPhase)(0),            // 0: supertag.runtime.v2.OperatorTokenPhase
+	(AuditOutcome)(0),                  // 1: supertag.runtime.v2.AuditOutcome
+	(*CreateOperatorTokenRequest)(nil), // 2: supertag.runtime.v2.CreateOperatorTokenRequest
+	(*GetOperatorTokenRequest)(nil),    // 3: supertag.runtime.v2.GetOperatorTokenRequest
+	(*ListOperatorTokensRequest)(nil),  // 4: supertag.runtime.v2.ListOperatorTokensRequest
+	(*ListOperatorTokensResponse)(nil), // 5: supertag.runtime.v2.ListOperatorTokensResponse
+	(*RotateOperatorTokenRequest)(nil), // 6: supertag.runtime.v2.RotateOperatorTokenRequest
+	(*RevokeOperatorTokenRequest)(nil), // 7: supertag.runtime.v2.RevokeOperatorTokenRequest
+	(*OperatorToken)(nil),              // 8: supertag.runtime.v2.OperatorToken
+	(*AuditEntry)(nil),                 // 9: supertag.runtime.v2.AuditEntry
+	(*ListAuditEntriesRequest)(nil),    // 10: supertag.runtime.v2.ListAuditEntriesRequest
+	(*ListAuditEntriesResponse)(nil),   // 11: supertag.runtime.v2.ListAuditEntriesResponse
 }
 var file_supertag_runtime_v2_access_proto_depIdxs = []int32{
 	8,  // 0: supertag.runtime.v2.ListOperatorTokensResponse.tokens:type_name -> supertag.runtime.v2.OperatorToken
 	0,  // 1: supertag.runtime.v2.OperatorToken.phase:type_name -> supertag.runtime.v2.OperatorTokenPhase
 	1,  // 2: supertag.runtime.v2.AuditEntry.outcome:type_name -> supertag.runtime.v2.AuditOutcome
-	11, // 3: supertag.runtime.v2.ListAuditEntriesResponse.entries:type_name -> supertag.runtime.v2.AuditEntry
+	9,  // 3: supertag.runtime.v2.ListAuditEntriesResponse.entries:type_name -> supertag.runtime.v2.AuditEntry
 	2,  // 4: supertag.runtime.v2.OperatorAccess.CreateOperatorToken:input_type -> supertag.runtime.v2.CreateOperatorTokenRequest
 	3,  // 5: supertag.runtime.v2.OperatorAccess.GetOperatorToken:input_type -> supertag.runtime.v2.GetOperatorTokenRequest
 	4,  // 6: supertag.runtime.v2.OperatorAccess.ListOperatorTokens:input_type -> supertag.runtime.v2.ListOperatorTokensRequest
 	6,  // 7: supertag.runtime.v2.OperatorAccess.RotateOperatorToken:input_type -> supertag.runtime.v2.RotateOperatorTokenRequest
 	7,  // 8: supertag.runtime.v2.OperatorAccess.RevokeOperatorToken:input_type -> supertag.runtime.v2.RevokeOperatorTokenRequest
-	12, // 9: supertag.runtime.v2.OperatorAccess.ListAuditEntries:input_type -> supertag.runtime.v2.ListAuditEntriesRequest
-	9,  // 10: supertag.runtime.v2.OperatorDirectory.Authenticate:input_type -> supertag.runtime.v2.AuthenticateOperatorRequest
-	8,  // 11: supertag.runtime.v2.OperatorAccess.CreateOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
-	8,  // 12: supertag.runtime.v2.OperatorAccess.GetOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
-	5,  // 13: supertag.runtime.v2.OperatorAccess.ListOperatorTokens:output_type -> supertag.runtime.v2.ListOperatorTokensResponse
-	8,  // 14: supertag.runtime.v2.OperatorAccess.RotateOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
-	8,  // 15: supertag.runtime.v2.OperatorAccess.RevokeOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
-	13, // 16: supertag.runtime.v2.OperatorAccess.ListAuditEntries:output_type -> supertag.runtime.v2.ListAuditEntriesResponse
-	10, // 17: supertag.runtime.v2.OperatorDirectory.Authenticate:output_type -> supertag.runtime.v2.OperatorIdentity
-	11, // [11:18] is the sub-list for method output_type
-	4,  // [4:11] is the sub-list for method input_type
+	10, // 9: supertag.runtime.v2.OperatorAccess.ListAuditEntries:input_type -> supertag.runtime.v2.ListAuditEntriesRequest
+	8,  // 10: supertag.runtime.v2.OperatorAccess.CreateOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
+	8,  // 11: supertag.runtime.v2.OperatorAccess.GetOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
+	5,  // 12: supertag.runtime.v2.OperatorAccess.ListOperatorTokens:output_type -> supertag.runtime.v2.ListOperatorTokensResponse
+	8,  // 13: supertag.runtime.v2.OperatorAccess.RotateOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
+	8,  // 14: supertag.runtime.v2.OperatorAccess.RevokeOperatorToken:output_type -> supertag.runtime.v2.OperatorToken
+	11, // 15: supertag.runtime.v2.OperatorAccess.ListAuditEntries:output_type -> supertag.runtime.v2.ListAuditEntriesResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1036,9 +937,9 @@ func file_supertag_runtime_v2_access_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_access_proto_rawDesc), len(file_supertag_runtime_v2_access_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   10,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   1,
 		},
 		GoTypes:           file_supertag_runtime_v2_access_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_access_proto_depIdxs,

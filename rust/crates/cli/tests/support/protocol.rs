@@ -25,7 +25,7 @@ pub async fn negotiated(channel: Channel) -> Result<ProtocolChannel> {
         protocol_versions: PROTOCOL_VERSIONS.to_vec(),
         build_version: build_version().into(),
     };
-    let answer = match client.negotiate(offer(ServiceRole::Operator)).await {
+    let answer = match client.negotiate(offer(ServiceRole::Client)).await {
         Err(status) if status.code() == Code::PermissionDenied => {
             client.negotiate(offer(ServiceRole::Gateway)).await
         }

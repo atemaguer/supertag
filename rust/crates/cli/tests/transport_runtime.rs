@@ -30,11 +30,11 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
-        AcceptEventRequest, AuthenticateOperatorRequest, ClaimOperatorNotificationRequest,
-        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListHostsRequest,
-        ListNativeUsageRequest, PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState,
-        WatchChange, WatchEvent, WatchKind, WatchRequest, connector_client::ConnectorClient,
-        operator_client::OperatorClient, operator_directory_client::OperatorDirectoryClient,
+        AcceptEventRequest, ClaimOperatorNotificationRequest, CreateAuthKeyRequest, GetTaskRequest,
+        ListEventsRequest, ListHostsRequest, ListNativeUsageRequest, PrincipalRole, PutTagRequest,
+        ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind,
+        WatchRequest, WhoAmIRequest, connector_client::ConnectorClient,
+        enrollments_client::EnrollmentsClient, operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient,
         operator_notifications_client::OperatorNotificationsClient, watch_event::Update,
     },
@@ -171,7 +171,7 @@ struct Tokens {
 impl Tokens {
     fn new() -> Self {
         Self {
-            gateway: Uuid::new_v4().to_string(),
+            gateway: supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
             operator: Uuid::new_v4().to_string(),
         }
     }
@@ -182,9 +182,9 @@ impl Tokens {
         Ok(request)
     }
 
-    /// A call with the shared Gateway credential, acting for `principal`.
-    fn gateway_request<T>(&self, message: T, principal: &str) -> Result<Request<T>> {
-        let mut request = authenticated_request(message, &self.gateway, Some(principal))?;
+    /// A call with the bootstrap Gateway's enrolled credential, `gateway:local`.
+    fn gateway_request<T>(&self, message: T) -> Result<Request<T>> {
+        let mut request = authenticated_request(message, &self.gateway, None)?;
         request.set_timeout(Duration::from_secs(15));
         Ok(request)
     }
@@ -200,7 +200,8 @@ impl Services {
     async fn start(database: &str, directory: &Path, tokens: &Tokens) -> Result<Self> {
         let mut command = binary(&["control-plane"]);
         command
-            .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
             .env("SUPERTAG_DATABASE_URL", database);
         let mut control_plane = Service::spawn(command, directory, "control-plane")?;
@@ -486,11 +487,11 @@ async fn start_host(
 ) -> Result<Host> {
     let id = format!("scale-host-{index:02}");
     let proxy = Proxy::start(gateway).await?;
-    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let secret = supertag_protocol::new_secret(supertag_protocol::AUTH_KEY_SECRET_PREFIX);
     operator
         .create_auth_key(tokens.request(CreateAuthKeyRequest {
             name: id.clone(),
-            host_id: id.clone(),
+            role: PrincipalRole::Host.into(),
             operation_id: Uuid::new_v4().to_string(),
             key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
             expires_in_ms: 600_000,
@@ -1569,7 +1570,8 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     // Control Plane: the public endpoint, with client certificates required as a network filter.
     let mut command = binary(&["control-plane"]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
         .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_DATABASE_URL", &database);
     server_tls(&mut command, &control_leaf, &pki.ca());
@@ -1579,7 +1581,9 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     // A Gateway holds no operator credential.
     let gateway = |client: Option<&Leaf>, upstream: &str| {
         let mut command = binary(&["gateway", "--control-plane", upstream]);
-        command.env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway);
+        command
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway);
         client_tls(&mut command, &pki.ca(), client);
         command
     };
@@ -1634,7 +1638,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     .await?;
     let issued = run_json(operator(
         &[
-            "auth-key", "create", "tls", "--host", "tls-host", "--tag", "secure",
+            "auth-key", "create", "tls", "--role", "host", "--tag", "secure",
         ],
         Some(&operator_leaf),
     ))
@@ -1745,43 +1749,47 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         .map_err(|error| anyhow!("{error}"))?,
         2
     );
-    // With its certificate, a Gateway resolves an operator credential presented to it, the admin
-    // token included, without holding one.
+    // With its certificate, a Gateway still authenticates with its own enrolled credential, and
+    // learns who presented a credential to it from the Control Plane, never by asserting it.
     let identified = supertag_protocol::negotiation::connect(
         identified,
         ServiceRole::Gateway,
         ServiceRole::ControlPlane,
     )
     .await?;
-    let mut directory = OperatorDirectoryClient::new(identified);
-    let admin = directory
-        .authenticate(tokens.gateway_request(
-            AuthenticateOperatorRequest {
-                token_digest: Sha256::digest(tokens.operator.as_bytes()).to_vec(),
-            },
-            "service:gateway",
-        )?)
+    let mut enrollments = EnrollmentsClient::new(identified);
+    let gateway_principal = enrollments
+        .who_am_i(tokens.gateway_request(WhoAmIRequest {})?)
         .await?
         .into_inner();
-    assert_eq!(admin.operator_id, "local");
-    let unknown = directory
-        .authenticate(tokens.gateway_request(
-            AuthenticateOperatorRequest {
-                token_digest: Sha256::digest(b"not an operator credential").to_vec(),
-            },
-            "service:gateway",
-        )?)
-        .await
-        .unwrap_err();
+    assert_eq!(gateway_principal.principal, "gateway:local");
+    let admin = enrollments
+        .who_am_i(tokens.request(WhoAmIRequest {})?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        (admin.principal.as_str(), admin.admin),
+        ("operator:local", true)
+    );
+    let mut unknown = tokens.request(WhoAmIRequest {})?;
+    unknown.metadata_mut().insert(
+        "authorization",
+        format!(
+            "Bearer {}",
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX)
+        )
+        .parse()?,
+    );
+    let unknown = enrollments.who_am_i(unknown).await.unwrap_err();
     assert_eq!(unknown.code(), Code::Unauthenticated, "{unknown:?}");
     ensure!(gateway.running()? && control_plane.running()?);
     Ok(())
 }
 
-/// The shared Gateway credential names any account or operator, so over TLS the Control Plane
-/// accepts it only from a client whose certificate it verified. A Control Plane without a client
-/// CA refuses it on every Gateway service and still serves operators.
-async fn exercise_gateway_credential_needs_a_client_certificate(database: String) -> Result<()> {
+/// Identity is in the bearer, so mutual TLS is only an optional network filter: over TLS without
+/// a client CA, an enrolled Gateway is admitted to the Gateway services and nowhere else, an
+/// operator is refused them, and a credential nobody enrolled is refused everywhere.
+async fn exercise_gateway_credential_needs_no_client_certificate(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let tokens = Tokens::new();
@@ -1789,7 +1797,7 @@ async fn exercise_gateway_credential_needs_a_client_certificate(database: String
     let control_leaf = pki.leaf("control-plane").await?;
     let mut command = binary(&["control-plane"]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
         .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_DATABASE_URL", &database)
         .env("SUPERTAG_TLS_CERT_FILE", &control_leaf.cert)
@@ -1809,45 +1817,39 @@ async fn exercise_gateway_credential_needs_a_client_certificate(database: String
     )
     .await?;
 
-    let accepted = ConnectorClient::new(channel.clone())
-        .accept_event(tokens.gateway_request(
-            AcceptEventRequest {
-                account_id: "example/victim".into(),
-                event_id: "event-1".into(),
-                tag_id: "helper".into(),
-                session_id: "session-1".into(),
-                prompt: "Not yours".into(),
-                ..Default::default()
-            },
-            "connector:example/victim",
-        )?)
-        .await;
-    let claimed = OperatorNotificationsClient::new(channel.clone())
-        .claim(tokens.gateway_request(
-            ClaimOperatorNotificationRequest::default(),
-            "operator:local",
-        )?)
-        .await;
-    let resolved = OperatorDirectoryClient::new(channel.clone())
-        .authenticate(tokens.gateway_request(
-            AuthenticateOperatorRequest {
-                token_digest: Sha256::digest(tokens.operator.as_bytes()).to_vec(),
-            },
-            "service:gateway",
-        )?)
-        .await;
-    for (call, error) in [
-        ("AcceptEvent", accepted.err()),
-        ("Claim", claimed.err()),
-        ("Authenticate", resolved.err()),
-    ] {
-        let error = error.with_context(|| format!("{call} accepted the Gateway credential"))?;
-        assert_eq!(error.code(), Code::PermissionDenied, "{call}: {error:?}");
-        assert!(
-            error.message().contains("client certificate"),
-            "{call}: {error:?}"
-        );
-    }
+    OperatorNotificationsClient::new(channel.clone())
+        .claim(tokens.gateway_request(ClaimOperatorNotificationRequest::default())?)
+        .await?;
+    let operator = OperatorNotificationsClient::new(channel.clone())
+        .claim(tokens.request(ClaimOperatorNotificationRequest::default())?)
+        .await
+        .unwrap_err();
+    assert_eq!(operator.code(), Code::PermissionDenied, "{operator:?}");
+    let gateway = OperatorClient::new(channel.clone())
+        .list_hosts(tokens.gateway_request(ListHostsRequest::default())?)
+        .await
+        .unwrap_err();
+    assert_eq!(gateway.code(), Code::PermissionDenied, "{gateway:?}");
+    let mut forged = supertag_protocol::connector_request(
+        AcceptEventRequest {
+            account_id: "example/victim".into(),
+            event_id: "event-1".into(),
+            tag_id: "helper".into(),
+            session_id: "session-1".into(),
+            prompt: "Not yours".into(),
+            ..Default::default()
+        },
+        &supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+        "example/victim",
+    )?;
+    forged
+        .metadata_mut()
+        .insert("x-supertag-internal-principal", "gateway:local".parse()?);
+    let refused = ConnectorClient::new(channel.clone())
+        .accept_event(forged)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::Unauthenticated, "{refused:?}");
     OperatorClient::new(channel)
         .list_hosts(tokens.request(ListHostsRequest::default())?)
         .await?;
@@ -1856,17 +1858,17 @@ async fn exercise_gateway_credential_needs_a_client_certificate(database: String
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_gateway_credential_needs_a_client_certificate() -> Result<()> {
+async fn sqlite_gateway_credential_needs_no_client_certificate() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    exercise_gateway_credential_needs_a_client_certificate(sqlite(directory.path())).await
+    exercise_gateway_credential_needs_no_client_certificate(sqlite(directory.path())).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
-async fn postgres_gateway_credential_needs_a_client_certificate() -> Result<()> {
+async fn postgres_gateway_credential_needs_no_client_certificate() -> Result<()> {
     with_postgres(
         "gateway_credential_tls",
-        exercise_gateway_credential_needs_a_client_certificate,
+        exercise_gateway_credential_needs_no_client_certificate,
     )
     .await
 }
@@ -1909,7 +1911,8 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         &format!("http://{old_control_plane}"),
     ]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
         .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let mut refused = Service::spawn(command, root, "gateway-old-control-plane")?;
     let failure = refused.failure().await?;
@@ -1951,7 +1954,10 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         ]);
         host.arg("--state-directory")
             .arg(root.join(format!("host-{}", target.port())))
-            .env("SUPERTAG_HOST_TOKEN", Uuid::new_v4().to_string());
+            .env(
+                "SUPERTAG_HOST_TOKEN",
+                supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX),
+            );
         let output = run(host).await?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         ensure!(
@@ -1965,7 +1971,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
             "--control-plane",
             &format!("http://{target}"),
             "--auth-key",
-            "unused-auth-key",
+            "stak_0000000000000000000000000000000000000000000000000000000000000000",
         ]);
         enroll
             .arg("--state-directory")
@@ -1986,7 +1992,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     let plane = services.raw_channel().await?;
     for role in [
         ServiceRole::WorkerHost,
-        ServiceRole::Operator,
+        ServiceRole::Client,
         ServiceRole::Gateway,
     ] {
         assert_eq!(
@@ -2111,10 +2117,10 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     let refused = supertag_protocol::v2::connector_client::ConnectorClient::new(
         services.raw_channel().await?,
     )
-    .claim_reply(authenticated_request(
+    .claim_reply(supertag_protocol::connector_request(
         supertag_protocol::v2::ClaimReplyRequest::default(),
         &tokens.gateway,
-        Some("connector:absent"),
+        "absent",
     )?)
     .await
     .unwrap_err();
@@ -2133,7 +2139,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     // ...and refuses a Control Plane from another protocol epoch before any call.
     let (old_plane, old_server) = serve_fake(
         Server::builder().add_service(
-            Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Operator])
+            Negotiator::new(ServiceRole::ControlPlane, &[ServiceRole::Client])
                 .with_versions(OLD_EPOCH)
                 .service(),
         ),
@@ -2277,7 +2283,8 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
 
     let mut command = binary(&["control-plane"]);
     command
-        .env("SUPERTAG_GATEWAY_TOKEN", &tokens.gateway)
+        .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
+        .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
         .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)
         .env("SUPERTAG_DATABASE_URL", &database);
     server_tls(&mut command, &control_leaf, &pki.ca());
@@ -2307,8 +2314,8 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
         "auth-key",
         "create",
         "proxy-host",
-        "--host",
-        "proxy-host",
+        "--role",
+        "host",
         "--tag",
         "proxied",
     ]))

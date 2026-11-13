@@ -16,7 +16,8 @@ use serde::Deserialize;
 
 const MAX_STORE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// One saved Control Plane with its operator token and optional TLS files.
+/// One saved Control Plane with its credential (an Operator Token, the admin operator token, or an
+/// enrolled client credential) and optional TLS files.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedControlPlane {
     pub url: String,
@@ -468,6 +469,23 @@ pub fn save(saved: &NewControlPlane, replace: bool) -> Result<PathBuf> {
     written.context("could not save Control Plane connections")?;
     drop(lock);
     Ok(path)
+}
+
+/// Replaces the credential of a Control Plane saved by name, as after a client credential
+/// rotation. The terminal UI's store is rewritten; the desktop app's is its own.
+pub fn replace_token(name: &str, token: &str) -> Result<PathBuf> {
+    let saved = resolve(name)?;
+    save(
+        &NewControlPlane {
+            name: name.to_owned(),
+            url: saved.url,
+            token: token.to_owned(),
+            server_ca_file: saved.server_ca_file,
+            client_cert_file: saved.client_cert_file,
+            client_key_file: saved.client_key_file,
+        },
+        true,
+    )
 }
 
 #[cfg(test)]

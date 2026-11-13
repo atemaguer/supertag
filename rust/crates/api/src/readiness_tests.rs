@@ -71,8 +71,9 @@ async fn host_presence_rejects_operator_credential_before_reading_its_report() {
     request
         .metadata_mut()
         .insert(HOST_GENERATION_HEADER, MetadataValue::from_static("1"));
+    // The operator is not a Worker Host, whatever principal its call names.
     assert_eq!(
         api.report_host(request).await.unwrap_err().code(),
-        Code::Unauthenticated
+        Code::PermissionDenied
     );
 }

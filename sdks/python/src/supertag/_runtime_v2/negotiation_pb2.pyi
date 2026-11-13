@@ -13,12 +13,12 @@ class ServiceRole(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SERVICE_ROLE_CONTROL_PLANE: _ClassVar[ServiceRole]
     SERVICE_ROLE_GATEWAY: _ClassVar[ServiceRole]
     SERVICE_ROLE_WORKER_HOST: _ClassVar[ServiceRole]
-    SERVICE_ROLE_OPERATOR: _ClassVar[ServiceRole]
+    SERVICE_ROLE_CLIENT: _ClassVar[ServiceRole]
 SERVICE_ROLE_UNSPECIFIED: ServiceRole
 SERVICE_ROLE_CONTROL_PLANE: ServiceRole
 SERVICE_ROLE_GATEWAY: ServiceRole
 SERVICE_ROLE_WORKER_HOST: ServiceRole
-SERVICE_ROLE_OPERATOR: ServiceRole
+SERVICE_ROLE_CLIENT: ServiceRole
 
 class NegotiateProtocolRequest(_message.Message):
     __slots__ = ("role", "protocol_versions", "build_version")

@@ -337,6 +337,7 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Resu
 impl Store {
     pub async fn list_objective_commit_reviews(
         &self,
+        principal: &str,
         input: &ListObjectiveCommitReviewsRequest,
     ) -> Result<ListObjectiveCommitReviewsResponse> {
         name("Objective ID", &input.objective_id)?;
@@ -345,6 +346,8 @@ impl Store {
         }
         let limit = if input.limit == 0 { 50 } else { input.limit } as usize;
         let mut tx = self.pool.begin().await?;
+        crate::objectives::ensure_objective_access_in(&mut tx, principal, &input.objective_id)
+            .await?;
         let exists: Option<String> = sqlx::query_scalar(
             "SELECT objective_id FROM supertag_v2_objectives WHERE objective_id=$1",
         )

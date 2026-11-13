@@ -877,3 +877,9 @@ button:disabled {
 [hidden] {
   display: none;
 }
+
+.connection .connection-principal {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}

@@ -18,60 +18,44 @@ impl github_workspaces_server::GithubWorkspaces for Api {
         &self,
         request: Request<PutGithubWorkspaceRequest>,
     ) -> Result<Response<GithubWorkspace>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_workspaces_client::GithubWorkspacesClient::new(channel)
-                    .put(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_workspaces_client::GithubWorkspacesClient::new(channel)
+                .put(request)
+                .await
+        })
         .await
     }
     async fn get(
         &self,
         request: Request<GetGithubWorkspaceRequest>,
     ) -> Result<Response<GithubWorkspace>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_workspaces_client::GithubWorkspacesClient::new(channel)
-                    .get(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_workspaces_client::GithubWorkspacesClient::new(channel)
+                .get(request)
+                .await
+        })
         .await
     }
     async fn list(
         &self,
         request: Request<ListGithubWorkspacesRequest>,
     ) -> Result<Response<ListGithubWorkspacesResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_workspaces_client::GithubWorkspacesClient::new(channel)
-                    .list(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_workspaces_client::GithubWorkspacesClient::new(channel)
+                .list(request)
+                .await
+        })
         .await
     }
     async fn delete(
         &self,
         request: Request<DeleteGithubWorkspaceRequest>,
     ) -> Result<Response<DeleteGithubWorkspaceResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.operator,
-            |channel, request| async {
-                github_workspaces_client::GithubWorkspacesClient::new(channel)
-                    .delete(request)
-                    .await
-            },
-        )
+        self.forward(request, |channel, request| async {
+            github_workspaces_client::GithubWorkspacesClient::new(channel)
+                .delete(request)
+                .await
+        })
         .await
     }
 }

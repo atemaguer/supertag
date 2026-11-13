@@ -510,11 +510,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         *reserve.metadata_mut() = metadata.clone();
         let reserved = self
             .api
-            .forward(
-                reserve,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).reserve_copy(request).await },
-            )
+            .forward(reserve, |channel, request| async move {
+                client(channel).reserve_copy(request).await
+            })
             .await?
             .into_inner();
         if reserved.volume.as_ref() != Some(&volume) {
@@ -545,11 +543,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         });
         *commit.metadata_mut() = metadata;
         self.api
-            .forward(
-                commit,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).commit_copy(request).await },
-            )
+            .forward(commit, |channel, request| async move {
+                client(channel).commit_copy(request).await
+            })
             .await
     }
     async fn put(
@@ -557,11 +553,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<PutArtifactVolumeRequest>,
     ) -> Result<Response<ArtifactVolume>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).put(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).put(request).await
+            })
             .await
     }
     async fn get(
@@ -569,11 +563,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<GetArtifactVolumeRequest>,
     ) -> Result<Response<ArtifactVolume>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).get(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).get(request).await
+            })
             .await
     }
     async fn list(
@@ -581,11 +573,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<ListArtifactVolumesRequest>,
     ) -> Result<Response<ListArtifactVolumesResponse>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).list(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).list(request).await
+            })
             .await
     }
     async fn delete(
@@ -593,11 +583,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<DeleteArtifactVolumeRequest>,
     ) -> Result<Response<DeleteArtifactVolumeResponse>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).delete(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).delete(request).await
+            })
             .await
     }
     async fn get_copy(
@@ -605,11 +593,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<GetArtifactVolumeCopyRequest>,
     ) -> Result<Response<ArtifactVolumeCopy>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).get_copy(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).get_copy(request).await
+            })
             .await
     }
     async fn list_copies(
@@ -617,11 +603,9 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
         request: Request<ListArtifactVolumeCopiesRequest>,
     ) -> Result<Response<ListArtifactVolumeCopiesResponse>, Status> {
         self.api
-            .forward(
-                request,
-                &self.api.credentials.operator,
-                |channel, request| async move { client(channel).list_copies(request).await },
-            )
+            .forward(request, |channel, request| async move {
+                client(channel).list_copies(request).await
+            })
             .await
     }
 }

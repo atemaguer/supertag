@@ -30,6 +30,11 @@ tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
 tonic-health.workspace = true
+tower-layer = "0.3"
 tower-service = "0.3"
 tracing = "0.1"
 uuid.workspace = true
+
+[dev-dependencies]
+prost.workspace = true
+prost-types = "0.14"

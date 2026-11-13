@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/atemaguer/supertag/apps/tui/client"
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
@@ -41,7 +42,8 @@ func (m model) hostsAfter() tea.Cmd {
 }
 
 func (m model) reloadHosts() tea.Cmd {
-	if !m.hostReload.start() {
+	// A client device does not see Worker Host status; only operators do.
+	if client.IsClientCredential(m.client.Target().Token) || !m.hostReload.start() {
 		return nil
 	}
 	return m.hostsCmd()

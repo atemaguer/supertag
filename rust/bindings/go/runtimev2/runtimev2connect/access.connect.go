@@ -23,8 +23,6 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// OperatorAccessName is the fully-qualified name of the OperatorAccess service.
 	OperatorAccessName = "supertag.runtime.v2.OperatorAccess"
-	// OperatorDirectoryName is the fully-qualified name of the OperatorDirectory service.
-	OperatorDirectoryName = "supertag.runtime.v2.OperatorDirectory"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -53,9 +51,6 @@ const (
 	// OperatorAccessListAuditEntriesProcedure is the fully-qualified name of the OperatorAccess's
 	// ListAuditEntries RPC.
 	OperatorAccessListAuditEntriesProcedure = "/supertag.runtime.v2.OperatorAccess/ListAuditEntries"
-	// OperatorDirectoryAuthenticateProcedure is the fully-qualified name of the OperatorDirectory's
-	// Authenticate RPC.
-	OperatorDirectoryAuthenticateProcedure = "/supertag.runtime.v2.OperatorDirectory/Authenticate"
 )
 
 // OperatorAccessClient is a client for the supertag.runtime.v2.OperatorAccess service.
@@ -270,75 +265,4 @@ func (UnimplementedOperatorAccessHandler) RevokeOperatorToken(context.Context, *
 
 func (UnimplementedOperatorAccessHandler) ListAuditEntries(context.Context, *connect.Request[runtimev2.ListAuditEntriesRequest]) (*connect.Response[runtimev2.ListAuditEntriesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.OperatorAccess.ListAuditEntries is not implemented"))
-}
-
-// OperatorDirectoryClient is a client for the supertag.runtime.v2.OperatorDirectory service.
-type OperatorDirectoryClient interface {
-	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateOperatorRequest]) (*connect.Response[runtimev2.OperatorIdentity], error)
-}
-
-// NewOperatorDirectoryClient constructs a client for the supertag.runtime.v2.OperatorDirectory
-// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
-// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
-// the connect.WithGRPC() or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewOperatorDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) OperatorDirectoryClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	operatorDirectoryMethods := runtimev2.File_supertag_runtime_v2_access_proto.Services().ByName("OperatorDirectory").Methods()
-	return &operatorDirectoryClient{
-		authenticate: connect.NewClient[runtimev2.AuthenticateOperatorRequest, runtimev2.OperatorIdentity](
-			httpClient,
-			baseURL+OperatorDirectoryAuthenticateProcedure,
-			connect.WithSchema(operatorDirectoryMethods.ByName("Authenticate")),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// operatorDirectoryClient implements OperatorDirectoryClient.
-type operatorDirectoryClient struct {
-	authenticate *connect.Client[runtimev2.AuthenticateOperatorRequest, runtimev2.OperatorIdentity]
-}
-
-// Authenticate calls supertag.runtime.v2.OperatorDirectory.Authenticate.
-func (c *operatorDirectoryClient) Authenticate(ctx context.Context, req *connect.Request[runtimev2.AuthenticateOperatorRequest]) (*connect.Response[runtimev2.OperatorIdentity], error) {
-	return c.authenticate.CallUnary(ctx, req)
-}
-
-// OperatorDirectoryHandler is an implementation of the supertag.runtime.v2.OperatorDirectory
-// service.
-type OperatorDirectoryHandler interface {
-	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateOperatorRequest]) (*connect.Response[runtimev2.OperatorIdentity], error)
-}
-
-// NewOperatorDirectoryHandler builds an HTTP handler from the service implementation. It returns
-// the path on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewOperatorDirectoryHandler(svc OperatorDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	operatorDirectoryMethods := runtimev2.File_supertag_runtime_v2_access_proto.Services().ByName("OperatorDirectory").Methods()
-	operatorDirectoryAuthenticateHandler := connect.NewUnaryHandler(
-		OperatorDirectoryAuthenticateProcedure,
-		svc.Authenticate,
-		connect.WithSchema(operatorDirectoryMethods.ByName("Authenticate")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/supertag.runtime.v2.OperatorDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case OperatorDirectoryAuthenticateProcedure:
-			operatorDirectoryAuthenticateHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-}
-
-// UnimplementedOperatorDirectoryHandler returns CodeUnimplemented from all methods.
-type UnimplementedOperatorDirectoryHandler struct{}
-
-func (UnimplementedOperatorDirectoryHandler) Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateOperatorRequest]) (*connect.Response[runtimev2.OperatorIdentity], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.OperatorDirectory.Authenticate is not implemented"))
 }

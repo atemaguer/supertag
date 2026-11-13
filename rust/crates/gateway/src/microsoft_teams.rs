@@ -21,7 +21,7 @@ use serde_json::Value;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_MESSAGE_BYTES, connector_request,
     v2::{AcceptMicrosoftTeamsActivityRequest, connector_client::ConnectorClient},
 };
 use tokio::{net::TcpListener, sync::Mutex, time};
@@ -47,7 +47,7 @@ struct Connector {
     config: MicrosoftTeamsConfig,
     control_plane: ConnectorClient<ProtocolChannel>,
     gateway_token: String,
-    principal: String,
+    account: String,
     http: reqwest::Client,
     metadata: reqwest::Url,
     token_url: reqwest::Url,
@@ -87,8 +87,8 @@ impl MicrosoftTeams {
             "Microsoft Teams credentials and allowed users are required"
         );
         config.account_id = format!("teams/{}", config.account_id);
-        let principal = format!("connector:{}", config.account_id);
-        authenticated_request((), &gateway_token, Some(&principal))?;
+        let account = config.account_id.clone();
+        connector_request((), &gateway_token, &account)?;
         let journal = Journal::open(
             &config.state_directory,
             &config.account_id,
@@ -112,7 +112,7 @@ impl MicrosoftTeams {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             gateway_token,
-            principal,
+            account,
             http,
             metadata: "https://login.botframework.com/v1/.well-known/openidconfiguration"
                 .parse()?,
@@ -173,7 +173,7 @@ impl MicrosoftTeams {
 }
 impl Connector {
     fn request<T>(&self, value: T, timeout: Duration) -> Result<Request<T>> {
-        let mut request = authenticated_request(value, &self.gateway_token, Some(&self.principal))?;
+        let mut request = connector_request(value, &self.gateway_token, &self.account)?;
         request.set_timeout(timeout);
         Ok(request)
     }

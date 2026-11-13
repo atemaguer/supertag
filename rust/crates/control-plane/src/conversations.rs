@@ -26,10 +26,16 @@ pub(crate) fn private_session(session_id: &str) -> bool {
 }
 
 impl Store {
-    pub async fn list_tags(&self, input: &ListTagsRequest) -> Result<ListTagsResponse> {
+    /// A client lists only the Tags its Auth Key lets it talk to.
+    pub async fn list_tags(
+        &self,
+        principal: &str,
+        input: &ListTagsRequest,
+    ) -> Result<ListTagsResponse> {
         if !input.cursor.is_empty() {
             name("Tag cursor", &input.cursor)?;
         }
+        let allowed = self.client_tags(principal).await?;
         let limit = page_size(input.limit);
         let rows = sqlx::query(
             "SELECT * FROM supertag_v2_tags
@@ -37,13 +43,24 @@ impl Store {
         )
         .bind(&input.cursor)
         .bind(i64::from(input.include_retired))
-        .bind(limit + 1)
+        // A client's Tags are filtered below, so its page reads past the ones it may not see.
+        .bind(if allowed.is_some() {
+            i64::MAX
+        } else {
+            limit + 1
+        })
         .fetch_all(&self.pool)
         .await?;
         let mut page = Page::new(limit);
         for row in rows {
             let tag = crate::tags::tag_from_row(&row)?;
             let cursor = tag.tag_id.clone();
+            if allowed
+                .as_ref()
+                .is_some_and(|allowed| !allowed.contains(&tag.tag_id))
+            {
+                continue;
+            }
             if !page.push(tag, cursor)? {
                 break;
             }
@@ -63,6 +80,7 @@ impl Store {
                 .map_err(|error| invalid(error.message()))?;
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
+        self.ensure_client_tag(principal, &input.tag_id).await?;
         conversation_name(&input.conversation)?;
         name("operation ID", &input.operation_id)?;
         text("message", &input.text, crate::store::MAX_TASK_PROMPT_BYTES)?;
@@ -209,6 +227,7 @@ impl Store {
     ) -> Result<ListMessagesResponse> {
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
+        self.ensure_client_tag(principal, &input.tag_id).await?;
         conversation_name(&input.conversation)?;
         let limit = page_size(input.limit);
         let cursor = order_cursor(&input.cursor)?;
@@ -281,12 +300,14 @@ impl Store {
 
     pub(crate) async fn ensure_input_access(&self, principal: &str, input_id: &str) -> Result<()> {
         name("live input ID", input_id)?;
-        let allowed: Option<i64> = sqlx::query_scalar(
+        let allowed: Option<i64> = sqlx::query_scalar(&format!(
             "SELECT CAST(1 AS BIGINT) FROM supertag_v2_live_inputs i
              JOIN supertag_v2_task_audience source ON source.task_id=i.task_id
              JOIN supertag_v2_task_audience follower ON follower.task_id=i.follower_task_id
-             WHERE i.input_id=$1 AND source.owner IN ('',$2) AND follower.owner IN ('',$2)",
-        )
+             WHERE i.input_id=$1 AND {} AND {}",
+            crate::store::sees_owner_sql("source.owner", "$2"),
+            crate::store::sees_owner_sql("follower.owner", "$2"),
+        ))
         .bind(input_id)
         .bind(principal)
         .fetch_optional(&self.pool)
@@ -317,7 +338,7 @@ pub(crate) async fn task_access_in(
 ) -> Result<bool> {
     Ok(task_owner_in(tx, task_id)
         .await?
-        .is_some_and(|owner| owner.is_empty() || owner == principal))
+        .is_some_and(|owner| crate::store::sees_owner(principal, &owner)))
 }
 
 async fn session_in(
@@ -362,11 +383,9 @@ async fn conversation_task_in(
     Ok(task)
 }
 
+/// Operators and clients converse; each sees only its own conversations.
 fn operator(principal: &str) -> Result<()> {
-    let id = principal
-        .strip_prefix("operator:")
-        .ok_or(StoreError::PermissionDenied)?;
-    name("operator identity", id)
+    crate::store::actor(principal)
 }
 
 fn conversation_name(value: &str) -> Result<()> {
@@ -456,7 +475,7 @@ impl conversations_server::Conversations for ControlPlane {
         &self,
         request: Request<ListConversationsRequest>,
     ) -> std::result::Result<Response<ListConversationsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_conversations(&principal, &request.into_inner())
@@ -468,7 +487,7 @@ impl conversations_server::Conversations for ControlPlane {
         &self,
         request: Request<ListMessagesRequest>,
     ) -> std::result::Result<Response<ListMessagesResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_messages(&principal, &request.into_inner())
@@ -480,7 +499,7 @@ impl conversations_server::Conversations for ControlPlane {
         &self,
         request: Request<SendMessageRequest>,
     ) -> std::result::Result<Response<ConversationMessage>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .send_message(&principal, &request.into_inner())
@@ -492,7 +511,7 @@ impl conversations_server::Conversations for ControlPlane {
         &self,
         request: Request<GetMessageRequest>,
     ) -> std::result::Result<Response<ConversationMessage>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         let input = request.into_inner();
         Ok(Response::new(
             self.store
@@ -505,7 +524,7 @@ impl conversations_server::Conversations for ControlPlane {
         &self,
         request: Request<ListMessageEventsRequest>,
     ) -> std::result::Result<Response<ListEventsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         let input = request.into_inner();
         self.store
             .get_message(&principal, &input.tag_id, &input.task_id)

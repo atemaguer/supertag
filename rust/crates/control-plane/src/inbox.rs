@@ -27,15 +27,6 @@ struct Cursor {
     at: i64,
     key: String,
 }
-fn operator(principal: &str) -> Result<()> {
-    if principal
-        .strip_prefix("operator:")
-        .is_none_or(str::is_empty)
-    {
-        return Err(StoreError::PermissionDenied);
-    }
-    name("operator principal", principal)
-}
 fn nonempty_text(value: &str, maximum: usize) -> Result<&str> {
     let value = value.trim();
     if value.is_empty() || value.encode_utf16().count() > maximum || value.contains('\0') {
@@ -170,7 +161,7 @@ impl Store {
     }
 
     pub async fn get_question(&self, principal: &str, task_id: &str) -> Result<ObjectiveQuestion> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("question Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
         let question = question_in(&mut tx, task_id, true).await?;
@@ -183,7 +174,7 @@ impl Store {
         principal: &str,
         input: &AnswerQuestionRequest,
     ) -> Result<Task> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         name("question Task ID", &input.task_id)?;
         name("operation ID", &input.operation_id)?;
         let text = nonempty_text(&input.text, 65_536)?;
@@ -233,7 +224,7 @@ impl Store {
         principal: &str,
         input: &ListInboxItemsRequest,
     ) -> Result<ListInboxItemsResponse> {
-        operator(principal)?;
+        crate::store::actor(principal)?;
         if !input.objective_id.is_empty() {
             name("Objective ID", &input.objective_id)?;
         }
@@ -646,7 +637,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<ListInboxItemsRequest>,
     ) -> std::result::Result<Response<ListInboxItemsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_inbox_items(&principal, request.get_ref())
@@ -657,7 +648,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<GetQuestionRequest>,
     ) -> std::result::Result<Response<ObjectiveQuestion>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_question(&principal, &request.get_ref().task_id)
@@ -668,7 +659,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<AnswerQuestionRequest>,
     ) -> std::result::Result<Response<Task>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .answer_question(&principal, request.get_ref())
@@ -679,7 +670,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<GetApprovalRequest>,
     ) -> std::result::Result<Response<Approval>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .get_approval(&principal, &request.get_ref().approval_id)
@@ -690,7 +681,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<ListApprovalsRequest>,
     ) -> std::result::Result<Response<ListApprovalsResponse>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .list_approvals(&principal, request.get_ref())
@@ -701,7 +692,7 @@ impl inbox_server::Inbox for ControlPlane {
         &self,
         request: Request<DecideApprovalRequest>,
     ) -> std::result::Result<Response<Approval>, Status> {
-        let principal = self.principal(&request, "operator:")?;
+        let principal = self.actor(&request)?;
         Ok(Response::new(
             self.store
                 .decide_approval(&principal, request.get_ref())

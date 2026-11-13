@@ -66,8 +66,8 @@ export function ConnectionDialog({
           <DialogTitle>{profile ? "Edit Control Plane" : "Add Control Plane"}</DialogTitle>
           <DialogDescription>
             {profile
-              ? "Update the name or operator token for this connection."
-              : "Use the Control Plane URL and operator token for your SuperTag workspace."}
+              ? "Update the name or credential for this connection."
+              : "Use the Control Plane URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save}>
@@ -94,7 +94,7 @@ export function ConnectionDialog({
             disabled={busy}
           />
           <label htmlFor="control-plane-token">
-            {profile ? "New operator token (optional)" : "Operator token"}
+            {profile ? "New operator token or Auth Key (optional)" : "Operator token or Auth Key"}
           </label>
           <Input
             id="control-plane-token"

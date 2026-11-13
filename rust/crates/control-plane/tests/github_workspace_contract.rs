@@ -146,6 +146,7 @@ async fn contract(url: String) {
                         )),
                     }),
                     enabled: true,
+                    gateway: "local".into(),
                     ..Default::default()
                 }),
                 ..Default::default()

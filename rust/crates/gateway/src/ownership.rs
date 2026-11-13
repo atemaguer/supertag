@@ -18,7 +18,7 @@ use serde_json::json;
 use std::{future::Future, time::Duration};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    authenticated_request,
+    connector_request,
     v2::{
         ClaimConnectorRequest, ConnectorLease, ReleaseConnectorRequest, RenewConnectorRequest,
         connector_client::ConnectorClient,
@@ -53,7 +53,7 @@ pub(crate) async fn refuse_while_draining(
 pub(crate) struct Owner<'a> {
     pub(crate) control_plane: &'a ConnectorClient<ProtocolChannel>,
     pub(crate) gateway_token: &'a str,
-    pub(crate) principal: &'a str,
+    pub(crate) account: &'a str,
     pub(crate) journal: &'a Journal,
 }
 
@@ -70,7 +70,7 @@ enum Claimed {
 
 impl Owner<'_> {
     fn request<T>(&self, input: T) -> Result<tonic::Request<T>> {
-        let mut request = authenticated_request(input, self.gateway_token, Some(self.principal))?;
+        let mut request = connector_request(input, self.gateway_token, self.account)?;
         request.set_timeout(CALL_TIMEOUT);
         Ok(request)
     }

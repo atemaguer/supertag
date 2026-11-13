@@ -11,7 +11,7 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, host_generation,
+    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
     v2::{
         checkpoint_directory_client::CheckpointDirectoryClient,
         checkpoint_download, checkpoint_upload,
@@ -277,20 +277,9 @@ impl ApiTransfers {
     }
 
     async fn authorize_upload<T>(&self, request: &Request<T>) -> Result<(), Status> {
-        let token_digest = self.api.credentials.host_credential_digest(request)?;
-        let generation = host_generation(request)?;
-        let host = timeout(
-            Duration::from_secs(5),
-            self.api
-                .authenticate_host(token_digest, Duration::from_secs(5)),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("Worker Host authentication timed out"))??;
-        if host.revoked || generation != host.generation {
-            return Err(Status::permission_denied(
-                "Worker Host generation is no longer current",
-            ));
-        }
+        timeout(Duration::from_secs(5), self.api.registered_host(request))
+            .await
+            .map_err(|_| Status::deadline_exceeded("Worker Host authentication timed out"))??;
         Ok(())
     }
 
@@ -645,18 +634,13 @@ impl ApiTransfers {
         &self,
         request: Request<GetWorkspaceArtifactRequest>,
     ) -> Result<WorkspaceDeliveryReference, Status> {
-        Ok(
-            self.api
-                .forward(
-                    request,
-                    &self.api.credentials.operator,
-                    |channel, request| async move {
-                        workspace_client(channel).get_artifact(request).await
-                    },
-                )
-                .await?
-                .into_inner(),
-        )
+        Ok(self
+            .api
+            .forward(request, |channel, request| async move {
+                workspace_client(channel).get_artifact(request).await
+            })
+            .await?
+            .into_inner())
     }
 }
 

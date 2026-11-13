@@ -40,12 +40,13 @@ struct Services {
 
 impl Services {
     async fn start(database: &str, directory: &Path) -> Result<Self> {
-        let gateway = Uuid::new_v4().to_string();
+        let gateway = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator = Uuid::new_v4().to_string();
-        let host = Uuid::new_v4().to_string();
+        let host = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut plane = bare(&["control-plane"]);
         plane
-            .env("SUPERTAG_GATEWAY_TOKEN", &gateway)
+            .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway)
+            .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host)
             .env("SUPERTAG_DATABASE_URL", database)
@@ -287,27 +288,37 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
 
     // Keys carry the operator's name, which is never reused.
     let issued = json(cli(&[
-        "auth-key",
-        "create",
-        "laptop",
-        "--host",
-        "laptop-host",
-        "--tag",
-        "builder",
+        "auth-key", "create", "laptop", "--role", "host", "--tag", "builder",
     ]))
     .await?;
     assert_eq!(
-        (&issued["name"], &issued["host_id"], &issued["phase"]),
-        (&json!("laptop"), &json!("laptop-host"), &json!("active"))
+        (&issued["name"], &issued["role"], &issued["phase"]),
+        (&json!("laptop"), &json!("host"), &json!("active"))
     );
     let key = field(&issued, "auth_key")?.to_owned();
     for (args, message) in [
         (
-            ["auth-key", "create", "laptop", "--reusable", "--all-tags"],
+            [
+                "auth-key",
+                "create",
+                "laptop",
+                "--role",
+                "host",
+                "--reusable",
+                "--all-tags",
+            ],
             "never reused",
         ),
         (
-            ["auth-key", "create", "Laptop", "--reusable", "--all-tags"],
+            [
+                "auth-key",
+                "create",
+                "Laptop",
+                "--role",
+                "host",
+                "--reusable",
+                "--all-tags",
+            ],
             "Auth Key name must be 1-63 lowercase",
         ),
     ] {
@@ -323,6 +334,8 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
         "auth-key",
         "create",
         "ci",
+        "--role",
+        "host",
         "--reusable",
         "--all-tags",
     ]))
@@ -391,7 +404,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let host = json(cli(&["get", "host", "laptop-host"])).await?;
     assert_eq!(host["credential_revision"], 1);
 
-    // Rotating in the host's state directory installs the new credential there.
+    // The host rotates its own credential in its state directory, presenting the current one.
     let rotated = json({
         let mut command = cli(&["host", "rotate-credential", "laptop-host"]);
         command.arg("--host-state-directory").arg(&state);
@@ -425,8 +438,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     let stale = output(run(None)).await?;
     ensure!(
         !stale.status.success()
-            && String::from_utf8_lossy(&stale.stderr)
-                .contains("valid Worker Host credential required"),
+            && String::from_utf8_lossy(&stale.stderr).contains("valid bearer credential required"),
         "the replaced credential still worked: {}",
         String::from_utf8_lossy(&stale.stderr)
     );
@@ -478,7 +490,7 @@ async fn named_auth_keys_and_rotated_host_credentials(database: String) -> Resul
     for expected in [
         ("auth-key.create", "AuthKey/laptop"),
         ("auth-key.revoke", "AuthKey/ci"),
-        ("worker-host.credential.rotate", "WorkerHost/laptop-host"),
+        ("credential.rotate", "WorkerHost/laptop-host"),
     ] {
         ensure!(
             entries.contains(&(expected.0.to_owned(), expected.1.to_owned())),
