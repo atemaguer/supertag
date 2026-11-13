@@ -105,7 +105,33 @@ impl Fixture {
     }
 }
 
-async fn refused(host: &Workspace, path: &Path, sha: &str, head: &str) -> String {
+/// Every file under an `objects` directory of a host's state, with its size.
+fn objects(state: &Path) -> Vec<(PathBuf, u64)> {
+    let mut found = Vec::new();
+    let mut pending = vec![state.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let entry = entry.unwrap();
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file()
+                && entry
+                    .path()
+                    .components()
+                    .any(|part| part.as_os_str() == "objects")
+            {
+                found.push((entry.path(), entry.metadata().unwrap().len()));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+async fn refused(host: &(Workspace, PathBuf), path: &Path, sha: &str, head: &str) -> String {
+    let (host, state) = host;
+    let before = objects(state);
     let error = tokio::time::timeout(
         Duration::from_secs(60),
         host.import_bundle(path, sha, head, &CancellationToken::new()),
@@ -113,6 +139,8 @@ async fn refused(host: &Workspace, path: &Path, sha: &str, head: &str) -> String
     .await
     .expect("import must not block")
     .expect_err("bundle must be refused");
+    // The host's object store is unchanged: no object, pack, or index was added.
+    assert_eq!(objects(state), before);
     // Nothing was imported: a Task pinned to the head still cannot start.
     assert!(
         host.prepare(
@@ -161,7 +189,10 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
         .unwrap();
     let head = delivery.head_commit.clone();
     let good = fs::read(&delivery.bundle_path).unwrap();
-    let second = fixture.host("second-host");
+    let second = (
+        fixture.host("second-host"),
+        fixture.path.join("second-host"),
+    );
 
     // Over the size cap: refused from the file's size, before reading or importing it.
     let huge = fixture.path.join("huge.bundle");
@@ -259,6 +290,7 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
 
     // The approved delivery still imports, and continuation starts from it.
     second
+        .0
         .import_bundle(
             &delivery.bundle_path,
             &delivery.bundle_sha256,
@@ -268,6 +300,7 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
         .await
         .unwrap();
     let continued = second
+        .0
         .prepare(
             PrepareRequest {
                 task_id: "next".into(),
