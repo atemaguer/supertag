@@ -613,55 +613,62 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     Ok(())
 }
 
+/// Each case gets its own database: a second local Control Plane on the first one's database
+/// would find `gateway:local` enrolled with another credential and refuse to start.
 async fn unsafe_provision_source_stops_before_hosts_start_and_reaps_services(
-    database: String,
+    postgres: bool,
 ) -> Result<()> {
     for linked in [false, true] {
-        let temp = tempfile::tempdir()?;
-        let state = temp.path().join("unsafe");
-        let file = temp.path().join("supertag.yaml");
-        let resource = temp.path().join("resource.yaml");
-        fs::write(
-            &resource,
-            "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: unsafe}\nspec: {instructions: untrusted}\n",
-        )?;
-        let selection = if linked {
-            let directory = temp.path().join("resources");
-            fs::create_dir(&directory)?;
-            std::os::unix::fs::symlink(&resource, directory.join("resource.yaml"))?;
-            "resources"
-        } else {
-            fs::set_permissions(&resource, fs::Permissions::from_mode(0o666))?;
-            "resource.yaml"
-        };
-        yaml(
-            &file,
-            &serde_json::json!({"services":{
-                "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":[selection]},
-                "worker":{"type":"host","adapter":ADAPTER}
-            }}),
-        )?;
-        let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
-        assert!(supervisor.ready().is_err());
-        let status = timeout(WAIT, async {
-            loop {
-                if let Some(status) = supervisor.child.try_wait()? {
-                    break Ok::<_, std::io::Error>(status);
-                }
-                sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await??;
-        assert!(!status.success());
-        assert!(!state.join("hosts").exists());
-        assert!(!state.join("endpoint").exists());
-        let address = fs::read_to_string(state.join("control-plane-address"))?;
-        assert!(
-            tokio::net::TcpStream::connect(address.trim())
-                .await
-                .is_err()
-        );
+        with_database(postgres, |database| unsafe_provision_case(database, linked)).await?;
     }
+    Ok(())
+}
+
+async fn unsafe_provision_case(database: String, linked: bool) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let state = temp.path().join("unsafe");
+    let file = temp.path().join("supertag.yaml");
+    let resource = temp.path().join("resource.yaml");
+    fs::write(
+        &resource,
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: unsafe}\nspec: {instructions: untrusted}\n",
+    )?;
+    let selection = if linked {
+        let directory = temp.path().join("resources");
+        fs::create_dir(&directory)?;
+        std::os::unix::fs::symlink(&resource, directory.join("resource.yaml"))?;
+        "resources"
+    } else {
+        fs::set_permissions(&resource, fs::Permissions::from_mode(0o666))?;
+        "resource.yaml"
+    };
+    yaml(
+        &file,
+        &serde_json::json!({"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":[selection]},
+            "worker":{"type":"host","adapter":ADAPTER}
+        }}),
+    )?;
+    let mut supervisor = Process::spawn(&state, Some(&file), &database_env(&database))?;
+    assert!(supervisor.ready().is_err());
+    let status = timeout(WAIT, async {
+        loop {
+            if let Some(status) = supervisor.child.try_wait()? {
+                break Ok::<_, std::io::Error>(status);
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+    assert!(!status.success());
+    assert!(!state.join("hosts").exists());
+    assert!(!state.join("endpoint").exists());
+    let address = fs::read_to_string(state.join("control-plane-address"))?;
+    assert!(
+        tokio::net::TcpStream::connect(address.trim())
+            .await
+            .is_err()
+    );
     Ok(())
 }
 
@@ -2411,22 +2418,14 @@ async fn postgres_local_provision_creates_ordered_resources_once_and_preserves_o
 #[tokio::test]
 async fn sqlite_unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()>
 {
-    with_database(
-        false,
-        unsafe_provision_source_stops_before_hosts_start_and_reaps_services,
-    )
-    .await
+    unsafe_provision_source_stops_before_hosts_start_and_reaps_services(false).await
 }
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
 async fn postgres_unsafe_provision_source_stops_before_hosts_start_and_reaps_services() -> Result<()>
 {
-    with_database(
-        true,
-        unsafe_provision_source_stops_before_hosts_start_and_reaps_services,
-    )
-    .await
+    unsafe_provision_source_stops_before_hosts_start_and_reaps_services(true).await
 }
 
 #[tokio::test]

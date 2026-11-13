@@ -91,7 +91,7 @@ shift
 test "$1" = "--model"
 test "$2" = "fixture-model"
 test "$3" = "--timeout-seconds"
-test "$4" = "120"
+test "$4" = "3600"
 exec "$program"
 "#,
     )?;
