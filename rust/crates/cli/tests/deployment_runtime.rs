@@ -240,7 +240,7 @@ async fn service(mut command: Command, log: &Path) -> Result<(Child, SocketAddr)
     Ok((child, address))
 }
 
-/// The env file format setup writes: KEY=VALUE, optionally single- or double-quoted.
+/// The env file format setup writes: KEY=VALUE, optionally single-quoted.
 fn env_file(path: &Path) -> Result<BTreeMap<String, String>> {
     let mut values = BTreeMap::new();
     for line in std::fs::read_to_string(path)?.lines() {
@@ -298,6 +298,19 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
             &env,
         )
     };
+    // A value Compose would change on the way to the container is refused before anything is
+    // written, without echoing it.
+    let refused = fail(setup(&[(
+        "SUPERTAG_DATABASE_URL",
+        "postgresql://supertag:quote'$HOME@db/supertag",
+    )]))
+    .await?;
+    assert!(
+        refused.contains("SUPERTAG_DATABASE_URL cannot be represented"),
+        "{refused}"
+    );
+    assert!(!refused.contains("quote'"), "{refused}");
+    assert!(!output.exists());
     let message = succeed(setup(&[])).await?;
     assert!(
         message.contains("Saved compose deployment configuration"),
@@ -662,10 +675,44 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         );
         sleep(Duration::from_millis(200)).await;
     }
-    assert_ne!(
-        task_state(&builder_task).await?["state"],
-        "TASK_STATE_SUCCEEDED"
+    // Once the review host is idle, the builder's Task, submitted first, is still unclaimed:
+    // no Attempt exists, so the host without the builder label never ran it.
+    let grouped = |group: &str, args: &[&str]| {
+        let mut all = vec![group, "--gateway", public_url.as_str()];
+        all.extend_from_slice(args);
+        command(&home, &all, &operator_env)
+    };
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let host: Value =
+            serde_json::from_str(&succeed(grouped("host", &["get", "review-host"])).await?)?;
+        if host["active_attempts"] == 0 && host["phase"] == "ready" {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "review host did not become idle: {host}"
+        );
+        sleep(Duration::from_millis(200)).await;
+    }
+    let waiting = task_state(&builder_task).await?;
+    assert_eq!(waiting["state"], "TASK_STATE_QUEUED", "{waiting}");
+    assert!(waiting["attempt_id"].is_null(), "{waiting}");
+    // Only the builder host, still offline, may take it.
+    let explained: Value =
+        serde_json::from_str(&succeed(grouped("placement", &["explain", &builder_task])).await?)?;
+    assert_eq!(
+        explained["required_labels"],
+        serde_json::json!(["builder-host"])
     );
+    let eligible = explained["hosts"]
+        .as_array()
+        .context("placement hosts")?
+        .iter()
+        .filter(|host| host["eligible"] == true)
+        .map(|host| host["host_id"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(eligible, ["builder-host"], "{explained}");
     let mut builder = start_host(hosts[1].0, &hosts[1].1)?;
     let deadline = Instant::now() + WAIT;
     loop {

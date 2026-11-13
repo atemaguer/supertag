@@ -3,10 +3,13 @@
 The Control Plane, Gateway, and PostgreSQL run from deploy/compose.native.yaml plus
 deploy/compose.native.ingress.yaml, configured only by the files setup wrote and a disposable
 TLS authority. Two Worker Hosts run outside Compose with the credential-free fixture adapter and
-connect outbound to the published Gateway. The rehearsal then runs the hosted image's
-entrypoint (Fly.io and Railway) with TLS secrets as PEM environment values and a root-owned
-volume. No cloud resource, model call, or real credential is used. Everything the rehearsal
-creates is removed, and the removal is checked.
+connect outbound to the published Gateway. PostgreSQL's first-start initialization is slowed so
+the Control Plane would race it if the PostgreSQL healthcheck reported healthy too early. The
+rehearsal then replaces the Compose Control Plane with the hosted image (Fly.io and Railway) and
+runs every hosted service command from deploy/native/fly and deploy/native/railway: TLS secrets
+arrive as PEM environment values, volumes are root-owned, and a Control Plane without a client CA
+refuses to start. No cloud resource, model call, or real credential is used. Everything the
+rehearsal creates is removed, and the removal is checked.
 
 Usage:
   python3 rust/scripts/smoke_deployment_compose.py --linux-binary PATH --cli PATH \
@@ -16,6 +19,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import subprocess
@@ -94,11 +98,11 @@ def wait_until(check, description, seconds=WAIT):
 
 
 def env_file(path):
-    """The KEY=VALUE format setup writes, with optional single or double quotes."""
+    """The KEY=VALUE format setup writes, optionally single-quoted."""
     values = {}
     for line in Path(path).read_text().splitlines():
         key, value = line.split("=", 1)
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        if len(value) >= 2 and value[0] == value[-1] == "'":
             value = value[1:-1]
         values[key] = value
     return values
@@ -120,7 +124,10 @@ def authority(root):
     openssl("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "1",
             "-subj", "/CN=SuperTag disposable deployment CA", "-addext", "basicConstraints=critical,CA:TRUE",
             "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-keyout", "ca.key", "-out", "ca.pem")
-    for name, names, usage in (("control-plane", "DNS:control-plane", "serverAuth"),
+    # The Control Plane's names cover Compose and the Fly.io and Railway private names, so the
+    # hosted rehearsal runs the platform definitions' commands unchanged.
+    control_names = "DNS:control-plane,DNS:supertag-control-plane.internal,DNS:supertag-control-plane.railway.internal"
+    for name, names, usage in (("control-plane", control_names, "serverAuth"),
                                ("gateway", "DNS:gateway,DNS:localhost,IP:127.0.0.1", "serverAuth"),
                                ("gateway-client", "DNS:gateway-client", "clientAuth")):
         (root / f"{name}.ext").write_text(f"subjectAltName={names}\nbasicConstraints=critical,CA:FALSE\n"
@@ -170,8 +177,8 @@ def rehearse(args):
     receipt = {"format": "supertag-deployment-compose-rehearsal-v1", "compose_project": identifier}
     images = {}
     children = []
-    hosted_volume = identifier + "-hosted-state"
-    hosted_container = identifier + "-hosted-gateway"
+    hosted_containers = []
+    hosted_volumes = []
     with tempfile.TemporaryDirectory(prefix=identifier + "-", dir="/tmp") as temporary:
         root = Path(temporary).resolve()
         home = root / "home"
@@ -210,9 +217,21 @@ def rehearse(args):
                 "SUPERTAG_GATEWAY_TLS_DIRECTORY": str(root / "tls/gateway"),
                 "SUPERTAG_GATEWAY_PUBLISH": f"127.0.0.1:{port}",
             })
+            # A slow first-start init: the image's temporary init server listens only on its Unix
+            # socket, so a healthcheck that passes during init starts the Control Plane, whose
+            # PostgreSQL pool gives up after 10 seconds, before PostgreSQL accepts TCP connections.
+            initdb = root / "initdb"
+            initdb.mkdir(mode=0o755)
+            (initdb / "slow-init.sh").write_text("echo 'rehearsal: slow init'\nsleep 20\n")
+            (initdb / "slow-init.sh").chmod(0o644)
+            slow_init = root / "slow-init.yaml"
+            slow_init.write_text("services:\n  postgres:\n    volumes:\n      - type: bind\n"
+                                 f"        source: {json.dumps(str(initdb / 'slow-init.sh'))}\n"
+                                 "        target: /docker-entrypoint-initdb.d/slow-init.sh\n"
+                                 "        read_only: true\n")
             prefix = ["docker", "compose", "--project-directory", str(root), "--project-name", identifier,
                       "--file", str(REPO / "deploy/compose.native.yaml"),
-                      "--file", str(REPO / "deploy/compose.native.ingress.yaml")]
+                      "--file", str(REPO / "deploy/compose.native.ingress.yaml"), "--file", str(slow_init)]
 
             def compose(*arguments, timeout=WAIT):
                 return run([*prefix, *arguments], env=compose_env, timeout=timeout).stdout
@@ -221,7 +240,34 @@ def rehearse(args):
                 return compose("ps", "--all", "--quiet", service).strip()
 
             compose("config", "--quiet")
+
+            # Env file values reach the container literally: a value Compose would expand inside
+            # double quotes is single-quoted, and one with a single quote is refused.
+            literal_url = "postgresql://supertag:p$HOME`id`${PATH}\\n\"#x@postgres:5432/supertag"
+            literal = root / "literal-deployment"
+            supertag("setup", "deployment", "compose", "--non-interactive", "--output", str(literal),
+                     env={"SUPERTAG_DATABASE_URL": literal_url})
+            environment = run([*prefix, "run", "--rm", "--no-deps", "--entrypoint", "/usr/bin/env", "control-plane"],
+                              env={**compose_env, "SUPERTAG_CONTROL_ENV_FILE": str(literal / "control-plane.env")},
+                              timeout=120).stdout
+            require(f"SUPERTAG_DATABASE_URL={literal_url}\n" in environment,
+                    "Compose changed an env file value on the way to the container")
+            refused = supertag("setup", "deployment", "compose", "--non-interactive", "--output",
+                               str(root / "refused-deployment"),
+                               env={"SUPERTAG_DATABASE_URL": "postgresql://supertag:quote'$HOME@postgres/supertag"},
+                               check=False)
+            require(refused.returncode != 0 and "cannot be represented" in refused.stderr
+                    and "quote'" not in refused.stderr + refused.stdout
+                    and not (root / "refused-deployment").exists(), "setup wrote a value Compose would change")
+            receipt["env_files_literal"] = True
+
             compose("up", "--detach", "--wait", "--wait-timeout", "120", timeout=180)
+            logs = run([*prefix, "logs", "--no-color", "postgres"], env=compose_env).stdout
+            require("rehearsal: slow init" in logs, "the slow PostgreSQL init did not run")
+            for service in ("control-plane", "gateway"):
+                restarts = run(["docker", "inspect", "--format", "{{.RestartCount}}", container(service)]).stdout
+                require(restarts.strip() == "0", f"{service} restarted while PostgreSQL initialized")
+            receipt["postgres_first_start_race"] = "covered"
             for service in ("postgres", "control-plane", "gateway"):
                 bindings = json.loads(run(["docker", "inspect", "--format", "{{json .HostConfig.PortBindings}}",
                                            container(service)]).stdout or "null") or {}
@@ -251,6 +297,9 @@ def rehearse(args):
 
             def operator(*arguments):
                 return json.loads(supertag(*arguments, "--gateway", url, env=operator_env).stdout)
+
+            def grouped(group, *arguments):
+                return json.loads(supertag(group, "--gateway", url, *arguments, env=operator_env).stdout)
 
             manifest = root / "organization.yaml"
             manifest.write_text(ORGANIZATION)
@@ -284,8 +333,16 @@ def rehearse(args):
             review_task = operator("submit", "--tag", "review-manager", "--session", "deploy", "Review the parser")
             review = wait_until(lambda: finished(review_task["task_id"]), "the review Task")
             require("Review the parser" in review["result"], review["result"])
-            require(operator("get-task", builder_task["task_id"])["state"] != "TASK_STATE_SUCCEEDED",
-                    "a host without the builder label ran the builder's Task")
+            # Once the review host is idle, the builder's Task, submitted first, still has no
+            # Attempt, and only the offline builder host may take it.
+            wait_until(lambda: (lambda host: host["active_attempts"] == 0 and host["phase"] == "ready")(
+                grouped("host", "get", "review-host")), "the review host to be idle")
+            waiting = operator("get-task", builder_task["task_id"])
+            require(waiting["state"] == "TASK_STATE_QUEUED" and waiting.get("attempt_id") is None,
+                    f"a host without the builder label claimed the builder's Task: {waiting}")
+            explained = grouped("placement", "explain", builder_task["task_id"])
+            require([host["host_id"] for host in explained["hosts"] if host["eligible"]] == ["builder-host"],
+                    f"unexpected placement: {explained}")
             start_host("builder-host")
             builder = wait_until(lambda: finished(builder_task["task_id"]), "the builder Task")
             require("Write the parser" in builder["result"], builder["result"])
@@ -307,16 +364,27 @@ def rehearse(args):
                        "Worker Hosts to reconnect after the restart")
 
             # The hosted image as Fly.io and Railway run it: root start, TLS from PEM secrets,
-            # a root-owned volume, and the Gateway command from the Fly definition.
-            fly = tomllib.loads((REPO / "deploy/native/fly/gateway.toml").read_text())
-            command = fly["processes"]["app"].replace("supertag-control-plane.internal", "control-plane").split()
-            hosted_port = free_port()
-            pem = {name: (root / "tls/gateway" / file).read_text() for name, file in (
-                ("SUPERTAG_TLS_CERT_PEM", "server.pem"), ("SUPERTAG_TLS_KEY_PEM", "server.key"),
-                ("SUPERTAG_SERVER_CA_PEM", "server-ca.pem"), ("SUPERTAG_CLIENT_CERT_PEM", "client.pem"),
-                ("SUPERTAG_CLIENT_KEY_PEM", "client.key"))}
+            # root-owned volumes, and each service command exactly as the platform definitions
+            # give it. The hosted Control Plane replaces the Compose one on the same database.
+            native = REPO / "deploy/native"
+            fly_control = tomllib.loads((native / "fly/control-plane.toml").read_text())["processes"]["app"].split()
+            fly_gateway = tomllib.loads((native / "fly/gateway.toml").read_text())["processes"]["app"].split()
+            # Railway's start command replaces the image entrypoint, so it names the entrypoint.
+            railway_control = shlex.split(json.loads((native / "railway/control-plane.json").read_text())
+                                          ["deploy"]["startCommand"])
+            railway_gateway = shlex.split(json.loads((native / "railway/gateway.json").read_text())
+                                          ["deploy"]["startCommand"])
+
+            def pem(role, names):
+                return {f"SUPERTAG_{name}_PEM": (root / "tls" / role / file).read_text() for name, file in names}
+
+            control_pem = pem("control", (("TLS_CERT", "server.pem"), ("TLS_KEY", "server.key"),
+                                          ("TLS_CLIENT_CA", "client-ca.pem")))
+            gateway_pem = pem("gateway", (("TLS_CERT", "server.pem"), ("TLS_KEY", "server.key"),
+                                          ("SERVER_CA", "server-ca.pem"), ("CLIENT_CERT", "client.pem"),
+                                          ("CLIENT_KEY", "client.key")))
             # Hosted env files come from setup for Fly.io, reusing this deployment's database and
-            # tokens so the hosted Gateway joins the same Control Plane.
+            # tokens so the hosted services join the same deployment.
             compose_gateway = env_file(deployment / "gateway.env")
             hosted = root / "hosted-deployment"
             supertag("setup", "deployment", "fly", "--non-interactive", "--output", str(hosted), env={
@@ -325,41 +393,100 @@ def rehearse(args):
                 "SUPERTAG_OPERATOR_TOKEN": compose_gateway["SUPERTAG_OPERATOR_TOKEN"],
             })
             supertag("check", "deployment", "fly", "--directory", str(hosted))
-            gateway_env = {**pem, **env_file(hosted / "gateway.env")}
-            require(not any(key.endswith("_FILE") for key in gateway_env), "hosted env names TLS files")
-            run(["docker", "volume", "create", "--label", f"supertag.rehearsal={identifier}", hosted_volume])
-            run(["docker", "create", "--name", hosted_container, "--label", f"supertag.rehearsal={identifier}",
-                 "--network", f"{identifier}_runtime", "--publish", f"127.0.0.1:{hosted_port}:3434",
-                 "--volume", f"{hosted_volume}:/var/lib/supertag", "--cap-drop", "ALL",
-                 *[flag for capability in ("CHOWN", "SETUID", "SETGID", "SETPCAP", "DAC_OVERRIDE", "FOWNER")
-                   for flag in ("--cap-add", capability)],
-                 *[flag for key in gateway_env for flag in ("--env", key)], images["hosted"], *command],
-                env={**os.environ, **gateway_env})
-            run(["docker", "network", "connect", f"{identifier}_ingress", hosted_container])
-            run(["docker", "start", hosted_container])
-            hosted_url = f"https://localhost:{hosted_port}"
-            wait_until(lambda: supertag("verify", "deployment", hosted_url, "--env-file", operator_file, "--require-ready",
-                                        env=trust, check=False).returncode == 0, "the hosted Gateway")
-            # PID 1 is tini, exec'd by setpriv; the Gateway is its child.
-            for pid in ("1", run(["docker", "exec", hosted_container, "cat", "/proc/1/task/1/children"]).stdout.split()[0]):
-                status = dict(line.split(":", 1) for line in run(
-                    ["docker", "exec", hosted_container, "cat", f"/proc/{pid}/status"]).stdout.splitlines())
-                require(status["Uid"].split() == ["10001"] * 4 and status["Gid"].split() == ["10001"] * 4
-                        and status["NoNewPrivs"].strip() == "1" and int(status["CapEff"], 16) == 0
-                        and int(status["CapBnd"], 16) == 0, f"hosted process {pid} kept privileges: {status}")
-            command_line = run(["docker", "exec", hosted_container, "cat", f"/proc/{pid}/cmdline"]).stdout
-            require(command_line.split("\0")[:2] == ["/usr/local/bin/supertag", "gateway"], command_line)
-            # Read as the service user: root in this container has no ptrace capability.
-            environment = run(["docker", "exec", "--user", "10001:10001", hosted_container, "cat",
-                               f"/proc/{pid}/environ"]).stdout
-            require("SUPERTAG_TLS_CERT_FILE=/run/supertag-tls/server.pem" in environment
-                    and "PEM=" not in environment, "the hosted service environment is not as expected")
-            ownership = run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/stat",
-                             "--volume", f"{hosted_volume}:/state", images["control-plane"], "-c", "%u %a", "/state",
-                             "/state/checkpoints"], check=False).stdout.split("\n")
-            require(ownership[0] == "10001 700", f"hosted volume ownership {ownership}")
-            receipt["hosted_image"] = {"tls_from_pem_secrets": True, "uid": 10001, "volume_owner": ownership[0],
-                                       "command_from": "deploy/native/fly/gateway.toml"}
+            control_env = {**control_pem, **env_file(hosted / "control-plane.env")}
+            gateway_env = {**gateway_pem, **env_file(hosted / "gateway.env")}
+            require(not any(key.endswith("_FILE") for key in {**control_env, **gateway_env}),
+                    "hosted env names TLS files")
+            capabilities = [flag for capability in ("CHOWN", "SETUID", "SETGID", "SETPCAP", "DAC_OVERRIDE", "FOWNER")
+                            for flag in ("--cap-add", capability)]
+
+            def hosted_args(name, environment, command, *flags):
+                """`docker create`/`run` arguments for the hosted image with this service command."""
+                entrypoint = []
+                if command[0].startswith("/"):
+                    entrypoint, command = ["--entrypoint", command[0]], command[1:]
+                return ["--name", name, "--label", f"supertag.rehearsal={identifier}",
+                        "--network", f"{identifier}_runtime", "--cap-drop", "ALL", *capabilities, *flags,
+                        *[flag for key in environment for flag in ("--env", key)], *entrypoint,
+                        images["hosted"], *command]
+
+            # Without a client CA the hosted Control Plane refuses to start (Railway's command).
+            refused = run(["docker", "run", "--rm", *hosted_args(
+                identifier + "-hosted-refused",
+                {key: value for key, value in control_env.items() if key != "SUPERTAG_TLS_CLIENT_CA_PEM"},
+                railway_control)], env={**os.environ, **control_env}, check=False)
+            require(refused.returncode != 0
+                    and "Control Plane TLS requires a client certificate authority" in refused.stderr,
+                    f"the hosted Control Plane started without a client CA: {refused.stderr[-500:]}")
+
+            compose("stop", "control-plane")
+            hosted_control = identifier + "-hosted-control-plane"
+            run(["docker", "create", *hosted_args(
+                hosted_control, control_env, fly_control, *[flag for alias in (
+                    "control-plane", "supertag-control-plane.internal", "supertag-control-plane.railway.internal")
+                    for flag in ("--network-alias", alias)])], env={**os.environ, **control_env})
+            hosted_containers.append(hosted_control)
+            run(["docker", "start", hosted_control])
+
+            # The private hop refuses a client without a certificate and accepts the Gateway's.
+            probe = ["docker", "run", "--rm", "--label", f"supertag.rehearsal={identifier}", "--network",
+                     f"{identifier}_runtime", "--volume", f"{root / 'tls/gateway'}:/tls:ro", "--entrypoint",
+                     "/usr/local/bin/supertag", "--env", "SUPERTAG_SERVER_CA_FILE=/tls/server-ca.pem"]
+            health = ["health", "--endpoint", "https://supertag-control-plane.internal:3435"]
+            wait_until(lambda: run([*probe, "--env", "SUPERTAG_CLIENT_CERT_FILE=/tls/client.pem", "--env",
+                                    "SUPERTAG_CLIENT_KEY_FILE=/tls/client.key", images["control-plane"], *health],
+                                   check=False).returncode == 0, "the hosted Control Plane")
+            anonymous = run([*probe, images["control-plane"], *health], check=False)
+            require(anonymous.returncode != 0, "the hosted Control Plane accepted a client without a certificate")
+
+            def check_privileges(name, role):
+                # PID 1 is tini, exec'd by setpriv; the service is its child.
+                child = run(["docker", "exec", name, "cat", "/proc/1/task/1/children"]).stdout.split()[0]
+                for pid in ("1", child):
+                    status = dict(line.split(":", 1) for line in run(
+                        ["docker", "exec", name, "cat", f"/proc/{pid}/status"]).stdout.splitlines())
+                    require(status["Uid"].split() == ["10001"] * 4 and status["Gid"].split() == ["10001"] * 4
+                            and status["NoNewPrivs"].strip() == "1" and int(status["CapEff"], 16) == 0
+                            and int(status["CapBnd"], 16) == 0, f"{name} process {pid} kept privileges: {status}")
+                command_line = run(["docker", "exec", name, "cat", f"/proc/{child}/cmdline"]).stdout
+                require(command_line.split("\0")[:2] == ["/usr/local/bin/supertag", role], command_line)
+                # Read as the service user: root in this container has no ptrace capability.
+                environment = run(["docker", "exec", "--user", "10001:10001", name, "cat",
+                                   f"/proc/{child}/environ"]).stdout
+                require("SUPERTAG_TLS_CERT_FILE=/run/supertag-tls/server.pem" in environment
+                        and "PEM=" not in environment, f"the {role} environment is not as expected")
+
+            check_privileges(hosted_control, "control-plane")
+            gateways = {}
+            for platform, command in (("fly", fly_gateway), ("railway", railway_gateway)):
+                name = f"{identifier}-hosted-{platform}-gateway"
+                volume = name + "-state"
+                run(["docker", "volume", "create", "--label", f"supertag.rehearsal={identifier}", volume])
+                hosted_volumes.append(volume)
+                hosted_port = free_port()
+                run(["docker", "create", *hosted_args(name, gateway_env, command, "--publish",
+                                                      f"127.0.0.1:{hosted_port}:3434", "--volume",
+                                                      f"{volume}:/var/lib/supertag")],
+                    env={**os.environ, **gateway_env})
+                hosted_containers.append(name)
+                run(["docker", "network", "connect", f"{identifier}_ingress", name])
+                run(["docker", "start", name])
+                hosted_url = f"https://localhost:{hosted_port}"
+                # Through the hosted Gateway and the hosted Control Plane, with both Worker Hosts.
+                wait_until(lambda: "Readiness: ready (2 Worker Hosts)" in supertag(
+                    "verify", "deployment", hosted_url, "--env-file", operator_file, "--require-ready", env=trust,
+                    check=False).stdout, f"the hosted {platform} Gateway")
+                check_privileges(name, "gateway")
+                ownership = run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "/usr/bin/stat",
+                                 "--volume", f"{volume}:/state", images["control-plane"], "-c", "%u %a", "/state",
+                                 "/state/checkpoints"], check=False).stdout.split("\n")
+                require(ownership[0] == "10001 700", f"hosted volume ownership {ownership}")
+                gateways[platform] = {"volume_owner": ownership[0]}
+            receipt["hosted_image"] = {
+                "tls_from_pem_secrets": True, "uid": 10001, "gateways": gateways,
+                "control_plane_refuses_without_client_ca": True, "private_hop_refuses_anonymous_clients": True,
+                "commands_from": ["deploy/native/fly/control-plane.toml", "deploy/native/fly/gateway.toml",
+                                  "deploy/native/railway/control-plane.json", "deploy/native/railway/gateway.json"]}
             receipt.update({"postgresql": True, "private_mtls": True, "public_tls": True, "verify_deployment": True,
                             "outbound_worker_hosts": 2, "label_placement": True, "restart_preserved_work": True})
             return receipt
@@ -382,13 +509,15 @@ def rehearse(args):
                     logs = subprocess.run([*prefix, "logs", "--no-color"], env=compose_env, capture_output=True,
                                           text=True, timeout=60)
                     print(logs.stdout[-6000:], file=sys.stderr)
-            subprocess.run(["docker", "rm", "--force", hosted_container], capture_output=True, timeout=60)
+            for name in hosted_containers:
+                subprocess.run(["docker", "rm", "--force", name], capture_output=True, timeout=60)
             if prefix:
                 result = subprocess.run([*prefix, "down", "--volumes", "--remove-orphans", "--timeout", "15"],
                                         env=compose_env, capture_output=True, text=True, timeout=120)
                 if result.returncode:
                     problems.append("compose down failed: " + result.stderr[-500:])
-            subprocess.run(["docker", "volume", "rm", "--force", hosted_volume], capture_output=True, timeout=60)
+            for volume in hosted_volumes:
+                subprocess.run(["docker", "volume", "rm", "--force", volume], capture_output=True, timeout=60)
             for image in images.values():
                 subprocess.run(["docker", "image", "rm", "--force", image], capture_output=True, timeout=120)
             for kind, flags in (("container", ["--all"]), ("network", []), ("volume", [])):

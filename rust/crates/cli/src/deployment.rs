@@ -533,23 +533,19 @@ fn https_origin(value: &str, path_allowed: bool) -> bool {
         && (path_allowed || path.is_empty() || path == "/")
 }
 
-/// One `KEY=VALUE` per line. Values that need quoting are single-quoted, or double-quoted when
-/// they contain a single quote; nothing in a value is ever evaluated.
+/// One `KEY=VALUE` per line. Values that need quoting are single-quoted, which Docker Compose,
+/// `fly secrets import`, and Railway all read literally. A single quote cannot appear inside
+/// such a value, and the double-quoted form is never written because Compose expands `$` and
+/// backslash escapes inside it; nothing in a value is ever evaluated.
 pub fn serialize(environment: &Environment) -> Result<String> {
     let mut output = String::new();
     for (key, value) in environment {
         ensure!(
-            !(value.contains(['\r', '\n', '\0']) || value.contains('\'') && value.contains('"')),
-            "{key} cannot be represented in a deployment environment file"
+            !value.contains(['\r', '\n', '\0', '\'']),
+            "{key} cannot be represented in a deployment environment file; it contains a line break or a single quote (percent-encode a quote in a URL as %27)"
         );
-        let plain = !value.is_empty()
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/:@%?&=,[]".contains(&byte));
-        if plain {
+        if plain(value) {
             output.push_str(&format!("{key}={value}\n"));
-        } else if value.contains('\'') {
-            output.push_str(&format!("{key}=\"{value}\"\n"));
         } else {
             output.push_str(&format!("{key}='{value}'\n"));
         }
@@ -557,8 +553,17 @@ pub fn serialize(environment: &Environment) -> Result<String> {
     Ok(output)
 }
 
-/// Parses what `serialize` writes, plus blank lines and `#` comments. Errors name the line or
-/// key, never a value.
+/// A value Compose reads unchanged without quotes.
+fn plain(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/:@%?&=,[]".contains(&byte))
+}
+
+/// Parses what `serialize` writes, plus blank lines and `#` comments. Anything Compose would
+/// change on the way to a container is refused: double quotes, and `$`, quotes, or spaces in an
+/// unquoted value. Errors name the line or key, never a value.
 pub fn parse(text: &str) -> Result<Environment> {
     let mut environment = Environment::new();
     for (index, line) in text.lines().enumerate() {
@@ -578,11 +583,21 @@ pub fn parse(text: &str) -> Result<Environment> {
             index + 1
         );
         let value = match value.as_bytes() {
-            [quote @ (b'\'' | b'"'), .., last] if last == quote && value.len() >= 2 => {
+            [b'\'', inner @ .., b'\''] if value.len() >= 2 => {
+                ensure!(!inner.contains(&b'\''), "{key} has a stray single quote");
                 &value[1..value.len() - 1]
             }
-            [b'\'' | b'"', ..] => bail!("{key} has an unterminated quote"),
-            _ => value,
+            [b'"', ..] => bail!(
+                "{key} is double-quoted; use single quotes, because Compose expands $ and escapes inside double quotes"
+            ),
+            [b'\'', ..] => bail!("{key} has an unterminated quote"),
+            _ => {
+                ensure!(
+                    value.is_empty() || plain(value),
+                    "{key} must be single-quoted; it contains characters Compose would change"
+                );
+                value
+            }
         };
         ensure!(
             environment
@@ -595,6 +610,15 @@ pub fn parse(text: &str) -> Result<Environment> {
 }
 
 fn write_directory(directory: &Path, files: &Files) -> Result<()> {
+    // Serialize first so an unrepresentable value leaves no directory behind.
+    let mut contents = vec![
+        (CONTROL_PLANE_FILE, serialize(&files.control_plane)?),
+        (GATEWAY_FILE, serialize(&files.gateway)?),
+        (OPERATOR_FILE, serialize(&files.operator)?),
+    ];
+    if let Some(postgres) = &files.postgres {
+        contents.push((POSTGRES_FILE, serialize(postgres)?));
+    }
     fs::DirBuilder::new()
         .mode(0o700)
         .create(directory)
@@ -604,14 +628,6 @@ fn write_directory(directory: &Path, files: &Files) -> Result<()> {
                 directory.display()
             )
         })?;
-    let mut contents = vec![
-        (CONTROL_PLANE_FILE, serialize(&files.control_plane)?),
-        (GATEWAY_FILE, serialize(&files.gateway)?),
-        (OPERATOR_FILE, serialize(&files.operator)?),
-    ];
-    if let Some(postgres) = &files.postgres {
-        contents.push((POSTGRES_FILE, serialize(postgres)?));
-    }
     for (name, text) in contents {
         let mut file = OpenOptions::new()
             .write(true)
@@ -1061,10 +1077,10 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_quotes_and_shell_metacharacters_without_evaluating_them() -> Result<()> {
+    fn round_trips_shell_metacharacters_without_evaluating_them() -> Result<()> {
         let environment = Environment::from([
-            ("ONE".into(), "a'b$HOME`cmd`".into()),
-            ("TWO".into(), "a\"b\\c".into()),
+            ("ONE".into(), "a$HOME`cmd`${X}\\n".into()),
+            ("TWO".into(), "a\"b\\c d".into()),
             ("THREE".into(), "#comment=not-a-comment".into()),
             (
                 "FOUR".into(),
@@ -1074,20 +1090,33 @@ mod tests {
         ]);
         let text = serialize(&environment)?;
         assert!(text.contains("FOUR=postgresql://u:p@db:5432/supertag?sslmode=require\n"));
+        // Only the literal single-quoted form; Compose expands double-quoted values.
+        assert!(text.contains("ONE='a$HOME`cmd`${X}\\n'\n"), "{text}");
+        assert!(!text.contains("=\""), "{text}");
         assert_eq!(parse(&text)?, environment);
-        let error = serialize(&Environment::from([(
-            "TOKEN".into(),
-            "injected\nBAD=1".into(),
-        )]))
-        .unwrap_err()
-        .to_string();
-        assert_eq!(
-            error,
-            "TOKEN cannot be represented in a deployment environment file"
-        );
+        for value in ["injected\nBAD=1", "p'$HOME"] {
+            let error = serialize(&Environment::from([("TOKEN".into(), value.into())]))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("TOKEN cannot be represented in a deployment environment file"),
+                "{error}"
+            );
+            assert!(!error.contains("HOME") && !error.contains("BAD"), "{error}");
+        }
         assert!(parse("A=1\nA=2\n").is_err());
         assert!(parse("lower=1\n").is_err());
         assert!(parse("A='open\n").is_err());
+        assert!(parse("A='a'b'\n").is_err());
+        for (text, message) in [
+            ("A=\"x'y$HOME\"\n", "A is double-quoted"),
+            ("A=p$HOME\n", "A must be single-quoted"),
+            ("A=two words\n", "A must be single-quoted"),
+        ] {
+            let error = parse(text).unwrap_err().to_string();
+            assert!(error.contains(message), "{error}");
+            assert!(!error.contains("HOME"), "{error}");
+        }
         Ok(())
     }
 
@@ -1113,6 +1142,218 @@ mod tests {
             assert!(!https_origin(url, false), "{url}");
         }
         assert!(https_origin("https://vault.example.com/v1", true));
+    }
+
+    /// How a fake Gateway answers each verification step, to show that `verify deployment`
+    /// fails closed. `None` health means an HTTPS edge that is not a gRPC service at all.
+    #[derive(Clone, Copy)]
+    struct Fake {
+        health: Option<ServingStatus>,
+        anonymous_operator: Code,
+        invalid_host: Code,
+        operator: Code,
+    }
+
+    const SAFE: Fake = Fake {
+        health: Some(ServingStatus::Serving),
+        anonymous_operator: Code::Unauthenticated,
+        invalid_host: Code::Unauthenticated,
+        operator: Code::Ok,
+    };
+
+    /// A unary gRPC reply: one message when `code` is OK, then the status trailer.
+    fn grpc_reply(code: Code, message: Vec<u8>) -> axum::response::Response {
+        use axum::{
+            body::{Body, Bytes},
+            http::{HeaderMap, HeaderValue},
+        };
+        let mut frames = Vec::new();
+        if code == Code::Ok {
+            let mut data = vec![0];
+            data.extend(u32::try_from(message.len()).unwrap().to_be_bytes());
+            data.extend(message);
+            frames.push(http_body::Frame::data(Bytes::from(data)));
+        }
+        let mut trailers = HeaderMap::new();
+        trailers.insert("grpc-status", HeaderValue::from(code as i32));
+        frames.push(http_body::Frame::trailers(trailers));
+        let body = http_body_util::StreamBody::new(futures_util::stream::iter(
+            frames.into_iter().map(Ok::<_, std::convert::Infallible>),
+        ));
+        axum::response::Response::builder()
+            .header("content-type", "application/grpc")
+            .body(Body::new(body))
+            .unwrap()
+    }
+
+    async fn fake_answer(
+        fake: Fake,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+        request: axum::extract::Request,
+    ) -> axum::response::Response {
+        use axum::response::IntoResponse;
+        use prost::Message;
+        use supertag_protocol::v2::{ListHostsResponse, WorkerHostStatus};
+        use tonic_health::pb::HealthCheckResponse;
+        let path = request.uri().path().to_owned();
+        let authorization = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        seen.lock()
+            .unwrap()
+            .push((path.clone(), authorization.clone()));
+        let Some(health) = fake.health else {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "edge authentication required",
+            )
+                .into_response();
+        };
+        match path.as_str() {
+            "/grpc.health.v1.Health/Check" => grpc_reply(
+                Code::Ok,
+                HealthCheckResponse {
+                    status: health as i32,
+                }
+                .encode_to_vec(),
+            ),
+            "/supertag.runtime.v2.Operator/ListHosts" => grpc_reply(
+                if authorization.is_empty() {
+                    fake.anonymous_operator
+                } else {
+                    fake.operator
+                },
+                ListHostsResponse::default().encode_to_vec(),
+            ),
+            "/supertag.runtime.v2.WorkerHost/ReportHost" => grpc_reply(
+                fake.invalid_host,
+                WorkerHostStatus::default().encode_to_vec(),
+            ),
+            _ => grpc_reply(Code::Unimplemented, Vec::new()),
+        }
+    }
+
+    /// Runs `verify_channel` against a loopback fake Gateway and returns its outcome and the
+    /// requests the fake received.
+    async fn verify_against(fake: Fake) -> Result<(Result<String>, Vec<(String, String)>)> {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let router = axum::Router::new().fallback(move |request: axum::extract::Request| {
+            fake_answer(fake, recorded.clone(), request)
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_routes(tonic::service::Routes::from(router))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
+        let channel = Channel::from_shared(format!("http://{address}"))?
+            .connect()
+            .await?;
+        let outcome = verify_channel(channel, &"t".repeat(40), false).await;
+        server.abort();
+        let seen = seen.lock().unwrap().clone();
+        Ok((outcome, seen))
+    }
+
+    #[tokio::test]
+    async fn verification_fails_closed_for_an_unsafe_or_broken_gateway() -> Result<()> {
+        let (outcome, seen) = verify_against(SAFE).await?;
+        assert!(
+            outcome?.contains("anonymous and invalid Worker Host credential rejection"),
+            "safe Gateway"
+        );
+        assert_eq!(
+            seen,
+            [
+                ("/grpc.health.v1.Health/Check".into(), String::new()),
+                (
+                    "/supertag.runtime.v2.Operator/ListHosts".into(),
+                    String::new()
+                ),
+                (
+                    "/supertag.runtime.v2.WorkerHost/ReportHost".into(),
+                    format!("Bearer {INVALID_HOST_CREDENTIAL}")
+                ),
+                (
+                    "/supertag.runtime.v2.Operator/ListHosts".into(),
+                    format!("Bearer {}", "t".repeat(40))
+                ),
+            ]
+        );
+        for (fake, expected) in [
+            (
+                Fake {
+                    health: None,
+                    ..SAFE
+                },
+                "Gateway health check failed",
+            ),
+            (
+                Fake {
+                    health: Some(ServingStatus::NotServing),
+                    ..SAFE
+                },
+                "Gateway health check failed",
+            ),
+            (
+                Fake {
+                    anonymous_operator: Code::Ok,
+                    ..SAFE
+                },
+                "Gateway did not reject an anonymous operator request",
+            ),
+            // Refusing anonymous calls for another reason is not proof of authentication.
+            (
+                Fake {
+                    anonymous_operator: Code::Unavailable,
+                    ..SAFE
+                },
+                "Gateway did not reject an anonymous operator request",
+            ),
+            (
+                Fake {
+                    invalid_host: Code::Ok,
+                    ..SAFE
+                },
+                "Gateway accepted an invalid Worker Host credential",
+            ),
+            (
+                Fake {
+                    invalid_host: Code::Unavailable,
+                    ..SAFE
+                },
+                "Worker Host credential check failed (Unavailable)",
+            ),
+            (
+                Fake {
+                    invalid_host: Code::PermissionDenied,
+                    ..SAFE
+                },
+                "Worker Host credential check failed (PermissionDenied)",
+            ),
+            (
+                Fake {
+                    operator: Code::Unauthenticated,
+                    ..SAFE
+                },
+                "Gateway operator authentication or Control Plane access failed (Unauthenticated)",
+            ),
+        ] {
+            let (outcome, _) = verify_against(fake).await?;
+            let error = outcome.err().map(|error| error.to_string());
+            assert!(
+                error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(expected)),
+                "{expected}: {error:?}"
+            );
+        }
+        Ok(())
     }
 
     /// The checked-in definitions must agree with the values setup and check use.
@@ -1181,6 +1422,10 @@ mod tests {
         // Compose: the private network publishes nothing; only the ingress override does.
         assert!(compose.contains(&format!("target: {TLS_DIRECTORY}")));
         assert!(!compose.contains("ports:"));
+        // PostgreSQL is healthy only once it accepts TCP connections, not while its first-start
+        // init server listens on the Unix socket alone; every service restarts after a failure.
+        assert!(compose.contains("pg_isready -h 127.0.0.1 -p 5432"));
+        assert_eq!(compose.matches("restart: unless-stopped").count(), 3);
         assert!(ingress.contains("ports:") && ingress.contains(&format!(":{GATEWAY_PORT}")));
         assert!(!ingress.contains("control-plane:"));
     }

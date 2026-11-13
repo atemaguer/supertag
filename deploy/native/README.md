@@ -44,6 +44,11 @@ Setup writes a new private directory and never replaces one. Each file is mode 0
 | `operator.env` | Your machine | Operator token, for `verify deployment` and operator commands |
 | `postgres.env` | Compose PostgreSQL | Generated database password (Compose only, when no database URL is supplied) |
 
+Values are written unquoted or in single quotes, which Compose and the platforms read literally.
+A value containing a single quote or a line break is refused; percent-encode a quote in a
+database URL as `%27`. If you edit a file by hand, `check deployment` refuses double quotes and
+unquoted `$`, quotes, or spaces, because Compose would expand or change them.
+
 Only the Control Plane holds the database credential. Setup generates the Gateway and operator
 tokens unless `SUPERTAG_GATEWAY_TOKEN` or `SUPERTAG_OPERATOR_TOKEN` is set. It reads
 `SUPERTAG_CREDENTIAL_VAULT=vault` and `VAULT_*` to keep connector credentials in HashiCorp Vault
@@ -105,8 +110,12 @@ Without the ingress file nothing is published.
 ## Fly.io
 
 Create two apps, `supertag-control-plane` and `supertag-gateway`, in one organization. Give the
-Control Plane no public IP. Create the Gateway's volume `supertag_gateway_state` and allocate its
-public IP. Then:
+Control Plane no public IP. Create the Gateway's volume `supertag_gateway_state` and allocate the
+Gateway a dedicated IPv4 address with `fly ips allocate-v4 --app supertag-gateway` (and an IPv6
+address with `fly ips allocate-v6`). The Gateway's port 443 is a raw TCP service
+(`handlers = []`), and Fly.io's shared IPv4 addresses route only HTTP and TLS-handler services, so
+without a dedicated IPv4 address Worker Hosts and operators on IPv4-only networks cannot reach it.
+Then:
 
 ```sh
 supertag setup deployment fly --output supertag-deployment
@@ -151,7 +160,9 @@ until the cutover.
 ## Rehearsal
 
 [`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)
-runs a disposable Compose deployment configured by `setup deployment compose`, with PostgreSQL,
-mutual TLS, `verify deployment`, two outbound Worker Hosts placed by label, and a full restart. It
-also runs the `hosted` image with PEM secrets, a root-owned volume, and the Gateway command from
-`fly/gateway.toml`. Fly.io and Railway themselves are not exercised.
+runs a disposable Compose deployment configured by `setup deployment compose`, with PostgreSQL
+(including a deliberately slow first-start initialization), mutual TLS, `verify deployment`, two
+outbound Worker Hosts placed by label, and a full restart. It then replaces the Compose Control
+Plane with the `hosted` image and runs all four service commands from `fly/` and `railway/` with
+PEM secrets and root-owned volumes, including a Control Plane that refuses to start without a
+client CA. Fly.io and Railway themselves are not exercised.

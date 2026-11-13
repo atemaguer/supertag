@@ -47,6 +47,8 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["sink"] }
 hmac.workspace = true
+http-body = "1"
+http-body-util = "0.1"
 reqwest.workspace = true
 sqlx.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
