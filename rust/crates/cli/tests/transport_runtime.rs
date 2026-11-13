@@ -30,13 +30,16 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::{NegotiationError, Negotiator, negotiate, negotiate_versions},
     v2::{
-        CreateAuthKeyRequest, GetTaskRequest, ListEventsRequest, ListNativeUsageRequest,
-        PutTagRequest, ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent,
-        WatchKind, WatchRequest,
+        CreateAuthKeyRequest, GetTaskRequest, GetWorkSessionRequest, ListEventsRequest,
+        ListNativeUsageRequest, ListWorkSessionsRequest, PutTagRequest, SendMessageRequest,
+        ServiceRole, SubmitTaskRequest, TaskState, WatchChange, WatchEvent, WatchKind,
+        WatchRequest, WorkSession,
+        conversations_client::ConversationsClient,
         operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient,
         operator_events_server::{OperatorEvents, OperatorEventsServer},
         watch_event::Update,
+        work_sessions_client::WorkSessionsClient,
     },
 };
 use tokio::{
@@ -1428,6 +1431,263 @@ async fn sqlite_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
 async fn postgres_adapter_calls_ride_out_a_gateway_partition() -> Result<()> {
     with_postgres("partition_calls", exercise_adapter_calls_through_partition).await
+}
+
+// ---------------------------------------------------------------------------
+// Work Session continue and ask through a partition
+
+async fn work_session(
+    work: &mut WorkSessionsClient<ProtocolChannel>,
+    tokens: &Tokens,
+    id: &str,
+) -> Result<WorkSession> {
+    Ok(work
+        .get(tokens.request(GetWorkSessionRequest {
+            work_session_id: id.into(),
+            report_task_id: None,
+        })?)
+        .await?
+        .into_inner())
+}
+
+async fn wait_for_work_session(
+    work: &mut WorkSessionsClient<ProtocolChannel>,
+    tokens: &Tokens,
+    id: &str,
+    host: &Host,
+    predicate: impl Fn(&WorkSession) -> bool,
+) -> Result<WorkSession> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let current = work_session(work, tokens, id).await?;
+        if predicate(&current) {
+            return Ok(current);
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "Work Session never reached the expected state: {current:?}\n{}\nadapter: {}",
+            host.process.logs(),
+            std::fs::read_to_string(host.launches.with_extension("stderr")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Holds `host` partitioned from its Gateway while the fixture makes one gated Work
+/// Session call, checks the call is still outstanding and its Task still running when
+/// the partition heals, and waits for the host to reconnect.
+async fn partition_work_call(
+    operator: &mut OperatorClient<ProtocolChannel>,
+    tokens: &Tokens,
+    host: &Host,
+    base: &Path,
+    step: &str,
+    task_id: &str,
+) -> Result<()> {
+    wait_for_marker(&step_marker(base, step, "ready"), host).await?;
+    let refused = host.proxy.refused();
+    host.proxy.partition();
+    std::fs::write(step_marker(base, step, "go"), "")?;
+    sleep(Duration::from_secs(4)).await;
+    ensure!(
+        !step_marker(base, step, "done").exists(),
+        "{step} finished while its Worker Host was partitioned"
+    );
+    let current = task_state(operator, tokens, task_id).await?;
+    ensure!(
+        current.state() == TaskState::Running,
+        "the {step} Task did not ride out the partition: {:?} {:?}",
+        current.state(),
+        current.result
+    );
+    ensure!(
+        host.proxy.refused() > refused,
+        "the {step} partition refused no reconnect"
+    );
+    host.proxy.restore();
+    wait_for_marker(&step_marker(base, step, "done"), host).await
+}
+
+/// A child Task's question to its starter (`HarnessWorkSessions.Ask`) and a later parent
+/// Task's answer (`HarnessWorkSessions.Continue`) each start while their Worker Host
+/// cannot reach the Gateway. Both ride out the partition: the question is published
+/// once and answered by the continuation, the Work Session continues once with one new
+/// child turn, and every Task's adapter runs once.
+async fn exercise_work_session_calls_through_partition(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let tokens = Tokens::new();
+    let services = Services::start(&database, root, &tokens).await?;
+    let channel = services.channel().await?;
+    let mut operator = OperatorClient::new(channel.clone());
+    let mut conversations = ConversationsClient::new(channel.clone());
+    let mut work = WorkSessionsClient::new(channel);
+    let tag = "partition-work";
+    operator_cli(
+        &services,
+        &tokens,
+        &[
+            "tag",
+            "put",
+            tag,
+            "--instructions",
+            "Inspect the requested region",
+        ],
+    )
+    .await?;
+    let started = root.join("work-session.json");
+    let gates = root.join("work-calls");
+    let host = start_host(
+        &mut operator,
+        &tokens,
+        services.gateway_address,
+        root,
+        0,
+        tag,
+        &[
+            &format!("--work-session-question-flow={}", started.display()),
+            &format!("--partition-work-calls={}", gates.display()),
+        ],
+    )
+    .await?;
+    std::fs::write(&host.release, "")?;
+    let send = |text: &str, operation: &str| SendMessageRequest {
+        output_policy: None,
+        execution_limits: None,
+        tag_id: tag.into(),
+        conversation: "private".into(),
+        text: text.into(),
+        operation_id: operation.into(),
+    };
+    let first_parent = conversations
+        .send_message(tokens.request(send("Investigate the release region", "first"))?)
+        .await?
+        .into_inner()
+        .task
+        .context("first parent Task")?;
+
+    // The child asks its starter while partitioned.
+    wait_for_marker(&step_marker(&gates, "ask", "ready"), &host).await?;
+    let marker: Value = serde_json::from_slice(&std::fs::read(&started)?)?;
+    let id = marker["work_session_id"]
+        .as_str()
+        .context("Work Session ID")?
+        .to_owned();
+    let child = marker["child_task_id"]
+        .as_str()
+        .context("child Task ID")?
+        .to_owned();
+    partition_work_call(&mut operator, &tokens, &host, &gates, "ask", &child).await?;
+    let asked = wait_for_work_session(&mut work, &tokens, &id, &host, |current| {
+        current.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let question = asked.question.clone().context("published question")?;
+    ensure!(
+        question.task_id == child && question.published_at_ms.is_some(),
+        "the question was not published for the child: {question:?}"
+    );
+    let first_report = asked.report_task_id.clone().context("first report")?;
+
+    // A later parent Task answers by continuing the Work Session while partitioned.
+    let next_parent = conversations
+        .send_message(tokens.request(send("Use us-east-1", "answer"))?)
+        .await?
+        .into_inner()
+        .task
+        .context("answer parent Task")?;
+    partition_work_call(
+        &mut operator,
+        &tokens,
+        &host,
+        &gates,
+        "continue",
+        &next_parent.task_id,
+    )
+    .await?;
+    let finished = wait_for_work_session(&mut work, &tokens, &id, &host, |current| {
+        current.latest_task_id != child
+            && current
+                .report_task_id
+                .as_deref()
+                .is_some_and(|report| report != first_report)
+            && current.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let page = work
+        .list(tokens.request(ListWorkSessionsRequest {
+            parent_tag_id: first_parent.tag_id.clone(),
+            parent_session_id: first_parent.session_id.clone(),
+            starter_task_id: None,
+            limit: 4,
+            cursor: String::new(),
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        page.work_sessions.len() == 1 && page.work_sessions[0].work_session_id == id,
+        "the continuation started another Work Session: {page:?}"
+    );
+    ensure!(
+        finished.starter_task_id == next_parent.task_id,
+        "the continuation was not recorded for the answering Task: {finished:?}"
+    );
+    let history = work
+        .get(tokens.request(GetWorkSessionRequest {
+            work_session_id: id.clone(),
+            report_task_id: Some(first_report),
+        })?)
+        .await?
+        .into_inner();
+    ensure!(
+        history
+            .question
+            .as_ref()
+            .and_then(|question| question.answer_task_id.as_deref())
+            == Some(finished.latest_task_id.as_str()),
+        "the question was not answered by the continued turn: {history:?}"
+    );
+    // Two parents, two child turns, two reports: one adapter launch each.
+    let tasks = [
+        first_parent.task_id.as_str(),
+        child.as_str(),
+        asked.report_task_id.as_deref().unwrap_or_default(),
+        next_parent.task_id.as_str(),
+        finished.latest_task_id.as_str(),
+        finished.report_task_id.as_deref().unwrap_or_default(),
+    ];
+    for task in tasks {
+        let current = task_state(&mut operator, &tokens, task).await?;
+        ensure!(
+            current.state() == TaskState::Succeeded,
+            "Task {task} ended {:?}: {:?}",
+            current.state(),
+            current.result
+        );
+    }
+    ensure!(
+        host.launches()? == tasks.len(),
+        "an adapter ran more than once: {} launches for {} Tasks",
+        host.launches()?,
+        tasks.len()
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_work_session_continue_and_ask_ride_out_a_gateway_partition() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_work_session_calls_through_partition(sqlite(directory.path())).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_work_session_continue_and_ask_ride_out_a_gateway_partition() -> Result<()> {
+    with_postgres(
+        "partition_work",
+        exercise_work_session_calls_through_partition,
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

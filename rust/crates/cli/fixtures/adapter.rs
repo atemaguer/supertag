@@ -314,6 +314,10 @@ async fn main() -> Result<()> {
                 may_ask && !may_continue && !may_start,
                 "child question capabilities differ"
             );
+            let gate = partition_calls::work_calls();
+            if let Some(base) = &gate {
+                partition_calls::step(base, "ask").await?;
+            }
             let asked = work
                 .ask(authenticated_request(
                     question_input.clone(),
@@ -322,6 +326,9 @@ async fn main() -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
+            if let Some(base) = &gate {
+                partition_calls::done(base, "ask")?;
+            }
             ensure!(
                 asked.work_session_id == task.session_id
                     && asked.task_id == task.task_id
@@ -363,6 +370,10 @@ async fn main() -> Result<()> {
                 may_continue && !may_ask,
                 "parent continuation capabilities differ"
             );
+            let gate = partition_calls::work_calls();
+            if let Some(base) = &gate {
+                partition_calls::step(base, "continue").await?;
+            }
             let continued = work
                 .r#continue(authenticated_request(
                     continue_input.clone(),
@@ -371,6 +382,9 @@ async fn main() -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
+            if let Some(base) = &gate {
+                partition_calls::done(base, "continue")?;
+            }
             ensure!(
                 continued.work_session_id == continue_input.work_session_id
                     && continued.parent_tag_id == task.tag_id
