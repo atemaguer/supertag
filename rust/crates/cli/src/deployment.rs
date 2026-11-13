@@ -30,8 +30,11 @@ use tonic_health::pb::{
 };
 use uuid::Uuid;
 
-/// The Control Plane's public gRPC port inside its container in every definition.
+/// The Control Plane's native gRPC port inside its container in every definition.
 pub const CONTROL_PLANE_PORT: u16 = 3434;
+/// The WebSocket tunnel listener's port inside the container on platforms that forward only
+/// HTTP (Render, Cloudflare, and Modal). Its plain `GET /healthz` serves platform health checks.
+pub const TUNNEL_PORT: u16 = 8080;
 /// The Gateway's test notification listener, reachable only inside its container.
 #[cfg(test)]
 const GATEWAY_LISTEN: &str = "127.0.0.1:3436";
@@ -39,7 +42,7 @@ const GATEWAY_LISTEN: &str = "127.0.0.1:3436";
 /// Gateway's file credential vault and connector state.
 pub const STATE_DIRECTORY: &str = "/var/lib/supertag";
 /// Where each container finds its TLS files, mounted (Compose) or written from secrets by
-/// `deploy/docker/rust-hosted-entrypoint.sh` (Fly.io and Railway).
+/// `deploy/docker/rust-hosted-entrypoint.sh` (every other platform).
 pub const TLS_DIRECTORY: &str = "/run/supertag-tls";
 
 const CONTROL_PLANE_FILE: &str = "control-plane.env";
@@ -102,8 +105,9 @@ const SECRET_KEYS: [&str; 5] = [
     "POSTGRES_PASSWORD",
 ];
 
-/// A platform whose model hosts a public native gRPC Control Plane with its own TLS, and an
-/// optional Gateway that reaches it over the platform's private network.
+/// A platform that hosts the public Control Plane, with its own TLS, and an optional Gateway
+/// that reaches it as a client. Platforms that forward only HTTP carry the Control Plane's gRPC
+/// in the WebSocket tunnel (`--websocket-listen`), with SuperTag's TLS running inside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Platform {
     /// Docker Compose on your own server: deploy/compose.native.yaml.
@@ -112,29 +116,72 @@ pub enum Platform {
     Fly,
     /// Two Railway services: deploy/native/railway.
     Railway,
+    /// A Render Blueprint with a web service, PostgreSQL, and an optional Gateway worker:
+    /// deploy/render.
+    Render,
+    /// A Cloudflare Worker in front of one Container that runs the Control Plane and the
+    /// optional Gateway: deploy/cloudflare.
+    Cloudflare,
+    /// A Modal app whose web endpoint carries the tunnel to one container that runs the
+    /// Control Plane and the optional Gateway: deploy/modal.
+    Modal,
 }
 
 impl Platform {
+    #[cfg(test)]
+    pub const ALL: [Self; 6] = [
+        Self::Compose,
+        Self::Fly,
+        Self::Railway,
+        Self::Render,
+        Self::Cloudflare,
+        Self::Modal,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Compose => "compose",
             Self::Fly => "fly",
             Self::Railway => "railway",
+            Self::Render => "render",
+            Self::Cloudflare => "cloudflare",
+            Self::Modal => "modal",
         }
     }
 
-    /// The private DNS name the Gateway uses for the Control Plane in this platform's
-    /// definitions. The Control Plane's certificate must carry it as well as its public host.
-    pub fn control_plane_host(self) -> &'static str {
+    /// The Control Plane URL the Gateway dials in this platform's definitions. The Control
+    /// Plane's certificate must name its host as well as the public host.
+    pub fn gateway_upstream(self) -> &'static str {
         match self {
-            Self::Compose => "control-plane",
-            Self::Fly => "supertag-control-plane.internal",
-            Self::Railway => "supertag-control-plane.railway.internal",
+            Self::Compose => "https://control-plane:3434",
+            Self::Fly => "https://supertag-control-plane.internal:3434",
+            Self::Railway => "https://supertag-control-plane.railway.internal:3434",
+            // Render's Gateway is a separate service that crosses the platform edge.
+            Self::Render => "wss://supertag-control-plane.onrender.com",
+            // The Gateway shares the Control Plane's container.
+            Self::Cloudflare | Self::Modal => "https://127.0.0.1:3434",
         }
     }
 
     fn hosted(self) -> bool {
         self != Self::Compose
+    }
+
+    /// Platforms whose ingress forwards only HTTP, so clients use a `wss://` URL.
+    pub fn tunnelled(self) -> bool {
+        matches!(self, Self::Render | Self::Cloudflare | Self::Modal)
+    }
+
+    /// The platform's own definition supplies the database URL (Render's Blueprint).
+    fn database_from_platform(self) -> bool {
+        self == Self::Render
+    }
+
+    /// Platforms with no disk the Gateway's file credential vault can rely on: Cloudflare
+    /// Containers have no persistent disk, and a Modal Volume does not give the file vault's
+    /// atomic, durable replacement.
+    fn requires_vault(self) -> bool {
+        matches!(self, Self::Cloudflare | Self::Modal)
     }
 
     fn next_steps(self) -> &'static str {
@@ -147,6 +194,15 @@ impl Platform {
             }
             Self::Railway => {
                 "Paste control-plane.env into the supertag-control-plane service's variables, add its TLS PEM variables, and use deploy/native/railway/control-plane.json as its config file. For collaboration surfaces, also paste gateway.env into a supertag-gateway service configured by deploy/native/railway/gateway.json (see deploy/native/README.md)."
+            }
+            Self::Render => {
+                "Set the hosted image digest in deploy/render/render.yaml and create the Blueprint; its database supplies SUPERTAG_DATABASE_URL. Add control-plane.env and the TLS PEM variables to supertag-control-plane, and, for collaboration surfaces, gateway.env and its PEM variables to supertag-gateway (see deploy/render/README.md)."
+            }
+            Self::Cloudflare => {
+                "Tag the hosted image as supertag-hosted:local, upload control-plane.env, gateway.env (when SUPERTAG_GATEWAY is on), and the TLS PEM values as Worker secrets with `wrangler secret bulk`, then run `wrangler deploy` in deploy/cloudflare (see deploy/cloudflare/README.md)."
+            }
+            Self::Modal => {
+                "Create the Modal secrets supertag-control-plane from control-plane.env plus its TLS PEM values and, for collaboration surfaces, supertag-gateway from gateway.env plus its PEM values, then run `modal deploy deploy/modal/app.py` with SUPERTAG_MODAL_IMAGE set to the hosted image by digest (see deploy/modal/README.md)."
             }
         }
     }
@@ -172,7 +228,7 @@ pub enum VerifyCommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
+    after_help = "Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal keep connector credentials in HashiCorp Vault (SUPERTAG_CREDENTIAL_VAULT=vault). Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them."
 )]
 pub struct SetupArgs {
     platform: Platform,
@@ -197,7 +253,8 @@ pub struct CheckArgs {
     after_help = "The operator token comes from SUPERTAG_OPERATOR_TOKEN or --env-file (the operator.env setup wrote). Use SUPERTAG_SERVER_CA_FILE when the Control Plane's certificate comes from a private CA, and SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE when the Control Plane requires client certificates. Verification registers no Worker Host and runs no Task."
 )]
 pub struct VerifyArgs {
-    /// The Control Plane's public HTTPS origin, such as https://supertag.example.com.
+    /// The Control Plane's public origin: https://HOST for native gRPC, or wss://HOST behind a
+    /// platform that forwards only HTTP (Render, Cloudflare, Modal).
     url: String,
     /// Private env file that holds SUPERTAG_OPERATOR_TOKEN.
     #[arg(long)]
@@ -239,15 +296,30 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
         .output
         .canonicalize()
         .context("resolve the deployment directory")?;
+    let listener = if args.platform.tunnelled() {
+        format!(
+            "The Control Plane serves TLS itself inside the WebSocket tunnel on container port {TUNNEL_PORT}, which also answers the platform health check at /healthz. Clients use a wss:// URL; its certificate must name the public host, and for a platform hostname it comes from your own CA, which every client trusts through SUPERTAG_SERVER_CA_FILE."
+        )
+    } else {
+        format!(
+            "The Control Plane serves TLS itself on container port {CONTROL_PLANE_PORT}; its certificate must name the public host operators and Worker Hosts use."
+        )
+    };
+    let upstream = args.platform.gateway_upstream();
+    let host = upstream
+        .split_once("://")
+        .map_or(upstream, |(_, rest)| rest)
+        .split(':')
+        .next()
+        .unwrap_or_default();
     out!(
         "Saved {platform} deployment configuration to {} (contains secrets; keep private).\n\
-         The Control Plane serves TLS itself on container port {CONTROL_PLANE_PORT}; its certificate must name the public host operators and Worker Hosts use.\n\
-         A Gateway reaches the Control Plane at https://{host}:{CONTROL_PLANE_PORT}, so the certificate must also name {host}. It presents a client certificate, so a Control Plane serving a Gateway requires client certificates.\n\
+         {listener}\n\
+         A Gateway reaches the Control Plane at {upstream}, so the certificate must also name {host}. It presents a client certificate, so a Control Plane serving a Gateway requires client certificates.\n\
          {}\n",
         directory.display(),
         args.platform.next_steps(),
         platform = args.platform.name(),
-        host = args.platform.control_plane_host(),
     );
     Ok(())
 }
@@ -276,7 +348,11 @@ pub fn configure(
     };
     let mut postgres = None;
     let database = match (platform, supplied("SUPERTAG_DATABASE_URL")) {
-        (_, Some(url)) => url,
+        (Platform::Render, Some(_)) => bail!(
+            "Render's Blueprint sets SUPERTAG_DATABASE_URL from its own database; unset it before running setup"
+        ),
+        (Platform::Render, None) => None,
+        (_, Some(url)) => Some(url),
         // Compose runs its own PostgreSQL service; give it a generated password.
         (Platform::Compose, None) => {
             let password = token();
@@ -285,19 +361,23 @@ pub fn configure(
                 ("POSTGRES_USER".into(), "supertag".into()),
                 ("POSTGRES_PASSWORD".into(), password.clone()),
             ]));
-            format!("postgresql://supertag:{password}@postgres:5432/supertag")
+            Some(format!(
+                "postgresql://supertag:{password}@postgres:5432/supertag"
+            ))
         }
-        (_, None) => required("SUPERTAG_DATABASE_URL")?,
+        (_, None) => Some(required("SUPERTAG_DATABASE_URL")?),
     };
     let gateway_token = supplied("SUPERTAG_GATEWAY_TOKEN").unwrap_or_else(token);
     let operator_token = supplied("SUPERTAG_OPERATOR_TOKEN").unwrap_or_else(token);
 
     let mut control_plane = Environment::from([
-        ("SUPERTAG_DATABASE_URL".into(), database),
         ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token.clone()),
         ("SUPERTAG_OPERATOR_TOKEN".into(), operator_token.clone()),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
     ]);
+    if let Some(database) = database {
+        control_plane.insert("SUPERTAG_DATABASE_URL".into(), database);
+    }
     let mut gateway = Environment::from([
         ("SUPERTAG_GATEWAY_TOKEN".into(), gateway_token),
         ("SUPERTAG_STATE_DIR".into(), STATE_DIRECTORY.into()),
@@ -306,7 +386,13 @@ pub fn configure(
         control_plane.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal.clone());
         gateway.insert("SUPERTAG_OPERATOR_PRINCIPAL".into(), principal);
     }
-    let vault = supplied("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_else(|| "file".into());
+    let vault = supplied("SUPERTAG_CREDENTIAL_VAULT").unwrap_or_else(|| {
+        if platform.requires_vault() {
+            "vault".into()
+        } else {
+            "file".into()
+        }
+    });
     if vault == "vault" {
         for key in ["VAULT_ADDR", "VAULT_TOKEN"] {
             gateway.insert(key.into(), required(key)?);
@@ -378,6 +464,11 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
     let gateway = |key: &str| files.gateway.get(key).map(String::as_str);
 
     match control("SUPERTAG_DATABASE_URL") {
+        Some(_) if platform.database_from_platform() => issues.push(format!(
+            "{CONTROL_PLANE_FILE}: SUPERTAG_DATABASE_URL is set by the {} definition from its own database; remove it",
+            platform.name()
+        )),
+        None if platform.database_from_platform() => {}
         None => issues.push(format!("{CONTROL_PLANE_FILE}: Missing SUPERTAG_DATABASE_URL")),
         Some(url) if !postgres_url(url) => issues.push(format!(
             "{CONTROL_PLANE_FILE}: SUPERTAG_DATABASE_URL must be a PostgreSQL URL; hosted deployments require PostgreSQL"
@@ -452,6 +543,10 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
         ));
     }
     match gateway("SUPERTAG_CREDENTIAL_VAULT") {
+        Some("file") if platform.requires_vault() => issues.push(format!(
+            "{GATEWAY_FILE}: {} has no disk the file credential vault can rely on; set SUPERTAG_CREDENTIAL_VAULT=vault with VAULT_ADDR and VAULT_TOKEN",
+            platform.name()
+        )),
         Some("file") => {
             if gateway("SUPERTAG_STATE_DIR") != Some(STATE_DIRECTORY) {
                 issues.push(format!(
@@ -571,7 +666,17 @@ fn strong_token(token: &str) -> bool {
 /// An `https://host[:port]` origin, optionally with a path, and never with credentials, query,
 /// or fragment.
 fn https_origin(value: &str, path_allowed: bool) -> bool {
-    let Some(rest) = value.strip_prefix("https://") else {
+    origin(value, "https://", path_allowed)
+}
+
+/// A Control Plane URL `verify deployment` accepts: an `https://` origin for native gRPC, or a
+/// `wss://` origin for a Control Plane behind an HTTP-only platform edge.
+fn control_plane_origin(value: &str) -> bool {
+    origin(value, "https://", false) || origin(value, "wss://", false)
+}
+
+fn origin(value: &str, scheme: &str, path_allowed: bool) -> bool {
+    let Some(rest) = value.strip_prefix(scheme) else {
         return false;
     };
     let (authority, path) = match rest.find('/') {
@@ -784,8 +889,8 @@ const INVALID_HOST_CREDENTIAL: &str = "supertag-deployment-verification-invalid-
 pub async fn verify(command: VerifyCommand) -> Result<()> {
     let VerifyCommand::Deployment(args) = command;
     ensure!(
-        https_origin(&args.url, false),
-        "Deployment URL must be an HTTPS origin without credentials, path, query, or fragment"
+        control_plane_origin(&args.url),
+        "Deployment URL must be an https:// or wss:// origin without credentials, path, query, or fragment"
     );
     let token = match &args.env_file {
         Some(path) => {
@@ -808,7 +913,7 @@ pub async fn verify(command: VerifyCommand) -> Result<()> {
         &crate::network::operator_endpoint(origin, Duration::from_secs(15), None).await?,
     )
     .await
-    .context("could not reach the Control Plane over TLS; check the URL, its certificate, and SUPERTAG_SERVER_CA_FILE")?;
+    .context("could not reach the Control Plane over TLS; check the URL, its certificate, and SUPERTAG_SERVER_CA_FILE (a wss:// URL also needs the platform edge to forward the WebSocket upgrade)")?;
     out!(
         "{}",
         verify_channel(channel, &token, args.require_ready).await?
@@ -933,11 +1038,31 @@ mod tests {
         configure(platform, &supplied(values), &mut refuse)
     }
 
+    /// The values each platform needs from the operator: a database URL unless the platform
+    /// supplies it, and Vault where the file credential vault has no reliable disk.
+    fn minimal(platform: Platform) -> Vec<(&'static str, &'static str)> {
+        let mut values = Vec::new();
+        if !platform.database_from_platform() {
+            values.push(("SUPERTAG_DATABASE_URL", DATABASE));
+        }
+        if platform.requires_vault() {
+            values.extend([
+                ("VAULT_ADDR", "https://vault.example.com"),
+                ("VAULT_TOKEN", "private-vault-token"),
+            ]);
+        }
+        values
+    }
+
     #[test]
     fn every_platform_shares_one_role_contract() -> Result<()> {
-        for platform in [Platform::Compose, Platform::Fly, Platform::Railway] {
-            let files = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])?;
-            assert_eq!(files.control_plane["SUPERTAG_DATABASE_URL"], DATABASE);
+        for platform in Platform::ALL {
+            let files = configured(platform, &minimal(platform))?;
+            assert_eq!(
+                files.control_plane.get("SUPERTAG_DATABASE_URL").cloned(),
+                (!platform.database_from_platform()).then(|| DATABASE.to_owned()),
+                "{platform:?}"
+            );
             assert_eq!(
                 files.control_plane["SUPERTAG_GATEWAY_TOKEN"],
                 files.gateway["SUPERTAG_GATEWAY_TOKEN"]
@@ -952,7 +1077,14 @@ mod tests {
             );
             // A Gateway never holds an operator credential.
             assert!(!files.gateway.contains_key("SUPERTAG_OPERATOR_TOKEN"));
-            assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "file");
+            assert_eq!(
+                files.gateway["SUPERTAG_CREDENTIAL_VAULT"],
+                if platform.requires_vault() {
+                    "vault"
+                } else {
+                    "file"
+                }
+            );
             assert_eq!(files.gateway["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             assert_eq!(files.control_plane["SUPERTAG_STATE_DIR"], STATE_DIRECTORY);
             // Role separation: only the Control Plane holds the database credential, and only
@@ -1042,6 +1174,64 @@ mod tests {
         )
         .unwrap();
         assert_eq!(files.gateway["SUPERTAG_VAULT_MOUNT"], "kv");
+    }
+
+    #[test]
+    fn http_only_platforms_take_the_database_and_vault_their_disks_allow() -> Result<()> {
+        // Render's Blueprint supplies the database URL, so setup refuses one and check refuses
+        // a file that names one.
+        let error = configured(Platform::Render, &[("SUPERTAG_DATABASE_URL", DATABASE)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Render's Blueprint sets SUPERTAG_DATABASE_URL"),
+            "{error}"
+        );
+        assert!(!error.contains("private-password"), "{error}");
+        let mut files = configured(Platform::Render, &[])?;
+        assert_eq!(files.gateway["SUPERTAG_CREDENTIAL_VAULT"], "file");
+        files
+            .control_plane
+            .insert("SUPERTAG_DATABASE_URL".into(), DATABASE.into());
+        let error = validate(Platform::Render, &files).unwrap_err().to_string();
+        assert!(
+            error.contains("SUPERTAG_DATABASE_URL is set by the render definition"),
+            "{error}"
+        );
+        assert!(!error.contains("private-password"), "{error}");
+        // The same file set is valid where the operator supplies the database.
+        validate(Platform::Fly, &files)?;
+        // Cloudflare and Modal default to Vault and refuse the file credential vault.
+        for platform in [Platform::Cloudflare, Platform::Modal] {
+            let error = configured(platform, &[("SUPERTAG_DATABASE_URL", DATABASE)])
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, "Missing VAULT_ADDR", "{platform:?}");
+            let error = configured(
+                platform,
+                &[
+                    ("SUPERTAG_DATABASE_URL", DATABASE),
+                    ("SUPERTAG_CREDENTIAL_VAULT", "file"),
+                ],
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("has no disk the file credential vault can rely on"),
+                "{error}"
+            );
+            let files = configured(platform, &minimal(platform))?;
+            assert_eq!(files.gateway["VAULT_ADDR"], "https://vault.example.com");
+            assert!(!files.control_plane.contains_key("VAULT_TOKEN"));
+            // Hosted TLS still arrives as PEM secrets.
+            assert!(
+                !files
+                    .control_plane
+                    .keys()
+                    .any(|key| TLS_KEYS.contains(&key.as_str()))
+            );
+        }
+        Ok(())
     }
 
     #[test]
@@ -1219,6 +1409,25 @@ mod tests {
             assert!(!https_origin(url, false), "{url}");
         }
         assert!(https_origin("https://vault.example.com/v1", true));
+        // `verify deployment` also takes a wss:// origin behind an HTTP-only platform edge.
+        for url in [
+            "https://supertag.example.com",
+            "wss://supertag-control-plane.onrender.com",
+            "wss://workspace--supertag.modal.run/",
+            "wss://127.0.0.1:8443",
+        ] {
+            assert!(control_plane_origin(url), "{url}");
+        }
+        for url in [
+            "ws://127.0.0.1:8443",
+            "http://supertag.example.com",
+            "wss://user:secret@supertag.example.com",
+            "wss://supertag.example.com/tunnel",
+            "wss://supertag.example.com?query",
+            "wss://",
+        ] {
+            assert!(!control_plane_origin(url), "{url}");
+        }
     }
 
     /// How a fake Control Plane answers each verification step, to show that `verify deployment`
@@ -1458,10 +1667,7 @@ mod tests {
             (Platform::Fly, &fly_control, &fly_gateway),
             (Platform::Railway, &railway_control, &railway_gateway),
         ] {
-            let upstream = format!(
-                "--control-plane https://{}:{CONTROL_PLANE_PORT}",
-                platform.control_plane_host()
-            );
+            let upstream = format!("--control-plane {}", platform.gateway_upstream());
             assert!(control.contains(&listen_control), "{platform:?}");
             assert!(gateway.contains(&listen_gateway), "{platform:?}");
             assert!(gateway.contains(&upstream), "{platform:?}");
@@ -1540,5 +1746,195 @@ mod tests {
         assert_eq!(compose.matches("restart: unless-stopped").count(), 3);
         assert!(ingress.contains("ports:") && ingress.contains(&format!(":{CONTROL_PLANE_PORT}")));
         assert!(!ingress.contains("gateway:"));
+    }
+
+    /// The quoted strings of the array literal assigned to `name` in a Python or TypeScript
+    /// definition, with the `ENTRYPOINT` constant expanded.
+    fn command_literal(source: &str, name: &str) -> Vec<String> {
+        let start = source
+            .find(&format!("{name} = ["))
+            .unwrap_or_else(|| panic!("{name}"));
+        let body = &source[start..];
+        let body = &body[body.find('[').unwrap() + 1..body.find(']').unwrap()];
+        body.split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| match item {
+                "ENTRYPOINT" => "/usr/local/bin/supertag-hosted-entrypoint".to_owned(),
+                quoted => quoted.trim_matches('"').to_owned(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn http_only_platform_definitions_carry_the_tunnel() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../deploy");
+        let read = |path: &str| {
+            fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("{path}: {error}"))
+        };
+        let render = read("render/render.yaml");
+        let wrangler: serde_json::Value =
+            serde_json::from_str(&read("cloudflare/wrangler.json")).unwrap();
+        let routing = read("cloudflare/src/routing.ts");
+        let worker = read("cloudflare/src/index.ts");
+        let cloudflare_image = read("cloudflare/Dockerfile");
+        let modal = read("modal/app.py");
+        let pair = read("docker/rust-hosted-pair.sh");
+        let entrypoint = read("docker/rust-hosted-entrypoint.sh");
+        let dockerfile = read("docker/rust-service.Dockerfile");
+
+        let hosted = "/usr/local/bin/supertag-hosted-entrypoint";
+        // Native gRPC only on loopback; the platform reaches the tunnel listener alone.
+        let control_plane = format!(
+            "{hosted} control-plane --listen 127.0.0.1:{CONTROL_PLANE_PORT} --websocket-listen 0.0.0.0:{TUNNEL_PORT} --transfer-directory {STATE_DIRECTORY}/transfers"
+        );
+        let pair_command = format!("{hosted} pair 0.0.0.0:{TUNNEL_PORT}");
+
+        // Render: a web service on the tunnel port with the health route, PostgreSQL from the
+        // Blueprint, a disk for transfers, and a Gateway worker dialing the public wss:// URL.
+        let commands: Vec<&str> = render
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("dockerCommand: "))
+            .collect();
+        assert_eq!(
+            commands,
+            [
+                control_plane.as_str(),
+                &format!(
+                    "{hosted} gateway --listen {GATEWAY_LISTEN} --control-plane {}",
+                    Platform::Render.gateway_upstream()
+                ),
+            ]
+        );
+        assert!(Platform::Render.gateway_upstream().starts_with("wss://"));
+        for expected in [
+            "type: web",
+            "type: worker",
+            "runtime: image",
+            "healthCheckPath: /healthz",
+            "- key: PORT\n        value: \"8080\"",
+            "property: connectionString",
+            "ipAllowList: []",
+        ] {
+            assert!(render.contains(expected), "{expected}");
+        }
+        assert_eq!(render.matches("healthCheckPath").count(), 1);
+        assert_eq!(render.matches("numInstances: 1").count(), 2);
+        assert_eq!(
+            render
+                .matches(&format!("mountPath: {STATE_DIRECTORY}"))
+                .count(),
+            2
+        );
+        assert!(!render.contains("SUPERTAG_GATEWAY_TOKEN") && !render.contains("_PEM"));
+        assert_eq!(
+            render.matches("@sha256:").count(),
+            2,
+            "images are pinned by digest"
+        );
+
+        // Cloudflare: one Container instance built from the hosted image, kept awake by cron,
+        // running the Control Plane alone or the pair.
+        let container = &wrangler["containers"][0];
+        assert_eq!(container["max_instances"], 1);
+        assert_eq!(container["image"], "./Dockerfile");
+        assert_eq!(wrangler["vars"]["SUPERTAG_GATEWAY"], "off");
+        assert_eq!(wrangler["triggers"]["crons"][0], "* * * * *");
+        assert!(cloudflare_image.contains("FROM supertag-hosted:local"));
+        assert_eq!(
+            command_literal(&routing, "CONTROL_PLANE_COMMAND").join(" "),
+            control_plane
+        );
+        assert_eq!(
+            command_literal(&routing, "PAIR_COMMAND").join(" "),
+            pair_command
+        );
+        assert!(routing.contains(&format!("TUNNEL_PORT = {TUNNEL_PORT};")));
+        assert!(routing.contains("HEALTH_PATH = \"/healthz\""));
+        assert_eq!(
+            supertag_transport::HEALTH_PATH,
+            "/healthz",
+            "the Worker, Render, and the listener name one health route"
+        );
+        // A client cannot pick another container port.
+        assert!(routing.contains("headers.delete(\"cf-container-target-port\")"));
+        assert!(worker.contains("pingEndpoint = `localhost${HEALTH_PATH}`"));
+        // The Worker passes exactly the deployment settings and TLS PEM values.
+        let passed: std::collections::BTreeSet<String> =
+            command_literal(&routing, "CONTAINER_KEYS")
+                .into_iter()
+                .collect();
+        let pem = [
+            "SUPERTAG_TLS_CERT_PEM",
+            "SUPERTAG_TLS_KEY_PEM",
+            "SUPERTAG_TLS_CLIENT_CA_PEM",
+            "SUPERTAG_SERVER_CA_PEM",
+            "SUPERTAG_CLIENT_CERT_PEM",
+            "SUPERTAG_CLIENT_KEY_PEM",
+        ];
+        let expected: std::collections::BTreeSet<String> = CONTROL_PLANE_KEYS
+            .iter()
+            .chain(GATEWAY_KEYS.iter())
+            .chain(pem.iter())
+            .map(|key| key.to_string())
+            .collect();
+        assert_eq!(passed, expected);
+        for key in pem {
+            let name = key.trim_start_matches("SUPERTAG_").trim_end_matches("_PEM");
+            assert!(entrypoint.contains(&format!("\"{name} ")), "{key}");
+        }
+
+        // Modal: one always-on container behind a labelled web endpoint on the tunnel port.
+        assert_eq!(
+            command_literal(&modal, "CONTROL_PLANE_COMMAND").join(" "),
+            control_plane
+        );
+        assert_eq!(
+            command_literal(&modal, "PAIR_COMMAND").join(" "),
+            pair_command
+        );
+        assert!(modal.contains(&format!("TUNNEL_PORT = {TUNNEL_PORT}")));
+        assert!(modal.contains(&format!("STATE_DIRECTORY = \"{STATE_DIRECTORY}\"")));
+        for expected in [
+            "min_containers=1",
+            "max_containers=1",
+            "@modal.web_server(TUNNEL_PORT",
+            "\"@sha256:\" not in image_ref",
+        ] {
+            assert!(modal.contains(expected), "{expected}");
+        }
+
+        // The pair: the same Control Plane command with the tunnel address, and a Gateway that
+        // dials it on loopback without the Control Plane's credentials.
+        assert!(pair.contains(&format!(
+            "control-plane --listen 127.0.0.1:{CONTROL_PLANE_PORT} --websocket-listen \"$tunnel\""
+        )));
+        assert!(pair.contains(&format!("--transfer-directory {STATE_DIRECTORY}/transfers")));
+        for platform in [Platform::Cloudflare, Platform::Modal] {
+            assert!(pair.contains(&format!(
+                "gateway --listen {GATEWAY_LISTEN} --control-plane {}",
+                platform.gateway_upstream()
+            )));
+        }
+        for key in [
+            "SUPERTAG_DATABASE_URL",
+            "SUPERTAG_OPERATOR_TOKEN",
+            "SUPERTAG_TLS_KEY_FILE",
+            "SUPERTAG_TLS_CERT_FILE",
+            "SUPERTAG_TLS_CLIENT_CA_FILE",
+        ] {
+            assert!(pair.contains(&format!("-u {key}")), "{key}");
+        }
+        assert!(entrypoint.contains("program=/usr/local/bin/supertag-hosted-pair"));
+        assert!(dockerfile.contains("rust-hosted-pair.sh /usr/local/bin/supertag-hosted-pair"));
+        for platform in Platform::ALL {
+            assert_eq!(
+                platform.tunnelled(),
+                matches!(
+                    platform,
+                    Platform::Render | Platform::Cloudflare | Platform::Modal
+                )
+            );
+        }
     }
 }

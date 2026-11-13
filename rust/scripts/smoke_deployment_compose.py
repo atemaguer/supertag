@@ -161,6 +161,7 @@ def build_images(binary, identifier):
     try:
         shutil.copyfile(binary, context / "supertag")
         shutil.copyfile(REPO / "deploy/docker/rust-hosted-entrypoint.sh", context / "rust-hosted-entrypoint.sh")
+        shutil.copyfile(REPO / "deploy/docker/rust-hosted-pair.sh", context / "rust-hosted-pair.sh")
         images = {}
         for target in ("control-plane", "gateway", "hosted"):
             tag = f"{identifier}-{target}:local"

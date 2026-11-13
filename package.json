@@ -55,7 +55,7 @@
     "test:mixed-harness:grpc:live": "node scripts/test-mixed-harness-grpc-live.mjs",
     "test:shared-organization:live": "node scripts/test-shared-organization-live.mjs --live",
     "test:artifact-organization:live": "tsx --conditions=development scripts/test-artifact-organization-live.ts --live",
-    "deploy:generate": "tsx deploy/generate.ts && biome format --write deploy/railway/railway.json deploy/cloudflare/wrangler.json deploy/modal/runtime.json",
+    "deploy:generate": "tsx deploy/generate.ts && biome format --write deploy/railway/railway.json",
     "deploy:check": "node --import tsx deploy/generate.ts --check",
     "test:worklet:grpc:soak": "tsx --conditions=development scripts/worklet-grpc-docker-soak.ts",
     "test:volumes:modal:live": "SUPERTAG_LIVE_MODAL=1 vitest run packages/runtime/environments/modal/modal-volumes-live.test.ts",

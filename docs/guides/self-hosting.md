@@ -41,36 +41,39 @@ connections) and **Gateway** (which carries collaboration surface traffic) are p
 
 ## 1. Choose a deployment
 
-All supported options run the same Control Plane image, and every option accepts the same outbound
-Worklet connection. Railway, Render, Fly.io, Modal, and Cloudflare share the
-[deployment setup and verification workflow](deployment-setup.md).
+Docker Compose, Railway, Fly.io, and the native single-host option run the same Control Plane
+image and accept the same outbound Worklet connection; Railway and Fly.io share the
+[deployment setup and verification workflow](deployment-setup.md). Render, Modal, and Cloudflare
+run the native Control Plane and optional Gateway services, reached through a `wss://` URL, with
+setup and verification in their own guides.
 
 | Option | Best for | PostgreSQL | Collaboration surface secret storage | Configured by |
 | --- | --- | --- | --- | --- |
 | Docker Compose | A server you operate | bundled container | named volume | `compose.yaml` and `.env`; `supertag.yaml` optional |
 | [Railway](deploy-railway.md) | Fast hosted Control Plane setup | Railway PostgreSQL service | Railway volume | Platform config and environment; `supertag.yaml` optional |
-| [Render](deploy-render.md) | Blueprint-based hosted setup | Render Postgres | Render persistent disk | Platform config and environment; `supertag.yaml` optional |
+| [Render](deploy-render.md) | Blueprint-based hosted setup | Render Postgres | Render persistent disk on the Gateway | Blueprint and `supertag setup deployment render` |
 | [Fly.io](deploy-fly.md) | Choosing the region and managing storage directly | Fly Managed Postgres or another provider | Fly volume | Platform config and environment; `supertag.yaml` optional |
-| [Modal](deploy-modal.md) | An always-on Modal Server with external storage | external PostgreSQL | external HashiCorp Vault KV v2 | Platform config and environment; `supertag.yaml` optional |
-| [Cloudflare](deploy-cloudflare.md) | Container hosting with Cloudflare ingress | external PostgreSQL | external HashiCorp Vault KV v2 | Platform config and environment; `supertag.yaml` optional |
+| [Modal](deploy-modal.md) | An always-on Modal container with external storage | external PostgreSQL | external HashiCorp Vault KV v2 | `app.py` and `supertag setup deployment modal` |
+| [Cloudflare](deploy-cloudflare.md) | A Container behind a Cloudflare Worker | external PostgreSQL | external HashiCorp Vault KV v2 | Wrangler and `supertag setup deployment cloudflare` |
 | [Native service](#native-single-host-alternative) | A server without containers, kept running by systemd or launchd | external PostgreSQL | host filesystem | `supertag.yaml` |
 
-Every option starts the Control Plane with `supertag up`. It reads
+Every option except Render, Modal, and Cloudflare starts the Control Plane with `supertag up`. It reads
 [`supertag.yaml`](../reference/supertag-yaml.md) when one is present, and environment variables
 override the file. Containers and hosting platforms keep using environment variables, so their file
 is optional; see [In containers and hosting platforms](../reference/supertag-yaml.md#in-containers-and-hosting-platforms).
 
 Production deployments require PostgreSQL, an HTTPS address for the Control Plane, a strong
 administrative token, per-Worker-Host enrollment credentials, and durable credential storage. By
-default, a persistent volume at `SUPERTAG_STATE_DIR` preserves credentials; Cloudflare uses external
-Vault instead. PostgreSQL preserves **Tags** (persistent AI actors with their own
+default, a persistent volume at `SUPERTAG_STATE_DIR` preserves credentials; Cloudflare and Modal use
+external Vault instead. PostgreSQL preserves **Tags** (persistent AI actors with their own
 responsibilities and permissions), **Sessions** (groups of Tasks from one conversation), Tasks,
 delivery state, and the catalog of artifacts, the output files that Tasks capture. The Control Plane
 stores no artifact bytes: Worker Hosts keep them.
 
-Railway and Render currently run a single Control Plane instance because the file-backed collaboration surface
-secret store is attached to one service volume. Moving collaboration surface secrets to an external secret store
-is required before horizontal Control Plane scaling is safe.
+Every option runs a single Control Plane instance. On Railway the file-backed collaboration
+surface secret store is attached to one service volume, so moving those secrets to an external
+secret store is required before horizontal scaling is safe. The native services on Render, Modal,
+and Cloudflare run one instance because every Control Plane runs the controllers.
 
 The rest of this guide uses Docker Compose. If you already run SuperTag locally, read
 [Moving from a local setup](#moving-from-a-local-setup) first.

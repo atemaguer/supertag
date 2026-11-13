@@ -1,7 +1,9 @@
 # Native service deployments
 
-Definitions for the native SuperTag services. These are separate from the TypeScript Control
-Plane definitions in the parent directory, which stay until the cutover.
+Definitions for the native SuperTag services: Docker Compose, Fly.io, and Railway here, and
+Render, Cloudflare, and Modal in [`../render/`](../render/README.md),
+[`../cloudflare/`](../cloudflare/README.md), and [`../modal/`](../modal/README.md). The TypeScript
+Control Plane definitions in the parent directory (Compose, Fly.io, Railway) stay until the cutover.
 
 A deployment runs these roles:
 
@@ -40,9 +42,14 @@ operators and Worker Hosts present client certificates too.
 | Docker Compose | [`../compose.native.yaml`](../compose.native.yaml), [`../compose.native.ingress.yaml`](../compose.native.ingress.yaml) | Published port on the Control Plane only | Internal Compose network, `control-plane:3434` |
 | Fly.io | [`fly/control-plane.toml`](fly/control-plane.toml), [`fly/gateway.toml`](fly/gateway.toml) | TCP service on 443 with `handlers = []` | 6PN, `supertag-control-plane.internal:3434` |
 | Railway | [`railway/control-plane.json`](railway/control-plane.json), [`railway/gateway.json`](railway/gateway.json) | TCP Proxy to port 3434 | Private network, `supertag-control-plane.railway.internal:3434` |
+| Render | [`../render/render.yaml`](../render/render.yaml) | Web service: the WebSocket tunnel on port 8080 | Background worker, through the public `wss://` URL |
+| Cloudflare | [`../cloudflare/`](../cloudflare/README.md): Worker, Wrangler configuration, container image | Worker forwarding the tunnel to one Container on port 8080 | Same container, `127.0.0.1:3434` |
+| Modal | [`../modal/app.py`](../modal/app.py) | Web endpoint forwarding the tunnel to port 8080 | Same container, `127.0.0.1:3434` |
 
-Render, Cloudflare, and Modal forward only HTTP and need the WebSocket tunnel; their definitions
-are not written yet. See [Platforms behind an HTTP proxy](#platforms-behind-an-http-proxy).
+Render, Cloudflare, and Modal forward only HTTP, so their Control Plane serves the
+[WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) and keeps native gRPC on loopback.
+Cloudflare and Modal give a deployment one container with no network to another, so the optional
+Gateway runs beside the Control Plane in it (see [One container](#one-container-cloudflare-and-modal)).
 
 ## Configure, check, and verify
 
@@ -59,7 +66,7 @@ Setup writes a new private directory and never replaces one. Each file is mode 0
 
 | File | For | Holds |
 | --- | --- | --- |
-| `control-plane.env` | Control Plane | Database URL, Gateway token, operator token, state directory |
+| `control-plane.env` | Control Plane | Database URL (except Render, whose Blueprint supplies it), Gateway token, operator token, state directory |
 | `gateway.env` | Gateway | Gateway token, state directory, credential vault settings |
 | `operator.env` | Your machine | Operator token, for `verify deployment` and operator commands |
 | `postgres.env` | Compose PostgreSQL | Generated database password (Compose only, when no database URL is supplied) |
@@ -70,12 +77,15 @@ database URL as `%27`. If you edit a file by hand, `check deployment` refuses do
 unquoted `$`, quotes, or spaces, because Compose would expand or change them.
 
 Only the Control Plane holds the database credential, and only the Gateway holds surface
-credentials. Setup generates the Gateway and operator tokens unless `SUPERTAG_GATEWAY_TOKEN` or
+credentials. On Cloudflare and Modal, which have no disk the file credential vault can rely on,
+setup defaults to `SUPERTAG_CREDENTIAL_VAULT=vault` and `check` refuses the file vault. Render's
+setup refuses `SUPERTAG_DATABASE_URL`, because the Blueprint sets it from its own database. Setup generates the Gateway and operator tokens unless `SUPERTAG_GATEWAY_TOKEN` or
 `SUPERTAG_OPERATOR_TOKEN` is set. It reads `SUPERTAG_CREDENTIAL_VAULT=vault` and `VAULT_*` to keep
 connector credentials in HashiCorp Vault instead of the Gateway's volume. Without a terminal, or
 with `--non-interactive`, a missing value fails instead of prompting.
 
-`verify deployment` connects to the public Control Plane. It checks gRPC health, that an
+`verify deployment` connects to the public Control Plane: an `https://` URL for native gRPC, or a
+`wss://` URL behind an HTTP-only platform. It checks gRPC health, that an
 anonymous operator request and an invalid Worker Host credential are refused, and that the
 operator token works. Readiness means at least one Worker Host is ready; `--require-ready` makes
 that required. It registers no Worker Host and runs no Task.
@@ -107,11 +117,13 @@ Compose mounts one directory per role there. Compose's Control Plane health prob
 name `control-plane` and chain to that CA. To use a certificate from a public authority, replace
 the health check in an override file.
 
-Fly.io and Railway use the image target `hosted` of
+Every platform except Compose uses the image target `hosted` of
 [`../docker/rust-service.Dockerfile`](../docker/rust-service.Dockerfile). Its
 [entrypoint](../docker/rust-hosted-entrypoint.sh) starts as root, gives the root-owned volume to
 UID 10001, writes each `SUPERTAG_<NAME>_PEM` secret to the file above, and then runs the service
-as UID 10001 with no capabilities. Set these secrets per role:
+as UID 10001 with no capabilities. A start command may name the entrypoint itself: platforms
+differ in whether their start command replaces the image entrypoint, and the entrypoint skips its
+own path when it receives it. Set these secrets per role:
 
 | Secret | Control Plane | Gateway |
 | --- | --- | --- |
@@ -119,6 +131,50 @@ as UID 10001 with no capabilities. Set these secrets per role:
 | `SUPERTAG_TLS_CLIENT_CA_PEM` | Required when a Gateway runs | Not used |
 | `SUPERTAG_SERVER_CA_PEM` | Optional | When the Control Plane's CA is private |
 | `SUPERTAG_CLIENT_CERT_PEM`, `SUPERTAG_CLIENT_KEY_PEM` | Optional | Required |
+
+### Build the hosted image
+
+Build it from a verified Linux `supertag` binary (from a Linux native release archive, or built
+for Linux from this checkout), with the two scripts beside it, and push it to a registry your
+platform can pull from. Deploy it by digest.
+
+```sh
+mkdir hosted && cp /path/to/linux/supertag hosted/
+cp deploy/docker/rust-hosted-entrypoint.sh deploy/docker/rust-hosted-pair.sh hosted/
+docker build --platform linux/amd64 --file deploy/docker/rust-service.Dockerfile \
+  --target hosted --tag REGISTRY/supertag-hosted:VERSION hosted
+docker push REGISTRY/supertag-hosted:VERSION   # prints the digest
+```
+
+### Issue certificates from your own CA
+
+A platform hostname such as `*.onrender.com`, `*.workers.dev`, or `*.modal.run` cannot get a
+publicly trusted certificate for SuperTag's inner TLS, so issue it from a CA you keep offline, and
+give that CA to every client as `SUPERTAG_SERVER_CA_FILE`. The same CA can issue the client
+certificates a Gateway (and then every operator and Worker Host) presents.
+
+```sh
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 365 \
+  -subj "/CN=SuperTag deployment CA" -addext basicConstraints=critical,CA:TRUE \
+  -addext keyUsage=critical,keyCertSign,cRLSign -keyout ca.key -out ca.pem
+# The public host, plus IP 127.0.0.1 on Cloudflare and Modal, where a Gateway dials loopback.
+printf 'subjectAltName=DNS:HOST,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' > server.ext
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=control-plane \
+  -keyout server.key -out server.csr
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 \
+  -extfile server.ext -out server.pem
+# A client certificate, here for the Gateway; repeat for operators and Worker Hosts.
+printf 'extendedKeyUsage=clientAuth\n' > client.ext
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=gateway \
+  -keyout gateway.key -out gateway.csr
+openssl x509 -req -in gateway.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 \
+  -extfile client.ext -out gateway.pem
+```
+
+Then `server.pem` and `server.key` become `SUPERTAG_TLS_CERT_PEM` and `SUPERTAG_TLS_KEY_PEM`,
+`ca.pem` becomes `SUPERTAG_TLS_CLIENT_CA_PEM` (when a Gateway runs) and the Gateway's
+`SUPERTAG_SERVER_CA_PEM`, and `gateway.pem` and `gateway.key` become its
+`SUPERTAG_CLIENT_CERT_PEM` and `SUPERTAG_CLIENT_KEY_PEM`.
 
 ## Docker Compose
 
@@ -182,6 +238,43 @@ For surfaces, add a `supertag-gateway` service in the same environment configure
 variables, and a volume at `/var/lib/supertag`, and give the Control Plane
 `SUPERTAG_TLS_CLIENT_CA_PEM`. It needs no public networking.
 
+## Render
+
+[`../render/render.yaml`](../render/render.yaml) is a Blueprint: a web service running the Control
+Plane with `--websocket-listen` on port 8080 (its `PORT`), a disk at `/var/lib/supertag` for
+transfers, Render PostgreSQL supplying `SUPERTAG_DATABASE_URL`, and an optional background worker
+running the Gateway, which dials `wss://supertag-control-plane.onrender.com`. Render's health check
+probes `/healthz` on the tunnel listener. See the [Render guide](../../docs/guides/deploy-render.md).
+
+## Cloudflare
+
+[`../cloudflare/`](../cloudflare/README.md) holds a Worker that forwards WebSocket upgrades and
+`GET /healthz` to one Container through its Durable Object, refuses every other request, and strips
+any client choice of container port. The Container is the hosted image, built by `wrangler deploy`
+from `supertag-hosted:local`. Worker secrets become the container's environment. A cron trigger
+starts the container after a deploy and keeps it awake. Cloudflare Containers have no persistent
+disk, so transfer files do not survive a restart and the Gateway needs Vault. See the
+[Cloudflare guide](../../docs/guides/deploy-cloudflare.md).
+
+## Modal
+
+[`../modal/app.py`](../modal/app.py) runs one always-on, non-preemptible container behind a
+labelled web endpoint, which gives the stable URL `wss://WORKSPACE--LABEL.modal.run`. A Modal
+Volume at `/var/lib/supertag` holds transfer files. PostgreSQL is external. See the
+[Modal guide](../../docs/guides/deploy-modal.md).
+
+## One container: Cloudflare and Modal
+
+With the Gateway turned on (`SUPERTAG_GATEWAY=on` in Wrangler's `vars`, or
+`SUPERTAG_MODAL_GATEWAY=on` at deploy), the command is `supertag-hosted-entrypoint pair 0.0.0.0:8080`.
+[`rust-hosted-pair.sh`](../docker/rust-hosted-pair.sh) starts the Control Plane, waits until it
+answers health checks, then starts the Gateway against `https://127.0.0.1:3434` with its client
+certificate. The Gateway never receives the database URL, the operator token, or the Control
+Plane's TLS key, but both run as UID 10001 in one container and share one trust boundary. When
+either service exits, the container exits non-zero so the platform restarts it; `SIGTERM` stops
+both cleanly. The container receives both roles' settings: `control-plane.env`, `gateway.env`, and
+all six PEM values.
+
 ## WebSocket tunnel for HTTP-only platforms
 
 Some platforms terminate TLS at their own proxy and forward only HTTP/1.1: Render web services,
@@ -195,8 +288,13 @@ unchanged.
 
 Clients choose the tunnel by URL scheme: give a `wss://HOST[:PORT][/PATH]` URL instead of
 `https://` wherever a Control Plane URL is expected. That covers operator commands,
-`host enroll`, `worker-host`, `health`, and the Gateway's `--control-plane`. The terminal UI,
-the desktop app, saved Control Planes, and `verify deployment` still need an `https://` URL.
+`host enroll`, `worker-host`, `health`, `verify deployment`, and the Gateway's `--control-plane`.
+The terminal UI, the desktop app, and saved Control Planes still need an `https://` URL.
+
+The tunnel listener also answers one plain HTTP request, `GET /healthz` with no `Upgrade` or
+`Origin` header, with `200 ok`, for a platform's HTTP health check. It reports only that the
+listener accepts connections. Every other request must be a WebSocket upgrade, and an upgrade on
+`/healthz` is an ordinary tunnel.
 
 Security does not depend on the platform's proxy:
 
@@ -224,21 +322,17 @@ flight the same way a dropped TCP connection does, and Worker Hosts and Gateways
 retry as they do with native gRPC. Opening a tunnel may take up to 30 seconds, rather than the
 5 allowed for native gRPC, so a platform can start a service that scaled to zero.
 
-## Platforms behind an HTTP proxy
-
-The tunnel carries the services' traffic on these platforms; definitions and live runs are still
-to come. Their TypeScript definitions stay until the cutover.
-
-- **Render.** A public web service runs the Control Plane with `--websocket-listen` on the web
-  port. A Gateway, when used, is a private service that reaches it through `wss://`.
-- **Cloudflare.** A Worker forwards WebSocket upgrades to the Control Plane's Container through
-  its Durable Object `fetch`. A Gateway reaches the Control Plane's Worker through `wss://`.
-- **Modal.** A web endpoint gives each service a stable HTTPS origin, which raw TCP tunnels do not.
-  Modal also remains a supported Workspace provider for Worker Hosts.
-
 ## Rehearsal
 
 [`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)
 rehearses this topology on disposable containers: setup's files, the published Control Plane with
 client certificates, the Gateway profile, two outbound Worker Hosts, a full restart, and every Fly
 and Railway service command in the `hosted` image. Fly.io and Railway themselves are not exercised.
+
+[`../../rust/scripts/smoke_deployment_http_platforms.py`](../../rust/scripts/smoke_deployment_http_platforms.py)
+rehearses the Render, Cloudflare, and Modal shapes behind an nginx edge that terminates TLS and
+forwards only WebSocket upgrades and `/healthz`, running the service commands read from their
+definitions in the `hosted` image: the platform health check, `verify deployment` over `wss://`, a
+Worker Host Task through the edge, Render's Gateway dialing the public `wss://` URL, and the
+one-container pair. Render, Cloudflare (Workers and `wrangler dev`), and Modal themselves are not
+exercised.

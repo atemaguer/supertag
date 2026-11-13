@@ -38,7 +38,10 @@ Two intentional exceptions to the CLI form:
   checkout / container.
 
 Before documenting a command, confirm it exists in `helpText()` in `apps/cli/src/index.ts`, and
-that any resource kind exists in the map in `apps/cli/src/resources.ts`. Do not copy commands
+that any resource kind exists in the map in `apps/cli/src/resources.ts`. Guides for the native
+services (Render, Cloudflare, Modal) document the native CLI instead: they carry
+`<!-- supertag-cli: native -->`, and `pnpm docs:check` checks their commands against
+`rust/docs/cli-reference.md`. Do not copy commands
 out of the internal architecture record — some were never implemented.
 
 ## Capitalized vocabulary

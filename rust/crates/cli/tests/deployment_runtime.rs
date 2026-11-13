@@ -1,7 +1,9 @@
 //! `supertag setup deployment`, `check deployment`, and `verify deployment` against the real
 //! service processes, configured from the files setup writes: a public TLS Control Plane, a
 //! Gateway that reaches it as a client, and two outbound Worker Hosts placed by label for a
-//! two-manager organization applied through the Control Plane.
+//! two-manager organization applied through the Control Plane; and the Render, Cloudflare, and
+//! Modal file sets with the Control Plane behind a platform-style edge that terminates TLS and
+//! forwards only to the WebSocket tunnel listener.
 //!
 //! Ports `tests/deployment-setup.test.ts` (setup, check, verify) and the deployed-organization
 //! part of `tests/shared-organization-*.test.ts` without model calls.
@@ -17,15 +19,25 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::{TcpListener, TcpStream},
     process::{Child, Command},
+    task::JoinHandle,
     time::{sleep, timeout},
+};
+use tokio_rustls::{
+    TlsAcceptor, TlsConnector,
+    rustls::{
+        ClientConfig, RootCertStore, ServerConfig,
+        pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject},
+    },
 };
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
@@ -508,9 +520,15 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
         &["--env-file", operator_file],
     ))
     .await?;
-    assert!(refused.contains("must be an HTTPS origin"), "{refused}");
+    assert!(
+        refused.contains("must be an https:// or wss:// origin"),
+        "{refused}"
+    );
     let refused = fail(verify(&format!("{public_url}/path"), &trusted, &[])).await?;
-    assert!(refused.contains("must be an HTTPS origin"), "{refused}");
+    assert!(
+        refused.contains("must be an https:// or wss:// origin"),
+        "{refused}"
+    );
     let refused = fail(verify(&public_url, &trusted, &[])).await?;
     assert!(
         refused.contains("SUPERTAG_OPERATOR_TOKEN is required"),
@@ -768,4 +786,278 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     deploys_and_verifies_split_roles;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    deploys_and_verifies_behind_an_http_only_edge;
+}
+
+/// What Render, Cloudflare, and Modal put in front of a service: their edge terminates TLS with
+/// the platform's certificate and passes the decrypted HTTP/1.1 bytes to one container port,
+/// here the Control Plane's tunnel listener. It forwards nothing else.
+struct Edge {
+    address: SocketAddr,
+    task: JoinHandle<()>,
+}
+
+impl Edge {
+    async fn start(backend: SocketAddr, leaf: &Leaf) -> Result<Self> {
+        let config = ServerConfig::builder_with_provider(Arc::new(
+            tokio_rustls::rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()?
+        .with_no_client_auth()
+        .with_single_cert(
+            CertificateDer::pem_file_iter(&leaf.cert)?.collect::<Result<_, _>>()?,
+            PrivateKeyDer::from_pem_file(&leaf.key)?,
+        )?;
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let task = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut downstream) = acceptor.accept(stream).await else {
+                        return;
+                    };
+                    if let Ok(mut upstream) = TcpStream::connect(backend).await {
+                        let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+                    }
+                });
+            }
+        });
+        Ok(Self { address, task })
+    }
+}
+
+impl Drop for Edge {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// A plain HTTPS `GET` through the edge, as a platform health check or a browser makes it.
+async fn https_get(edge: SocketAddr, ca: &Path, path: &str, headers: &str) -> Result<String> {
+    let mut roots = RootCertStore::empty();
+    for certificate in CertificateDer::pem_file_iter(ca)? {
+        roots.add(certificate?)?;
+    }
+    let config = ClientConfig::builder_with_provider(Arc::new(
+        tokio_rustls::rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let stream = TcpStream::connect(edge).await?;
+    let mut stream = TlsConnector::from(Arc::new(config))
+        .connect(ServerName::try_from("localhost")?, stream)
+        .await?;
+    stream
+        .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n").as_bytes())
+        .await?;
+    let mut response = Vec::new();
+    // The listener closes the connection after its answer or its refusal.
+    let _ = timeout(WAIT, stream.read_to_end(&mut response)).await?;
+    Ok(String::from_utf8_lossy(&response).into_owned())
+}
+
+async fn deploys_and_verifies_behind_an_http_only_edge(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let home = root.join("home");
+    std::fs::create_dir(&home)?;
+    let pki = Pki::authority(root, "deployment-ca").await?;
+    let control_leaf = pki.leaf("control-plane", "serverAuth").await?;
+    // The platform edge's own certificate; clients trust it through the same CA here, as they
+    // would trust a platform's public certificate through the system roots.
+    let edge_leaf = pki.leaf("edge", "serverAuth").await?;
+    let ca = pki.ca().to_string_lossy().into_owned();
+    let setup_database = if database.starts_with("postgres") {
+        database.clone()
+    } else {
+        "postgresql://supertag@127.0.0.1:1/unused".to_owned()
+    };
+    let setup = |platform: &str, output: &Path, env: &[(&str, &str)]| {
+        command(
+            &home,
+            &[
+                "setup",
+                "deployment",
+                platform,
+                "--non-interactive",
+                "--output",
+                output.to_str().expect("utf-8 path"),
+            ],
+            env,
+        )
+    };
+    let check = |platform: &str, directory: &Path| {
+        command(
+            &home,
+            &[
+                "check",
+                "deployment",
+                platform,
+                "--directory",
+                directory.to_str().expect("utf-8 path"),
+            ],
+            &[],
+        )
+    };
+
+    // Render: the Blueprint's database supplies the URL, so setup refuses one and writes none.
+    let render = root.join("render");
+    let refused = fail(setup(
+        "render",
+        &render,
+        &[("SUPERTAG_DATABASE_URL", setup_database.as_str())],
+    ))
+    .await?;
+    assert!(
+        refused.contains("Render's Blueprint sets SUPERTAG_DATABASE_URL"),
+        "{refused}"
+    );
+    assert!(!refused.contains(&setup_database) && !render.exists());
+    let message = succeed(setup("render", &render, &[])).await?;
+    for expected in [
+        "inside the WebSocket tunnel on container port 8080",
+        "/healthz",
+        "SUPERTAG_SERVER_CA_FILE",
+        "wss://supertag-control-plane.onrender.com",
+        "deploy/render/README.md",
+    ] {
+        assert!(message.contains(expected), "{expected}: {message}");
+    }
+    assert!(!env_file(&render.join("control-plane.env"))?.contains_key("SUPERTAG_DATABASE_URL"));
+    succeed(check("render", &render)).await?;
+    let refused = fail(check("fly", &render)).await?;
+    assert!(
+        refused.contains("Missing SUPERTAG_DATABASE_URL"),
+        "{refused}"
+    );
+
+    // Cloudflare and Modal keep connector credentials in Vault: setup asks for it, and a file
+    // set with the file vault is refused for them.
+    let cloudflare = root.join("cloudflare");
+    let database_env = [("SUPERTAG_DATABASE_URL", setup_database.as_str())];
+    let refused = fail(setup("cloudflare", &cloudflare, &database_env)).await?;
+    assert!(refused.contains("Missing VAULT_ADDR"), "{refused}");
+    assert!(!cloudflare.exists());
+    let message = succeed(setup(
+        "cloudflare",
+        &cloudflare,
+        &[
+            ("SUPERTAG_DATABASE_URL", setup_database.as_str()),
+            ("VAULT_ADDR", "https://vault.example.com"),
+            ("VAULT_TOKEN", "private-vault-token"),
+        ],
+    ))
+    .await?;
+    assert!(message.contains("https://127.0.0.1:3434"), "{message}");
+    assert!(!message.contains("private-vault-token"), "{message}");
+    succeed(check("cloudflare", &cloudflare)).await?;
+    succeed(check("modal", &cloudflare)).await?;
+    let fly = root.join("fly");
+    succeed(setup("fly", &fly, &database_env)).await?;
+    for platform in ["cloudflare", "modal"] {
+        let refused = fail(check(platform, &fly)).await?;
+        assert!(
+            refused.contains("has no disk the file credential vault can rely on"),
+            "{refused}"
+        );
+    }
+
+    // The Control Plane from Cloudflare's file: native gRPC on loopback, and the tunnel
+    // listener, which is all the edge reaches.
+    let state = root.join("control-state");
+    std::fs::create_dir(&state)?;
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
+    let mut control = command(
+        &home,
+        &[
+            "control-plane",
+            "--listen",
+            "127.0.0.1:0",
+            "--websocket-listen",
+            "127.0.0.1:0",
+            "--transfer-directory",
+            state.join("transfers").to_str().expect("utf-8 path"),
+        ],
+        &[],
+    );
+    control
+        .envs(&env_file(&cloudflare.join("control-plane.env"))?)
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .env("SUPERTAG_STATE_DIR", &state)
+        .env("SUPERTAG_TLS_CERT_FILE", &control_leaf.cert)
+        .env("SUPERTAG_TLS_KEY_FILE", &control_leaf.key)
+        .stdout(Stdio::piped())
+        .stderr(std::fs::File::create(root.join("control-plane.log"))?);
+    let mut control = control.spawn()?;
+    let mut lines = BufReader::new(control.stdout.take().context("stdout")?).lines();
+    let mut address = async || -> Result<SocketAddr> {
+        let line = timeout(WAIT, lines.next_line())
+            .await
+            .with_context(|| {
+                std::fs::read_to_string(root.join("control-plane.log")).unwrap_or_default()
+            })??
+            .context("the Control Plane exited")?;
+        Ok(line.trim().parse()?)
+    };
+    let native = address().await?;
+    let tunnel = address().await?;
+    let edge = Edge::start(tunnel, &edge_leaf).await?;
+    let public = format!("wss://localhost:{}", edge.address.port());
+
+    // The platform health check: plain HTTP through the edge, without weakening the browser
+    // rule.
+    let healthy = https_get(edge.address, &pki.ca(), "/healthz", "").await?;
+    assert!(healthy.starts_with("HTTP/1.1 200 OK"), "{healthy}");
+    let browser = https_get(
+        edge.address,
+        &pki.ca(),
+        "/healthz",
+        "Origin: https://evil.example\r\n",
+    )
+    .await?;
+    assert!(!browser.contains(" 200 "), "{browser}");
+
+    let operator_file = cloudflare.join("operator.env");
+    let operator_file = operator_file.to_str().expect("utf-8 path");
+    let verify = |url: &str, env: &[(&str, &str)]| {
+        command(
+            &home,
+            &["verify", "deployment", url, "--env-file", operator_file],
+            env,
+        )
+    };
+    let trusted = [("SUPERTAG_SERVER_CA_FILE", ca.as_str())];
+    let report = succeed(verify(&public, &trusted)).await?;
+    assert!(
+        report.contains("operator authentication passed")
+            && report.contains("Readiness: not ready"),
+        "{report}"
+    );
+    // Native gRPC does not cross an edge that forwards only to the tunnel listener.
+    fail(verify(
+        &format!("https://localhost:{}", edge.address.port()),
+        &trusted,
+    ))
+    .await?;
+    // The platform hostname needs the deployment's own CA.
+    let refused = fail(verify(&public, &[])).await?;
+    assert!(refused.contains("SUPERTAG_SERVER_CA_FILE"), "{refused}");
+    // The same Control Plane still answers native gRPC on its loopback listener.
+    succeed(verify(
+        &format!("https://localhost:{}", native.port()),
+        &trusted,
+    ))
+    .await?;
+    // A tunnel URL with a path is not an origin.
+    let refused = fail(verify(&format!("{public}/tunnel"), &trusted)).await?;
+    assert!(
+        refused.contains("must be an https:// or wss:// origin"),
+        "{refused}"
+    );
+    control.start_kill()?;
+    Ok(())
 }

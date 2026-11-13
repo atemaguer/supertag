@@ -34,20 +34,50 @@ and each Worker Host.
 | --- | --- | --- |
 | Docker Compose | A server you operate | [Self-host](../../docs/guides/self-hosting.md) |
 | Railway | Fast hosted Control Plane | [Railway](../../docs/guides/deploy-railway.md) |
-| Render | Blueprint-based hosted | [Render](../../docs/guides/deploy-render.md) |
+| Render | Blueprint: native Control Plane web service, optional Gateway worker, Render PostgreSQL | [Render](../../docs/guides/deploy-render.md) |
 | Fly.io | Always-on Machine with attached storage | [Fly.io](../../docs/guides/deploy-fly.md) |
-| Modal | Always-on Server with external storage | [Modal](../../docs/guides/deploy-modal.md) |
-| Cloudflare | Container behind a routing Worker | [Cloudflare](../../docs/guides/deploy-cloudflare.md) |
+| Modal | Native services in one always-on container behind a web endpoint | [Modal](../../docs/guides/deploy-modal.md) |
+| Cloudflare | Native services in one Container behind a tunnel Worker | [Cloudflare](../../docs/guides/deploy-cloudflare.md) |
 | Native service | `supertag.yaml` and `supertag up`, kept running by systemd or launchd | [Self-host](../../docs/guides/self-hosting.md#native-single-host-alternative) |
 | `supertag up` on a server | A machine you manage by hand, no containers | [supertag.yaml](../../docs/reference/supertag-yaml.md#a-shared-server) |
 
-All run the same Control Plane image; its API Server accepts the same outbound Worklet connection through the Worklet API.
+Docker Compose, Railway, Fly.io, and the native single-host option run the same Control Plane
+image; its API Server accepts the same outbound Worklet connection through the Worklet API. Render,
+Modal, and Cloudflare run the native services instead; see the next section.
+
+## Render, Modal, and Cloudflare: the native services
+
+These platforms forward only HTTP, so the native Control Plane carries its gRPC API in a WebSocket
+tunnel (`--websocket-listen`) with SuperTag's own TLS inside it. Everything below differs from
+the rest of this skill:
+
+- **Image and definitions.** The `hosted` target of `deploy/docker/rust-service.Dockerfile`, by
+  digest, with `deploy/render/render.yaml`, `deploy/cloudflare/` (Worker, `wrangler.json`), or
+  `deploy/modal/app.py`. Role contract and TLS files: `deploy/native/README.md`.
+- **Configuration.** The native CLI's `setup deployment render|cloudflare|modal --output DIR`
+  writes `control-plane.env`, `gateway.env`, and `operator.env`; `check deployment PLATFORM
+  --directory DIR` validates them. Render's Blueprint supplies the database URL; Cloudflare and
+  Modal require Vault for the Gateway. TLS arrives as `SUPERTAG_<NAME>_PEM` secrets.
+- **URL and trust.** Clients use `wss://HOST`. A platform hostname needs a certificate from your
+  own CA, which every client trusts through `SUPERTAG_SERVER_CA_FILE`. With a Gateway, the Control
+  Plane requires client certificates from every caller.
+- **Gateway.** Render runs it as a background worker dialing the public `wss://` URL. Cloudflare
+  and Modal run it in the Control Plane's container (`supertag-hosted-entrypoint pair`), dialing
+  `https://127.0.0.1:3434`, so the certificate also names `IP:127.0.0.1`.
+- **Health.** The tunnel listener answers plain `GET /healthz` with `200 ok`; it refuses requests
+  with an `Origin` header and anything else that is not a WebSocket upgrade.
+- **Verify and join.** The native CLI's `verify deployment wss://HOST --env-file DIR/operator.env`,
+  then `auth-key create`, `host enroll`, and `worker-host` with `--control-plane wss://HOST`; see
+  the platform guide.
+- **Limits.** One instance. Cloudflare transfer files are lost on restart. The terminal UI and
+  desktop app need `https://`, so they cannot connect yet. No webhook-based surface ingress.
 
 Docker Compose and the native option need a checkout of the repository for `deploy/compose.yaml` and
 `deploy/.env.example`. You also need the CLI ([install from npm](../../docs/operations/install.md)) to manage the running
 Control Plane — the checkout provides the deployment, the CLI provides management.
 
-Every option starts the Control Plane with `supertag up`. Containers and platforms run
+Every option except Render, Modal, and Cloudflare starts the Control Plane with `supertag up`.
+Containers and platforms run
 `supertag up --foreground control-plane`: environment variables stay their main configuration, and
 an optional `supertag.yaml` mounted or baked at `/var/lib/supertag/supertag.yaml` (or passed with
 `-f PATH`) adds settings that the environment still overrides. The image sets

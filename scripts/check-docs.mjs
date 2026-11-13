@@ -197,6 +197,48 @@ function checkCommand({ command }) {
     : null;
 }
 
+// --- Native CLI pages -------------------------------------------------------------------------
+// Guides for the native services (Render, Cloudflare, Modal) document the native `supertag`
+// CLI. They carry this marker, and their commands are checked against its reference instead.
+const nativeMarker = "<!-- supertag-cli: native -->";
+const nativeCommands = new Map(); // "host enroll" -> Set of flags its help lists
+for (const section of readFileSync(join(root, "rust/docs/cli-reference.md"), "utf8")
+  .split(/^## /mu)
+  .slice(1)) {
+  const heading = section.match(/^`supertag ([^`]+)`/u);
+  if (heading)
+    nativeCommands.set(
+      heading[1],
+      new Set([...section.matchAll(/--[a-z][a-z0-9-]*/gu)].map(([flag]) => flag)),
+    );
+}
+function checkNativeCommand({ command }) {
+  const words = command
+    .replace(/\s+#.*$/u, "")
+    .replace(/["'][^"']*["']/gu, "VALUE")
+    .split(/\s+/u)
+    .slice(1);
+  const path = [];
+  for (const word of words) {
+    if (word.startsWith("-")) break;
+    path.push(word);
+  }
+  let key;
+  for (let length = path.length; length > 0 && !key; length--) {
+    const candidate = path.slice(0, length).join(" ");
+    if (nativeCommands.has(candidate)) key = candidate;
+  }
+  if (!key)
+    return `\`supertag ${path.slice(0, 2).join(" ")}\` is not in rust/docs/cli-reference.md`;
+  const unknown = words
+    .filter((word) => /^--[a-z]/u.test(word))
+    .map((word) => word.split("=")[0])
+    .filter((flag) => flag !== "--help" && !nativeCommands.get(key).has(flag));
+  return unknown.length
+    ? `flag ${[...new Set(unknown)].join(", ")} not listed for \`supertag ${key}\` in rust/docs/cli-reference.md`
+    : null;
+}
+
 // --- Links and anchors ------------------------------------------------------------------------
 // Long sections are hard to scan. They are reported but do not fail the check.
 const sectionWordLimit = 600;
@@ -295,9 +337,10 @@ for (const file of files) {
         );
     });
   warnings.push(...longSections(name, text));
+  const native = text.includes(nativeMarker);
   for (const found of commandsIn(text)) {
     commandCount++;
-    const problem = checkCommand(found);
+    const problem = native ? checkNativeCommand(found) : checkCommand(found);
     if (problem) problems.push(`${name}:${found.line}: ${problem}`);
   }
 }

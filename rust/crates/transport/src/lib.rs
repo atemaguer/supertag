@@ -6,6 +6,10 @@
 //! only ciphertext and cannot impersonate either side. A `wss://` target always requires
 //! that inner TLS; a `ws://` target is cleartext and, like `http://`, is limited to loopback
 //! by the caller.
+//!
+//! A tunnel listener also answers one plain HTTP request, `GET /healthz`, so a platform's
+//! HTTP health check can probe it. It reports only that the listener is accepting
+//! connections, and it is refused to browsers like every upgrade.
 
 mod websocket;
 
@@ -34,7 +38,7 @@ use tonic::transport::{
 use tower_service::Service;
 use url::Url;
 
-pub use websocket::WebSocketIo;
+pub use websocket::{HEALTH_PATH, Replayed, WebSocketIo};
 
 /// How often each end of a tunnel pings the other. Platform proxies close idle
 /// connections (about 100 seconds on Cloudflare, five minutes on Render), and a
@@ -246,7 +250,7 @@ impl Service<http::Uri> for Dialer {
 /// A server's own TLS configuration applies to both.
 pub enum Connection {
     Native(TcpStream),
-    Tunnel(Box<WebSocketIo<TcpStream>>, TcpConnectInfo),
+    Tunnel(Box<WebSocketIo<Replayed<TcpStream>>>, TcpConnectInfo),
 }
 
 impl Connected for Connection {

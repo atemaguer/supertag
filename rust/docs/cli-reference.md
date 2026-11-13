@@ -122,9 +122,12 @@ Usage: supertag setup deployment [OPTIONS] <PLATFORM>
 Arguments:
   <PLATFORM>
           Possible values:
-          - compose: Docker Compose on your own server: deploy/compose.native.yaml
-          - fly:     Two Fly.io apps: deploy/native/fly
-          - railway: Two Railway services: deploy/native/railway
+          - compose:    Docker Compose on your own server: deploy/compose.native.yaml
+          - fly:        Two Fly.io apps: deploy/native/fly
+          - railway:    Two Railway services: deploy/native/railway
+          - render:     A Render Blueprint with a web service, PostgreSQL, and an optional Gateway worker: deploy/render
+          - cloudflare: A Cloudflare Worker in front of one Container that runs the Control Plane and the optional Gateway: deploy/cloudflare
+          - modal:      A Modal app whose web endpoint carries the tunnel to one container that runs the Control Plane and the optional Gateway: deploy/modal
 
 Options:
       --output <OUTPUT>
@@ -138,7 +141,7 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set. Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
+Setup reads SUPERTAG_DATABASE_URL, SUPERTAG_GATEWAY_TOKEN, SUPERTAG_OPERATOR_TOKEN, SUPERTAG_OPERATOR_PRINCIPAL, SUPERTAG_CREDENTIAL_VAULT, and VAULT_* from the environment and prompts for missing required values (secrets are masked). Tokens that are not supplied are generated. Secrets are never accepted as flags or printed. Compose generates its own PostgreSQL password when SUPERTAG_DATABASE_URL is not set, and Render's Blueprint supplies the database URL itself. Cloudflare and Modal keep connector credentials in HashiCorp Vault (SUPERTAG_CREDENTIAL_VAULT=vault). Setup never replaces an existing directory. Upload the files through your provider's secret controls; do not shell-source them.
 ```
 
 ## `supertag setup surface`
@@ -339,9 +342,12 @@ Usage: supertag check deployment [OPTIONS] <PLATFORM>
 Arguments:
   <PLATFORM>
           Possible values:
-          - compose: Docker Compose on your own server: deploy/compose.native.yaml
-          - fly:     Two Fly.io apps: deploy/native/fly
-          - railway: Two Railway services: deploy/native/railway
+          - compose:    Docker Compose on your own server: deploy/compose.native.yaml
+          - fly:        Two Fly.io apps: deploy/native/fly
+          - railway:    Two Railway services: deploy/native/railway
+          - render:     A Render Blueprint with a web service, PostgreSQL, and an optional Gateway worker: deploy/render
+          - cloudflare: A Cloudflare Worker in front of one Container that runs the Control Plane and the optional Gateway: deploy/cloudflare
+          - modal:      A Modal app whose web endpoint carries the tunnel to one container that runs the Control Plane and the optional Gateway: deploy/modal
 
 Options:
       --directory <DIRECTORY>
@@ -376,7 +382,7 @@ Check a deployed Control Plane: health, authentication, and readiness
 Usage: supertag verify deployment [OPTIONS] <URL>
 
 Arguments:
-  <URL>  The Control Plane's public HTTPS origin, such as https://supertag.example.com
+  <URL>  The Control Plane's public origin: https://HOST for native gRPC, or wss://HOST behind a platform that forwards only HTTP (Render, Cloudflare, Modal)
 
 Options:
       --env-file <ENV_FILE>  Private env file that holds SUPERTAG_OPERATOR_TOKEN
