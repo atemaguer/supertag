@@ -6,6 +6,7 @@ mod artifact_context;
 mod artifact_direct;
 mod artifact_publications;
 mod artifact_volumes;
+mod audit;
 mod budget_pool;
 mod checkpoints;
 mod commit_reviews;
@@ -22,6 +23,7 @@ mod manifest_relationships;
 mod mcp_effects;
 pub mod objective_limits;
 mod objectives;
+mod operator_access;
 mod policy;
 mod replies;
 mod review_artifacts;
@@ -36,8 +38,10 @@ mod work_sessions;
 mod workspace_mounts;
 mod workspaces;
 
+pub use audit::{AuditLayer, AuditService};
 pub use github_workspaces::validate_manifest_workspace;
 pub use objectives::validate_manifest_objective;
+pub use operator_access::{AuditRecord, OPERATOR_TOKEN_LIFETIME_MS, OperatorAuthentication};
 pub use policy::{
     normalize_manifest_context, normalize_manifest_permission, normalize_manifest_role,
     normalize_tag_execution,
