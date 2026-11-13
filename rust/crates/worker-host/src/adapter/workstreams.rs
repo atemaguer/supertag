@@ -99,7 +99,7 @@ impl HarnessWorkstreams for Bridge {
             PostAttemptWorkstreamRequest {
                 attempt: Some(self.attempt()),
                 operation_id: input.operation_id,
-                body: input.body,
+                body: self.redact(&input.body),
                 to_tag_ids: input.to_tag_ids,
             },
             &self.host_token,
@@ -142,7 +142,7 @@ impl HarnessMailbox for Bridge {
                 attempt: Some(self.attempt()),
                 operation_id: input.operation_id,
                 recipient_tag_id: input.recipient_tag_id,
-                text: input.text,
+                text: self.redact(&input.text),
                 review: input.review,
             },
             &self.host_token,

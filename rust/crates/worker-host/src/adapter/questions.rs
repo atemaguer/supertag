@@ -36,7 +36,7 @@ impl HarnessQuestions for Bridge {
             AskQuestionRequest {
                 attempt: Some(self.attempt()),
                 operation_id: input.operation_id,
-                text: input.text,
+                text: self.redact(&input.text),
             },
             &self.host_token,
             None,

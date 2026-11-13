@@ -26,6 +26,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, ensure};
 use prost::Message;
+use supertag_protocol::redaction::{
+    SensitiveValue, redact_text, sensitive_environment_values, unique_sensitive_values,
+};
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
     v2::{
@@ -77,6 +80,8 @@ struct Bridge {
     artifact_checkout: Option<(PathBuf, Snapshots)>,
     artifact_inputs: Option<crate::artifact_inputs::Inputs>,
     artifact_capacity: Arc<Semaphore>,
+    /// Secrets this host knows, hidden from every text the harness sends upstream.
+    secrets: Arc<Vec<SensitiveValue>>,
 }
 
 #[derive(Default)]
@@ -90,6 +95,13 @@ struct RunState {
 }
 
 impl Bridge {
+    /// Hides credentials in harness text before it leaves the Worker Host: explicit URL and
+    /// authorization credentials, and the values of this host's credential variables, its own
+    /// credential, and the adapter's bootstrap token, in any of their encodings.
+    fn redact(&self, text: &str) -> String {
+        redact_text(text, &self.secrets, false)
+    }
+
     /// Repeats an idempotent upstream call across a transient Gateway partition
     /// until execution authority ends, so the harness does not fail for a
     /// disconnect its Worker Host is still allowed to ride out.
@@ -237,7 +249,7 @@ impl Harness for Bridge {
             attempt_id: self.assignment.attempt_id.clone(),
             lease_token: self.assignment.lease_token.clone(),
             sequence: event.sequence,
-            text: event.text,
+            text: self.redact(&event.text),
         };
         // The Control Plane deduplicates an event by sequence and content, so an
         // append whose outcome the transport lost is safely repeated.
@@ -332,7 +344,8 @@ impl Harness for Bridge {
                 "adapter must attach before proposing a result",
             ));
         }
-        let outcome = request.into_inner();
+        let mut outcome = request.into_inner();
+        outcome.result = self.redact(&outcome.result);
         if outcome.result.len() > 262_144
             || outcome.result.contains('\0')
             || ObjectiveSignal::try_from(outcome.objective_signal).is_err()
@@ -474,6 +487,7 @@ pub(crate) async fn execute(
         artifact_checkout,
         artifact_inputs,
         artifact_capacity: Arc::new(Semaphore::new(1)),
+        secrets: Arc::new(host_secrets(&[host_token, &bootstrap.token])),
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -658,6 +672,24 @@ async fn supervise(
         .outcome
         .clone()
         .unwrap_or_else(|| failed("Harness adapter exited without an outcome")))
+}
+
+/// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
+fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
+    let environment = std::env::vars_os()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect::<Vec<_>>();
+    let mut secrets = sensitive_environment_values(
+        environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
+    secrets.extend(
+        credentials
+            .iter()
+            .map(|credential| SensitiveValue::High((*credential).to_owned())),
+    );
+    unique_sensitive_values(secrets)
 }
 
 pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
