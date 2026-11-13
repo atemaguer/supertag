@@ -63,9 +63,9 @@ enum Service {
         /// Where the operator hears about Inbox items; `desktop` when unset.
         #[serde(default)]
         notify: Option<Notify>,
-        /// Where audit entries also go, besides the database: `stderr` or a JSON-lines file.
-        #[serde(default, rename = "audit-log")]
-        audit_log: Option<String>,
+        /// Service logging; only `audit` is configurable.
+        #[serde(default)]
+        logging: Option<Logging>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -93,6 +93,14 @@ enum Service {
         #[serde(default)]
         concurrency: Option<u32>,
     },
+}
+/// `logging.audit`: where audit entries also go, besides the database, as in TypeScript's
+/// supertag.yaml: `stderr` or a JSON-lines file.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Logging {
+    #[serde(default)]
+    audit: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -366,7 +374,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             restart,
             provision,
             notify,
-            audit_log,
+            logging,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -442,15 +450,16 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 }
                 secrets.insert(name.clone(), secret);
             }
-            let audit_log = audit_log
+            let audit_log = logging
                 .as_ref()
+                .and_then(|logging| logging.audit.as_ref())
                 .map(|value| {
                     anyhow::Ok(if value == "stderr" {
                         value.clone()
                     } else {
                         resolve_path(base, Path::new(value))?
                             .to_str()
-                            .context("audit-log path must be UTF-8")?
+                            .context("logging.audit path must be UTF-8")?
                             .to_owned()
                     })
                 })
@@ -1122,7 +1131,7 @@ secrets:
         let audit_log = |value: &str| {
             parse(
                 format!(
-                    "services:\n  control-plane: {{type: control-plane, audit-log: {value}}}\n"
+                    "services:\n  control-plane: {{type: control-plane, logging: {{audit: {value}}}}}\n"
                 )
                 .as_bytes(),
                 Path::new("/trusted"),

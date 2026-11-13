@@ -62,6 +62,7 @@ impl AuditSink {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let result = match &self.destination {
+            // terminal-safe: `escaped` writes every unsafe character as a JSON `\u` escape.
             Destination::Stderr => std::io::stderr().lock().write_all(lines.as_bytes()),
             Destination::File(path) => {
                 open(path).and_then(|mut file| file.write_all(lines.as_bytes()))
@@ -77,6 +78,23 @@ impl AuditSink {
             ));
         }
     }
+}
+
+/// A JSON line with every character that could drive a terminal written as a `\u` escape, as the
+/// CLI writes JSON. serde_json already escapes C0 controls; outside strings a line is ASCII.
+fn escaped(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
+        if supertag_protocol::terminal_text::unsafe_char(c) {
+            let mut units = [0; 2];
+            for unit in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn open(path: &Path) -> std::io::Result<std::fs::File> {
@@ -120,7 +138,7 @@ impl Store {
                         "code": row.try_get::<String, _>("code")?,
                         "method": row.try_get::<String, _>("method")?,
                     }))?;
-                    Ok(line + "\n")
+                    Ok(escaped(&line) + "\n")
                 })
                 .collect::<anyhow::Result<String>>()
         });
@@ -137,6 +155,19 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::AuditSink;
+
+    #[test]
+    fn lines_escape_every_terminal_control() {
+        let line =
+            serde_json::to_string(&serde_json::json!({ "target": "Tag/\u{1b}[2J\u{9b}\u{202e}x" }))
+                .unwrap();
+        let escaped = super::escaped(&line);
+        assert_eq!(escaped, r#"{"target":"Tag/\u001b[2J\u009b\u202ex"}"#);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&escaped).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()
+        );
+    }
 
     #[test]
     fn accepts_stderr_or_an_absolute_owner_only_file() {
