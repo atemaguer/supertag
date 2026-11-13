@@ -3051,7 +3051,7 @@ class AcceptEventRequest(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ..., requested_execution: _Optional[_Union[ExecutionSelection, _Mapping]] = ...) -> None: ...
 
 class AcceptSlackEventRequest(_message.Message):
-    __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id")
+    __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id", "actor_id")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3060,6 +3060,7 @@ class AcceptSlackEventRequest(_message.Message):
     THREAD_TS_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     MENTION_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     event_id: str
     team_id: str
@@ -3068,7 +3069,8 @@ class AcceptSlackEventRequest(_message.Message):
     thread_ts: str
     prompt: str
     mention_tag_id: str
-    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ...) -> None: ...
+    actor_id: str
+    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ..., actor_id: _Optional[str] = ...) -> None: ...
 
 class AcceptSlackEventResponse(_message.Message):
     __slots__ = ("task",)

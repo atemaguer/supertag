@@ -2073,6 +2073,8 @@ message AcceptSlackEventRequest {
   string thread_ts = 6;
   string prompt = 7;
   optional string mention_tag_id = 8;
+  // The verified, allowlisted Slack user who wrote the message.
+  string actor_id = 1300;
 }
 
 message AcceptSlackEventResponse {

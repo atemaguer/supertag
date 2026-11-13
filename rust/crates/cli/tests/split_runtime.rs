@@ -1564,6 +1564,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         account_id: SLACK_ACCOUNT.into(),
         event_id: SLACK_EVENT.into(),
         mention_tag_id: Some("slack-engineer".into()),
+        actor_id: "UALICE1".into(),
         team_id: SLACK_TEAM.into(),
         channel_id: SLACK_CHANNEL.into(),
         message_ts: "1794470000.123456".into(),

@@ -63,6 +63,7 @@ fn event(
         thread_ts: format!("1721000000.{thread:06}"),
         prompt: "Related work".into(),
         mention_tag_id: Some(tag.into()),
+        actor_id: "UALICE1".into(),
     }
 }
 async fn capture(

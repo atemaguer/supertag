@@ -91,6 +91,7 @@ fn accepts_configured_human_mentions_and_thread_replies_for_durable_routing() ->
     assert_eq!(accepted.channel_id, "CCHANNEL1");
     assert_eq!(accepted.thread_ts, "1700000000.123456");
     assert_eq!(accepted.mention_tag_id.as_deref(), Some("builder"));
+    assert_eq!(accepted.actor_id, "UALICE1");
     assert_eq!(accepted.message_ts, "1700000010.123456");
 
     payload["event"]["type"] = json!("message");

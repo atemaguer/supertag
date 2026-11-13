@@ -60,6 +60,7 @@ fn event(alias: &str, team: &str, channel: &str, sequence: u64) -> AcceptSlackEv
         thread_ts: "1721000000.000001".into(),
         prompt: "Review the change".into(),
         mention_tag_id: Some("engineer".into()),
+        actor_id: "UALICE1".into(),
     }
 }
 

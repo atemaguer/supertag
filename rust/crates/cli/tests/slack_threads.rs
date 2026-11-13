@@ -343,6 +343,7 @@ async fn receipt(
         thread_ts: event["thread_ts"].as_str().unwrap().into(),
         prompt: event["text"].as_str().unwrap().into(),
         mention_tag_id: (event["type"] == "app_mention").then(|| "builder".into()),
+        actor_id: event["user"].as_str().unwrap().into(),
     };
     client
         .accept_slack_event(credentials.connector(input)?)

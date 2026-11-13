@@ -4,10 +4,15 @@
 mod support;
 
 use sqlx::{Connection, Executor, Row};
-use supertag_control_plane::{HostAuthority, Store};
+use std::future::Future;
+use supertag_control_plane::{HostAuthority, Store, StoreError};
 use supertag_protocol::v2::{
-    AcceptSlackEventRequest, FinishTaskRequest, ListObjectivesRequest, Objective, ObjectiveSignal,
-    ObjectiveStatus, StartTaskRequest, Task, TaskState,
+    AcceptSlackEventRequest, DeleteSurfaceLocationRequest, FinishTaskRequest,
+    GetSurfaceLocationRequest, ListObjectivesRequest, ListSurfaceLocationsRequest, Objective,
+    ObjectiveSignal, ObjectiveStatus, PutSurfaceAccountRequest, PutSurfaceLocationRequest,
+    SlackSurfaceChannel, SlackSurfaceIdentity, StartTaskRequest, SurfaceAccount,
+    SurfaceAccountIdentity, SurfaceLocation, SurfaceLocationScope, Task, TaskState,
+    surface_account_identity, surface_location_scope,
 };
 use uuid::Uuid;
 
@@ -24,6 +29,7 @@ fn event(id: &str, ts: &str, thread: &str, mention: bool, text: &str) -> AcceptS
         thread_ts: thread.into(),
         prompt: text.into(),
         mention_tag_id: mention.then(|| "builder".into()),
+        actor_id: "UALICE1".into(),
     }
 }
 
@@ -63,6 +69,28 @@ async fn reply_route(url: &str, task: &str) -> Option<(String, String, String)> 
             row.try_get("text").unwrap(),
         )
     })
+}
+
+/// Principals of the Objective's operation receipts.
+async fn actors(url: &str, objective: &str) -> Vec<String> {
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    let principals = sqlx::query_scalar(
+        "SELECT principal FROM supertag_v2_objective_operations WHERE objective_id=$1 ORDER BY operation_id",
+    )
+    .bind(objective)
+    .fetch_all(&mut connection)
+    .await
+    .unwrap();
+    connection.close().await.unwrap();
+    principals
+}
+
+async fn sql(url: &str, statement: &str) {
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    connection.execute(statement).await.unwrap();
+    connection.close().await.unwrap();
 }
 
 async fn finish(store: &Store, host: &HostAuthority, task: &str, signal: ObjectiveSignal) {
@@ -143,6 +171,22 @@ async fn contract(url: String) {
         assert!(task.session_id.starts_with("slack:"), "{text}");
         finish(&store, &host, &task.task_id, ObjectiveSignal::Progress).await;
     }
+    // A plain thread message that mentions a colleague never starts an Objective in an active ordinary thread.
+    let ordinary_thread = "1794460000.100000";
+    let colleague = accept(
+        &store,
+        event(
+            "EvCOLLEAGUESTART",
+            "1794460000.200000",
+            ordinary_thread,
+            false,
+            "<@UBOB1> objective Launch the product",
+        ),
+    )
+    .await;
+    assert!(colleague.session_id.starts_with("slack:"));
+    assert_eq!(colleague.state(), TaskState::Queued);
+    finish(&store, &host, &colleague.task_id, ObjectiveSignal::Progress).await;
     assert!(objectives(&store).await.is_empty());
 
     // An explicit invocation starts one Objective whose home is this thread.
@@ -217,6 +261,30 @@ async fn contract(url: String) {
     )
     .await;
     assert_eq!(mention.session_id, starting.session_id);
+
+    // Only Slack's app_mention addresses the app. A plain thread message that
+    // mentions a colleague is the Objective's next turn, never a directive.
+    for (index, text) in ["<@UBOB1> approve.", "<@UBOB1> pause"]
+        .into_iter()
+        .enumerate()
+    {
+        let colleague = accept(
+            &store,
+            event(
+                &format!("EvCOLLEAGUE{index}"),
+                &format!("1794470002.20000{index}"),
+                HOME,
+                false,
+                text,
+            ),
+        )
+        .await;
+        assert_eq!(colleague.session_id, starting.session_id, "{text}");
+        assert_eq!(colleague.state(), TaskState::Queued, "{text}");
+    }
+    let unchanged = store.get_objective(&objective.objective_id).await.unwrap();
+    assert_eq!(unchanged.status(), ObjectiveStatus::Working);
+    assert!(unchanged.paused_at_ms.is_none());
 
     // One Objective per thread.
     let again = accept(
@@ -422,6 +490,11 @@ async fn contract(url: String) {
             .status(),
         ObjectiveStatus::Completed
     );
+    // Objective actions are receipted under the Slack person who wrote them.
+    assert_eq!(
+        actors(&url, &objective.objective_id).await,
+        vec!["slack:UALICE1".to_owned(); 4]
+    );
     // A closed Objective takes no more turns from its thread.
     let late = accept(
         &store,
@@ -447,6 +520,224 @@ async fn contract(url: String) {
     store.close().await;
 }
 
+const OPERATOR: &str = "operator:alice";
+
+fn surface_account(step: &str, enabled: bool, revision: Option<u64>) -> PutSurfaceAccountRequest {
+    PutSurfaceAccountRequest {
+        operation_id: format!("account-{step}"),
+        expected_revision: revision,
+        account: Some(SurfaceAccount {
+            account_id: "workspace".into(),
+            identity: Some(SurfaceAccountIdentity {
+                provider: Some(surface_account_identity::Provider::Slack(
+                    SlackSurfaceIdentity {
+                        team_id: "TTEAM1".into(),
+                    },
+                )),
+            }),
+            enabled,
+            ..Default::default()
+        }),
+    }
+}
+
+async fn put_location(store: &Store, step: &str, location: &str, tag: &str, enabled: bool) {
+    let current = store
+        .list_surface_locations(OPERATOR, &ListSurfaceLocationsRequest::default())
+        .await
+        .unwrap()
+        .locations
+        .into_iter()
+        .find(|current| current.location_id == location);
+    store
+        .put_surface_location(
+            OPERATOR,
+            &PutSurfaceLocationRequest {
+                operation_id: format!("location-{step}"),
+                expected_revision: current.as_ref().map(|location| location.revision),
+                location: Some(SurfaceLocation {
+                    location_id: location.into(),
+                    account_id: "workspace".into(),
+                    connector_account_id: "slack-objectives".into(),
+                    scope: Some(SurfaceLocationScope {
+                        provider: Some(surface_location_scope::Provider::Slack(
+                            SlackSurfaceChannel {
+                                channel_id: "CCHANNEL1".into(),
+                            },
+                        )),
+                    }),
+                    tag_id: tag.into(),
+                    enabled,
+                    ..Default::default()
+                }),
+            },
+        )
+        .await
+        .unwrap();
+}
+
+async fn delete_location(store: &Store, step: &str, location: &str) {
+    let current = store
+        .get_surface_location(
+            OPERATOR,
+            &GetSurfaceLocationRequest {
+                location_id: location.into(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .delete_surface_location(
+            OPERATOR,
+            &DeleteSurfaceLocationRequest {
+                operation_id: step.into(),
+                location_id: location.into(),
+                expected_revision: current.revision,
+            },
+        )
+        .await
+        .unwrap();
+}
+
+/// Every directive, answer, and turn from the home thread, and an empty
+/// invocation elsewhere, is refused without changing the Objective.
+async fn refused(store: &Store, objective: &str, sequence: &mut u32, why: &str) {
+    for (thread, text) in [
+        (HOME, "<@UBOT1> approve"),
+        (HOME, "<@UBOT1> pause"),
+        (HOME, "<@UBOT1> resume"),
+        (HOME, "<@UBOT1> objective Another"),
+        (HOME, "Keep going"),
+        ("1794470900.100000", "<@UBOT1> objective"),
+    ] {
+        *sequence += 1;
+        let ts = format!("1794471000.{sequence:06}");
+        let mention = text.starts_with("<@");
+        let result = store
+            .accept_slack_event(
+                PRINCIPAL,
+                &event(&format!("EvGATED{sequence}"), &ts, thread, mention, text),
+            )
+            .await;
+        assert_eq!(result.unwrap().task, None, "{why} {text}");
+    }
+    let current = store.get_objective(objective).await.unwrap();
+    assert_eq!(current.status(), ObjectiveStatus::ReadyForReview, "{why}");
+    assert!(current.paused_at_ms.is_none(), "{why}");
+}
+
+/// Every Objective action and every Control Plane answer from a thread is
+/// admitted like ordinary work: a disabled account or location, an inactive
+/// Tag stops it before anything changes.
+async fn gated(url: String) {
+    let store = Store::open(&url).await.unwrap();
+    for tag in ["builder", "reviewer"] {
+        store.put_tag(tag, "Builder", vec![]).await.unwrap();
+    }
+    let host = support::register_host(&store, "worker").await;
+    let account = store
+        .put_surface_account(OPERATOR, &surface_account("create", true, None))
+        .await
+        .unwrap();
+    put_location(&store, "bind", "home", "builder", true).await;
+    let starting = accept(
+        &store,
+        event("EvSTART", HOME, HOME, true, "<@UBOT1> objective Ship it"),
+    )
+    .await;
+    let objective = objectives(&store).await.remove(0);
+    finish(
+        &store,
+        &host,
+        &starting.task_id,
+        ObjectiveSignal::ReadyForReview,
+    )
+    .await;
+    let id = objective.objective_id.as_str();
+    assert_eq!(
+        store.get_objective(id).await.unwrap().status(),
+        ObjectiveStatus::ReadyForReview
+    );
+    let mut sequence = 0;
+    put_location(&store, "disable", "home", "builder", false).await;
+    refused(&store, id, &mut sequence, "disabled location").await;
+    put_location(&store, "enable", "home", "builder", true).await;
+    let account = store
+        .put_surface_account(
+            OPERATOR,
+            &surface_account("disable", false, Some(account.revision)),
+        )
+        .await
+        .unwrap();
+    refused(&store, id, &mut sequence, "disabled account").await;
+    store
+        .put_surface_account(
+            OPERATOR,
+            &surface_account("enable", true, Some(account.revision)),
+        )
+        .await
+        .unwrap();
+    delete_location(&store, "delete-home", "home").await;
+    refused(&store, id, &mut sequence, "deleted location").await;
+    // The deleted location's connector alias stays reserved for its Tag.
+    let moved = store
+        .put_surface_location(
+            OPERATOR,
+            &PutSurfaceLocationRequest {
+                operation_id: "retarget".into(),
+                expected_revision: None,
+                location: Some(SurfaceLocation {
+                    location_id: "moved".into(),
+                    account_id: "workspace".into(),
+                    connector_account_id: "slack-objectives".into(),
+                    scope: Some(SurfaceLocationScope {
+                        provider: Some(surface_location_scope::Provider::Slack(
+                            SlackSurfaceChannel {
+                                channel_id: "CCHANNEL1".into(),
+                            },
+                        )),
+                    }),
+                    tag_id: "reviewer".into(),
+                    enabled: true,
+                    ..Default::default()
+                }),
+            },
+        )
+        .await;
+    assert!(matches!(moved, Err(StoreError::Conflict(_))), "{moved:?}");
+    put_location(&store, "restore", "home", "builder", true).await;
+    sql(
+        &url,
+        "UPDATE supertag_v2_tags SET retired_at_ms=1 WHERE tag_id='builder'",
+    )
+    .await;
+    refused(&store, id, &mut sequence, "inactive Tag").await;
+    sql(
+        &url,
+        "UPDATE supertag_v2_tags SET retired_at_ms=NULL WHERE tag_id='builder'",
+    )
+    .await;
+
+    // With the surface admitted again, the same person approves.
+    let approve = accept(
+        &store,
+        event(
+            "EvAPPROVE",
+            "1794472000.100000",
+            HOME,
+            true,
+            "<@UBOT1> approve",
+        ),
+    )
+    .await;
+    answered(&store, &url, &approve, "Approved.").await;
+    assert_eq!(
+        store.get_objective(id).await.unwrap().status(),
+        ObjectiveStatus::Completed
+    );
+    store.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_surface_objectives_contract() {
     let dir = tempfile::tempdir().unwrap();
@@ -458,8 +749,16 @@ async fn sqlite_surface_objectives_contract() {
 }
 
 #[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_surface_objectives_contract() {
+async fn sqlite_surface_objective_actions_are_admitted_like_ordinary_work() {
+    let dir = tempfile::tempdir().unwrap();
+    gated(format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("state.db").display()
+    ))
+    .await;
+}
+
+async fn on_postgres<F: Future<Output = ()> + 'static>(run: impl FnOnce(String) -> F) {
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .expect("dedicated PostgreSQL URL file is required");
     let admin_url = std::fs::read_to_string(path).unwrap();
@@ -476,7 +775,7 @@ async fn postgres_surface_objectives_contract() {
     url.set_path(&name);
     let local = tokio::task::LocalSet::new();
     let outcome = local
-        .run_until(async move { tokio::task::spawn_local(contract(url.to_string())).await })
+        .run_until(async move { tokio::task::spawn_local(run(url.to_string())).await })
         .await;
     admin
         .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
@@ -484,4 +783,16 @@ async fn postgres_surface_objectives_contract() {
         .unwrap();
     admin.close().await.unwrap();
     outcome.expect("PostgreSQL surface Objective contract failed");
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_surface_objectives_contract() {
+    on_postgres(contract).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_surface_objective_actions_are_admitted_like_ordinary_work() {
+    on_postgres(gated).await;
 }

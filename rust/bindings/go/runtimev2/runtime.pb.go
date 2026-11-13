@@ -17426,15 +17426,17 @@ func (x *AcceptEventRequest) GetRequestedExecution() *ExecutionSelection {
 }
 
 type AcceptSlackEventRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	EventId       string                 `protobuf:"bytes,2,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	TeamId        string                 `protobuf:"bytes,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	MessageTs     string                 `protobuf:"bytes,5,opt,name=message_ts,json=messageTs,proto3" json:"message_ts,omitempty"`
-	ThreadTs      string                 `protobuf:"bytes,6,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
-	Prompt        string                 `protobuf:"bytes,7,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	MentionTagId  *string                `protobuf:"bytes,8,opt,name=mention_tag_id,json=mentionTagId,proto3,oneof" json:"mention_tag_id,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	AccountId    string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	EventId      string                 `protobuf:"bytes,2,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	TeamId       string                 `protobuf:"bytes,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	ChannelId    string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	MessageTs    string                 `protobuf:"bytes,5,opt,name=message_ts,json=messageTs,proto3" json:"message_ts,omitempty"`
+	ThreadTs     string                 `protobuf:"bytes,6,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Prompt       string                 `protobuf:"bytes,7,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	MentionTagId *string                `protobuf:"bytes,8,opt,name=mention_tag_id,json=mentionTagId,proto3,oneof" json:"mention_tag_id,omitempty"`
+	// The verified, allowlisted Slack user who wrote the message.
+	ActorId       string `protobuf:"bytes,1300,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17521,6 +17523,13 @@ func (x *AcceptSlackEventRequest) GetPrompt() string {
 func (x *AcceptSlackEventRequest) GetMentionTagId() string {
 	if x != nil && x.MentionTagId != nil {
 		return *x.MentionTagId
+	}
+	return ""
+}
+
+func (x *AcceptSlackEventRequest) GetActorId() string {
+	if x != nil {
+		return x.ActorId
 	}
 	return ""
 }
@@ -20802,7 +20811,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x16\n" +
 	"\x06prompt\x18\x05 \x01(\tR\x06prompt\x12G\n" +
 	"\vdestination\x18\x06 \x01(\v2%.supertag.runtime.v2.ReplyDestinationR\vdestination\x12X\n" +
-	"\x13requested_execution\x18\a \x01(\v2'.supertag.runtime.v2.ExecutionSelectionR\x12requestedExecution\"\x9d\x02\n" +
+	"\x13requested_execution\x18\a \x01(\v2'.supertag.runtime.v2.ExecutionSelectionR\x12requestedExecution\"\xb9\x02\n" +
 	"\x17AcceptSlackEventRequest\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x19\n" +
@@ -20814,7 +20823,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"message_ts\x18\x05 \x01(\tR\tmessageTs\x12\x1b\n" +
 	"\tthread_ts\x18\x06 \x01(\tR\bthreadTs\x12\x16\n" +
 	"\x06prompt\x18\a \x01(\tR\x06prompt\x12)\n" +
-	"\x0emention_tag_id\x18\b \x01(\tH\x00R\fmentionTagId\x88\x01\x01B\x11\n" +
+	"\x0emention_tag_id\x18\b \x01(\tH\x00R\fmentionTagId\x88\x01\x01\x12\x1a\n" +
+	"\bactor_id\x18\x94\n" +
+	" \x01(\tR\aactorIdB\x11\n" +
 	"\x0f_mention_tag_id\"I\n" +
 	"\x18AcceptSlackEventResponse\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\"\xa5\x03\n" +

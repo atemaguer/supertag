@@ -347,6 +347,7 @@ mod tests {
             thread_ts: "1794470000.100000".into(),
             prompt: "Slack uses the same configured account text".into(),
             mention_tag_id: Some("builder".into()),
+            actor_id: "UALICE1".into(),
         };
         let slack_task = left
             .accept_slack_event("connector:shared", &slack)

@@ -319,13 +319,16 @@ fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
             }
             let mention = event.kind == "app_mention";
             let reply = event.kind == "message" && event.thread_ts.is_some();
+            let Some(user) = event
+                .user
+                .filter(|user| config.allowed_users.contains(user))
+            else {
+                return Ok(Ingress::Ignore);
+            };
             if (!mention && !reply)
                 || event.bot_id.is_some()
                 || event.subtype.is_some()
                 || event.channel.as_deref() != Some(&config.channel_id)
-                || !event
-                    .user
-                    .is_some_and(|user| config.allowed_users.contains(&user))
             {
                 return Ok(Ingress::Ignore);
             }
@@ -354,6 +357,7 @@ fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
                 message_ts: ts,
                 thread_ts: thread,
                 mention_tag_id: mention.then(|| config.tag_id.clone()),
+                actor_id: user,
                 prompt,
             }))
         }

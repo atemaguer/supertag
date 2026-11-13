@@ -15,7 +15,9 @@ use uuid::Uuid;
 use crate::{
     StoreError, objectives,
     store::{Result, insert_task, insert_task_with_surface, next_order, task_in},
-    surface_policy::{VerifiedConnectorOrigin, admit_connector_task_in, connector_surface_in},
+    surface_policy::{
+        AdmissionSurface, VerifiedConnectorOrigin, admit_connector_task_in, connector_surface_in,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -90,8 +92,11 @@ pub(crate) struct Message<'a> {
     pub thread_id: &'a str,
     pub event_id: &'a str,
     pub prompt: &'a str,
-    /// Whether the message was addressed to the app or arrived in an active thread.
+    /// Whether the provider says the message addresses the app itself.
     pub addressed: bool,
+    /// The verified person who wrote it, as `<provider>:<user ID>`. Objective
+    /// actions are recorded and receipted under this principal.
+    pub actor: &'a str,
 }
 
 pub(crate) enum Handled {
@@ -136,12 +141,28 @@ pub(crate) async fn handle_in(
     let account = message.origin.connector_account_id;
     let home = home_in(tx, account, message.conversation_id, message.thread_id).await?;
     let command = message.addressed.then(|| parse(message.prompt)).flatten();
-    let Some(home) = home else {
+    // Directives outside a home thread are ordinary messages.
+    if home.is_none() && !matches!(command, Some(Command::Create(_) | Command::Invalid)) {
+        return Ok(Handled::Ordinary);
+    }
+    // Every Objective action and every Control Plane answer is admitted like
+    // ordinary work first: a disabled account or location, an inactive Tag, or a
+    // location moved to another Tag stops it before anything changes or replies.
+    let origin = VerifiedConnectorOrigin {
+        tag_id: home
+            .as_ref()
+            .map_or(message.origin.tag_id, |home| home.tag_id.as_str()),
+        ..message.origin
+    };
+    let Some(surface) = connector_surface_in(tx, &origin).await? else {
+        return Ok(Handled::Work(None));
+    };
+    let Some(home) = home.as_ref() else {
         return match command {
             Some(Command::Create(outcome)) => {
-                create_in(tx, order, &message, &outcome, now_ms).await
+                create_in(tx, order, &message, surface, &outcome, now_ms).await
             }
-            Some(Command::Invalid) => Ok(Handled::Status(
+            _ => Ok(Handled::Status(
                 status_in(
                     tx,
                     order,
@@ -152,8 +173,6 @@ pub(crate) async fn handle_in(
                 )
                 .await?,
             )),
-            // Directives outside a home thread are ordinary messages.
-            _ => Ok(Handled::Ordinary),
         };
     };
     let id = home.objective_id.as_str();
@@ -166,10 +185,6 @@ pub(crate) async fn handle_in(
         Some(Command::Approve) => directive_in(tx, &message, id, "approve", now_ms).await?,
         None => {
             // Any other message in the home thread is the Objective's next turn.
-            let origin = VerifiedConnectorOrigin {
-                tag_id: &home.tag_id,
-                ..message.origin
-            };
             let mut savepoint = tx.begin().await?;
             match admit_connector_task_in(
                 &mut savepoint,
@@ -202,14 +217,12 @@ async fn create_in(
     tx: &mut Transaction<'_, Any>,
     order: i64,
     message: &Message<'_>,
+    surface: Option<AdmissionSurface>,
     outcome: &str,
     now_ms: i64,
 ) -> Result<Handled> {
     // The Objective's authority is what this surface grants the Tag: the
     // invocation cannot raise it, and later surface changes do not either.
-    let Some(surface) = connector_surface_in(tx, &message.origin).await? else {
-        return Ok(Handled::Work(None));
-    };
     let tag = message.origin.tag_id;
     let runtime_actions = Box::pin(crate::store::surface_runtime_actions_in(
         tx,
@@ -252,7 +265,8 @@ async fn create_in(
 }
 
 /// Anyone who may start Objectives from this thread may steer its Objective.
-/// The operation is recorded under the connector principal and provider event.
+/// The operation is recorded under the person who wrote the message and is
+/// receipted by its provider event.
 async fn directive_in(
     tx: &mut Transaction<'_, Any>,
     message: &Message<'_>,
@@ -260,8 +274,11 @@ async fn directive_in(
     action: &str,
     now_ms: i64,
 ) -> Result<String> {
-    let principal = format!("connector:{}", message.origin.connector_account_id);
-    let operation_id = format!("surface:{}", message.event_id);
+    let principal = message.actor;
+    let operation_id = format!(
+        "surface:{}:{}",
+        message.origin.connector_account_id, message.event_id
+    );
     let mut savepoint = tx.begin().await?;
     let before = objectives::objective_in(&mut savepoint, id).await?;
     let result = if action == "approve" {
@@ -272,7 +289,7 @@ async fn directive_in(
             feedback: String::new(),
         };
         let fingerprint = objectives::digest("review", &input);
-        objectives::review_in(&mut savepoint, &principal, &input, &fingerprint, now_ms).await
+        objectives::review_in(&mut savepoint, principal, &input, &fingerprint, now_ms).await
     } else {
         let input = ObjectiveActionRequest {
             objective_id: id.into(),
@@ -282,7 +299,7 @@ async fn directive_in(
         let fingerprint = objectives::digest(action, &input);
         objectives::objective_action_in(
             &mut savepoint,
-            &principal,
+            principal,
             &input,
             action,
             &fingerprint,

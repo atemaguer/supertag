@@ -29,6 +29,9 @@ impl Store {
         if let Some(tag) = &input.mention_tag_id {
             name("Tag ID", tag)?;
         }
+        if !slack_id(&input.actor_id, b"UW") {
+            return Err(invalid("invalid Slack user ID"));
+        }
         // Both Slack notifications for one human message are the same logical
         // input. Event kind and a Gateway's current default Tag are not content.
         let fingerprint = format!(
@@ -109,6 +112,7 @@ impl Store {
             },
         };
         let now_ms = self.execution_now_ms();
+        let actor = format!("slack:{}", input.actor_id);
         let handled = Box::pin(crate::surface_objectives::handle_in(
             &mut tx,
             order,
@@ -118,8 +122,10 @@ impl Store {
                 thread_id: &input.thread_ts,
                 event_id: &input.event_id,
                 prompt: &input.prompt,
-                // Unaddressed messages in inactive threads were ignored above.
-                addressed: true,
+                // Only Slack's app_mention addresses the app. A plain thread
+                // message that mentions someone else is never a command.
+                addressed: input.mention_tag_id.is_some(),
+                actor: &actor,
             },
             now_ms,
         ))
@@ -244,6 +250,7 @@ mod tests {
             thread_ts: "1794470000.100000".into(),
             prompt: format!("Message {message}"),
             mention_tag_id: mention.then(|| "builder".into()),
+            actor_id: "UALICE1".into(),
         }
     }
 
