@@ -49,10 +49,13 @@ pub use websocket::WebSocketIo;
 pub const PING_INTERVAL: Duration = Duration::from_secs(20);
 
 /// How often an HTTP/2 connection is pinged, idle or not. Servers use the same values
-/// for the connections they accept.
-pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
+/// for the connections they accept. With [`KEEPALIVE_TIMEOUT`], a connection dropped
+/// without a close fails within 20 seconds: inside the Control Plane's 30-second
+/// execution lease, so a Worker Host reconnects and renews its running Attempt before
+/// the lease lapses and the Task becomes Uncertain.
+pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /// How long a ping may go unanswered before the connection is treated as gone.
-pub const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+pub const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -118,7 +121,8 @@ impl Target {
     }
 
     /// The same target reached through `proxy`, unless the proxy's exceptions or a
-    /// loopback address exclude its host. `None` leaves the target unchanged.
+    /// loopback address exclude its host. `None` leaves the target unchanged. A proxy URL
+    /// SuperTag cannot use is an error only when the proxy applies to this target.
     pub fn proxy(mut self, proxy: Option<Proxy>) -> Result<Self, Error> {
         let Some(proxy) = proxy else {
             return Ok(self);
@@ -141,13 +145,14 @@ impl Target {
         if !proxy.applies_to(&host) {
             return Ok(self);
         }
+        let server = proxy.server()?;
         let dialer = self.dialer.get_or_insert(Dialer {
             host,
             port,
             proxy: None,
             tunnel: None,
         });
-        dialer.proxy = Some(Arc::new(proxy));
+        dialer.proxy = Some(Arc::new(server));
         Ok(self)
     }
 
@@ -276,7 +281,7 @@ fn outer_tls(extra_roots: Option<&[u8]>) -> Result<ClientConfig, Error> {
 struct Dialer {
     host: url::Host<String>,
     port: u16,
-    proxy: Option<Arc<Proxy>>,
+    proxy: Option<Arc<proxy::Server>>,
     tunnel: Option<Tunnel>,
 }
 

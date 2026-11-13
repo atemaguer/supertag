@@ -842,7 +842,7 @@ async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
         .connect_timeout(Duration::from_secs(5))
         .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
     let native = Target::native(native)
-        .proxy(Some(configured().map_err(|error| anyhow::anyhow!(error))?))
+        .proxy(Some(configured()))
         .map_err(|error| anyhow::anyhow!(error))?;
     ensure!(native.proxied() && !native.tunnelled());
     let mut client = RemoteWorkspaceProviderClient::new(native.connect().await?)
@@ -854,7 +854,7 @@ async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
             &format!("wss://gateway.test:{}/supertag", edge.port()),
             Some(&fixture.client),
         )?
-        .proxy(Some(configured().map_err(|error| anyhow::anyhow!(error))?))
+        .proxy(Some(configured()))
         .map_err(|error| anyhow::anyhow!(error))?;
     ensure!(tunnel.proxied() && tunnel.tunnelled());
     let mut client = RemoteWorkspaceProviderClient::new(tunnel.connect_lazy())
@@ -888,14 +888,14 @@ async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
         format!("https://localhost:{}", served.native.port()),
     ] {
         let target = Target::native(Endpoint::from_shared(url.clone())?)
-            .proxy(Some(configured().map_err(|error| anyhow::anyhow!(error))?))
+            .proxy(Some(configured()))
             .map_err(|error| anyhow::anyhow!(error))?;
         ensure!(!target.proxied(), "{url} was proxied");
     }
     let direct = Endpoint::from_shared(format!("https://localhost:{}", served.native.port()))?
         .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
     let direct = Target::native(direct)
-        .proxy(Some(configured().map_err(|error| anyhow::anyhow!(error))?))
+        .proxy(Some(configured()))
         .map_err(|error| anyhow::anyhow!(error))?;
     RemoteWorkspaceProviderClient::new(direct.connect().await?)
         .allocate(RemoteWorkspaceAllocateRequest::default())
@@ -911,9 +911,7 @@ async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
         .connect_timeout(Duration::from_secs(5))
         .tls_config(fixture.inner_tls(Some(&fixture.client))?)?;
     let native = Target::native(native)
-        .proxy(Some(
-            Proxy::new(&refusing.url(""), "").map_err(|error| anyhow::anyhow!(error))?,
-        ))
+        .proxy(Some(Proxy::new(&refusing.url(""), "")))
         .map_err(|error| anyhow::anyhow!(error))?;
     let error = native
         .connect()
@@ -925,6 +923,28 @@ async fn native_and_tunnel_targets_cross_an_http_connect_proxy() -> Result<()> {
         "unexpected refusal: {chain}"
     );
     ensure!(refusing.requests().len() == 1);
+
+    // A proxy URL SuperTag cannot use fails only the targets it applies to: a loopback or
+    // excluded target still connects directly, and a proxied one never dials directly.
+    let unusable = || Proxy::new("https://proxy.corp:443", "bypass.test");
+    for url in [
+        format!("https://127.0.0.1:{}", served.native.port()),
+        "https://bypass.test:1".to_owned(),
+    ] {
+        let target = Target::native(Endpoint::from_shared(url.clone())?)
+            .proxy(Some(unusable()))
+            .map_err(|error| anyhow::anyhow!(error))?;
+        ensure!(!target.proxied(), "{url} was proxied");
+    }
+    let error = Target::native(Endpoint::from_shared("https://gateway.test:1")?)
+        .proxy(Some(unusable()))
+        .err()
+        .context("an unusable proxy was accepted")?
+        .to_string();
+    ensure!(
+        error.contains("must be an http:// URL"),
+        "unexpected error: {error}"
+    );
     Ok(())
 }
 

@@ -20,19 +20,31 @@ use crate::Error;
 const MAX_RESPONSE_HEAD: usize = 8 * 1024;
 
 /// An HTTP proxy that SuperTag clients reach their services through with `CONNECT`.
+///
+/// A proxy URL SuperTag cannot use is an error only for a connection that would go
+/// through it: a loopback or `NO_PROXY` target still connects directly.
 #[derive(Clone)]
 pub struct Proxy {
-    host: Host<String>,
-    port: u16,
-    authorization: Option<String>,
+    server: Result<Server, String>,
     bypass: Vec<Bypass>,
 }
 
 /// The proxy URL without its credentials.
 impl fmt::Debug for Proxy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "http://{}", authority(&self.host, self.port))
+        match &self.server {
+            Ok(server) => write!(f, "http://{}", authority(&server.host, server.port)),
+            Err(_) => f.write_str("unusable proxy"),
+        }
     }
+}
+
+/// Where the proxy listens, and the `Proxy-Authorization` its URL's credentials give.
+#[derive(Clone)]
+pub(crate) struct Server {
+    host: Host<String>,
+    port: u16,
+    authorization: Option<String>,
 }
 
 #[derive(Clone)]
@@ -43,27 +55,84 @@ enum Bypass {
 }
 
 impl Proxy {
-    /// The proxy `https_proxy` or `HTTPS_PROXY` names, with the `no_proxy` or `NO_PROXY`
-    /// exceptions. `None` when neither proxy variable is set.
-    pub fn from_env() -> Result<Option<Self>, Error> {
-        let variable = |lower: &str, upper: &str| {
+    /// The proxy `https_proxy` or `HTTPS_PROXY` names in this process's environment, with
+    /// the `no_proxy` or `NO_PROXY` exceptions. `None` when neither proxy variable is set.
+    pub fn from_env() -> Option<Self> {
+        Self::from_variables(|name| std::env::var(name).ok())
+    }
+
+    /// The proxy that the variables `variable` looks up name, read as [`Proxy::from_env`]
+    /// reads this process's environment.
+    pub fn from_variables(variable: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        let first = |lower: &str, upper: &str| {
             [lower, upper]
                 .into_iter()
-                .filter_map(|name| std::env::var(name).ok())
+                .filter_map(&variable)
                 .map(|value| value.trim().to_owned())
                 .find(|value| !value.is_empty())
         };
-        let Some(url) = variable("https_proxy", "HTTPS_PROXY") else {
-            return Ok(None);
-        };
-        let no_proxy = variable("no_proxy", "NO_PROXY").unwrap_or_default();
-        Self::new(&url, &no_proxy).map(Some)
+        let url = first("https_proxy", "HTTPS_PROXY")?;
+        let no_proxy = first("no_proxy", "NO_PROXY").unwrap_or_default();
+        Some(Self::new(&url, &no_proxy))
     }
 
     /// A proxy at `url` (`http://[user:password@]host[:port]`; a URL without a scheme
     /// is `http://`) that is not used for the comma-separated hosts in `no_proxy`: `*`
     /// for every host, an IP address, or a domain that also covers its subdomains.
-    pub fn new(url: &str, no_proxy: &str) -> Result<Self, Error> {
+    pub fn new(url: &str, no_proxy: &str) -> Self {
+        let bypass = no_proxy
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                if entry == "*" {
+                    return Bypass::Everything;
+                }
+                let entry = entry.trim_start_matches("*.").trim_start_matches('.');
+                if let Ok(address) = entry.trim_matches(['[', ']']).parse::<IpAddr>() {
+                    return Bypass::Address(address);
+                }
+                // A port in an entry is ignored: the entry covers the host on every port.
+                let domain = entry.rsplit_once(':').map_or(entry, |(domain, _)| domain);
+                Bypass::Domain(domain.to_ascii_lowercase())
+            })
+            .collect();
+        Self {
+            server: Server::parse(url).map_err(|error| error.to_string()),
+            bypass,
+        }
+    }
+
+    /// The proxy server, or why its URL cannot be used.
+    pub(crate) fn server(&self) -> Result<Server, Error> {
+        self.server.clone().map_err(Error::from)
+    }
+
+    /// Whether a connection to `host` goes through this proxy.
+    pub(crate) fn applies_to(&self, host: &Host<String>) -> bool {
+        match host {
+            Host::Ipv4(address) if address.is_loopback() => false,
+            Host::Ipv6(address) if address.is_loopback() => false,
+            Host::Domain(domain) if domain.eq_ignore_ascii_case("localhost") => false,
+            host => !self.bypass.iter().any(|bypass| match (bypass, host) {
+                (Bypass::Everything, _) => true,
+                (Bypass::Address(address), Host::Ipv4(target)) => *address == IpAddr::V4(*target),
+                (Bypass::Address(address), Host::Ipv6(target)) => *address == IpAddr::V6(*target),
+                (Bypass::Domain(domain), Host::Domain(target)) => {
+                    let target = target.to_ascii_lowercase();
+                    target == *domain
+                        || target
+                            .strip_suffix(domain.as_str())
+                            .is_some_and(|prefix| prefix.ends_with('.'))
+                }
+                _ => false,
+            }),
+        }
+    }
+}
+
+impl Server {
+    fn parse(url: &str) -> Result<Self, Error> {
         let url = if url.contains("://") {
             Url::parse(url)
         } else {
@@ -96,53 +165,15 @@ impl Proxy {
                 STANDARD.encode(format!("{user}:{password}"))
             ))
         };
-        let bypass = no_proxy
-            .split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| {
-                if entry == "*" {
-                    return Bypass::Everything;
-                }
-                let entry = entry.trim_start_matches("*.").trim_start_matches('.');
-                if let Ok(address) = entry.trim_matches(['[', ']']).parse::<IpAddr>() {
-                    return Bypass::Address(address);
-                }
-                // A port in an entry is ignored: the entry covers the host on every port.
-                let domain = entry.rsplit_once(':').map_or(entry, |(domain, _)| domain);
-                Bypass::Domain(domain.to_ascii_lowercase())
-            })
-            .collect();
         Ok(Self {
             host,
             port,
             authorization,
-            bypass,
         })
     }
+}
 
-    /// Whether a connection to `host` goes through this proxy.
-    pub(crate) fn applies_to(&self, host: &Host<String>) -> bool {
-        match host {
-            Host::Ipv4(address) if address.is_loopback() => false,
-            Host::Ipv6(address) if address.is_loopback() => false,
-            Host::Domain(domain) if domain.eq_ignore_ascii_case("localhost") => false,
-            host => !self.bypass.iter().any(|bypass| match (bypass, host) {
-                (Bypass::Everything, _) => true,
-                (Bypass::Address(address), Host::Ipv4(target)) => *address == IpAddr::V4(*target),
-                (Bypass::Address(address), Host::Ipv6(target)) => *address == IpAddr::V6(*target),
-                (Bypass::Domain(domain), Host::Domain(target)) => {
-                    let target = target.to_ascii_lowercase();
-                    target == *domain
-                        || target
-                            .strip_suffix(domain.as_str())
-                            .is_some_and(|prefix| prefix.ends_with('.'))
-                }
-                _ => false,
-            }),
-        }
-    }
-
+impl Server {
     /// A TCP connection to the proxy, already switched by `CONNECT` to `host:port`.
     pub(crate) async fn connect(&self, host: &Host<String>, port: u16) -> io::Result<TcpStream> {
         let mut stream = open(&self.host, self.port).await?;
@@ -244,8 +275,7 @@ mod tests {
         let proxy = Proxy::new(
             "proxy.internal:3128",
             " example.com, .corp.test,*.svc.test, 10.1.2.3 ,[2001:db8::1], other.test:8443",
-        )
-        .unwrap();
+        );
         assert_eq!(format!("{proxy:?}"), "http://proxy.internal:3128");
         for direct in [
             "127.0.0.1",
@@ -273,16 +303,16 @@ mod tests {
                 "{proxied} was not proxied"
             );
         }
-        let everything = Proxy::new("http://proxy.internal", "*").unwrap();
+        let everything = Proxy::new("http://proxy.internal", "*");
         assert!(!everything.applies_to(&host("gateway.test")));
-        assert_eq!(everything.port, 80);
+        assert_eq!(everything.server().unwrap().port, 80);
     }
 
     #[test]
     fn proxy_urls_are_plain_http_and_credentials_become_basic_authorization() {
-        let proxy = Proxy::new("http://us%40er:p%3Ass@proxy.internal:8080/", "").unwrap();
+        let proxy = Proxy::new("http://us%40er:p%3Ass@proxy.internal:8080/", "");
         assert_eq!(
-            proxy.authorization.as_deref(),
+            proxy.server().unwrap().authorization.as_deref(),
             Some(format!("Basic {}", STANDARD.encode("us@er:p:ss")).as_str())
         );
         assert_eq!(format!("{proxy:?}"), "http://proxy.internal:8080");
@@ -292,8 +322,14 @@ mod tests {
             "http://proxy.internal:8080/path",
             "http://",
         ] {
-            let error = Proxy::new(invalid, "").unwrap_err().to_string();
+            let proxy = Proxy::new(invalid, "localhost");
+            let error = proxy.server().err().unwrap().to_string();
             assert!(error.contains("HTTPS proxy"), "{invalid}: {error}");
+            assert_eq!(format!("{proxy:?}"), "unusable proxy");
+            // Only a connection that would use the proxy fails because of its URL.
+            assert!(!proxy.applies_to(&host("127.0.0.1")));
+            assert!(!proxy.applies_to(&host("localhost")));
+            assert!(proxy.applies_to(&host("gateway.test")));
         }
     }
 }

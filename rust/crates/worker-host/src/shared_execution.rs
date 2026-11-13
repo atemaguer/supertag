@@ -95,7 +95,10 @@ impl SharedExecutionConfig {
         let mut endpoint = Endpoint::from_shared(uri)
             .map_err(|_| anyhow::anyhow!("invalid shared execution endpoint"))?
             .connect_timeout(REQUEST_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT);
+            .timeout(REQUEST_TIMEOUT)
+            .http2_keep_alive_interval(supertag_transport::KEEPALIVE_INTERVAL)
+            .keep_alive_timeout(supertag_transport::KEEPALIVE_TIMEOUT)
+            .keep_alive_while_idle(true);
         let target = endpoint.uri();
         ensure!(
             target.path() == "/"

@@ -2810,6 +2810,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "subtle",
+ "supertag-transport",
  "tempfile",
  "tokio",
  "tokio-stream",

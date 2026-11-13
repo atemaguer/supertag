@@ -77,7 +77,7 @@ pub async fn operator_endpoint(
     timeout: Duration,
     files: Option<&TlsFiles>,
 ) -> Result<Target> {
-    configured_endpoint(uri, false, timeout, files).await
+    configured_endpoint(uri, false, timeout, files, Proxy::from_env()).await
 }
 
 pub async fn endpoint_with_timeout(
@@ -85,7 +85,13 @@ pub async fn endpoint_with_timeout(
     private: bool,
     timeout: Duration,
 ) -> Result<Target> {
-    configured_endpoint(uri, private, timeout, None).await
+    configured_endpoint(uri, private, timeout, None, Proxy::from_env()).await
+}
+
+/// A private endpoint reached through `proxy` instead of the one this process's
+/// environment names: a supervisor's Worker Host reads it from `env_file` too.
+pub async fn endpoint_through(uri: String, proxy: Option<Proxy>) -> Result<Target> {
+    configured_endpoint(uri, false, Duration::from_secs(15), None, proxy).await
 }
 
 /// `https://` and `http://` dial native gRPC. `wss://` and `ws://` carry the same gRPC
@@ -97,6 +103,7 @@ async fn configured_endpoint(
     private: bool,
     timeout: Duration,
     files: Option<&TlsFiles>,
+    proxy: Option<Proxy>,
 ) -> Result<Target> {
     let tunnel = tunneled_uri(&uri).map_err(|error| anyhow!("invalid endpoint URL: {error}"))?;
     let native = tunnel.clone().unwrap_or_else(|| uri.clone());
@@ -154,7 +161,6 @@ async fn configured_endpoint(
         }
         _ => bail!("endpoint must use https, wss, or a loopback http or ws URL"),
     }
-    let proxy = Proxy::from_env().map_err(|error| anyhow!("{error}"))?;
     let target = if tunnel.is_none() {
         Target::native(endpoint)
     } else {
