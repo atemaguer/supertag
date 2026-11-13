@@ -693,7 +693,7 @@ fn http_server(
         }
         secrets.insert(value);
     }
-    let minted = auth::resolve(&server.auth(), environment, secrets)?.map(std::sync::Arc::new);
+    let minted = auth::resolve(&server.auth(), url, environment, secrets)?.map(std::sync::Arc::new);
     Ok(HttpServer {
         name: server.name.clone(),
         endpoint,

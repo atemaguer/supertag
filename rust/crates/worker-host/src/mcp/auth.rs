@@ -40,7 +40,7 @@ use serde_json::{Value, json};
 use tokio::{io::AsyncReadExt, process::Command, sync::Mutex, time};
 
 use super::{
-    catalog::valid_header,
+    catalog::{TRACKED_ENV_VALUE_BYTES, valid_header},
     oauth::{
         access_token, discover_token_endpoint, now_ms, safe_endpoint, token_request,
         token_response, valid_token,
@@ -196,6 +196,8 @@ impl AuthConfig<'_> {
 /// A minted form, resolved when the catalog loads.
 pub(super) struct MintedAuth {
     server: String,
+    /// The server's URL as configured: the RFC 8707 resource indicator, sent exactly.
+    resource: String,
     form: Form,
     /// The token endpoint discovered from the server's metadata, once.
     discovered: Mutex<Option<String>>,
@@ -252,6 +254,7 @@ pub(super) struct Minted {
 /// Resolves the server's minted form, if any, adding each credential to `secrets`.
 pub(super) fn resolve(
     config: &AuthConfig<'_>,
+    resource: &str,
     environment: &impl Fn(&str) -> Option<String>,
     secrets: &mut BTreeSet<String>,
 ) -> Result<Option<MintedAuth>> {
@@ -260,7 +263,9 @@ pub(super) fn resolve(
         config.forms() <= 1,
         "MCP server {name}: choose one of oauth, clientCredentials, githubApp, or helper"
     );
-    let mut read = |field: &str, variable: &str, limit: usize| -> Result<String> {
+    // A value shorter than TRACKED_ENV_VALUE_BYTES is too short to recognize: withholding it
+    // would drop every tool output that happens to contain it. A client ID is public.
+    let mut read = |field: &str, variable: &str, limit: usize, secret: bool| -> Result<String> {
         ensure!(
             valid_variable(variable),
             "MCP server {name}: {field} must name a Worker Host variable not named SUPERTAG_*"
@@ -275,14 +280,16 @@ pub(super) fn resolve(
             value.len() <= limit && !value.contains('\0'),
             "MCP server {name} {field} reads {variable}, whose value is too long"
         );
-        secrets.insert(value.clone());
+        if secret && value.len() >= TRACKED_ENV_VALUE_BYTES {
+            secrets.insert(value.clone());
+        }
         Ok(value)
     };
     let form = if let Some(config) = config.client_credentials {
         let token_url = token_url(name, config.token_url.as_deref())?;
         let client_id = match (&config.client_id, &config.client_id_env) {
             (Some(id), None) if !id.trim().is_empty() && id.len() <= 1024 => id.trim().to_owned(),
-            (None, Some(variable)) => read("clientCredentials.clientIdEnv", variable, 1024)?,
+            (None, Some(variable)) => read("clientCredentials.clientIdEnv", variable, 1024, false)?,
             _ => bail!(
                 "MCP server {name}: clientCredentials needs exactly one of clientId or clientIdEnv"
             ),
@@ -292,11 +299,17 @@ pub(super) fn resolve(
                 "clientCredentials.clientSecretEnv",
                 variable,
                 VALUE_BYTES,
+                true,
             )?),
             (None, Some(variable)) => ClientCredential::Assertion(Box::new(signing_key(
                 name,
                 "clientCredentials.assertionKeyEnv",
-                &read("clientCredentials.assertionKeyEnv", variable, KEY_BYTES)?,
+                &read(
+                    "clientCredentials.assertionKeyEnv",
+                    variable,
+                    KEY_BYTES,
+                    true,
+                )?,
             )?)),
             _ => bail!(
                 "MCP server {name}: clientCredentials needs exactly one of clientSecretEnv or assertionKeyEnv"
@@ -332,6 +345,7 @@ pub(super) fn resolve(
             "githubApp.privateKeyEnv",
             &config.private_key_env,
             KEY_BYTES,
+            true,
         )?;
         Form::GithubApp {
             app_id: config.app_id,
@@ -361,6 +375,7 @@ pub(super) fn resolve(
             "oauth.refreshTokenEnv",
             &config.refresh_token_env,
             VALUE_BYTES,
+            true,
         )?;
         let stored = stored_refresh_token(&value);
         ensure!(
@@ -368,8 +383,13 @@ pub(super) fn resolve(
             "MCP server {name} oauth.refreshTokenEnv reads {}, which holds no refresh token",
             config.refresh_token_env
         );
-        secrets.insert(stored.refresh_token.clone());
-        secrets.extend(stored.client_secret.clone());
+        secrets.extend(
+            [Some(&stored.refresh_token), stored.client_secret.as_ref()]
+                .into_iter()
+                .flatten()
+                .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES)
+                .cloned(),
+        );
         Form::RefreshToken {
             stored,
             token_url,
@@ -380,6 +400,7 @@ pub(super) fn resolve(
     };
     Ok(Some(MintedAuth {
         server: name.to_owned(),
+        resource: resource.to_owned(),
         form,
         discovered: Mutex::default(),
     }))
@@ -474,7 +495,8 @@ impl MintedAuth {
                     headers
                         .values()
                         .filter_map(|value| value.to_str().ok())
-                        .flat_map(credential_parts),
+                        .flat_map(credential_parts)
+                        .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES),
                 );
                 return Ok(Minted { headers, secrets });
             }
@@ -530,7 +552,7 @@ impl MintedAuth {
                 let endpoint = self.endpoint(client, url, token_url.as_deref()).await?;
                 let mut form = vec![
                     ("grant_type", "client_credentials".to_owned()),
-                    ("resource", url.to_string()),
+                    ("resource", self.resource.clone()),
                 ];
                 if let Some(scope) = scope {
                     form.push(("scope", scope.clone()));
@@ -605,7 +627,7 @@ impl MintedAuth {
                 let mut form = vec![
                     ("grant_type", "refresh_token".to_owned()),
                     ("refresh_token", refresh_token),
-                    ("resource", url.to_string()),
+                    ("resource", self.resource.clone()),
                 ];
                 form.extend(stored.client_id.clone().map(|id| ("client_id", id)));
                 form.extend(
@@ -996,6 +1018,14 @@ mod tests {
         )
         .unwrap();
         assert!(parsed.secrets.contains(&"client-secret-value".to_owned()));
+        // A client ID is public: withholding it would drop every output that names it.
+        assert!(!parsed.secrets.contains(&"client-id-value".to_owned()));
+        let short = catalog(
+            json!({"name":"cc","url":url,"clientCredentials":{"clientId":"app","clientSecretEnv":"CC_SECRET"}}),
+            &[("CC_SECRET", "12345")],
+        )
+        .unwrap();
+        assert!(!short.secrets.contains(&"12345".to_owned()));
         let entries_label = parsed.servers["cc"].capability.provider_binding.clone();
         // A changed credential is a different provider binding.
         let rotated = catalog(
@@ -1154,6 +1184,7 @@ mod tests {
         }
 
         // A JWT client assertion signed with the EC key, for the token endpoint as audience.
+        // A URL without a path is the resource exactly as configured, with no trailing slash.
         let (address, served) = serve(vec![
             (
                 200,
@@ -1165,7 +1196,7 @@ mod tests {
         ])
         .await;
         let origin = format!("http://127.0.0.1:{}", address.port());
-        let url = format!("{origin}/mcp");
+        let url = origin.clone();
         let parsed = catalog(
             json!({"name":"cc","url":url,"clientCredentials":{"clientId":"client-1","assertionKeyEnv":"CC_KEY","tokenUrl":format!("{origin}/token")}}),
             &[("CC_KEY", EC_KEY)],
@@ -1182,6 +1213,7 @@ mod tests {
                 .any(|header| header.starts_with("authorization:"))
         );
         assert_eq!(body["client_id"], "client-1");
+        assert_eq!(body["resource"], origin);
         assert_eq!(
             body["client_assertion_type"],
             "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
@@ -1473,7 +1505,7 @@ mod tests {
         };
         let good = helper(
             "good",
-            r#"printf '{"X-Api-Key":"helper-key-value","Authorization":"Bearer helper-token"}'"#,
+            r#"printf '{"X-Api-Key":"helper-key-value","Authorization":"Bearer helper-token","X-Tenant":"acme"}'"#,
         );
         let parsed = catalog(
             json!({"name":"x","url":"https://mcp.example.test/mcp","helper":[good]}),
@@ -1498,6 +1530,9 @@ mod tests {
         for secret in ["helper-key-value", "Bearer helper-token", "helper-token"] {
             assert!(minted.secrets.contains(&secret.to_owned()), "{secret}");
         }
+        // A value too short to recognize is not withheld, so it cannot drop unrelated output.
+        assert_eq!(minted.headers["x-tenant"], "acme");
+        assert!(!minted.secrets.contains(&"acme".to_owned()));
         for (body, message) in [
             ("printf 'leaked-output-value'", "must print a JSON object"),
             (
