@@ -951,6 +951,17 @@ async fn run(command: Command) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             execution_profile.workspace_mounts = workspace_mounts.capabilities();
+            let disk_space = supertag_worker_host::environment::DiskSpaceSource::Directory(
+                state_directory.clone(),
+            );
+            // Test builds never hold a real sleep assertion unless a test supplies a fake one.
+            #[cfg(not(feature = "test-fixtures"))]
+            let keep_awake = supertag_worker_host::environment::KeepAwakeCommand::for_platform(
+                std::env::consts::OS,
+                std::process::id(),
+            );
+            #[cfg(feature = "test-fixtures")]
+            let (keep_awake, disk_space) = test_host_environment(disk_space)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -974,6 +985,8 @@ async fn run(command: Command) -> Result<()> {
                 artifact_source,
                 artifact_peers,
                 workspace_mounts,
+                disk_space,
+                keep_awake,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -2246,6 +2259,37 @@ fn operator_target(connection: Connection) -> Result<(String, String)> {
             required_env("SUPERTAG_OPERATOR_TOKEN")?,
         ))
     }
+}
+
+/// `SUPERTAG_TEST_KEEP_AWAKE_COMMAND` replaces the OS keep-awake command with a fake that
+/// receives the host's platform arguments; `SUPERTAG_TEST_DISK_SPACE=free,total` fixes reports.
+#[cfg(feature = "test-fixtures")]
+fn test_host_environment(
+    disk_space: supertag_worker_host::environment::DiskSpaceSource,
+) -> Result<(
+    Option<supertag_worker_host::environment::KeepAwakeCommand>,
+    supertag_worker_host::environment::DiskSpaceSource,
+)> {
+    use supertag_worker_host::environment::{DiskSpaceSource, KeepAwakeCommand};
+    let keep_awake = std::env::var_os("SUPERTAG_TEST_KEEP_AWAKE_COMMAND").and_then(|program| {
+        KeepAwakeCommand::for_platform(std::env::consts::OS, std::process::id()).map(|command| {
+            KeepAwakeCommand {
+                program: program.into(),
+                ..command
+            }
+        })
+    });
+    let disk_space = match std::env::var("SUPERTAG_TEST_DISK_SPACE") {
+        Ok(value) => {
+            let (free, total) = value.split_once(',').context("invalid test disk space")?;
+            DiskSpaceSource::Fixed(supertag_protocol::v2::HostDiskSpace {
+                free_bytes: free.parse()?,
+                total_bytes: total.parse()?,
+            })
+        }
+        Err(_) => disk_space,
+    };
+    Ok((keep_awake, disk_space))
 }
 
 fn required_env(name: &str) -> Result<String> {

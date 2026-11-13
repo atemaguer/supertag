@@ -9,7 +9,7 @@ use supertag_protocol::v2::{
 use tokio::{sync::watch, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
-use crate::{RegisteredHost, journal::Journal, request, retryable};
+use crate::{RegisteredHost, environment::DiskSpaceSource, journal::Journal, request, retryable};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum State {
@@ -27,6 +27,7 @@ impl State {
         harness: i32,
         workspaces: &[String],
         profile: &HarnessExecutionProfile,
+        disk: &DiskSpaceSource,
     ) -> ReportHostRequest {
         let (readiness, reason, available_slots) = match self {
             Self::Pending => (HostReadiness::Pending, HostReadinessReason::Starting, 0),
@@ -48,6 +49,7 @@ impl State {
             harness_kind: harness,
             workspace_ids: workspaces.to_vec(),
             execution_profile: Some(profile.clone()),
+            disk_space: disk.sample(),
         }
     }
 }
@@ -62,11 +64,13 @@ pub(crate) struct Presence {
     harness: i32,
     workspaces: Vec<String>,
     profile: HarnessExecutionProfile,
+    disk: DiskSpaceSource,
 }
 
 impl Presence {
     pub(crate) fn start(
         journal: Arc<Journal>,
+        disk: DiskSpaceSource,
         client: RegisteredHost,
         token: String,
         harness: i32,
@@ -86,6 +90,7 @@ impl Presence {
             harness,
             workspaces: workspaces.clone(),
             profile: profile.clone(),
+            disk: disk.clone(),
         };
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
@@ -106,7 +111,7 @@ impl Presence {
                         return Err(error);
                     }
                 };
-                let report = state.report(sequence, harness, &workspaces, &profile);
+                let report = state.report(sequence, harness, &workspaces, &profile, &disk);
                 let response = tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
@@ -146,6 +151,7 @@ impl Presence {
             self.harness,
             &self.workspaces,
             &self.profile,
+            &self.disk,
         );
         // Best effort: on a partition the last observation naturally expires. Never
         // prevent journal cleanup or treat a presence reply as execution authority.

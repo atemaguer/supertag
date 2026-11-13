@@ -658,6 +658,13 @@ message ReportHostRequest {
   HarnessKind harness_kind = 6;
   repeated string workspace_ids = 7;
   HarnessExecutionProfile execution_profile = 8;
+  // Free space where the host allocates Workspaces and scratch, sampled with each report.
+  HostDiskSpace disk_space = 2000;
+}
+
+message HostDiskSpace {
+  uint64 free_bytes = 1;
+  uint64 total_bytes = 2;
 }
 
 message WorkerHostStatus {
@@ -676,6 +683,8 @@ message WorkerHostStatus {
   optional int64 presence_expires_at_ms = 13;
   optional int64 revoked_at_ms = 14;
   HarnessExecutionProfile execution_profile = 15;
+  // From the current generation's latest report; absent until the host reports it.
+  HostDiskSpace disk_space = 2000;
 }
 
 message ListHostsRequest {

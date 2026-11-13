@@ -55,6 +55,20 @@ impl Store {
         {
             return Err(invalid("host must report at most 256 valid Workspace IDs"));
         }
+        let disk = input
+            .disk_space
+            .as_ref()
+            .map(|disk| {
+                let free = i64::try_from(disk.free_bytes).ok();
+                let total = i64::try_from(disk.total_bytes).ok();
+                match (free, total) {
+                    (Some(free), Some(total)) if total > 0 && free <= total => Ok((free, total)),
+                    _ => Err(invalid(
+                        "host disk space needs a positive total no smaller than free space",
+                    )),
+                }
+            })
+            .transpose()?;
         let mut workspaces = input.workspace_ids.clone();
         workspaces.sort_unstable();
         workspaces.dedup();
@@ -73,9 +87,10 @@ impl Store {
             input.harness_kind,
             &workspaces,
         );
-        let digest_input = match &execution_profile {
-            Some(profile) => serde_json::to_vec(&(observed, profile))?,
-            None => serde_json::to_vec(&observed)?,
+        let digest_input = match (&execution_profile, disk) {
+            (Some(profile), None) => serde_json::to_vec(&(observed, profile))?,
+            (None, None) => serde_json::to_vec(&observed)?,
+            (profile, Some(disk)) => serde_json::to_vec(&(observed, profile, disk))?,
         };
         let digest = format!("{:x}", Sha256::digest(digest_input));
         let (mut transaction, _) = self.write().await?;
@@ -107,11 +122,11 @@ impl Store {
         let expires = now
             .checked_add(PRESENCE_MS)
             .ok_or_else(|| invalid("presence expiry is out of range"))?;
-        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile")
+        sqlx::query("INSERT INTO supertag_v2_host_readiness (host_id,generation,sequence,request_digest,capacity,available_slots,readiness,reason,harness_kind,workspace_ids,last_seen_at_ms,presence_expires_at_ms,execution_profile,disk_free_bytes,disk_total_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(host_id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,request_digest=excluded.request_digest,capacity=excluded.capacity,available_slots=excluded.available_slots,readiness=excluded.readiness,reason=excluded.reason,harness_kind=excluded.harness_kind,workspace_ids=excluded.workspace_ids,last_seen_at_ms=excluded.last_seen_at_ms,presence_expires_at_ms=excluded.presence_expires_at_ms,execution_profile=excluded.execution_profile,disk_free_bytes=excluded.disk_free_bytes,disk_total_bytes=excluded.disk_total_bytes")
             .bind(host.id()).bind(host.generation).bind(sequence).bind(digest)
             .bind(i64::from(input.capacity)).bind(i64::from(input.available_slots)).bind(i64::from(input.readiness))
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
-            .bind(execution_profile)
+            .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1))
             .execute(&mut *transaction).await?;
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;
@@ -225,6 +240,16 @@ async fn status_in(
         view.reason = row.try_get::<i64, _>("reason")? as i32;
         view.workspace_ids = serde_json::from_str(&row.try_get::<String, _>("workspace_ids")?)?;
         view.execution_profile = execution::read_profile(row.try_get("execution_profile")?)?;
+        view.disk_space = match (
+            row.try_get::<Option<i64>, _>("disk_free_bytes")?,
+            row.try_get::<Option<i64>, _>("disk_total_bytes")?,
+        ) {
+            (Some(free), Some(total)) => Some(HostDiskSpace {
+                free_bytes: free as u64,
+                total_bytes: total as u64,
+            }),
+            _ => None,
+        };
         view.last_seen_at_ms = Some(row.try_get("last_seen_at_ms")?);
         let expires: i64 = row.try_get("presence_expires_at_ms")?;
         view.presence_expires_at_ms = Some(expires);

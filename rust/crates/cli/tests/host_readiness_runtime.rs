@@ -350,3 +350,129 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
     control.kill()?;
     Ok(())
 }
+
+async fn wait_for_log(path: &Path, expected: &[String]) -> Result<()> {
+    let end = Instant::now() + WAIT;
+    loop {
+        let log = std::fs::read_to_string(path).unwrap_or_default();
+        if log.lines().map(str::to_owned).collect::<Vec<_>>() == expected {
+            return Ok(());
+        }
+        ensure!(
+            Instant::now() < end,
+            "keep-awake log {log:?} never became {expected:?}"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_attempt_keeps_the_machine_awake_and_low_disk_is_reported() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("control.db").display()
+    );
+    let credentials = Credentials::new();
+    let mut command = credentials.command(&["control-plane"]);
+    command.env("SUPERTAG_DATABASE_URL", &database);
+    let mut control = Process::spawn(command, directory.path())?;
+    let private = control.address().await?;
+    let mut gateway = Process::spawn(
+        credentials.command(&["gateway", "--control-plane", &private]),
+        directory.path(),
+    )?;
+    let public = gateway.address().await?;
+    let mut operator =
+        operator_client::OperatorClient::new(Endpoint::from_shared(public.clone())?.connect_lazy());
+    operator
+        .put_tag(credentials.request(PutTagRequest {
+            tag_id: "reviewer".into(),
+            instructions: "Review".into(),
+            ..Default::default()
+        })?)
+        .await?;
+
+    // A fake OS command records the platform arguments it receives and its termination.
+    let log = directory.path().join("keep-awake.log");
+    let script = directory.path().join("keep-awake");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"start $*\" >> '{0}'\ntrap 'echo term >> \"{0}\"; exit 0' TERM\nwhile :; do sleep 0.05; done\n",
+            log.display()
+        ),
+    )?;
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
+    let gib = 1u64 << 30;
+    let state = directory.path().join("worker");
+    let mut command = host_command(&credentials, &public, &state);
+    command
+        .arg("--adapter-arg=--wait-for-cancel")
+        .env("SUPERTAG_TEST_KEEP_AWAKE_COMMAND", &script)
+        .env("SUPERTAG_TEST_DISK_SPACE", format!("{gib},{}", 100 * gib));
+    let mut host = Process::spawn(command, directory.path())?;
+    assert_eq!(host.line().await?, "ready");
+    let ready = wait_phase(&mut operator, &credentials, HostPhase::Ready, WAIT).await?;
+    assert_eq!(
+        ready.disk_space,
+        Some(HostDiskSpace {
+            free_bytes: gib,
+            total_bytes: 100 * gib
+        })
+    );
+    // Preflight warns before any work is claimed; idle hosts hold nothing.
+    let preflight = std::fs::read_to_string(&host.log)?;
+    assert!(
+        preflight.contains("Warning: Worker Host free disk 1 GiB is below 5 GiB"),
+        "{preflight}"
+    );
+    assert!(!log.exists());
+    let output = credentials
+        .command(&["host", "--gateway", &public, "get", "local"])
+        .output()?;
+    ensure!(output.status.success(), "{output:?}");
+    let shown: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(shown["disk_space"]["free_bytes"], gib);
+    assert!(
+        shown["disk_warning"]
+            .as_str()
+            .is_some_and(|warning| warning.contains("below 5 GiB")),
+        "{shown}"
+    );
+
+    let task = operator
+        .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
+            execution_limits: None,
+            tag_id: "reviewer".into(),
+            session_id: "review".into(),
+            operation_id: "review-turn".into(),
+            prompt: "Wait for operator".into(),
+            input_artifacts: vec![],
+        })?)
+        .await?
+        .into_inner();
+    wait_phase(&mut operator, &credentials, HostPhase::Busy, WAIT).await?;
+    let arguments = match std::env::consts::OS {
+        "macos" => format!("start -i -w {}", host.child.id()),
+        "linux" => format!(
+            "start --what=idle:sleep --who=SuperTag --why=Running Task Attempts --mode=block tail --pid={} -f /dev/null",
+            host.child.id()
+        ),
+        other => anyhow::bail!("unsupported test platform {other}"),
+    };
+    wait_for_log(&log, std::slice::from_ref(&arguments)).await?;
+    operator
+        .cancel_task(credentials.request(CancelTaskRequest {
+            task_id: task.task_id.clone(),
+        })?)
+        .await?;
+    wait_phase(&mut operator, &credentials, HostPhase::Ready, WAIT).await?;
+    wait_for_log(&log, &[arguments, "term".into()]).await?;
+    host.kill()?;
+    gateway.kill()?;
+    control.kill()?;
+    Ok(())
+}
