@@ -62,6 +62,87 @@ async fn json(mut command: Command) -> Result<Value> {
 database_tests! {
     #[tokio::test]
     harness_output_is_redacted_before_it_leaves_the_worker_host;
+    #[tokio::test]
+    redaction_keeps_harness_text_within_its_limit;
+}
+
+/// `[REDACTED]` is longer than a short secret, so redacting an event the Control Plane would accept
+/// may lengthen it past the 16,384-byte event limit; the Worker Host keeps it within the limit
+/// instead of failing the Attempt.
+async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let gateway_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut control = binary(&["control-plane", "--listen", "127.0.0.1:0"]);
+    control
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let (_control, private) = service(control).await?;
+    let mut gateway = binary(&["gateway", "--control-plane", &private]);
+    gateway
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_gateway, public) = service(gateway).await?;
+    let operator = |args: &[&str]| {
+        let mut command = binary(args);
+        command
+            .args(["--gateway", &public])
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+        command
+    };
+    json(operator(&["put-tag", "reviewer", "--instructions", "Echo"])).await?;
+    // The fixture publishes `Echo: PROMPT []`: 15,009 bytes, 33,009 once redacted.
+    let prompt = "pw42 ".repeat(3_000);
+    let submitted = json(operator(&[
+        "submit",
+        "--tag",
+        "reviewer",
+        "--session",
+        "review",
+        &prompt,
+    ]))
+    .await?;
+    let task_id = submitted["task_id"].as_str().context("task_id")?.to_owned();
+    let mut worker = binary(&[
+        "worker-host",
+        "--gateway",
+        &public,
+        "--adapter",
+        ADAPTER,
+        "--once",
+    ]);
+    worker
+        .arg("--state-directory")
+        .arg(directory.path().join("worker"))
+        .env("SUPERTAG_HOST_TOKEN", &host_token)
+        .env("FIXTURE_PROVIDER_PASSWORD", "pw42");
+    let status = timeout(WAIT, worker.status()).await??;
+    ensure!(status.success(), "Worker Host exited with {status}");
+
+    let task = json(operator(&["get-task", &task_id])).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let result = task["result"].as_str().context("result")?;
+    let mut connection = database::connect(&database).await?;
+    let events: Vec<String> =
+        sqlx::query_scalar("SELECT text FROM supertag_v2_task_events WHERE task_id=$1")
+            .bind(&task_id)
+            .fetch_all(&mut connection)
+            .await?;
+    let echoed = events
+        .iter()
+        .find(|text| text.starts_with("Echo:"))
+        .context("echoed event")?;
+    assert_eq!(echoed.len(), 16_384);
+    assert!(
+        echoed.starts_with("Echo: [REDACTED] [REDACTED] "),
+        "{echoed:.64}"
+    );
+    assert!(!echoed.contains("pw42"));
+    assert_eq!(result.len(), 33_009);
+    assert!(!result.contains("pw42"));
+    Ok(())
 }
 
 async fn harness_output_is_redacted_before_it_leaves_the_worker_host(

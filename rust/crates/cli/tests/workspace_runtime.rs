@@ -640,7 +640,21 @@ async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_deli
             json(credentials.operator(&["get-task", field(&task, "task_id")?], &public)).await?;
         assert_eq!(result["state"], "TASK_STATE_SUCCEEDED", "{result}");
         if prompt == "produce" {
-            assert!(field(&result, "result")?.starts_with("artifact:"));
+            let produced = field(&result, "result")?
+                .strip_prefix("artifact:")
+                .context("missing produced artifact")?;
+            let metadata =
+                json(credentials.command(&["artifact", "--gateway", &public, "get", produced]))
+                    .await?;
+            assert_eq!(
+                metadata["summary"]["description"]["title"],
+                "Reusable evidence from https://[REDACTED]@git.example/repo.git",
+                "{metadata}"
+            );
+            assert_eq!(
+                metadata["summary"]["description"]["summary"], "auth Basic [REDACTED]",
+                "{metadata}"
+            );
             gateway.kill().await?;
             gateway.wait().await?;
             gateway = service(gateway_command(Some(
