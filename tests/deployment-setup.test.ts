@@ -32,7 +32,6 @@ describe("shared deployment configuration", () => {
     (platform) => {
       const env = resolveDeploymentEnvironment(platform, {
         ...common,
-        ...(platform === "cloudflare" || platform === "modal" ? external : {}),
         SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID: "  surface-task-123  ",
         SUPERTAG_OPERATOR_CHANNEL: " slack:C0OPS ",
       });
@@ -53,10 +52,9 @@ describe("shared deployment configuration", () => {
       SUPERTAG_WORKLET_GRPC_TLS_KEY_FILE: "/var/lib/supertag/tls/privkey.pem",
     };
     expect(resolveDeploymentEnvironment("fly", grpc)).toMatchObject(grpc);
-    for (const platform of ["railway", "render", "cloudflare", "modal"] as const)
-      expect(() => resolveDeploymentEnvironment(platform, { ...external, ...grpc })).toThrow(
-        "template requires WebSocket",
-      );
+    expect(() => resolveDeploymentEnvironment("railway", { ...external, ...grpc })).toThrow(
+      "template requires WebSocket",
+    );
     for (const changes of [
       { SUPERTAG_WORKLET_GRPC_TLS_KEY_FILE: "relative.pem" },
       { SUPERTAG_WORKLET_GRPC_TLS_CERT_FILE: "" },
@@ -91,10 +89,7 @@ describe("shared deployment configuration", () => {
   );
 
   it.each(DEPLOYMENT_PLATFORMS)("validates %s against the same runtime contract", (platform) => {
-    const env = resolveDeploymentEnvironment(platform, {
-      ...common,
-      ...(platform === "cloudflare" || platform === "modal" ? external : {}),
-    });
+    const env = resolveDeploymentEnvironment(platform, common);
     expect(env).toMatchObject({
       ...common,
       SUPERTAG_DEPLOYMENT_PLATFORM: platform,
@@ -102,31 +97,23 @@ describe("shared deployment configuration", () => {
       SUPERTAG_STATE_DIR: "/var/lib/supertag",
     });
   });
-  it.each(["railway", "render", "fly"] as const)(
-    "allows durable external storage on %s",
-    (platform) => {
-      expect(
-        resolveDeploymentEnvironment(platform, { ...common, ...external })
-          .SUPERTAG_CREDENTIAL_VAULT,
-      ).toBe("vault");
-    },
-  );
+  it.each(DEPLOYMENT_PLATFORMS)("allows durable external storage on %s", (platform) => {
+    expect(
+      resolveDeploymentEnvironment(platform, { ...common, ...external }).SUPERTAG_CREDENTIAL_VAULT,
+    ).toBe("vault");
+  });
   it("rejects incompatible hosts, local databases, local state and mismatched platforms", () => {
     for (const changes of [
       { SUPERTAG_DATABASE_URL: "file:/tmp/db" },
       { SUPERTAG_WORKLET_TRANSPORT: "embedded" },
       { SUPERTAG_STATE_DIR: "/tmp" },
-      { SUPERTAG_DEPLOYMENT_PLATFORM: "render" },
+      { SUPERTAG_DEPLOYMENT_PLATFORM: "fly" },
       { SUPERTAG_COORDINATION_URL: "https://example.com/path" },
     ])
       expect(() => resolveDeploymentEnvironment("railway", { ...common, ...changes })).toThrow();
-    expect(() =>
-      resolveDeploymentEnvironment("cloudflare", {
-        ...common,
-        ...external,
-        SUPERTAG_CREDENTIAL_VAULT: "file",
-      }),
-    ).toThrow("requires SUPERTAG_CREDENTIAL_VAULT=vault");
+  });
+  it("leaves the native-only platforms to the native CLI", () => {
+    expect(DEPLOYMENT_PLATFORMS).toEqual(["railway", "fly"]);
   });
   it("redacts malformed values from validation errors", () => {
     expect(() =>
@@ -136,24 +123,13 @@ describe("shared deployment configuration", () => {
       }),
     ).toThrow(/^SUPERTAG_DATABASE_URL must be a valid URL$/);
   });
-  it.each(["cloudflare", "modal"] as const)(
-    "requires durable external credentials on %s",
-    (platform) => {
-      expect(() => resolveDeploymentEnvironment(platform, common)).toThrow("Missing VAULT_ADDR");
+  it("requires the Vault address and token with the Vault credential store", () => {
+    for (const key of ["VAULT_ADDR", "VAULT_TOKEN"]) {
       expect(() =>
-        resolveDeploymentEnvironment(platform, {
-          ...common,
-          ...external,
-          SUPERTAG_CREDENTIAL_VAULT: "file",
-        }),
-      ).toThrow("requires SUPERTAG_CREDENTIAL_VAULT=vault");
-      for (const key of ["VAULT_ADDR", "VAULT_TOKEN"]) {
-        expect(() =>
-          resolveDeploymentEnvironment(platform, { ...common, ...external, [key]: undefined }),
-        ).toThrow(`Missing ${key}`);
-      }
-    },
-  );
+        resolveDeploymentEnvironment("railway", { ...common, ...external, [key]: undefined }),
+      ).toThrow(`Missing ${key}`);
+    }
+  });
 });
 
 describe("deployment setup and verification", () => {
@@ -163,11 +139,7 @@ describe("deployment setup and verification", () => {
       const directory = await mkdtemp(join(tmpdir(), "deployment-setup-"));
       const output = join(directory, ".env.deployment");
       for (const key of DEPLOYMENT_ENVIRONMENT_KEYS) vi.stubEnv(key, undefined);
-      for (const [key, value] of Object.entries({
-        ...common,
-        ...(platform === "modal" || platform === "cloudflare" ? external : {}),
-      }))
-        vi.stubEnv(key, value);
+      for (const [key, value] of Object.entries(common)) vi.stubEnv(key, value);
       vi.stubEnv("UNRELATED_SECRET", "never-export");
       try {
         const args = ["setup", "--platform", platform, "--output", output, "--non-interactive"];

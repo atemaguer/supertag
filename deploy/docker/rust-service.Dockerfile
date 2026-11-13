@@ -25,11 +25,14 @@ FROM runtime AS gateway
 CMD ["gateway", "--listen", "127.0.0.1:3436", "--control-plane", "https://control-plane:3434"]
 
 # For platforms that mount root-owned volumes and pass TLS material as secrets (Fly.io,
-# Railway). Starts as root only to prepare /var/lib/supertag and /run/supertag-tls, then runs
-# the service as UID 10001; see rust-hosted-entrypoint.sh. The platform definition supplies
-# the service command. Build context: the verified `supertag` binary and this entrypoint.
+# Railway, Render, Cloudflare, and Modal). Starts as root only to prepare /var/lib/supertag and
+# /run/supertag-tls, then runs the service as UID 10001; see rust-hosted-entrypoint.sh. The
+# platform definition supplies the service command; `pair` runs the Control Plane and a Gateway
+# in this one container (rust-hosted-pair.sh). Build context: the verified `supertag` binary and
+# these two scripts.
 FROM runtime AS hosted
 USER 0:0
 COPY --chown=0:0 --chmod=0755 rust-hosted-entrypoint.sh /usr/local/bin/supertag-hosted-entrypoint
+COPY --chown=0:0 --chmod=0755 rust-hosted-pair.sh /usr/local/bin/supertag-hosted-pair
 ENTRYPOINT ["/usr/local/bin/supertag-hosted-entrypoint"]
 CMD ["--help"]

@@ -669,7 +669,7 @@ Operate SuperTag:
   supertag status control-plane
   supertag use|remove control-plane NAME
   supertag migrate database [--check]
-  supertag setup|check deployment --platform railway|render|cloudflare|fly|modal [--transport websocket|grpc]
+  supertag setup|check deployment --platform railway|fly [--transport websocket|grpc]
   supertag verify deployment URL [--env-file PATH] [--require-ready] [--grpc-url URL]
 
 Resource list output is a text table by default; --output json|yaml gives structured data. Get returns JSON; describe defaults to readable text for supported resources.

@@ -55,7 +55,7 @@ Follow this order on your first visit:
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |
 | Add another execution system | [Build a custom Worker or harness](guides/custom-workers.md) |
 | Run an always-on deployment | [Self-host SuperTag](guides/self-hosting.md) |
-| Host the Control Plane and run repository work on Modal | [Deploy on Modal](guides/deploy-modal.md) |
+| Host the Control Plane on Modal | [Deploy on Modal](guides/deploy-modal.md) |
 | Compare SuperTag with other agent systems | [SuperTag and other agent systems](concepts/supertag-and-other-agent-systems.md) |
 | Look up a term | [Glossary](reference/glossary.md) |
 
@@ -111,11 +111,11 @@ Choose the tool your team already uses:
 
 - [Self-host SuperTag](guides/self-hosting.md) — choose Docker Compose, Railway, Render, Cloudflare, or a native service
 - [Railway](guides/deploy-railway.md) — hosted Control Plane, PostgreSQL, and persistent storage
-- [Render](guides/deploy-render.md) — Blueprint-managed Control Plane, PostgreSQL, and persistent storage
+- [Render](guides/deploy-render.md) — Blueprint-managed native Control Plane, optional Gateway, and PostgreSQL
 - [Fly.io](guides/deploy-fly.md) — always-on Machine with PostgreSQL and a persistent volume
-- [Modal](guides/deploy-modal.md) — always-on Server with external PostgreSQL and credentials
-- [Cloudflare](guides/deploy-cloudflare.md) — container-hosted Control Plane with PostgreSQL and Vault
-- [Deployment setup](guides/deployment-setup.md) — shared configuration and verification for Railway, Render, and Cloudflare
+- [Modal](guides/deploy-modal.md) — always-on native Control Plane behind a web endpoint, with external PostgreSQL and Vault
+- [Cloudflare](guides/deploy-cloudflare.md) — native Control Plane in a Container behind a Worker, with external PostgreSQL and Vault
+- [Deployment setup](guides/deployment-setup.md) — shared configuration and verification for Railway and Fly.io
 - [Control Plane operations](operations/control-plane.md) — health, persistence, deployment, and databases
 - [Operator notifications](guides/notifications.md) — alert the operator about inbox items
 - [Manage resources](operations/resources.md) — get, describe, diff, apply, delete, watch, and cancel

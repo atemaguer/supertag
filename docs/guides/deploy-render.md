@@ -1,178 +1,207 @@
 # Deploy the Control Plane on Render
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
-in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
-may pursue different goals but share one set of rules and one record of the work. Declare a hosted
-**Control Plane** (the service that stores and coordinates a SuperTag organization), managed
-PostgreSQL, and persistent secret storage together as a Render Blueprint. That storage holds
-credentials for each **collaboration surface**, an external work tool such as Slack where SuperTag
-meets people. **Worker Hosts** (machines that execute the work) stay on machines you control, and
-each runs a **Worklet**, the supervisor that connects outbound to the Control Plane. See the
+<!-- supertag-cli: native -->
+
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
+Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
+public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
+optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the
+native Control Plane on Render from a Blueprint, with Render PostgreSQL. See the
 [glossary](../reference/glossary.md) for other terms.
 
-The repository's [`render.yaml`](../../deploy/render/render.yaml) declares one Docker web service,
-one Render Postgres database, a persistent disk, database migrations, `/healthz` checks, and remote
-Worklet transport.
+Render's edge terminates TLS and forwards only HTTP/1.1. The Control Plane therefore carries its
+gRPC API inside a WebSocket, the **tunnel**, and runs SuperTag's own TLS end to end inside it.
+Clients use a `wss://` URL. Render sees only ciphertext.
+
+```text
+operators, Worker Hosts ── wss:// ──> Render edge ──> supertag-control-plane (web, port 8080)
+                                                        │ PostgreSQL (Render), disk
+supertag-gateway (background worker, optional) ── wss:// ──┘
+```
+
+[`render.yaml`](../../deploy/render/render.yaml) declares:
+
+| Service | Render type | Runs | State |
+| --- | --- | --- | --- |
+| `supertag-control-plane` | Web service, port 8080 | `control-plane --websocket-listen 0.0.0.0:8080`; native gRPC on loopback only | Render PostgreSQL; a 1 GB disk at `/var/lib/supertag` for transfer files |
+| `supertag-gateway` | Background worker, optional | `gateway --control-plane wss://supertag-control-plane.onrender.com` plus its connector flags | A 1 GB disk for connector state and the file credential vault |
+| `supertag-postgres` | PostgreSQL | | Private network only (`ipAllowList: []`) |
 
 ## Before you start
 
-- The installed `supertag` CLI. Deploy the release tag or commit that matches `supertag --version`.
-- A private environment file prepared with `supertag setup deployment --platform render`, as
-  described in [Configure a hosted Control Plane](deployment-setup.md). The Blueprint provides the
-  persistent disk and database binding; preserve those provider-managed settings.
-- Render access to the SuperTag GitHub repository. The repository is not publicly accessible, so
-  grant Render access to it or use a fork your account can read.
+- The native `supertag` CLI, from the release you deploy. No native release archive is published
+  yet, so build it from that release's checkout with
+  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
+  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
+  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `hosted` service image pushed to a registry Render can pull, with its digest. See
+  [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
+- `openssl`, to issue certificates from your own CA.
+- A Render workspace with billing: disks need a paid instance type, and free instances sleep.
 
-## 1. Create the Blueprint
-
-1. Generate an administrative token locally:
-
-   ```sh
-   openssl rand -hex 32
-   ```
-
-2. In the Render Dashboard, create a new Blueprint from the SuperTag GitHub repository and set
-   **Blueprint Path** to `deploy/render/render.yaml`. Keep the service root at the repository root.
-3. During creation, provide `SUPERTAG_ADMIN_TOKEN` and `SUPERTAG_COORDINATION_URL`, the service's final
-   HTTPS origin or configured custom domain. The Blueprint sets `SUPERTAG_DEPLOYMENT_PLATFORM=render`.
-4. Review the selected service and database plans, region, and disk size before applying the Blueprint.
-
-The persistent disk makes the Control Plane a paid, single-instance service. It is mandatory
-because collaboration surface credentials are stored under `/var/lib/supertag`; the managed database does not
-contain credential values.
-
-Render builds `deploy/docker/Dockerfile`, runs `node dist/index.js migrate` before each deployment,
-and starts the Control Plane on Render's injected `PORT`. Inside the container image,
-`node dist/index.js` is the `supertag` CLI. The database is private-network only. The generated
-HTTPS endpoint serves management requests, Worklet connections, and collaboration surface traffic from the same
-Control Plane process and listener. See Render's [Docker](https://render.com/docs/docker),
-[Blueprint](https://render.com/docs/blueprint-spec), and
-[PostgreSQL](https://render.com/docs/postgresql-creating-connecting) documentation.
-
-## 2. Verify the Control Plane
-
-After the Blueprint finishes, copy the Control Plane's `onrender.com` URL and check liveness:
+## 1. Prepare the configuration
 
 ```sh
-curl --fail https://YOUR-CONTROL-PLANE.onrender.com/healthz
+supertag setup deployment render --output supertag-deployment
+supertag check deployment render --directory supertag-deployment
 ```
 
-Use `supertag verify deployment https://YOUR-CONTROL-PLANE.onrender.com --env-file .env.deployment`
-to check management authentication and report readiness as well.
+Setup writes `control-plane.env`, `gateway.env`, and `operator.env`, each readable only by you.
+It generates the Gateway and operator tokens. It leaves out `SUPERTAG_DATABASE_URL`: the Blueprint
+sets it from its own database, and setup refuses one supplied in the environment.
 
-Render continuously checks `/healthz` and uses it to gate deployments. `/readyz` remains
-unavailable until a compatible Worklet connects, so keep `/healthz` as the platform health-check
-path. Render explains this distinction in its [health-check documentation](https://render.com/docs/health-checks).
+## 2. Create the Blueprint
 
-## 3. Connect your local CLI
+1. In your copy of the repository, replace both image URLs in `deploy/render/render.yaml` with
+   your hosted image by digest. For a private registry, add the registry credential to each
+   service's `image` (`creds: {fromRegistryCreds: {name: ...}}`). Remove the `supertag-gateway`
+   service if you use no collaboration surface or notification; otherwise give it its connector
+   flags (see [Collaboration surfaces](#collaboration-surfaces)).
+2. In the Render Dashboard, create a Blueprint from the repository with **Blueprint Path**
+   `deploy/render/render.yaml`.
+3. Read the Control Plane's hostname on the `supertag-control-plane` service page. Render
+   subdomains are global, so it is `supertag-control-plane.onrender.com` only if no other service
+   took that name first. This guide writes `supertag-control-plane.onrender.com`; use yours. If it
+   differs, or you add a custom domain, change the Gateway's `--control-plane` URL in
+   `render.yaml` to it.
 
-Connect once from your local machine. The administrative token is read from the environment and
-stored in the local credential store:
+The services fail their first start: they have no TLS settings yet.
+
+## 3. Issue certificates and add the settings
+
+Render's `onrender.com` hostname cannot carry a publicly trusted certificate for SuperTag's inner
+TLS. Issue the Control Plane's certificate from your own CA for the hostname from step 2 (and any
+custom domain you add), as shown in
+[Issue certificates from your own CA](../../deploy/native/README.md#issue-certificates-from-your-own-ca).
+Every client then trusts that CA through `SUPERTAG_SERVER_CA_FILE`. If the hostname changes later,
+issue the certificate again.
+
+The Gateway signs in as `gateway:local` with the credential setup put in `gateway.env`; the
+Control Plane accepts it because `control-plane.env` holds the same value as
+`SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`. Client certificates are optional. To require them from
+every caller, add `SUPERTAG_TLS_CLIENT_CA_PEM` (your CA) to the Control Plane and give the
+Gateway, each operator, and each Worker Host a client certificate.
+
+1. On `supertag-control-plane`, open **Environment**, choose **Add from .env**, and paste
+   `control-plane.env`. Add `SUPERTAG_TLS_CERT_PEM` and `SUPERTAG_TLS_KEY_PEM` with the
+   certificate and key.
+2. On `supertag-gateway`, paste `gateway.env` and its connector settings, and add
+   `SUPERTAG_SERVER_CA_PEM` (your CA).
+
+The image entrypoint writes each `_PEM` value to a file under `/run/supertag-tls` and runs the
+service as an unprivileged user. Do not set the matching `_FILE` variables yourself.
+
+The Control Plane migrates its database when it starts. Render's health check sends
+`GET /healthz` to port 8080. The tunnel listener answers that one plain request with `200 ok` and
+accepts nothing else that is not a WebSocket upgrade, and it refuses any upgrade that carries an
+`Origin` header, as browsers send. The health check reports only that the Control Plane process is
+listening.
+
+## 4. Verify
 
 ```sh
-export SUPERTAG_ADMIN_TOKEN="the-administrative-token"
-supertag connect control-plane https://YOUR-CONTROL-PLANE.onrender.com
-unset SUPERTAG_ADMIN_TOKEN
+curl --fail https://supertag-control-plane.onrender.com/healthz
+export SUPERTAG_SERVER_CA_FILE=$PWD/ca.pem
+supertag verify deployment wss://supertag-control-plane.onrender.com \
+  --env-file supertag-deployment/operator.env
 ```
 
-The active Control Plane is remembered in `~/.supertag`, so your local CLI now controls the Render
-deployment, the way `kubectl` controls a cluster, without Shell or SSH access. Then manage the deployment from your local CLI, just like a local one: write the `org.yaml`
-manifests from [Declare a collaboration surface and Tag](self-hosting.md#5-declare-a-collaboration-surface-and-tag)
-and apply them.
+If the Control Plane requires client certificates, also set `SUPERTAG_CLIENT_CERT_FILE` and
+`SUPERTAG_CLIENT_KEY_FILE` to an operator's client certificate. Verification checks gRPC health
+through the tunnel, that anonymous and invalid credentials are refused, and that the operator token
+works. It reports readiness as `not ready` until a Worker Host connects.
+
+## 5. Connect a Worker Host
+
+Run operator commands with the operator token in `SUPERTAG_OPERATOR_TOKEN` and the URL in
+`--control-plane`. Create an **Auth Key** (a one-time enrollment secret) for the host, then enroll
+and run it on the machine that owns the **harness** (the coding agent that does the work, such as
+Codex):
 
 ```sh
-supertag apply -f org.yaml
+supertag auth-key create build-1 --role host --tag engineering \
+  --control-plane wss://supertag-control-plane.onrender.com
+# Save the printed key as build-1.key (mode 0600) on the Worker Host, then, with the same
+# SUPERTAG_SERVER_CA_FILE (and, if the Control Plane requires client certificates, the host's own
+# SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE):
+supertag host enroll build-1 --control-plane wss://supertag-control-plane.onrender.com \
+  --state-directory ~/.supertag-host --auth-key file:build-1.key
+supertag worker-host --control-plane wss://supertag-control-plane.onrender.com \
+  --state-directory ~/.supertag-host --harness codex
 ```
 
- Follow the matching [collaboration surface guide](../surfaces/README.md) for
-provider-side app and webhook configuration.
+The Worker Host connects outbound and needs no inbound port.
 
-## 4. Connect a Worklet
+## Collaboration surfaces
 
-A Tag with no
-bound Worker Host rejects every mention. From an operator environment, create an
-[Auth Key](../reference/resource-model.md#auth-keys) for the Tag. The host that joins with it is bound to
-the Tag:
+`supertag-gateway` is a background worker, which receives no inbound traffic, so it can serve only
+connectors that connect outbound. Append their flags to its `dockerCommand` in `render.yaml`; with
+none, it runs no connector.
 
-```sh
-supertag create auth-key build-east-1 --tag engineering
+- **Lark or Feishu**, over its outbound long connection:
+  `--lark-state-directory /var/lib/supertag/lark`, with `SUPERTAG_LARK_ACCOUNT_ID`,
+  `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
+  `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
+  `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in its environment. The app secret comes from the
+  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
+  `SUPERTAG_LARK_APP_SECRET`.
+- **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
+  secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
+
+Slack, GitHub, Linear, and Microsoft Teams need inbound webhooks, which this deployment cannot
+receive, and the native Gateway has no Slack Socket Mode. For them, run a Gateway on a host that
+can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
+with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
+URL with its own credential.
+
+```yaml
+    dockerCommand: /usr/local/bin/supertag-hosted-entrypoint gateway --listen 127.0.0.1:3436 --control-plane wss://supertag-control-plane.onrender.com --lark-state-directory /var/lib/supertag/lark
 ```
-
-The command prints a `stak_` secret once. On the machine that owns the **harness** (the coding agent that does the work, such as Claude
-Code or Codex) and workspace, set
-it in `SUPERTAG_AUTH_KEY`. The Worker Host needs only this key, not the administrative token, so
-pass the Control Plane URL directly:
-
-```sh
-export SUPERTAG_AUTH_KEY=stak_...
-supertag connect worklet --transport websocket \
-  --worklet-url https://YOUR-CONTROL-PLANE.onrender.com \
-  --worker-host build-east-1 \
-  --harness codex \
-  --workspace /absolute/path/to/codebase \
-  --worker-profile local-codex
-```
-
-The host joins as `build-east-1` and stores its credential, so later runs need no key.
-
-A **Worker** is the code on that host that completes a Tag's work. The HTTPS URL is upgraded to
-WSS automatically. This template uses WebSocket; see
-[Choose the Worker connection](deployment-setup.md#choose-the-worker-connection) before enabling gRPC.
 
 ## Check that it worked
 
-From the operator environment, confirm readiness and the host's connection:
-
 ```sh
-supertag verify deployment https://YOUR-CONTROL-PLANE.onrender.com --env-file .env.deployment --require-ready
-supertag describe worker-host build-east-1
+supertag verify deployment wss://supertag-control-plane.onrender.com \
+  --env-file supertag-deployment/operator.env --require-ready
 ```
 
-Readiness shows that a compatible Worklet is connected, not that the Tag can complete work. Finish
-by mentioning the Slack app in channel `C0123456789` and confirming that a Worker replies.
+With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm that it replies.
 
-## Optional: add a supertag.yaml
+## Cold starts and restarts
 
-The Control Plane starts with `supertag up --foreground control-plane`, so it also reads a
-[`supertag.yaml`](../reference/supertag-yaml.md). The Blueprint's environment variables remain the main configuration and override
-the file. Keep `SUPERTAG_DATABASE_URL`, `SUPERTAG_ADMIN_TOKEN`, and `SUPERTAG_COORDINATION_URL` there,
-because the platform check reads them from the environment. A file suits settings such as `notify`,
-`logging`, `operators.file`, or a `provision` list, which creates missing resources each time the
-Control Plane starts; leave `ports` out.
-
-The persistent disk at `/var/lib/supertag` hides any file the image puts there, so bake the file in at
-another path. In your copy of the repository, add this line to `deploy/docker/Dockerfile` after
-`COPY deploy/docker/entrypoint.sh`:
-
-```dockerfile
-COPY supertag.yaml /etc/supertag/supertag.yaml
-```
-
-Then append `-f /etc/supertag/supertag.yaml` to `dockerCommand` in `deploy/render/render.yaml`, or the service's Docker Command in the Render Dashboard, so it reads
-`node dist/index.js up --foreground control-plane -f /etc/supertag/supertag.yaml`.
-
-See [In containers and hosting platforms](../reference/supertag-yaml.md#in-containers-and-hosting-platforms)
-for the keys that behave differently in a container.
+- Each deploy replaces the instance. A service with a disk gets no zero-downtime deploy, so open
+  tunnels drop. Worker Hosts and the Gateway reconnect and retry; opening a tunnel waits up to 30
+  seconds for the new instance.
+- Do not use a free instance type: it sleeps when idle, which stops the Control Plane's
+  controllers, and it cannot attach a disk.
+- Both ends of a tunnel ping every 20 seconds, which keeps idle tunnels open through Render's proxy.
 
 ## Limits
 
-- A Render persistent disk is accessible to one service instance, so the Control Plane cannot scale horizontally in this configuration.
-- A disk-backed Render service does not receive zero-downtime deploys; expect a short interruption during replacement.
-- Back up both Render Postgres and the `/var/lib/supertag` disk. Render provides database recovery features and daily disk snapshots, but they protect different state.
-- Keep the Control Plane and database in the same region. Put collaboration surface webhook URLs behind the Render HTTPS domain or a verified custom domain.
+- One instance per service. A service with a disk cannot scale, and every Control Plane runs the
+  controllers.
+- Back up Render PostgreSQL and both disks; they hold different state.
+- Native gRPC (`https://`) does not reach this deployment. The terminal UI and the desktop app need
+  an `https://` URL, so they cannot connect to it yet.
+- The Gateway is a background worker with no inbound traffic, so it serves Lark and webhook
+  notifications only. Slack, GitHub, Linear, and Microsoft Teams need a Gateway on another host.
 
-The disk behavior and limitations are documented in Render's [persistent disk guide](https://render.com/docs/disks).
+## Remove the deployment
+
+Delete the Blueprint's services and database in the Render Dashboard, then confirm that both disks
+and the database are gone. Deleting a service removes its disk.
 
 ## If something goes wrong
 
-- **`/readyz` returns unavailable.** This is expected until a compatible Worklet connects. See
-  [Health and readiness](../operations/control-plane.md#health-and-readiness).
-- **The Worklet cannot connect.** HTTPS Worklet addresses select gRPC unless you pass
-  `--transport websocket`. See [Choose the Worker connection](deployment-setup.md#choose-the-worker-connection)
-  and [Troubleshooting](troubleshooting.md).
+- **Verification cannot reach the Control Plane over TLS.** Check that `SUPERTAG_SERVER_CA_FILE`
+  names your CA and that the certificate names the host in the `wss://` URL.
+- **The health check fails.** The service must listen on port 8080, and `PORT` must stay `8080`.
+- **The Gateway restarts repeatedly.** It exits when it cannot reach the Control Plane; check that
+  its `SUPERTAG_GATEWAY_CREDENTIAL` matches the Control Plane's
+  `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`, and, if the Control Plane requires client certificates,
+  that the Gateway has one.
 
 ## Next
 
-- [Control Plane operations](../operations/control-plane.md) for recovery, upgrades, and credential boundaries.
-- [Run a Worker](workers.md)
-- [collaboration surface guides](../surfaces/README.md)
+- [Native service deployments](../../deploy/native/README.md) for the role contract and TLS files
+- [Control Plane operations](../operations/control-plane.md)

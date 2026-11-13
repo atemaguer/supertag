@@ -11,12 +11,6 @@ const { parse, stringify } = createRequire(new URL("../apps/cli/package.json", i
 };
 const root = new URL("../", import.meta.url);
 const manifests: Record<string, unknown> = {
-  "deploy/modal/runtime.json": {
-    ...runtime,
-    startArguments: runtime.startCommand.split(" "),
-    migrationArguments: runtime.migrationCommand.split(" "),
-    environment: deploymentDefaults("modal"),
-  },
   "deploy/railway/railway.json": {
     $schema: "https://railway.com/railway.schema.json",
     build: { builder: "DOCKERFILE", dockerfilePath: "deploy/docker/Dockerfile" },
@@ -27,59 +21,6 @@ const manifests: Record<string, unknown> = {
       healthcheckTimeout: 300,
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 10,
-    },
-  },
-  "deploy/render/render.yaml": {
-    services: [
-      {
-        type: "web",
-        name: "supertag-control-plane",
-        runtime: "docker",
-        dockerfilePath: "./deploy/docker/Dockerfile",
-        dockerContext: ".",
-        preDeployCommand: runtime.migrationCommand,
-        dockerCommand: runtime.startCommand,
-        healthCheckPath: runtime.healthPath,
-        envVars: [
-          {
-            key: "SUPERTAG_DATABASE_URL",
-            fromDatabase: { name: "supertag-postgres", property: "connectionString" },
-          },
-          ...Object.entries(deploymentDefaults("render")).map(([key, value]) => ({ key, value })),
-          { key: "SUPERTAG_COORDINATION_URL", sync: false },
-          { key: "SUPERTAG_ADMIN_TOKEN", sync: false },
-        ],
-        disk: { name: "supertag-state", mountPath: runtime.stateDirectory, sizeGB: 1 },
-      },
-    ],
-    databases: [
-      { name: "supertag-postgres", databaseName: "supertag", user: "supertag", ipAllowList: [] },
-    ],
-  },
-  "deploy/cloudflare/wrangler.json": {
-    $schema: "node_modules/wrangler/config-schema.json",
-    name: "supertag-control-plane",
-    main: "src/index.ts",
-    compatibility_date: "2026-09-16",
-    containers: [
-      {
-        class_name: "SuperTagControlPlane",
-        image: "../docker/Dockerfile",
-        image_build_context: "../..",
-        instance_type: "standard-1",
-        max_instances: 1,
-      },
-    ],
-    durable_objects: { bindings: [{ name: "CONTROL_PLANE", class_name: "SuperTagControlPlane" }] },
-    migrations: [{ tag: "v1", new_sqlite_classes: ["SuperTagControlPlane"] }],
-    triggers: { crons: ["* * * * *"] },
-    vars: {
-      ...deploymentDefaults("cloudflare"),
-      SUPERTAG_MAINTENANCE: "false",
-      SUPERTAG_COORDINATION_URL: "https://supertag-control-plane.YOUR-SUBDOMAIN.workers.dev",
-      VAULT_ADDR: "https://vault.example.com",
-      SUPERTAG_VAULT_MOUNT: "secret",
-      SUPERTAG_VAULT_PATH_PREFIX: "supertag",
     },
   },
 };

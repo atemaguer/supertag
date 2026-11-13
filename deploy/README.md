@@ -5,11 +5,12 @@ the base image for Workspace sandboxes.
 Follow the [deployment setup guide](../docs/guides/deployment-setup.md) for the shared CLI workflow.
 
 The native services (separate Control Plane, Gateway, and Worker Hosts) use the definitions in
-[`native/`](native/README.md), `compose.native.yaml`, and `compose.native.ingress.yaml`.
+[`native/`](native/README.md), `compose.native.yaml`, `compose.native.ingress.yaml`, and the
+Render, Cloudflare, and Modal directories.
 
 ```text
 deploy/
-  shared/                 Common runtime and environment contract (private workspace package)
+  shared/                 TypeScript templates' runtime and environment contract (private package)
   generate.ts             Native manifest generator and drift check
   docker/
     Dockerfile            Shared Control Plane image; build context is the repository root
@@ -19,10 +20,11 @@ deploy/
   compose.yaml            Local self-hosting with PostgreSQL and persistent volumes
   .env.example            Environment template for self-hosting
   railway/railway.json    Railway service configuration
-  render/render.yaml      Render Blueprint
   fly/fly.toml            Fly Machine, release migration, volume, and HTTPS checks
-  modal/                  Modal Server adapter, generated runtime contract, and pinned Python SDK
-  cloudflare/             Routing Worker, Wrangler configuration, and independent npm tooling
+  native/                 Native services: Compose notes, Fly.io, and Railway
+  render/render.yaml      Native services: Render Blueprint (WebSocket tunnel)
+  modal/app.py            Native services: Modal app (WebSocket tunnel) and pinned Modal client
+  cloudflare/             Native services: tunnel Worker, Wrangler configuration, container image
 ```
 
 From the repository root:
@@ -38,7 +40,7 @@ docker compose --env-file .env -f deploy/compose.yaml config --quiet
 
 The ignore rules live in `docker/Dockerfile.dockerignore`, keeping local secrets and build
 outputs out of the repository-root build context. A root `.dockerignore` symlink points to those
-same rules because Wrangler's image build does not discover the Dockerfile-specific ignore file.
+same rules for builders that do not discover the Dockerfile-specific ignore file.
 Do not change the build context to `deploy/`:
 the image needs the application and workspace packages.
 
@@ -62,8 +64,9 @@ Compose explicitly uses project name `supertag` to preserve the normal existing 
 If an existing installation used another project name, retain it with `COMPOSE_PROJECT_NAME` or
 `-p` when using the relocated Compose file. The local `.env` stays at the repository root.
 
-Cloudflare tooling runs from `deploy/cloudflare`; the shared contract also remains bundled in
-the published `supertag-ai` CLI. The package under `shared/` is internal and is never published.
+Cloudflare tooling runs from `deploy/cloudflare`. The package under `shared/` is internal, is
+never published, and serves only the TypeScript Railway and Fly.io definitions and the TypeScript
+CLI's `setup deployment --platform railway|fly`.
 Test fixture images and example applications keep their Dockerfiles with their respective code.
 
 ## Choose a host
@@ -72,18 +75,20 @@ Test fixture images and example applications keep their Dockerfiles with their r
 | --- | --- | --- | --- |
 | Docker Compose | Your own server | PostgreSQL and local volumes | [Self-hosting](../docs/guides/self-hosting.md) |
 | Railway | One service | PostgreSQL and attached volume | [Railway](railway/README.md) |
-| Render | One service | PostgreSQL and attached disk | [Render](render/README.md) |
+| Render (native) | Control Plane web service, optional Gateway worker | PostgreSQL and attached disks | [Render](render/README.md) |
 | Fly.io | One always-on Machine | PostgreSQL and attached volume | [Fly.io](fly/README.md) |
-| Modal | One always-on Server | External PostgreSQL and Vault | [Modal](modal/README.md) |
-| Cloudflare | Worker plus one Container | External PostgreSQL and Vault | [Cloudflare](cloudflare/README.md) |
+| Modal (native) | One always-on container | External PostgreSQL, a Modal Volume, and Vault | [Modal](modal/README.md) |
+| Cloudflare (native) | Worker plus one Container | External PostgreSQL and Vault | [Cloudflare](cloudflare/README.md) |
 
 Hosting the Control Plane and supplying Worker Hosts are independent choices. Modal sandbox
-execution support does not require a Modal-hosted Control Plane. Every target starts the same
-Node application; provider adapters own only provisioning, ingress, lifecycle, and configuration.
+execution support does not require a Modal-hosted Control Plane. The Compose, Railway, and Fly.io
+targets here start the Node application; Render, Modal, and Cloudflare run the native services
+from the `hosted` image. Provider adapters own only provisioning, ingress, lifecycle, and
+configuration.
 
-Fly and Modal build the common Dockerfile by default. Fly accepts a published image with `--image`;
-Modal accepts one through `SUPERTAG_MODAL_IMAGE`. Pin a digest when using a registry so migration
-and serving containers run the same release. Never bake deployment credentials into the image.
+Fly builds the common Dockerfile by default and accepts a published image with `--image`. Render,
+Modal, and Cloudflare deploy the native `hosted` image by digest. Never bake deployment credentials
+into an image.
 
 When adding a target, include its adapter/configuration, a README linking to the public guide,
 shared environment validation, migration and single-instance behavior, health and reconnection

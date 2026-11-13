@@ -1,13 +1,31 @@
 #!/bin/sh
 # Entrypoint of the hosted service image (target "hosted" in rust-service.Dockerfile) for
-# platforms that mount root-owned volumes and deliver TLS material as secrets (Fly.io, Railway).
+# platforms that mount root-owned volumes and deliver TLS material as secrets (Fly.io, Railway,
+# Render, Cloudflare, and Modal).
 #
 # As root, and only for these fixed paths, it:
 #   1. gives the persistent state mount /var/lib/supertag to the service user, and
 #   2. writes each SUPERTAG_<NAME>_PEM secret to /run/supertag-tls, sets the matching
 #      SUPERTAG_<NAME>_FILE, and removes the PEM value from the environment,
 # then runs `supertag "$@"` as UID 10001 with no capabilities and no new privileges.
+#
+# `pair TUNNEL_ADDRESS [GATEWAY_FLAG...]` instead runs supertag-hosted-pair, which starts the
+# Control Plane and a Gateway side by side in this one container (Cloudflare and Modal; see that
+# script).
+#
+# Some platforms' start commands replace the image entrypoint and others only its command, so
+# definitions name this entrypoint; when the platform also runs the entrypoint, that leading
+# path is skipped.
 set -eu
+
+if [ "${1:-}" = /usr/local/bin/supertag-hosted-entrypoint ]; then
+  shift
+fi
+program=/usr/local/bin/supertag
+if [ "${1:-}" = pair ]; then
+  shift
+  program=/usr/local/bin/supertag-hosted-pair
+fi
 
 state=/var/lib/supertag
 tls=/run/supertag-tls
@@ -46,5 +64,6 @@ chmod 0500 "$tls"
 
 cd "$state"
 export HOME="$state"
+# tini -s also reaps orphans where it is not PID 1, such as under the Modal function.
 exec setpriv --reuid=10001 --regid=10001 --clear-groups --inh-caps=-all --bounding-set=-all \
-  --no-new-privs /usr/bin/tini -- /usr/local/bin/supertag "$@"
+  --no-new-privs /usr/bin/tini -s -- "$program" "$@"

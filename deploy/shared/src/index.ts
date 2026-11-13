@@ -1,4 +1,8 @@
-/** Shared deployment contract. This module also runs in Cloudflare Workers: no Node APIs. */
+/**
+ * Deployment contract of the TypeScript Control Plane templates (Railway and Fly.io). Render,
+ * Cloudflare, and Modal run the native services; their contract is `supertag setup deployment` in
+ * the native CLI.
+ */
 export const DEPLOYMENT_RUNTIME = {
   stateDirectory: "/var/lib/supertag",
   port: 3434,
@@ -8,15 +12,12 @@ export const DEPLOYMENT_RUNTIME = {
   healthPath: "/healthz",
   readinessPath: "/readyz",
 } as const;
-export const DEPLOYMENT_PLATFORMS = ["railway", "render", "cloudflare", "fly", "modal"] as const;
+export const DEPLOYMENT_PLATFORMS = ["railway", "fly"] as const;
 export type DeploymentPlatform = (typeof DEPLOYMENT_PLATFORMS)[number];
 /** Template capabilities, not a claim about every provider networking product. */
 export const DEPLOYMENT_RPC_CAPABILITIES = {
   railway: { grpc: false, websocket: true },
-  render: { grpc: false, websocket: true },
-  cloudflare: { grpc: false, websocket: true },
   fly: { grpc: true, websocket: true },
-  modal: { grpc: false, websocket: true },
 } as const;
 export type DeploymentEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -59,7 +60,7 @@ export function deploymentDefaults(platform: DeploymentPlatform): Record<string,
     SUPERTAG_STATE_DIR: DEPLOYMENT_RUNTIME.stateDirectory,
     SUPERTAG_WORKLET_TRANSPORT: "remote",
     SUPERTAG_DEPLOYMENT_RPC_TRANSPORT: "websocket",
-    SUPERTAG_CREDENTIAL_VAULT: platform === "cloudflare" || platform === "modal" ? "vault" : "file",
+    SUPERTAG_CREDENTIAL_VAULT: "file",
   };
 }
 
@@ -116,11 +117,6 @@ export function resolveDeploymentEnvironment(
     issues.push("Hosted deployments require SUPERTAG_WORKLET_TRANSPORT=remote");
   if (!["file", "vault"].includes(env["SUPERTAG_CREDENTIAL_VAULT"] ?? ""))
     issues.push("SUPERTAG_CREDENTIAL_VAULT must be file or vault");
-  if (
-    (platform === "cloudflare" || platform === "modal") &&
-    env["SUPERTAG_CREDENTIAL_VAULT"] !== "vault"
-  )
-    issues.push(`${platform} hosting requires SUPERTAG_CREDENTIAL_VAULT=vault`);
   if (
     env["SUPERTAG_CREDENTIAL_VAULT"] === "file" &&
     env["SUPERTAG_STATE_DIR"] !== DEPLOYMENT_RUNTIME.stateDirectory

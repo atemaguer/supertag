@@ -11,7 +11,7 @@ use std::{
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
     net::{TcpListener, TcpStream},
     sync::mpsc,
     task::{AbortHandle, JoinSet},
@@ -39,6 +39,14 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// unfinished upgrade rather than being refused, so clients that stall the upgrade
 /// cannot lock out a client that completes it promptly.
 const MAX_HANDSHAKES: usize = 256;
+/// Largest HTTP request head the listener reads before deciding between the health
+/// route and a WebSocket upgrade.
+const MAX_REQUEST_HEAD: usize = 16 * 1024;
+/// The plain HTTP path a platform health check may probe on a tunnel listener. A `GET`
+/// for exactly this path without an `Upgrade` or `Origin` header is answered `200 OK`
+/// with no detail; every other request must be a WebSocket upgrade.
+pub const HEALTH_PATH: &str = "/healthz";
+const HEALTHY: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nok\n";
 
 pub(crate) fn config() -> WebSocketConfig {
     WebSocketConfig::default()
@@ -280,17 +288,123 @@ async fn upgrade(stream: TcpStream, ping: Duration) -> Option<Connection> {
         remote_addr: stream.peer_addr().ok(),
     };
     stream.set_nodelay(true).ok()?;
-    let socket = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        tokio_tungstenite::accept_hdr_async_with_config(stream, RefuseBrowsers, Some(config())),
-    )
+    let socket = tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
+        let mut stream = stream;
+        let head = read_head(&mut stream).await?;
+        if health_check(&head) {
+            // Answered and closed; never a tunnel.
+            let _ = stream.write_all(HEALTHY).await;
+            let _ = stream.shutdown().await;
+            return None;
+        }
+        tokio_tungstenite::accept_hdr_async_with_config(
+            Replayed {
+                head: Bytes::from(head),
+                inner: stream,
+            },
+            RefuseBrowsers,
+            Some(config()),
+        )
+        .await
+        .ok()
+    })
     .await
-    .ok()?
-    .ok()?;
+    .ok()??;
     Some(Connection::Tunnel(
         Box::new(WebSocketIo::new(socket, ping)),
         info,
     ))
+}
+
+/// Reads up to the end of the HTTP request head, or gives up on a head larger than
+/// [`MAX_REQUEST_HEAD`]. Anything read past the head is kept for the upgrade.
+async fn read_head(stream: &mut TcpStream) -> Option<Vec<u8>> {
+    let mut head = Vec::with_capacity(1024);
+    let mut chunk = [0_u8; 2048];
+    loop {
+        let read = stream.read(&mut chunk).await.ok()?;
+        if read == 0 {
+            return None;
+        }
+        let searched_from = head.len().saturating_sub(3);
+        head.extend_from_slice(&chunk[..read]);
+        if head.len() > MAX_REQUEST_HEAD {
+            return None;
+        }
+        if head[searched_from..]
+            .windows(4)
+            .any(|window| window == b"\r\n\r\n")
+        {
+            return Some(head);
+        }
+    }
+}
+
+/// Whether `head` is the plain health check: `GET /healthz` with no `Upgrade` header
+/// (an upgrade on that path is an ordinary tunnel) and no `Origin` header (a browser).
+fn health_check(head: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(head) else {
+        return false;
+    };
+    let mut lines = text.split("\r\n");
+    let Some(request_line) = lines.next() else {
+        return false;
+    };
+    let mut parts = request_line.split(' ');
+    if parts.next() != Some("GET")
+        || parts.next() != Some(HEALTH_PATH)
+        || !parts
+            .next()
+            .is_some_and(|version| version.starts_with("HTTP/1."))
+        || parts.next().is_some()
+    {
+        return false;
+    }
+    lines.take_while(|line| !line.is_empty()).all(|line| {
+        let name = line.split(':').next().unwrap_or_default().trim();
+        !name.eq_ignore_ascii_case("upgrade") && !name.eq_ignore_ascii_case("origin")
+    })
+}
+
+/// A stream whose first bytes, already read to choose between the health route and an
+/// upgrade, are read again before the rest of the connection.
+pub struct Replayed<S> {
+    head: Bytes,
+    inner: S,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Replayed<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if !this.head.is_empty() {
+            let length = buf.remaining().min(this.head.len());
+            buf.put_slice(&this.head.split_to(length));
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut this.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Replayed<S> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
 }
 
 #[cfg(test)]
@@ -438,6 +552,85 @@ mod tests {
         next_upgrade(&mut upgrades).await;
         client.await.unwrap().unwrap();
         drop(stalled);
+    }
+
+    async fn plain_request(address: std::net::SocketAddr, request: &str) -> String {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        // A refused request may be reset before it is fully written or read; what arrived
+        // before the reset is the answer.
+        let _ = stream.write_all(request.as_bytes()).await;
+        let mut response = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(15), stream.read_to_end(&mut response))
+            .await
+            .expect("the listener answers or closes");
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    #[tokio::test]
+    async fn answers_the_health_route_without_weakening_the_upgrade_rules() {
+        let (address, mut upgrades) = listen(MAX_HANDSHAKES);
+        // A platform health check: plain HTTP, no Origin, no Upgrade.
+        let healthy = plain_request(
+            address,
+            "GET /healthz HTTP/1.1\r\nHost: supertag.example.com\r\nUser-Agent: probe\r\n\r\n",
+        )
+        .await;
+        assert!(healthy.starts_with("HTTP/1.1 200 OK\r\n"), "{healthy}");
+        assert!(healthy.ends_with("\r\n\r\nok\n"), "{healthy}");
+        // Neither a browser, nor another path, nor another method gets an answer.
+        for request in [
+            "GET /healthz HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.example\r\n\r\n",
+            "GET /healthz/ HTTP/1.1\r\nHost: x\r\n\r\n",
+            "GET /healthz?verbose HTTP/1.1\r\nHost: x\r\n\r\n",
+            "POST /healthz HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
+        ] {
+            let response = plain_request(address, request).await;
+            assert!(
+                !response.contains(" 200 "),
+                "{request:?} was answered: {response}"
+            );
+        }
+        // An oversized head is dropped without an answer.
+        let huge = format!(
+            "GET /healthz HTTP/1.1\r\nX-Padding: {}\r\n\r\n",
+            "a".repeat(MAX_REQUEST_HEAD)
+        );
+        assert!(plain_request(address, &huge).await.is_empty());
+        // A browser's upgrade on the health path is still refused, and a client's upgrade
+        // on it is an ordinary tunnel.
+        let mut request = format!("ws://{address}/healthz")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            http::header::ORIGIN,
+            http::HeaderValue::from_static("https://evil.example"),
+        );
+        let stream = TcpStream::connect(address).await.unwrap();
+        match tokio_tungstenite::client_async_with_config(request, stream, Some(config())).await {
+            Err(tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+            }
+            other => panic!("unexpected {:?}", other.map(|_| ())),
+        }
+        let stream = TcpStream::connect(address).await.unwrap();
+        let (mut client, _) = tokio_tungstenite::client_async_with_config(
+            format!("ws://{address}/healthz"),
+            stream,
+            Some(config()),
+        )
+        .await
+        .unwrap();
+        let Connection::Tunnel(mut tunnel, _) = next_upgrade(&mut upgrades).await else {
+            panic!("expected a tunnel");
+        };
+        client
+            .send(Message::Binary(Bytes::from_static(b"through")))
+            .await
+            .unwrap();
+        let mut received = [0_u8; 7];
+        tunnel.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"through");
     }
 
     #[tokio::test]

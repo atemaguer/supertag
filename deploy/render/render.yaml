@@ -1,37 +1,67 @@
+# SuperTag on Render. Render's edge terminates TLS and forwards only HTTP/1.1, so the Control
+# Plane accepts gRPC carried in a WebSocket on the web port (--websocket-listen) and runs its own
+# TLS inside the tunnel. Clients use wss://supertag-control-plane.onrender.com (or your custom
+# domain); the service certificate must name that host and, for the onrender.com host, comes
+# from your own CA, given to every client as SUPERTAG_SERVER_CA_FILE. Native gRPC stays on
+# loopback: Render routes nothing else to the container.
+#
+# Before creating the Blueprint, replace both image URLs with the hosted image
+# (rust-service.Dockerfile target "hosted") by digest. After creation, add the variables from
+# `supertag setup deployment render` (control-plane.env, gateway.env) and the TLS PEM values
+# (deploy/render/README.md). The database supplies SUPERTAG_DATABASE_URL. Each service runs one
+# instance: a service with a disk cannot scale, and every Control Plane runs the controllers.
+#
+# The Gateway is optional: delete the supertag-gateway service if you use no collaboration
+# surface or notification. It is a background worker with no inbound traffic that reaches the
+# Control Plane through the same public wss:// URL as any client, so it can run only outbound
+# connectors: append their flags to its dockerCommand, such as
+# `--lark-state-directory /var/lib/supertag/lark` or `--notify webhook:HTTPS_URL#NAME`. Render
+# subdomains are global: if the Control Plane gets another hostname, change --control-plane.
+#
+# dockerCommand names the image entrypoint, which starts as root to prepare the disk and write
+# the TLS secrets to files, then runs the service as UID 10001.
 services:
   - type: web
     name: supertag-control-plane
-    runtime: docker
-    dockerfilePath: ./deploy/docker/Dockerfile
-    dockerContext: .
-    preDeployCommand: node dist/index.js migrate
-    dockerCommand: node dist/index.js up --foreground control-plane
+    runtime: image
+    image:
+      url: ghcr.io/YOUR-ORG/supertag-hosted@sha256:REPLACE-WITH-THE-HOSTED-IMAGE-DIGEST
+    plan: starter
+    region: oregon
+    numInstances: 1
+    dockerCommand: /usr/local/bin/supertag-hosted-entrypoint control-plane --listen 127.0.0.1:3434 --websocket-listen 0.0.0.0:8080 --transfer-directory /var/lib/supertag/transfers
+    # Plain HTTP on the tunnel listener; it answers 200 only to this exact path.
     healthCheckPath: /healthz
+    disk:
+      name: supertag-control-plane-state
+      mountPath: /var/lib/supertag
+      sizeGB: 1
     envVars:
+      # Render routes the public URL to this port.
+      - key: PORT
+        value: "8080"
       - key: SUPERTAG_DATABASE_URL
         fromDatabase:
           name: supertag-postgres
           property: connectionString
-      - key: SUPERTAG_DEPLOYMENT_PLATFORM
-        value: render
-      - key: SUPERTAG_STATE_DIR
-        value: /var/lib/supertag
-      - key: SUPERTAG_WORKLET_TRANSPORT
-        value: remote
-      - key: SUPERTAG_DEPLOYMENT_RPC_TRANSPORT
-        value: websocket
-      - key: SUPERTAG_CREDENTIAL_VAULT
-        value: file
-      - key: SUPERTAG_COORDINATION_URL
-        sync: false
-      - key: SUPERTAG_ADMIN_TOKEN
-        sync: false
+  - type: worker
+    name: supertag-gateway
+    runtime: image
+    image:
+      url: ghcr.io/YOUR-ORG/supertag-hosted@sha256:REPLACE-WITH-THE-HOSTED-IMAGE-DIGEST
+    plan: starter
+    region: oregon
+    numInstances: 1
+    dockerCommand: /usr/local/bin/supertag-hosted-entrypoint gateway --listen 127.0.0.1:3436 --control-plane wss://supertag-control-plane.onrender.com
     disk:
-      name: supertag-state
+      name: supertag-gateway-state
       mountPath: /var/lib/supertag
       sizeGB: 1
 databases:
   - name: supertag-postgres
     databaseName: supertag
     user: supertag
+    plan: basic-256mb
+    region: oregon
+    # Only Render services in this account's private network may connect.
     ipAllowList: []

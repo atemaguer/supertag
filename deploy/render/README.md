@@ -1,16 +1,7 @@
 # SuperTag on Render
 
-See the [deployment guide](../../docs/guides/deploy-render.md) for setup and verification.
-
-### Opt-in SSH image
-
-For a paid Render service that needs Render-managed SSH access, select
-`deploy/render/Dockerfile` with the repository root as the Docker build context.
-This image prepares the root account and its SSH directory for Render's SSH
-service. It contains no SSH daemon, embedded key, or known login password. The
-Control Plane still runs as the `node` user through the standard entrypoint, with
-state under `/var/lib/supertag`. Do not mount a persistent disk over `/root`.
-
-Register your public SSH key with Render to connect. This image does not change
-Render's public gRPC routing capabilities; SSH access is an administrative path.
-See [Render's Docker SSH requirements](https://render.com/docs/ssh#docker-specific-configuration).
+[`render.yaml`](render.yaml) is a Render Blueprint for the native services: the Control Plane as
+a web service behind Render's HTTP edge, carried in the WebSocket tunnel; Render PostgreSQL; a
+disk for transfer files; and an optional Gateway worker. Follow the
+[Render guide](../../docs/guides/deploy-render.md). The role contract, TLS files, and hosted image
+are described in [native service deployments](../native/README.md).

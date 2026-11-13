@@ -942,8 +942,9 @@ service.
 ## In containers and hosting platforms
 
 The SuperTag container image starts the Control Plane with `supertag up --foreground control-plane`.
-Docker Compose and the Railway, Render, Fly.io, Modal, and Cloudflare templates all run that
-command. It reads `/var/lib/supertag/supertag.yaml` when the file exists, and the defaults
+Docker Compose and the Railway and Fly.io templates run that command. (Render, Modal, and
+Cloudflare run the native services from the `hosted` image, configured only by environment
+variables; they do not read this file.) It reads `/var/lib/supertag/supertag.yaml` when the file exists, and the defaults
 otherwise. Environment variables stay the main configuration and override the file, so a
 deployment configured only by environment variables needs no file.
 

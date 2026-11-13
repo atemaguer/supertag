@@ -161,6 +161,7 @@ def build_images(binary, identifier):
     try:
         shutil.copyfile(binary, context / "supertag")
         shutil.copyfile(REPO / "deploy/docker/rust-hosted-entrypoint.sh", context / "rust-hosted-entrypoint.sh")
+        shutil.copyfile(REPO / "deploy/docker/rust-hosted-pair.sh", context / "rust-hosted-pair.sh")
         images = {}
         for target in ("control-plane", "gateway", "hosted"):
             tag = f"{identifier}-{target}:local"
@@ -206,8 +207,8 @@ def rehearse(args):
                     if key.endswith(("_TOKEN", "_PASSWORD", "_URL")):
                         require(value not in setup.stdout, f"setup printed {key}")
             supertag("check", "deployment", "compose", "--directory", str(deployment))
-            # A Gateway needs a Control Plane that requires client certificates; its own health
-            # probe then presents one, as does the Gateway.
+            # Require client certificates, the optional network filter; the Control Plane's own
+            # health probe then presents one, as does the Gateway.
             tls_file = "/run/supertag-tls/"
             for name, values in (("control-plane.env", {"SUPERTAG_TLS_CLIENT_CA_FILE": tls_file + "client-ca.pem",
                                                         "SUPERTAG_CLIENT_CERT_FILE": tls_file + "client.pem",
@@ -341,7 +342,7 @@ def rehearse(args):
             require("Team/csv" in applied, applied)
             hosts = {}
             for host, tag in (("review-host", "review-manager"), ("builder-host", "builder-manager")):
-                issued = operator("auth-key", "create", host, "--host", host, "--label", host, "--tag", tag)
+                issued = operator("auth-key", "create", host, "--role", "host", "--label", host, "--tag", tag)
                 key = root / f"{host}.key"
                 key.write_text(issued["auth_key"])
                 key.chmod(0o600)

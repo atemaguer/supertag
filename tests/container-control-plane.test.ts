@@ -332,7 +332,7 @@ describe("the container images and templates", () => {
   it("all run the container command", async () => {
     const command = DEPLOYMENT_RUNTIME.startCommand.split(" ");
     expect(command).toEqual(["node", "dist/index.js", "up", "--foreground", "control-plane"]);
-    for (const dockerfile of ["deploy/docker/Dockerfile", "deploy/render/Dockerfile"]) {
+    for (const dockerfile of ["deploy/docker/Dockerfile"]) {
       const text = await readFile(dockerfile, "utf8");
       expect(text).toContain(`CMD ${JSON.stringify(command).replaceAll(",", ", ")}`);
       expect(text).toContain(`ENV SUPERTAG_STATE_DIR=${DEPLOYMENT_RUNTIME.stateDirectory}`);
