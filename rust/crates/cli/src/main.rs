@@ -1,5 +1,6 @@
 mod artifact_publications;
 mod artifacts;
+mod gateway_credentials;
 mod github_publications;
 mod github_workspaces;
 mod harness;
@@ -39,6 +40,7 @@ use sha2::{Digest, Sha256};
 use supertag_control_plane::{ControlPlane, OperatorWatch};
 use supertag_gateway::{
     Gateway, GatewayWatch,
+    credential_vault::CredentialVault,
     github::{
         Github, GithubAppConfig, GithubAuthentication, GithubConfig,
         workspaces::{GithubWorkspaceAccount, GithubWorkspaceSources},
@@ -149,6 +151,11 @@ enum Command {
         connection: Connection,
         #[command(flatten)]
         args: surface_policy::SurfacePolicyArgs,
+    },
+    /// Store or delete Gateway collaboration credentials in the configured credential vault.
+    GatewayCredential {
+        #[command(subcommand)]
+        command: gateway_credentials::GatewayCredentialCommand,
     },
     /// Read Worker Host readiness and manage draining.
     Host {
@@ -665,6 +672,7 @@ async fn run(command: Command) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES);
             surface_policy::run(client, &token, args).await?;
         }
+        Command::GatewayCredential { command } => gateway_credentials::run(command).await?,
         Command::Host {
             connection,
             command,
@@ -1016,6 +1024,17 @@ async fn run(command: Command) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             execution_profile.workspace_mounts = workspace_mounts.capabilities();
+            let disk_space = supertag_worker_host::environment::DiskSpaceSource::Directory(
+                state_directory.clone(),
+            );
+            // Test builds never hold a real sleep assertion unless a test supplies a fake one.
+            #[cfg(not(feature = "test-fixtures"))]
+            let keep_awake = supertag_worker_host::environment::KeepAwakeCommand::for_platform(
+                std::env::consts::OS,
+                std::process::id(),
+            );
+            #[cfg(feature = "test-fixtures")]
+            let (keep_awake, disk_space) = test_host_environment(disk_space)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -1039,6 +1058,8 @@ async fn run(command: Command) -> Result<()> {
                 artifact_source,
                 artifact_peers,
                 workspace_mounts,
+                disk_space,
+                keep_awake,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -1700,7 +1721,7 @@ async fn gateway(
                 "Slack webhook listener must use loopback"
             );
             let connector =
-                slack_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+                slack_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
             Some((connector, TcpListener::bind(address).await?))
         }
         None => None,
@@ -1969,14 +1990,48 @@ async fn gateway(
     }
 }
 
-fn slack_connector(
+/// The Slack signing secret and bot token come from the environment when both are set, and
+/// otherwise from the Gateway credential vault at `surface/slack/<account>`.
+async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
+    let nonempty = |name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    match (
+        nonempty("SUPERTAG_SLACK_SIGNING_SECRET"),
+        nonempty("SUPERTAG_SLACK_BOT_TOKEN"),
+    ) {
+        (Some(signing), Some(bot)) => return Ok((signing, bot)),
+        (None, None) => {}
+        _ => anyhow::bail!(
+            "set both SUPERTAG_SLACK_SIGNING_SECRET and SUPERTAG_SLACK_BOT_TOKEN, or neither to use the credential vault"
+        ),
+    }
+    let id = format!("surface/slack/{account_id}");
+    let mut credential = CredentialVault::from_process_environment()?
+        .resolve(&id)
+        .await?
+        .with_context(|| format!("Slack credentials are missing: store {id} in the credential vault or set SUPERTAG_SLACK_SIGNING_SECRET and SUPERTAG_SLACK_BOT_TOKEN"))?;
+    let mut field = |name: &str| {
+        credential
+            .remove(name)
+            .filter(|value| !value.trim().is_empty())
+            .with_context(|| format!("credential {id} has no {name}"))
+    };
+    Ok((field("signingSecret")?, field("botToken")?))
+}
+
+async fn slack_connector(
     channel: Channel,
     gateway_token: String,
     state_directory: PathBuf,
 ) -> Result<Slack> {
+    let account_id = required_env("SUPERTAG_SLACK_ACCOUNT_ID")?;
+    let (signing_secret, bot_token) = slack_secrets(&account_id).await?;
     let connector = Slack::new(
         SlackConfig {
-            account_id: required_env("SUPERTAG_SLACK_ACCOUNT_ID")?,
+            account_id,
             team_id: required_env("SUPERTAG_SLACK_TEAM_ID")?,
             channel_id: required_env("SUPERTAG_SLACK_CHANNEL_ID")?,
             tag_id: required_env("SUPERTAG_SLACK_TAG_ID")?,
@@ -1984,8 +2039,8 @@ fn slack_connector(
                 .split(',')
                 .map(|user| user.trim().to_owned())
                 .collect(),
-            signing_secret: required_env("SUPERTAG_SLACK_SIGNING_SECRET")?,
-            bot_token: required_env("SUPERTAG_SLACK_BOT_TOKEN")?,
+            signing_secret,
+            bot_token,
             state_directory,
         },
         channel,
@@ -2288,6 +2343,37 @@ fn operator_target(connection: Connection) -> Result<(String, String)> {
             required_env("SUPERTAG_OPERATOR_TOKEN")?,
         ))
     }
+}
+
+/// `SUPERTAG_TEST_KEEP_AWAKE_COMMAND` replaces the OS keep-awake command with a fake that
+/// receives the host's platform arguments; `SUPERTAG_TEST_DISK_SPACE=free,total` fixes reports.
+#[cfg(feature = "test-fixtures")]
+fn test_host_environment(
+    disk_space: supertag_worker_host::environment::DiskSpaceSource,
+) -> Result<(
+    Option<supertag_worker_host::environment::KeepAwakeCommand>,
+    supertag_worker_host::environment::DiskSpaceSource,
+)> {
+    use supertag_worker_host::environment::{DiskSpaceSource, KeepAwakeCommand};
+    let keep_awake = std::env::var_os("SUPERTAG_TEST_KEEP_AWAKE_COMMAND").and_then(|program| {
+        KeepAwakeCommand::for_platform(std::env::consts::OS, std::process::id()).map(|command| {
+            KeepAwakeCommand {
+                program: program.into(),
+                ..command
+            }
+        })
+    });
+    let disk_space = match std::env::var("SUPERTAG_TEST_DISK_SPACE") {
+        Ok(value) => {
+            let (free, total) = value.split_once(',').context("invalid test disk space")?;
+            DiskSpaceSource::Fixed(supertag_protocol::v2::HostDiskSpace {
+                free_bytes: free.parse()?,
+                total_bytes: total.parse()?,
+            })
+        }
+        Err(_) => disk_space,
+    };
+    Ok((keep_awake, disk_space))
 }
 
 fn required_env(name: &str) -> Result<String> {

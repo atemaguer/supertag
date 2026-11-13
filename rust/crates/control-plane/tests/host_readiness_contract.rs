@@ -41,6 +41,10 @@ fn report(sequence: u64) -> ReportHostRequest {
             shared_execution: None,
             task_artifact_inputs: false,
         }),
+        disk_space: Some(HostDiskSpace {
+            free_bytes: 40 << 30,
+            total_bytes: 500 << 30,
+        }),
     }
 }
 
@@ -66,6 +70,25 @@ async fn contract(url: &str) {
     assert_eq!(ready.last_seen_at_ms, Some(NOW));
     assert_eq!(ready.presence_expires_at_ms, Some(NOW + 30_000));
     assert_eq!(ready.execution_profile, report(1).execution_profile);
+    assert_eq!(ready.disk_space, report(1).disk_space);
+    // Disk space is part of the report's identity and must be internally consistent.
+    let mut changed_disk = report(1);
+    changed_disk.disk_space.as_mut().unwrap().free_bytes -= 1;
+    assert!(matches!(
+        store.report_host(&host, &changed_disk).await,
+        Err(StoreError::Conflict(_))
+    ));
+    for (free_bytes, total_bytes) in [(2, 1), (0, 0), (u64::MAX, u64::MAX)] {
+        let mut invalid = report(2);
+        invalid.disk_space = Some(HostDiskSpace {
+            free_bytes,
+            total_bytes,
+        });
+        assert!(matches!(
+            store.report_host(&host, &invalid).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
     clock.store(NOW + 5_000, Ordering::SeqCst);
     let mut replay = report(1);
     replay

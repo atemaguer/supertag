@@ -6,6 +6,7 @@ mod checkpoints;
 pub mod context;
 mod credentials;
 mod enrollment;
+pub mod environment;
 mod guardian;
 mod journal;
 mod mcp;
@@ -80,6 +81,10 @@ pub struct HostOptions {
     pub artifact_source: Option<ArtifactSourceConfig>,
     pub artifact_peers: ArtifactPeers,
     pub workspace_mounts: WorkspaceMounts,
+    /// Where reports sample free disk space, normally the state directory's filesystem.
+    pub disk_space: environment::DiskSpaceSource,
+    /// The OS command that keeps the machine awake while an Attempt runs, if any.
+    pub keep_awake: Option<environment::KeepAwakeCommand>,
 }
 
 #[derive(Clone)]
@@ -396,8 +401,14 @@ pub async fn run(
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    // Preflight: warn before claiming work when the host is short of disk space.
+    if let Some(warning) = environment::low_disk_warning(options.disk_space.sample().as_ref()) {
+        eprintln!("{warning}");
+    }
+    let keep_awake = environment::KeepAwake::start(options.keep_awake.clone(), shutdown.clone());
     let presence = readiness::Presence::start(
         journal.clone(),
+        options.disk_space.clone(),
         host.clone(),
         token.clone(),
         options.harness as i32,
@@ -425,11 +436,13 @@ pub async fn run(
                 entry
             }
         };
-        presence.set(match &entry {
+        let state = match &entry {
             Entry::Claim { .. } => readiness::State::Ready,
             Entry::Executing { .. } => readiness::State::Recovery,
             _ => readiness::State::Busy,
-        });
+        };
+        presence.set(state);
+        keep_awake.update(state == readiness::State::Busy);
         match entry {
             Entry::Claim { operation_id, request: saved } => {
                 if saved.is_empty() {
@@ -897,6 +910,7 @@ pub async fn run(
     }
     Ok(())
     }.await;
+    keep_awake.stop().await;
     let stopped = presence.stop().await;
     outcome.and(stopped)
 }

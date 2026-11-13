@@ -3,6 +3,7 @@
 mod artifact_publications;
 
 mod conversations;
+pub mod credential_vault;
 mod delivery_journal;
 pub mod github;
 mod github_publications;

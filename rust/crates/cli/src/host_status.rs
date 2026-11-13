@@ -78,6 +78,11 @@ fn status_json(host: WorkerHostStatus) -> Value {
         "capacity": host.capacity,
         "available_slots": host.available_slots,
         "active_attempts": host.active_attempts,
+        "disk_space": host.disk_space.as_ref().map(|disk| json!({
+            "free_bytes": disk.free_bytes,
+            "total_bytes": disk.total_bytes,
+        })),
+        "disk_warning": supertag_worker_host::environment::low_disk_warning(host.disk_space.as_ref()),
         "reason": reason,
         "harness_kind": host.harness_kind().as_str_name(),
         "workspace_ids": host.workspace_ids,
