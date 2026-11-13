@@ -37,6 +37,16 @@ pub fn host_generation<T>(request: &Request<T>) -> Result<u64, Status> {
     Ok(value)
 }
 
+/// A call that failed in the local transport (reset, broken pipe, failed handshake,
+/// HTTP/2 connection error) rather than with a status from the peer. Tonic reports
+/// these as `Unknown` or `Internal` with the local error attached, sometimes behind
+/// its channel buffer. A status decoded from a peer never carries a source. Like
+/// `Unavailable`, the outcome is unknown and an idempotent call may be retried.
+pub fn local_transport_failure(status: &Status) -> bool {
+    matches!(status.code(), tonic::Code::Unknown | tonic::Code::Internal)
+        && std::error::Error::source(status).is_some()
+}
+
 pub fn matches_bearer<T>(request: &Request<T>, token: &str) -> bool {
     let candidate = request
         .metadata()
