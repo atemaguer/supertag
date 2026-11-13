@@ -553,6 +553,34 @@ set says which resources the input owns.
 Check that it worked: `supertag diff -f engineering/ --set engineering --prune` prints
 `No changes.`
 
+On a Rust deployment, an apply set owns only the resources its own apply created. Applying an
+existing resource with `--set` updates it but never adds it to the set, so prune never removes a
+resource that an operator, `supertag up`, or another set created. Prune covers the
+`SurfaceLocation`, `Team`, `Tag`, `Role`, `PermissionSet`, `ContextSet`, `Workspace`, and `Volume`
+kinds; `SurfaceAccount` and `Objective` resources never join a Rust apply set. The Control Plane records the revision each member had
+when the set last applied it, and prune reports one line per member:
+
+```text
+delete Team/release-crew
+retire Tag/release-worker
+keep Role/Engineer: Role is still assigned to Tag builder
+release Volume/archive: changed outside apply set engineering after it was applied
+```
+
+- `delete` or `retire` removes the member. Tags and Roles are retired, keeping their history.
+- `keep` leaves a member that something still uses. It stays in the set for the next prune.
+- `release` leaves a member that another writer changed after the set last applied it, and
+  removes it from the set. A member that a second set also declares leaves both sets the same way.
+- `forget` drops a member that no longer exists, such as a `SurfaceLocation` removed when its Tag
+  was retired. Deleting or retiring a member with a command removes it from its set directly.
+
+`diff` previews the prune against the current state and changes nothing. `apply` writes the
+declared resources first, then records membership and prunes in one Control Plane write, so a
+prune either finishes completely or changes nothing. A concurrent write waits for that write, and
+a member it changes first is released instead of removed. If an apply fails partway, nothing is
+pruned and the resources it already created stay in the set; run the same command again to
+finish.
+
 ### supertag.yaml is not a manifest
 
 `apply` and `diff` read only resource manifests, each with `apiVersion`, `kind`, `metadata`, and
