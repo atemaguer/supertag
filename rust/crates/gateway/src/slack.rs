@@ -1,6 +1,8 @@
 //! Slack Events API ingress and durable thread replies.
 
 mod delivery;
+mod progress;
+mod render;
 
 use std::{
     path::PathBuf,
@@ -25,7 +27,10 @@ use serde_json::json;
 use sha2::Sha256;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
-    v2::{AcceptSlackEventRequest, connector_client::ConnectorClient},
+    v2::{
+        AcceptSlackEventRequest, connector_client::ConnectorClient,
+        reply_progress_client::ReplyProgressClient,
+    },
 };
 use tokio::{net::TcpListener, time};
 use tokio_util::sync::CancellationToken;
@@ -59,6 +64,8 @@ struct Connector {
     http: reqwest::Client,
     post_message: reqwest::Url,
     journal: Journal,
+    progress: ReplyProgressClient<Channel>,
+    progress_journal: Journal,
 }
 
 impl Slack {
@@ -101,6 +108,12 @@ impl Slack {
         authenticated_request((), &gateway_token, Some(&principal))
             .context("invalid private Slack connector credential")?;
         let journal = Journal::open(&config.state_directory, &config.account_id, "slack")?;
+        // A separate private journal, so an acknowledgement in flight never blocks a final reply.
+        let progress_journal = Journal::open(
+            &config.state_directory.join("progress"),
+            &config.account_id,
+            "slack",
+        )?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(DELIVERY_TIMEOUT)
@@ -110,9 +123,13 @@ impl Slack {
             .build()?;
         Ok(Self(Arc::new(Connector {
             config,
-            control_plane: ConnectorClient::new(private_channel)
+            control_plane: ConnectorClient::new(private_channel.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            progress: ReplyProgressClient::new(private_channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            progress_journal,
             gateway_token,
             principal,
             http,
@@ -121,7 +138,7 @@ impl Slack {
         })))
     }
 
-    #[cfg(feature = "test-fixtures")]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub fn with_test_reply_url(mut self, url: &str) -> Result<Self> {
         let url: reqwest::Url = url.parse().context("invalid test Slack reply URL")?;
         let loopback = url.host_str().is_some_and(|host| {

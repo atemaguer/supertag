@@ -178,7 +178,7 @@ impl Drop for Process {
 
 struct MockSlack {
     endpoint: String,
-    requests: Arc<Mutex<Vec<Value>>>,
+    requests: Arc<Mutex<Vec<(String, Value)>>>,
     server: tokio::task::JoinHandle<Result<()>>,
 }
 
@@ -195,8 +195,13 @@ impl MockSlack {
                     tokio::time::timeout(Duration::from_secs(5), mock_request(&mut connection))
                         .await??;
                 let mut requests = observed.lock().await;
+                // An update answers with the message it replaced; a post with a new message.
+                let ts = match request.0.as_str() {
+                    "/chat.update" => request.1["ts"].as_str().unwrap_or_default().to_owned(),
+                    _ => format!("1794470100.{:06}", requests.len() + 1),
+                };
                 requests.push(request);
-                let body = json!({"ok":true,"channel":CHANNEL,"ts":format!("1794470100.{:06}",requests.len())}).to_string();
+                let body = json!({"ok":true,"channel":CHANNEL,"ts":ts}).to_string();
                 drop(requests);
                 connection.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await?;
                 connection.shutdown().await?;
@@ -216,7 +221,7 @@ impl Drop for MockSlack {
     }
 }
 
-async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
+async fn mock_request(stream: &mut TcpStream) -> Result<(String, Value)> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 4096];
     let end = loop {
@@ -229,7 +234,15 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         bytes.extend_from_slice(&buffer[..count]);
     };
     let headers = std::str::from_utf8(&bytes[..end])?;
-    ensure!(headers.starts_with("POST /chat.postMessage HTTP/1.1\r\n"));
+    let path = headers
+        .strip_prefix("POST ")
+        .and_then(|line| line.split_once(" HTTP/1.1\r\n"))
+        .map(|(path, _)| path.to_owned())
+        .context("unexpected fixture HTTP request")?;
+    ensure!(matches!(
+        path.as_str(),
+        "/chat.postMessage" | "/chat.update"
+    ));
     let header = |name: &str| {
         headers
             .lines()
@@ -247,7 +260,7 @@ async fn mock_request(stream: &mut TcpStream) -> Result<Value> {
         ensure!(count > 0, "fixture HTTP body ended early");
         bytes.extend_from_slice(&buffer[..count]);
     }
-    Ok(serde_json::from_slice(&bytes[end..end + length])?)
+    Ok((path, serde_json::from_slice(&bytes[end..end + length])?))
 }
 
 async fn gateway(
@@ -545,14 +558,37 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     second.stop().await?;
     cp.stop().await?;
     let requests = mock.requests.lock().await;
+    // Each accepted logical message may first show one acknowledgement. Whether it does is
+    // a race with the fixture Task finishing; the final answer is exactly one per message,
+    // in the thread or in place of that acknowledgement.
+    let acknowledgements: Vec<String> = requests
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, body))| body["text"] == "Got it. I’m looking into this now.")
+        .map(|(index, (path, body))| {
+            assert_eq!(path, "/chat.postMessage");
+            assert_eq!(body["thread_ts"], THREAD);
+            format!("1794470100.{:06}", index + 1)
+        })
+        .collect();
+    assert!(acknowledgements.len() <= 3);
+    let finals: Vec<_> = requests
+        .iter()
+        .filter(|(_, body)| body["text"] != "Got it. I’m looking into this now.")
+        .collect();
     assert_eq!(
-        requests.len(),
+        finals.len(),
         3,
         "one provider response per accepted logical message"
     );
-    for request in requests.iter() {
+    for (path, request) in finals {
         assert_eq!(request["channel"], CHANNEL);
-        assert_eq!(request["thread_ts"], THREAD);
+        match path.as_str() {
+            "/chat.update" => {
+                assert!(acknowledgements.contains(&request["ts"].as_str().unwrap().to_owned()))
+            }
+            _ => assert_eq!(request["thread_ts"], THREAD),
+        }
         assert!(
             request["text"]
                 .as_str()

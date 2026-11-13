@@ -1287,8 +1287,10 @@ impl MockSlackApi {
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
-                stream.write_all(response.as_bytes()).await?;
-                stream.shutdown().await?;
+                // A crashed Gateway may have closed this connection; keep serving the next one.
+                if stream.write_all(response.as_bytes()).await.is_ok() {
+                    let _ = stream.shutdown().await;
+                }
             }
         });
         Ok(Self {
@@ -1299,10 +1301,10 @@ impl MockSlackApi {
         })
     }
 
-    async fn wait_for_request(&self) -> Result<()> {
+    async fn wait_for_requests(&self, count: usize) -> Result<()> {
         let deadline = Instant::now() + WAIT;
         loop {
-            if !self.requests.lock().await.is_empty() {
+            if self.requests.lock().await.len() >= count {
                 return Ok(());
             }
             ensure!(
@@ -1587,6 +1589,25 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             .location_id,
         location.location_id
     );
+    // The acknowledgement is posted once for the admitted Task, then replaced in place.
+    mock.wait_for_requests(1).await?;
+    {
+        let requests = mock.requests.lock().await;
+        assert_eq!(requests[0].path, "/chat.postMessage");
+        assert_eq!(
+            requests[0].authorization,
+            format!("Bearer {SLACK_BOT_TOKEN}")
+        );
+        assert_eq!(
+            requests[0].body,
+            serde_json::json!({
+                "channel": SLACK_CHANNEL, "thread_ts": SLACK_THREAD,
+                "text": "Got it. I’m looking into this now.",
+                "unfurl_links": false, "unfurl_media": false, "mrkdwn": true,
+            })
+        );
+    }
+    mock.responses.add_permits(1);
     let mut host = worker(&services, directory.path(), &credentials, false)?;
     let completed = wait_for_state(
         &mut operator,
@@ -1596,19 +1617,19 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     )
     .await?;
     host.successful_exit().await?;
-    mock.wait_for_request().await?;
+    mock.wait_for_requests(2).await?;
     {
         let requests = mock.requests.lock().await;
-        assert_eq!(requests.len(), 1);
-        let request = &requests[0];
-        assert_eq!(request.path, "/chat.postMessage");
+        assert_eq!(requests.len(), 2);
+        let request = &requests[1];
+        assert_eq!(request.path, "/chat.update");
         assert_eq!(request.authorization, format!("Bearer {SLACK_BOT_TOKEN}"));
         assert_eq!(
             request.body,
             serde_json::json!({
-                "channel": SLACK_CHANNEL, "thread_ts": SLACK_THREAD,
+                "channel": SLACK_CHANNEL, "ts": SLACK_RECEIPT,
                 "text": "Respond carefully: inspect the fixture repository [files:read]",
-                "unfurl_links": false, "unfurl_media": false, "mrkdwn": false,
+                "unfurl_links": false, "unfurl_media": false, "mrkdwn": true,
             })
         );
     }
@@ -1717,7 +1738,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     assert!(remaining.reply.is_none(), "settled reply was offered again");
     assert_eq!(
         mock.requests.lock().await.len(),
-        1,
+        2,
         "receipt replay must not repeat the provider send"
     );
     let mut operator = services.client().await?;
@@ -1728,6 +1749,272 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         2
     );
     Ok(())
+}
+
+/// Signs a Slack mention in its own thread, for tests that need several conversations.
+async fn signed_slack_mention(
+    endpoint: &str,
+    event_id: &str,
+    ts: &str,
+    prompt: &str,
+) -> Result<reqwest::StatusCode> {
+    let body = serde_json::json!({
+        "type": "event_callback", "team_id": SLACK_TEAM, "event_id": event_id,
+        "event": { "type": "app_mention", "channel": SLACK_CHANNEL, "user": SLACK_USER,
+            "text": prompt, "ts": ts }
+    })
+    .to_string();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs()
+        .to_string();
+    let mut mac = Hmac::<Sha256>::new_from_slice(SLACK_SIGNING_SECRET.as_bytes())?;
+    mac.update(format!("v0:{timestamp}:{body}").as_bytes());
+    let signature = format!("v0={:x}", mac.finalize().into_bytes());
+    Ok(reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()?
+        .post(format!("{endpoint}/slack/events"))
+        .header("content-type", "application/json")
+        .header("x-slack-request-timestamp", timestamp)
+        .header("x-slack-signature", signature)
+        .body(body)
+        .send()
+        .await?
+        .status())
+}
+
+/// TypeScript parity: the acknowledgement, `progress.updated` replacement, and in-place final
+/// result of `packages/control-plane/src/index.ts`, through real services and a mock Slack API.
+async fn exercise_slack_reply_streaming(database: &str, directory: &Path) -> Result<()> {
+    use supertag_protocol::v2::{
+        PutSurfaceAccountRequest, PutSurfaceLocationRequest, SlackSurfaceChannel,
+        SlackSurfaceIdentity, SurfaceAccount, SurfaceAccountIdentity, SurfaceLocation,
+        SurfaceLocationScope, surface_account_identity, surface_location_scope,
+        surface_policy_catalog_client::SurfacePolicyCatalogClient,
+    };
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .env("SUPERTAG_DATABASE_URL", database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private_endpoint = control_plane.endpoint().await?;
+    let (gateway, endpoint, http) =
+        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
+    let mut services = Services {
+        gateway,
+        control_plane,
+        endpoint,
+    };
+    let mut operator = services.client().await?;
+    operator
+        .put_tag(credentials.request(PutTagRequest {
+            name: None,
+            expected_revision: None,
+            approval_rules: vec![],
+            harness_kind: 0,
+            workspace: None,
+            tag_id: "slack-engineer".into(),
+            instructions: "Respond carefully".into(),
+            execution: None,
+            allowed_actions: vec!["files:read".into()],
+        })?)
+        .await?;
+    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    policy
+        .put_surface_account(credentials.request(PutSurfaceAccountRequest {
+            operation_id: "account-fixture".into(),
+            account: Some(SurfaceAccount {
+                account_id: "slack-installation".into(),
+                enabled: true,
+                identity: Some(SurfaceAccountIdentity {
+                    provider: Some(surface_account_identity::Provider::Slack(
+                        SlackSurfaceIdentity {
+                            team_id: SLACK_TEAM.into(),
+                        },
+                    )),
+                }),
+                ..Default::default()
+            }),
+            expected_revision: None,
+        })?)
+        .await?;
+    policy
+        .put_surface_location(credentials.request(PutSurfaceLocationRequest {
+            operation_id: "location-fixture".into(),
+            location: Some(SurfaceLocation {
+                location_id: "slack-release".into(),
+                account_id: "slack-installation".into(),
+                connector_account_id: SLACK_ACCOUNT.into(),
+                tag_id: "slack-engineer".into(),
+                enabled: true,
+                scope: Some(SurfaceLocationScope {
+                    provider: Some(surface_location_scope::Provider::Slack(
+                        SlackSurfaceChannel {
+                            channel_id: SLACK_CHANNEL.into(),
+                        },
+                    )),
+                }),
+                ..Default::default()
+            }),
+            expected_revision: None,
+        })?)
+        .await?;
+    let body = |method: &str, target: (&str, &str), text: &str| {
+        let mut body = serde_json::json!({
+            "channel": SLACK_CHANNEL, "text": text,
+            "unfurl_links": false, "unfurl_media": false, "mrkdwn": true,
+        });
+        body[target.0] = target.1.into();
+        (method.to_owned(), body)
+    };
+    let observed = |requests: &[MockSlackRequest]| {
+        requests
+            .iter()
+            .map(|request| (request.path.clone(), request.body.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    // One conversation: acknowledgement, a paced progress update, then the final result, all
+    // in the same Slack message and strictly in that order.
+    let first_thread = "1794470100.000001";
+    assert_eq!(
+        signed_slack_mention(&http, "EvSTREAM1", first_thread, "inspect the fixture").await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(1).await?;
+    mock.responses.add_permits(1);
+    let release = directory.join("progress-release");
+    let mut command = credentials.command();
+    command
+        .args([
+            "worker-host",
+            "--gateway",
+            &services.endpoint,
+            "--adapter",
+            ADAPTER,
+            "--once",
+            "--adapter-arg=--progress-fixture",
+        ])
+        .arg(format!(
+            "--adapter-arg=--progress-release={}",
+            release.display()
+        ))
+        .arg("--state-directory")
+        .arg(directory.join("progress-host"));
+    let mut host = Process::spawn(command, directory, "worker-host", false)?;
+    mock.wait_for_requests(2).await?;
+    mock.responses.add_permits(1);
+    std::fs::write(&release, b"")?;
+    mock.wait_for_requests(3).await?;
+    mock.responses.add_permits(1);
+    host.successful_exit().await?;
+    assert_eq!(
+        observed(&mock.requests.lock().await),
+        [
+            body(
+                "/chat.postMessage",
+                ("thread_ts", first_thread),
+                "Got it. I’m looking into this now."
+            ),
+            body(
+                "/chat.update",
+                ("ts", SLACK_RECEIPT),
+                "Inspecting\n\n• Read the fixture"
+            ),
+            body(
+                "/chat.update",
+                ("ts", SLACK_RECEIPT),
+                "Respond carefully: inspect the fixture [files:read]"
+            ),
+        ]
+    );
+
+    // A second conversation: the Gateway dies while Slack holds the acknowledgement. The
+    // restarted Gateway cannot prove whether it was shown, so it never posts it again, and
+    // the final result is a new thread reply instead of an edit of an unknown message.
+    let second_thread = "1794470200.000001";
+    assert_eq!(
+        signed_slack_mention(&http, "EvSTREAM2", second_thread, "check the restart").await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(4).await?;
+    let progress_journal = directory.join("slack/progress/reply.json");
+    wait_for_reply_journal(&progress_journal, "sending").await?;
+    services.gateway.crash()?;
+    mock.responses.add_permits(1);
+    let (gateway, endpoint, _http) =
+        slack_gateway(&credentials, &private_endpoint, directory, &mock).await?;
+    services.gateway = gateway;
+    services.endpoint = endpoint;
+    let mut host = worker(&services, directory, &credentials, false)?;
+    mock.wait_for_requests(5).await?;
+    mock.responses.add_permits(1);
+    host.successful_exit().await?;
+    sleep(Duration::from_millis(2_500)).await;
+    let requests = observed(&mock.requests.lock().await);
+    assert_eq!(
+        requests.len(),
+        5,
+        "an uncertain acknowledgement was repeated"
+    );
+    assert_eq!(
+        requests[3],
+        body(
+            "/chat.postMessage",
+            ("thread_ts", second_thread),
+            "Got it. I’m looking into this now."
+        )
+    );
+    assert_eq!(
+        requests[4],
+        body(
+            "/chat.postMessage",
+            ("thread_ts", second_thread),
+            "Respond carefully: check the restart [files:read]"
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slack_reply_streams_progress_and_never_repeats_an_uncertain_acknowledgement() -> Result<()>
+{
+    let directory = TempDir::new()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("stream.db").display()
+    );
+    exercise_slack_reply_streaming(&database, directory.path()).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_slack_reply_streams_progress_and_never_repeats_an_uncertain_acknowledgement()
+-> Result<()> {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .context("PostgreSQL process integration requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")?;
+    let admin_url = std::fs::read_to_string(path)?;
+    let options = PgConnectOptions::from_str(admin_url.trim())?;
+    let mut admin = PgConnection::connect_with(&options).await?;
+    let name = format!("supertag_rust_slack_stream_{}", Uuid::new_v4().simple());
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await?;
+    let database = options.database(&name).to_url_lossy().to_string();
+    let directory = TempDir::new()?;
+    let path = directory.path().to_owned();
+    let result =
+        tokio::spawn(async move { exercise_slack_reply_streaming(&database, &path).await }).await;
+    let cleanup = admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await;
+    admin.close().await?;
+    cleanup?;
+    result.context("PostgreSQL process test panicked")?
 }
 
 #[tokio::test]
