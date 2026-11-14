@@ -9,7 +9,9 @@ both. `verify` re-reads an archive, and with --from also checks it against the s
 the Rust runtime no longer accepts.
 
 Secrets stay out of the archive: credential stores, host credentials, harness sign-ins, .env
-files, and private keys go into FILE.secrets.tar.age, a tar encrypted with age to the recipients
+files, private keys, the files supertag.yaml names as secrets (`secrets:` files, env_file, a TLS
+key, the operators file, Volume credentials), and a --database-url-file kept in the state
+directory go into FILE.secrets.tar.age, a tar encrypted with age to the recipients
 you name, and the manifest lists them by path, size, and SHA-256. `verify` decrypts that bundle
 with an age identity file and checks every secret against the manifest. Task checkouts
 (workspaces/*/worktrees) are left out; `create` warns about any with uncommitted or unbranched
@@ -38,17 +40,22 @@ import tempfile
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
-FORMAT = "supertag-legacy-archive-v2"
+FORMAT = "supertag-legacy-archive-v3"
 MANIFEST = "manifest.json"
 DATABASE_FILE = "supertag.db"
-# File names left out as secrets, and names that match them but hold no secret. `*credential.json`
+# File names left out as secrets, and names that match them but hold no secret; `paths` adds the
+# files and directories the state directory's supertag.yaml names as secrets. `*credential.json`
 # covers hosts/ID/credential.json and worker-hosts/ID.credential.json; `*credentials.json` covers
 # the credential store and Claude Code's .credentials.json; auth.json is the Codex and OpenCode sign-in.
 SECRET_RULES = {
     "names": ["*credentials.json", "*credential.json", "auth.json", ".env", ".env.*", "*.pem", "*.key",
               "id_rsa", "id_rsa.*", "id_ecdsa", "id_ecdsa.*", "id_ed25519", "id_ed25519.*"],
     "except": ["*.example", "*.sample", "*.template"],
+    "paths": [],
 }
+# supertag.yaml keys that can name a secret file. Without them, create needs no YAML parser.
+SECRET_REFERENCE_KEYS = re.compile(r"^\s*(secrets|env_file|tls|operators|volume-credentials)\s*:", re.MULTILINE)
+INTERPOLATION = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 # Task checkouts point at their Workspace's repository outside the state directory and can dominate
 # its size, so the archive leaves them out; the rollback snapshot keeps them.
 TASK_CHECKOUTS = "workspaces/*/worktrees"
@@ -78,6 +85,8 @@ def private_directory(prefix):
 
 
 def is_secret(relative, rules):
+    if any(relative == path or relative.startswith(path + "/") for path in rules["paths"]):
+        return True
     name = PurePosixPath(relative).name
     matches = lambda patterns: any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
     return matches(rules["names"]) and not matches(rules["except"])
@@ -116,6 +125,82 @@ def walk(source, patterns, rules=SECRET_RULES):
 
     visit(source, "")
     return entries, secrets, skipped
+
+
+def interpolate(value, where):
+    """TypeScript's ${VAR} and ${VAR:-DEFAULT}, from this shell's environment."""
+    def substitute(match):
+        name, default = match.group(1), match.group(2)
+        found = os.environ.get(name) or default
+        require(found is not None, f"supertag.yaml {where} uses ${{{name}}}, which is not set; set it as the "
+                "old runtime had it so create can find that secret file")
+        return found
+    return INTERPOLATION.sub(substitute, value)
+
+
+def secret_references(document):
+    """(where, path) for every file or directory a TypeScript supertag.yaml reads a secret from."""
+    references = []
+
+    def files(mapping, where):
+        for name, source in (mapping or {}).items() if isinstance(mapping, dict) else ():
+            if isinstance(source, dict) and isinstance(source.get("file"), str):
+                references.append((f"{where}.{name}.file", source["file"]))
+            if isinstance(source, dict) and isinstance(source.get("path"), str):
+                references.append((f"{where}.{name}.path", source["path"]))
+
+    files(document.get("secrets"), "secrets")
+    env_files = document.get("env_file")
+    for index, value in enumerate(env_files if isinstance(env_files, list) else [env_files]):
+        if isinstance(value, str):
+            references.append((f"env_file[{index}]", value))
+    services = document.get("services")
+    for name, service in services.items() if isinstance(services, dict) else ():
+        if not isinstance(service, dict):
+            continue
+        tls, operators = service.get("tls"), service.get("operators")
+        if isinstance(tls, dict) and isinstance(tls.get("key"), str):
+            references.append((f"services.{name}.tls.key", tls["key"]))
+        if isinstance(operators, dict) and isinstance(operators.get("file"), str):
+            references.append((f"services.{name}.operators.file", operators["file"]))
+        files(service.get("volume-credentials"), f"services.{name}.volume-credentials")
+    return references
+
+
+def secret_paths(source, database_url_file=None):
+    """Paths relative to source of the secret files supertag.yaml and --database-url-file name.
+
+    TypeScript resolves a relative path against supertag.yaml's directory and `~` against home. The
+    snapshot is the renamed state directory, so a path under its old location (SUPERTAG_STATE_DIR, or
+    ~/.supertag) names the same file in source.
+    """
+    original = Path(os.path.expanduser(os.environ.get("SUPERTAG_STATE_DIR", "").strip() or "~/.supertag")).absolute()
+    roots = [source, Path(os.path.normpath(original))]
+    references = []
+    text = read_text(source / "supertag.yaml")
+    if SECRET_REFERENCE_KEYS.search(text):
+        try:
+            import yaml  # PyYAML, only when supertag.yaml can name secret files
+        except ImportError:
+            raise ArchiveError("supertag.yaml can name secret files, and reading it needs PyYAML; run create with "
+                               "`uv run --with PyYAML==6.0.3 rust/scripts/legacy_archive.py create ...`") from None
+        try:
+            document = yaml.safe_load(text)
+        except yaml.YAMLError as error:
+            raise ArchiveError(f"supertag.yaml is not valid YAML: {error}") from None
+        require(isinstance(document, dict), "supertag.yaml is not a mapping")
+        references = [(where, interpolate(value.strip(), where)) for where, value in secret_references(document)]
+    if database_url_file is not None:
+        references.append(("--database-url-file", str(Path(database_url_file).absolute())))
+    paths = set()
+    for _, value in references:
+        path = Path(os.path.expanduser(value))
+        path = Path(os.path.normpath(path if path.is_absolute() else source / path))
+        for root in roots:
+            if path.is_relative_to(root) and path != root:
+                paths.add(path.relative_to(root).as_posix())
+                break
+    return sorted(paths)
 
 
 def require_stopped(source):
@@ -572,7 +657,8 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
     sqlite_database = source / DATABASE_FILE
     require(database_url_file or sqlite_database.is_file(),
             f"{source} has no {DATABASE_FILE}; name the PostgreSQL database with --database-url-file")
-    entries, secrets, skipped = walk(source, patterns)
+    rules = {**SECRET_RULES, "paths": secret_paths(source, database_url_file)}
+    entries, secrets, skipped = walk(source, patterns, rules)
     if secrets:
         require(age_recipients, f"{len(secrets)} secret files need an encrypted bundle; name its age recipients "
                 "with --age-recipient or --age-recipients-file")
@@ -662,7 +748,7 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
                         "records": records,
                         "secrets": secrets,
                         "secretsBundle": secrets_bundle,
-                        "secretRules": SECRET_RULES,
+                        "secretRules": rules,
                         "excludedPatterns": list(patterns),
                         "unsavedCheckouts": unsaved,
                         "snapshot": {"keepDays": SNAPSHOT_KEEP_DAYS, "deleteAfter": delete_after},
@@ -864,16 +950,15 @@ RUST_KEYS = {
     "control-plane": {"type", "ports", "url", "credentials", "restart", "provision", "notify", "database", "logging"},
     "host": {"type", "control-plane", "auth-key", "harnesses", "adapter", "adapter-args", "models", "workspaces",
              "skills", "allow-unsandboxed-commands", "restart", "depends_on", "concurrency",
-             "attempt-timeout-seconds"},
+             "attempt-timeout-seconds", "labels"},
     ("control-plane", "logging"): {"audit"},
     ("control-plane", "database"): {"url", "password"},
 }
-UNSANDBOXED_HARNESSES = ("opencode", "cursor")
+UNSANDBOXED_HARNESSES = ("claude-code", "opencode", "cursor")
 GUIDANCE = {
     "tls": "the local Control Plane listens on loopback; deploy with `supertag setup deployment` for TLS",
     "hosts": "Worker Hosts connect to the Control Plane's one public endpoint",
     "operators": "issue named Operator Tokens with `supertag operator-token create`",
-    "labels": "grant labels with `supertag auth-key create --role host --label LABEL`",
     "environment": "put harness variables in env_file (STATE_DIRECTORY/.env by default)",
     "mcp": "write the servers to a JSON MCP catalog for `supertag worker-host --mcp-catalog`; "
            "check it with `supertag mcp list --mcp-catalog PATH`",
@@ -923,7 +1008,7 @@ def translate_config(source, destination):
             for harness in consent:
                 if harness not in kept:
                     removed.append({"key": f"services.{name}.allow-unsandboxed-commands[{harness}]",
-                                    "instead": "only OpenCode and Cursor accept unsandboxed command consent"})
+                                    "instead": "only Claude Code, OpenCode, and Cursor accept unsandboxed command consent"})
             if kept:
                 service["allow-unsandboxed-commands"] = kept
             else:

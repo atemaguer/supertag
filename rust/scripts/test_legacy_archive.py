@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -260,6 +261,58 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.root.iterdir()),
                          ["identity.txt", "only-zstd", "state", "tools"])
 
+    def test_files_supertag_yaml_names_as_secrets_go_into_the_bundle(self):
+        try:
+            import yaml  # noqa: F401
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        # The snapshot was renamed from ~/.supertag, which supertag.yaml still names.
+        home, saved = self.root / "home", {name: os.environ.get(name) for name in ("HOME", "SUPERTAG_STATE_DIR")}
+        os.environ["HOME"] = str(home)
+        os.environ.pop("SUPERTAG_STATE_DIR", None)
+        self.addCleanup(lambda: [os.environ.pop(name, None) if value is None else os.environ.__setitem__(name, value)
+                                 for name, value in saved.items()])
+        (self.state / "supertag.yaml").write_text(
+            "env_file: [config/harness.env]\n"
+            "services:\n  control-plane:\n    type: control-plane\n"
+            "    tls: {cert: tls/server.crt, key: tls/server-material}\n    operators: {file: operators.yaml}\n"
+            "  laptop:\n    type: host\n    volume-credentials: {bucket: {file: \"${CREDS_DIR:-creds}/bucket\"}}\n"
+            "secrets:\n  db-password: {file: ~/.supertag/db-password}\n"
+            "  slack: {file: secrets/slack-app-token}\n  elsewhere: {file: /nonexistent/token}\n"
+            "  github: {environment: GITHUB_TOKEN}\n")
+        named = ["config/harness.env", "creds/bucket", "db-password", "operators.yaml", "secrets/slack-app-token",
+                 "tls/server-material"]
+        for relative in [*named, "tls/server.crt"]:
+            (self.state / relative).parent.mkdir(parents=True, exist_ok=True)
+            (self.state / relative).write_text(SECRET if relative in named else "certificate\n")
+        report = self.create(self.state, self.archive, age_identity=self.identity)
+        self.assertTrue(set(named) <= set(report["secrets"]))
+        self.assertTrue(report["secretsDecrypted"])
+        names = tarfile.open(fileobj=io.BytesIO(decompressed(self.archive))).getnames()
+        self.assertIn("state/tls/server.crt", names)
+        self.assertFalse({f"state/{relative}" for relative in named} & set(names))
+        self.assertNotIn(SECRET.encode(), decompressed(self.archive))
+        self.assertTrue(self.verify(self.archive, source=self.state)["checkedAgainstSource"])
+        # A database URL file kept in the state directory is a secret too.
+        self.assertIn("legacy-db-url", legacy_archive.secret_paths(self.state, self.state / "legacy-db-url"))
+
+    def test_create_refuses_supertag_yaml_secret_files_it_cannot_read(self):
+        (self.state / "supertag.yaml").write_text(
+            "services:\n  control-plane:\n    type: control-plane\nsecrets:\n  db-password: {file: db-password}\n")
+        (self.state / "db-password").write_text(SECRET)
+        saved = sys.modules.get("yaml")
+        sys.modules["yaml"] = None  # import yaml now fails, as without PyYAML
+        try:
+            with self.assertRaisesRegex(ArchiveError, "reading it needs PyYAML"):
+                self.create(self.state, self.archive)
+        finally:
+            if saved is None:
+                del sys.modules["yaml"]
+            else:
+                sys.modules["yaml"] = saved
+        self.assertFalse(self.archive.exists())
+        self.assertFalse(self.bundle.exists())
+
     def test_state_without_secrets_needs_no_bundle(self):
         for path in [*self.state.rglob("*credential*.json"), *self.state.rglob("auth.json"), self.state / ".env"]:
             path.unlink()
@@ -407,7 +460,7 @@ class LegacyArchiveTests(unittest.TestCase):
         source.write_text(
             "name: dogfood\nservices:\n  control-plane:\n    type: control-plane\n    tls: {cert: a, key: b}\n"
             "    logging: {level: info, audit: stderr}\n  laptop:\n    type: host\n    harnesses: [codex]\n"
-            "    labels: [gpu]\n    concurrency: 2\n    allow-unsandboxed-commands: [codex, cursor]\n"
+            "    labels: [gpu]\n    concurrency: 2\n    allow-unsandboxed-commands: [codex, claude-code, cursor]\n"
             "    x-note: kept by TypeScript\n  x-template:\n    harnesses: [codex]\n"
             "x-anchor: &anchor {a: 1}\n")
         text = source.read_text().replace("    tls:", "    credentials: vault://kv/supertag\n    x-owner: me\n    tls:")
@@ -416,11 +469,13 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual(sorted(item["key"] for item in result["removed"]), [
             "services.control-plane.credentials", "services.control-plane.logging.level",
             "services.control-plane.tls", "services.control-plane.x-owner",
-            "services.laptop.allow-unsandboxed-commands[codex]", "services.laptop.labels",
+            "services.laptop.allow-unsandboxed-commands[codex]",
             "services.laptop.x-note", "services.x-template"])
         translated = (self.root / "rust.yaml").read_text()
         self.assertIn("concurrency: 2", translated)
-        self.assertNotIn("labels", translated)
+        # The Rust host reports declared labels, so a Tag's runsOn keeps selecting it.
+        self.assertIn("labels:\n    - gpu", translated)
+        self.assertIn("- claude-code", translated)
         self.assertIn("- cursor", translated)
         self.assertIn("x-anchor", translated)
         self.assertNotIn("vault", translated)

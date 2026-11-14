@@ -15,7 +15,7 @@ run from a SuperTag checkout.
 | Python 3.11 or later and `zstd` | `rust/scripts/legacy_archive.py` writes and checks the archive |
 | [`age`](https://age-encryption.org) and an age key pair | Encrypts the secrets bundle. `create` needs the public key, `verify` the identity file |
 | Git | `create` checks the Task checkouts it leaves out for unsaved work |
-| PyYAML (`uv run --with PyYAML==6.0.3`) | Only for translating `supertag.yaml` and manifests |
+| PyYAML (`uv run --with PyYAML==6.0.3`) | For translating `supertag.yaml` and manifests, and for archiving a state directory whose `supertag.yaml` names secret files |
 | `psql`, `pg_dump`, and `pg_restore` | Only when the old Control Plane used PostgreSQL |
 | Free disk of about one third of the state directory | The rehearsal compressed 5.2 GB to 1.5 GB |
 | The Rust native release archive | Installs the Rust `supertag` |
@@ -127,7 +127,20 @@ as secrets anywhere in the state directory:
 - `auth.json`, the Codex and OpenCode sign-in
 - `.env`, `.env.*`, `*.pem`, `*.key`, and SSH private keys
 
-Names ending in `.example`, `.sample`, or `.template` do not count. The manifest lists each
+Names ending in `.example`, `.sample`, or `.template` do not count. Any file, whatever its name,
+also counts when the state directory's `supertag.yaml` reads a secret from it: a `secrets:` entry
+of the form `{ file: PATH }`, each `env_file`, a Control Plane's `tls.key` and `operators.file`,
+and a host's `volume-credentials` files and directories. So does the `--database-url-file` when
+it is in the state directory. Paths resolve as TypeScript resolved them: relative to
+`supertag.yaml`, with `~` as your home and `${VAR}` from your shell. A path under the old state
+directory location (`SUPERTAG_STATE_DIR`, or `~/.supertag`) names the same file in the renamed
+snapshot. When `supertag.yaml` uses any of those keys, `create` reads it with PyYAML, and refuses
+to run without it:
+
+```sh
+uv run --with PyYAML==6.0.3 rust/scripts/legacy_archive.py create --from ... --to ...
+```
+ The manifest lists each
 secret by path, size, and SHA-256 only. Task checkouts are not archived, so a repository file with
 one of these names in a checkout is in neither the archive nor the bundle.
 
@@ -214,11 +227,11 @@ For a new setup instead, run `supertag init` in the repository.
 | Control Plane `database` | Unchanged form. Point `url` at a new, empty database, never the old one |
 | Control Plane `credentials: vault://...` | Removed. The local supervisor keeps credentials in files. A deployed Control Plane chooses Vault with `supertag setup deployment` |
 | `x-` keys | Kept only at the top level. Rust refuses them inside services, and `x-` entries under `services` are removed. YAML anchors are expanded first |
-| Host `labels` | Removed. Grant labels with `supertag auth-key create --role host --label LABEL` |
+| Host `labels` | Unchanged. The host reports them with its presence, so a Tag's `runsOn` still selects it |
 | Host `environment` | Removed. Put harness variables in `env_file` |
 | Host `mcp` | Removed. Write the servers to a JSON MCP catalog for `supertag worker-host --mcp-catalog`, and check it with `supertag mcp list --mcp-catalog PATH` |
 | Host `volume-credentials`, `artifact-volume`, `local-mount-root` | Removed. Register Volumes with `supertag volume put` |
-| Host `allow-unsandboxed-commands` | Only `opencode` and `cursor` remain; Rust refuses other harnesses here |
+| Host `allow-unsandboxed-commands` | Only `claude-code`, `opencode`, and `cursor` remain; Rust refuses other harnesses here |
 | Host `workspaces` | Unchanged. An entry may also be `{path, delivery, setup}` |
 | Top-level `surfaces` | New in Rust. See `supertag setup surface` |
 
@@ -363,7 +376,8 @@ trip is covered by `RealAgeSecretsBundleTests`, which skips with a message when 
 `age-keygen` are not installed.
 
 The translated dogfood `supertag.yaml` passed `supertag config` after `config` dropped
-`claude-code` from two `allow-unsandboxed-commands` lists. So did a file with `x-` keys inside
+`claude-code` from two `allow-unsandboxed-commands` lists. Rust has since accepted that consent
+for Claude Code and host `labels`, so `config` now keeps both. So did a file with `x-` keys inside
 services, an `x-` service entry, and `credentials: vault://...`. The translated dogfood
 manifests, plus a GitHub Workspace, a Tag with `locations`, a Volume with `credential`, and a
 Permission Set with `approval: required`, applied cleanly to a fresh Rust Control Plane. A
@@ -372,7 +386,8 @@ second `supertag diff` reported no changes. A translated Objective and surface g
 
 `python3 -m unittest discover -s rust/scripts -p 'test_legacy_archive.py'` covers the archive
 format, the secrets bundle (recipients, decryption with the right and a wrong identity, a changed
-or missing bundle, and secrets that differ from the manifest), Task checkout exclusion and the
+or missing bundle, secrets that differ from the manifest, and the files `supertag.yaml` names as
+secrets), Task checkout exclusion and the
 unsaved-work warnings, the snapshot date, tampering, row-count checks, damaged archives,
 PostgreSQL URL options, and translation. The bundle tests use a stand-in for `age` everywhere,
 and the real `age` with throwaway keys when it is installed. Set
