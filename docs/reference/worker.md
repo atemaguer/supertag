@@ -169,9 +169,10 @@ Control Plane or a sandbox.
 
 ## Artifacts
 
-A Task captures files as artifacts. The host keeps their bytes in its state directory, and the
-Control Plane records only the catalog. Other hosts read a host's artifacts through its transfer
-listener (`--artifact-transfer-listen`), pinned by `--artifact-peer HOST_ID=ORIGIN`. See
+A Task captures files as artifacts. The host uploads their bytes to the Control Plane's transfer
+directory, and the Control Plane records the catalog. A host run with
+`--artifact-source-directory` and `--artifact-transfer-listen` also keeps its own copy and serves
+other hosts directly; they pin it with `--artifact-peer HOST_ID=ORIGIN`. See
 [Artifacts](artifacts.md).
 
 ## Next

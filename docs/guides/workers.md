@@ -208,12 +208,14 @@ Tasks. A Task sees a catalog tool only when its Permission Sets grant it. See
 
 ## Keep artifacts on Worker Hosts
 
-A host keeps the artifacts its Tasks capture in its state directory. To let Tasks on other hosts
-read them, give it a transfer listener:
+Every artifact a Task captures reaches the Control Plane's transfer directory. A host can also
+keep its own copy and serve it to Tasks on other hosts directly. Give it a dedicated owner-only
+directory and a transfer listener:
 
 ```sh
 supertag worker-host --control-plane https://supertag.example.com \
   --state-directory /var/lib/supertag-host --harness codex \
+  --artifact-source-directory /var/lib/supertag-artifacts \
   --artifact-transfer-listen 0.0.0.0:8443 \
   --artifact-transfer-tls-cert transfer.pem --artifact-transfer-tls-key transfer.key
 ```

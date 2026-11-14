@@ -73,8 +73,8 @@ the host. See [Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-san
 
 ## What a Worker Host keeps
 
-A host's state directory holds its credential, its execution journal, the artifacts its Tasks
-captured, and Workspace checkouts. The journal lets a restarted host recover an interrupted Task
+A host's state directory holds its credential, its execution journal, output files waiting to
+upload, and Workspace checkouts. The journal lets a restarted host recover an interrupted Task
 Attempt without running it twice. See [Persistence](persistence.md).
 
 ## Next
