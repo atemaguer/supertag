@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
+    MAX_MESSAGE_BYTES,
     artifacts::validate_capture_request,
     authenticated_request,
     v2::{
-        ArtifactChunk, ArtifactUpload, CapturedArtifact, CommitArtifactCaptureRequest,
-        HarnessCaptureArtifactRequest, TaskState, artifact_upload,
+        CapturedArtifact, HarnessCaptureArtifactRequest, TaskState,
         harness_artifacts_server::{HarnessArtifacts, HarnessArtifactsServer},
     },
 };
@@ -122,14 +121,16 @@ impl HarnessArtifacts for Bridge {
                 Capture::Pending(manifest, selected) => (manifest, selected),
                 Capture::Committed(capture) => return Ok(Response::new(capture)),
             };
-            let stream = tokio_stream::iter(upload_records(manifest.clone(), selected));
-            let mut upstream = authenticated_request(stream, &self.host_token, None)?;
+            // The snapshot retained the bytes in this host's artifact storage; only the manifest
+            // goes to the Control Plane.
+            drop(selected);
+            let mut upstream = authenticated_request(manifest.clone(), &self.host_token, None)?;
             upstream.set_timeout(operation_deadline.saturating_duration_since(Instant::now()));
             let capture = self
                 .coordination
-                .artifacts
+                .acquisitions
                 .clone()
-                .upload_capture(upstream)
+                .commit_capture(upstream)
                 .await?
                 .into_inner();
             if capture.files != manifest.files
@@ -175,24 +176,4 @@ impl HarnessArtifacts for Bridge {
             }
         }
     }
-}
-
-pub(crate) fn upload_records(
-    manifest: CommitArtifactCaptureRequest,
-    selected: Vec<Vec<u8>>,
-) -> impl Iterator<Item = ArtifactUpload> + Send + 'static {
-    let chunks = selected.into_iter().enumerate().flat_map(|(index, bytes)| {
-        (0..bytes.len())
-            .step_by(CHECKPOINT_CHUNK_BYTES)
-            .map(move |offset| ArtifactUpload {
-                part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                    file_index: index as u32,
-                    data: bytes[offset..bytes.len().min(offset + CHECKPOINT_CHUNK_BYTES)].to_vec(),
-                })),
-            })
-    });
-    std::iter::once(ArtifactUpload {
-        part: Some(artifact_upload::Part::Begin(manifest)),
-    })
-    .chain(chunks)
 }

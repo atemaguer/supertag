@@ -1,4 +1,9 @@
-//! Opt-in storage and peer transport for exact artifact reads.
+//! This Worker Host's artifact storage, and the transports that read from it.
+//!
+//! Every artifact a Task captures and every Workspace delivery's patch and bundle stay here, on the
+//! producing Worker Host: the Control Plane stores none of their bytes. It relays them to readers
+//! by asking this host over the `HostRelay` stream ([`relay`]). An opt-in peer listener also lets
+//! other Worker Hosts read artifacts directly under a Control Plane grant.
 use std::{
     collections::BTreeMap,
     fs::{self, DirBuilder, File, OpenOptions},
@@ -19,6 +24,7 @@ use supertag_protocol::{
     v2::{
         artifact_download::Part,
         attempt_artifacts_client::AttemptArtifactsClient,
+        host_relay_client::HostRelayClient,
         worker_artifact_transfers_client::WorkerArtifactTransfersClient,
         worker_artifact_transfers_server::{
             WorkerArtifactTransfers, WorkerArtifactTransfersServer,
@@ -27,7 +33,6 @@ use supertag_protocol::{
     },
     valid_sha256,
 };
-use supertag_workspaces::ExclusiveLock;
 use tokio::{
     net::TcpListener,
     sync::{Semaphore, mpsc},
@@ -124,23 +129,41 @@ impl ArtifactPeers {
     }
 }
 
+/// Where this Worker Host keeps the artifact and Workspace delivery bytes it holds, and
+/// whether it also serves artifact reads directly to peer Worker Hosts.
 pub struct ArtifactSourceConfig {
-    pub listen: SocketAddr,
+    /// A dedicated owner-only absolute directory, or exactly `STATE_DIRECTORY/artifacts`. Lanes of
+    /// one supervised Host share one directory.
     pub directory: PathBuf,
+    pub listen: Option<SocketAddr>,
     pub tls: Option<Identity>,
 }
 
 impl ArtifactSourceConfig {
+    /// The default storage inside a Worker Host's state directory.
+    pub fn in_state(state: &Path) -> Self {
+        Self {
+            directory: state.join("artifacts"),
+            listen: None,
+            tls: None,
+        }
+    }
+
     pub(crate) async fn bind(self, state: &Path, workspaces: &[&Path]) -> Result<BoundSource> {
         ensure!(
-            self.listen.ip().is_loopback() || self.tls.is_some(),
+            self.listen
+                .is_none_or(|listen| listen.ip().is_loopback() || self.tls.is_some()),
             "remote artifact listener requires TLS"
         );
         let directory = self.directory.clone();
         let state = state.canonicalize()?;
+        // A mapped Workspace whose source is missing is not advertised and holds nothing.
         let workspaces = workspaces
             .iter()
-            .map(|path| path.canonicalize())
+            .filter_map(|path| match path.canonicalize() {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                result => Some(result),
+            })
             .collect::<std::io::Result<Vec<_>>>()?;
         let storage = tokio::task::spawn_blocking(move || {
             ensure!(
@@ -149,9 +172,10 @@ impl ArtifactSourceConfig {
             );
             private_directory(&directory)?;
             let root = directory.canonicalize()?;
+            // Inside the state directory, only its own `artifacts` entry, which nothing else uses.
             ensure!(
                 !state.starts_with(&root)
-                    && !root.starts_with(&state)
+                    && (!root.starts_with(&state) || root == state.join("artifacts"))
                     && workspaces
                         .iter()
                         .all(|path| !root.starts_with(path) && !path.starts_with(&root)),
@@ -160,34 +184,38 @@ impl ArtifactSourceConfig {
             SourceStorage::open(&root)
         })
         .await??;
-        // Pings every peer connection, as every other SuperTag service does.
-        let mut server = Server::builder()
-            .http2_keepalive_interval(Some(supertag_transport::KEEPALIVE_INTERVAL))
-            .http2_keepalive_timeout(Some(supertag_transport::KEEPALIVE_TIMEOUT));
-        if let Some(identity) = self.tls {
-            server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
-        }
-        let listener = TcpListener::bind(self.listen)
-            .await
-            .context("bind artifact peer listener")?;
-        Ok(BoundSource {
-            server,
-            listener,
-            storage,
-        })
+        let peers = match self.listen {
+            Some(listen) => {
+                // Pings every peer connection, as every other SuperTag service does.
+                let mut server = Server::builder()
+                    .http2_keepalive_interval(Some(supertag_transport::KEEPALIVE_INTERVAL))
+                    .http2_keepalive_timeout(Some(supertag_transport::KEEPALIVE_TIMEOUT));
+                if let Some(identity) = self.tls {
+                    server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
+                }
+                let listener = TcpListener::bind(listen)
+                    .await
+                    .context("bind artifact peer listener")?;
+                Some((server, listener))
+            }
+            None => None,
+        };
+        Ok(BoundSource { peers, storage })
     }
 }
 
 pub(crate) struct BoundSource {
-    server: Server,
-    listener: TcpListener,
+    peers: Option<(Server, TcpListener)>,
     storage: SourceStorage,
 }
 
 impl BoundSource {
+    /// Registers this storage with the Control Plane, then answers its relay requests and, when
+    /// configured, direct reads from peer Worker Hosts until `shutdown`.
     pub(crate) async fn serve(
-        mut self,
+        self,
         mut authority: Authority,
+        relay: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
         token: &str,
         shutdown: &CancellationToken,
     ) -> Result<Serving> {
@@ -207,29 +235,44 @@ impl BoundSource {
             receipt.storage_id == self.storage.id,
             "artifact source registration changed"
         );
-        let source = SourceServer {
-            authority,
-            host_token: token.to_owned(),
-            storage: self.storage.clone(),
-            capacity: Arc::new(Semaphore::new(8)),
-        };
         let stop = shutdown.child_token();
-        let stopped = stop.clone();
-        let task = tokio::spawn(
-            self.server
+        // Open the relay stream before reporting ready, so the host's bytes are reachable as soon
+        // as it is; a failure here is retried in the background.
+        let first = relay::open(&relay, token).await.ok();
+        let mut tasks = vec![tokio::spawn(relay::serve(
+            relay,
+            token.to_owned(),
+            self.storage.clone(),
+            stop.clone(),
+            first,
+        ))];
+        if let Some((mut server, listener)) = self.peers {
+            let source = SourceServer {
+                authority,
+                host_token: token.to_owned(),
+                storage: self.storage.clone(),
+                capacity: Arc::new(Semaphore::new(8)),
+            };
+            let stopped = stop.clone();
+            let peers = server
                 .add_service(
                     WorkerArtifactTransfersServer::new(source)
                         .max_decoding_message_size(16 * 1024)
                         .max_encoding_message_size(MAX_MESSAGE_BYTES),
                 )
-                .serve_with_incoming_shutdown(TcpListenerStream::new(self.listener), async move {
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
                     stopped.cancelled().await;
-                }),
-        );
+                });
+            tasks.push(tokio::spawn(async move {
+                if let Err(error) = peers.await {
+                    tracing::warn!("artifact peer listener stopped: {error}");
+                }
+            }));
+        }
         Ok(Serving {
             storage: self.storage,
             stop,
-            task,
+            tasks,
         })
     }
 }
@@ -237,20 +280,25 @@ impl BoundSource {
 pub(crate) struct Serving {
     pub(crate) storage: SourceStorage,
     stop: CancellationToken,
-    task: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 impl Drop for Serving {
     fn drop(&mut self) {
         self.stop.cancel();
-        self.task.abort();
+        for task in &self.tasks {
+            task.abort();
+        }
     }
 }
 
+/// The owner-only directory holding this Worker Host's immutable artifact and delivery bytes,
+/// as `attempt-<sha256 of the Attempt ID>/<sha256 of the bytes>`. Writes are atomic and
+/// content-addressed, so lanes of one Host share the directory and its storage identity.
 #[derive(Clone)]
 pub(crate) struct SourceStorage {
     root: PathBuf,
     id: String,
-    directory: Arc<ExclusiveLock>,
+    directory: Arc<File>,
 }
 
 impl SourceStorage {
@@ -264,9 +312,6 @@ impl SourceStorage {
         let root = path.canonicalize()?;
         let directory = supertag_workspaces::packages::open_directory(&root)?;
         check_directory(&directory.metadata()?)?;
-        // One serving process owns the configured storage directory.
-        let directory = ExclusiveLock::try_acquire(directory)
-            .context("artifact source directory is already in use")?;
         let identity = root.join("storage-id");
         let id = match open_private(&identity)? {
             Some(file) => read_id(file)?,
@@ -367,6 +412,63 @@ impl SourceStorage {
         }
         supertag_workspaces::packages::open_directory(&parent)?.sync_all()?;
         self.current()
+    }
+
+    /// Keeps one Workspace delivery blob of `attempt`, verifying it against its receipt.
+    pub(crate) fn retain_blob(
+        &self,
+        attempt: &str,
+        blob: &BlobReference,
+        content: &[u8],
+    ) -> Result<()> {
+        self.current()?;
+        ensure!(
+            valid_sha256(&blob.sha256)
+                && blob.byte_length <= supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64
+                && content.len() as u64 == blob.byte_length
+                && digest(content) == blob.sha256,
+            "retained bytes differ from the receipt"
+        );
+        let parent = self.root.join(attempt_dir(attempt));
+        private_directory(&parent)?;
+        self.directory.sync_all()?;
+        let path = parent.join(&blob.sha256);
+        if let Some(file) = open_private(&path)? {
+            verify(file, blob)?;
+            return Ok(());
+        }
+        let mut staged = tempfile::NamedTempFile::new_in(&parent)?;
+        staged.write_all(content)?;
+        staged.as_file().sync_all()?;
+        match staged.persist_noclobber(&path) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        verify(
+            open_private(&path)?.context("retained bytes vanished")?,
+            blob,
+        )?;
+        supertag_workspaces::packages::open_directory(&parent)?.sync_all()?;
+        self.current()
+    }
+
+    /// The verified bytes of one blob this host holds for `attempt`.
+    pub(crate) fn read_held(&self, attempt: &str, blob: &BlobReference) -> Result<Vec<u8>> {
+        ensure!(
+            valid_sha256(&blob.sha256)
+                && blob.byte_length <= supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
+            "invalid held byte reference"
+        );
+        self.current()?;
+        let parent = self.root.join(attempt_dir(attempt));
+        check_directory(&parent.symlink_metadata()?)?;
+        let bytes = verify(
+            open_private(&parent.join(&blob.sha256))?.context("held bytes are missing")?,
+            blob,
+        )?;
+        self.current()?;
+        Ok(bytes)
     }
 
     fn read(&self, attempt: &str, blob: &BlobReference) -> Result<Vec<u8>> {
@@ -593,6 +695,104 @@ impl WorkerArtifactTransfers for SourceServer {
             let _ = tokio::time::timeout(Duration::from_secs(1), send.send(Err(error))).await;
         });
         Ok(Response::new(ReceiverStream::new(receive)))
+    }
+}
+
+mod relay {
+    //! Answers the Control Plane's relay requests from this host's artifact storage.
+    use super::*;
+    use supertag_protocol::v2::relay_frame::Part as Frame;
+
+    type Requests = tonic::Streaming<RelayRequest>;
+
+    /// Opens one `HostRelay.Await` stream.
+    pub(super) async fn open(
+        client: &HostRelayClient<InterceptedService<Channel, HostHeaders>>,
+        token: &str,
+    ) -> Result<Requests, Status> {
+        let request = authenticated_request(AwaitRelayRequest {}, token, None)?;
+        Ok(client.clone().r#await(request).await?.into_inner())
+    }
+
+    /// Keeps one `HostRelay.Await` stream open, reconnecting after failures, until `stop`.
+    pub(super) async fn serve(
+        client: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
+        token: String,
+        storage: SourceStorage,
+        stop: CancellationToken,
+        mut first: Option<Requests>,
+    ) {
+        let capacity = Arc::new(Semaphore::new(8));
+        loop {
+            let session = async {
+                let mut requests = match first.take() {
+                    Some(requests) => requests,
+                    None => open(&client, &token).await?,
+                };
+                while let Some(request) = requests.message().await? {
+                    let Ok(permit) = capacity.clone().try_acquire_owned() else {
+                        // The reader times out; the Control Plane bounds waiting requests.
+                        continue;
+                    };
+                    let client = client.clone();
+                    let token = token.clone();
+                    let storage = storage.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        answer(client, &token, storage, request).await;
+                    });
+                }
+                Ok::<_, Status>(())
+            };
+            tokio::select! {
+                _ = stop.cancelled() => return,
+                _ = session => {}
+            }
+            tokio::select! {
+                _ = stop.cancelled() => return,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    }
+
+    async fn answer(
+        mut client: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
+        token: &str,
+        storage: SourceStorage,
+        request: RelayRequest,
+    ) {
+        let attempt = request.attempt_id;
+        let read = match request.blob {
+            Some(blob) => tokio::task::spawn_blocking(move || storage.read_held(&attempt, &blob))
+                .await
+                .map_err(anyhow::Error::from)
+                .and_then(|result| result),
+            None => Err(anyhow::anyhow!("relay request names no blob")),
+        };
+        let mut frames = vec![RelayFrame {
+            part: Some(Frame::RelayId(request.relay_id)),
+        }];
+        match read {
+            Ok(bytes) => {
+                frames.extend(
+                    bytes
+                        .chunks(CHECKPOINT_CHUNK_BYTES)
+                        .map(|chunk| RelayFrame {
+                            part: Some(Frame::Chunk(chunk.to_vec())),
+                        }),
+                )
+            }
+            Err(_) => frames.push(RelayFrame {
+                part: Some(Frame::Failure("held bytes are missing or changed".into())),
+            }),
+        }
+        let Ok(mut request) = authenticated_request(tokio_stream::iter(frames), token, None) else {
+            return;
+        };
+        request.set_timeout(Duration::from_secs(120));
+        if let Err(error) = client.deliver(request).await {
+            tracing::debug!("relay delivery ended: {error}");
+        }
     }
 }
 

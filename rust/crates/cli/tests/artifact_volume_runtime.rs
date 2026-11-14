@@ -1,4 +1,7 @@
-//! Actual split processes preserve consent and verified-copy recovery across restart.
+//! Actual split processes preserve consent and verified-copy recovery across restart, and a Volume
+//! copy stays readable while the Worker Host holding the artifact is offline.
+#[path = "support/held_artifacts.rs"]
+mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -83,7 +86,7 @@ async fn stop(child: &mut Child) -> Result<()> {
 fn plane(credentials: &Credentials, root: &Path, database: &str, mapped: bool) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", "127.0.0.1:0"]);
     c.env("SUPERTAG_DATABASE_URL", database)
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(root.join("cas"));
     if mapped {
         c.arg("--artifact-volume")
@@ -109,7 +112,12 @@ mod s3_artifact_volume;
 async fn capture(
     credentials: &Credentials,
     public: &str,
-) -> Result<(String, Vec<u8>, BlobReference)> {
+) -> Result<(
+    String,
+    Vec<u8>,
+    BlobReference,
+    held_artifacts::HeldArtifacts,
+)> {
     let channel =
         protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
     let mut operator = operator_client::OperatorClient::new(channel.clone());
@@ -178,10 +186,13 @@ async fn capture(
     ))
     .await?;
     let bytes = b"exact durable artifact evidence\n".to_vec();
-    let blob = BlobReference {
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
-        byte_length: bytes.len() as u64,
-    };
+    let held = held_artifacts::HeldArtifacts::register(
+        channel.clone(),
+        &credentials.host,
+        registered.generation,
+    )
+    .await?;
+    let blob = held.hold(&attempt.attempt_id, &bytes);
     let capture = CommitArtifactCaptureRequest {
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
@@ -197,24 +208,7 @@ async fn capture(
         }],
         ..Default::default()
     };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
-    let artifact = transfers
-        .upload_capture(credentials.host(
-            tokio_stream::iter(vec![
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Begin(capture)),
-                },
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                        file_index: 0,
-                        data: bytes.clone(),
-                    })),
-                },
-            ]),
-            registered.generation,
-        ))
-        .await?
-        .into_inner();
+    let artifact = held.commit(capture).await?;
     host.finish_task(credentials.host(
         FinishTaskRequest {
             task_id: attempt.task_id,
@@ -227,7 +221,7 @@ async fn capture(
         registered.generation,
     ))
     .await?;
-    Ok((artifact.summary.unwrap().artifact_id, bytes, blob))
+    Ok((artifact.summary.unwrap().artifact_id, bytes, blob, held))
 }
 
 fn capture_download(
@@ -390,7 +384,7 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     std::fs::set_permissions(&volume_path, std::fs::Permissions::from_mode(0o700))?;
     let credentials = Credentials::new();
     let (mut control, public) = service(plane(&credentials, &root, &database, false)).await?;
-    let (artifact_id, bytes, blob) = capture(&credentials, &public).await?;
+    let (artifact_id, bytes, blob, mut held) = capture(&credentials, &public).await?;
     let source = format!("file://{}", volume_path.display());
     let registered = json(volume(
         &credentials,
@@ -430,6 +424,9 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     stop(&mut control).await?;
     let (next, next_public) = service(plane(&credentials, &root, &database, true)).await?;
     control = next;
+    // The copy's bytes come from the holding Worker Host, relayed by the Control Plane.
+    held.reconnect(protocol::dial(next_public.clone()).await?)
+        .await?;
     let receipt = json(volume(&credentials, &next_public, &copy_args)).await?;
     assert_eq!(receipt["state"], "ARTIFACT_VOLUME_COPY_STATE_VERIFIED");
     let destination = volume_path.join(receipt["storage_key"].as_str().unwrap());
@@ -455,8 +452,9 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     .await?;
     assert!(!deletion.status.success());
     stop(&mut control).await?;
-    // The durable Volume remains usable after both service replacement and CAS loss.
-    std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
+    // The durable Volume remains usable after service replacement while the Worker Host holding
+    // the artifact is offline.
+    held.disconnect();
     let (next, new_public) = service(plane(&credentials, &root, &database, true)).await?;
     control = next;
     assert_eq!(
@@ -490,7 +488,8 @@ async fn mapped_volume_copy_is_exact_durable_and_never_overwrites_divergent_byte
     .await?;
     assert_eq!(std::fs::read(&from_capture)?, bytes);
     read_dynamic(&credentials, &new_public, &artifact_id, &bytes).await?;
-    assert!(!root.join("cas").join(&blob.sha256).exists());
+    // The Control Plane stored no artifact bytes: its checkpoint directory is empty.
+    assert_eq!(std::fs::read_dir(root.join("cas"))?.count(), 0);
     std::fs::write(&destination, b"divergent destination")?;
     let corrupted = volume(&credentials, &new_public, &copy_args)
         .output()

@@ -97,7 +97,7 @@ pub(crate) async fn locations_in(
     artifact: &CapturedArtifact,
     file: ArtifactFile,
     ids: &[String],
-) -> Result<LocateArtifactVolumeCopiesResponse> {
+) -> Result<LocateArtifactCopiesResponse> {
     if ids.len() > 32 || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
         return Err(invalid(
             "Volume lookup requires at most 32 ordered unique IDs",
@@ -142,7 +142,19 @@ pub(crate) async fn locations_in(
             storage_key: storage_key.clone(),
         });
     }
-    Ok(LocateArtifactVolumeCopiesResponse { locations })
+    let holder: Option<String> = sqlx::query_scalar(
+        "SELECT host_id FROM supertag_v2_artifact_host_copies WHERE artifact_id=$1",
+    )
+    .bind(&summary.artifact_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(LocateArtifactCopiesResponse {
+        locations,
+        holder: holder.map(|host_id| BlobHolder {
+            host_id,
+            attempt_id: producer.attempt_id.clone(),
+        }),
+    })
 }
 
 pub(crate) async fn operator_locations(
@@ -150,8 +162,8 @@ pub(crate) async fn operator_locations(
     principal: &str,
     request: &DownloadArtifactFileRequest,
     ids: &[String],
-) -> Result<LocateArtifactVolumeCopiesResponse> {
-    operator(principal)?;
+) -> Result<LocateArtifactCopiesResponse> {
+    crate::store::actor(principal)?;
     name("artifact ID", &request.artifact_id)?;
     validate_artifact_path(&request.path).map_err(|error| invalid(error.message()))?;
     let mut tx = store.pool.begin().await?;

@@ -3,6 +3,8 @@
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
 //! Control Plane refuses the revoked token on new calls and ends a Watch stream and an artifact download
 //! it already opened. The audit log names every resource a call changed.
+#[path = "support/held_artifacts.rs"]
+mod held_artifacts;
 #[path = "support/protocol.rs"]
 mod protocol;
 use std::{
@@ -18,11 +20,8 @@ use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
-use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request, v2::*,
-};
+use supertag_protocol::{HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request, v2::*};
 use tokio::time::sleep;
 use tonic::{Code, Request, transport::Endpoint};
 use uuid::Uuid;
@@ -469,7 +468,8 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
     Ok(())
 }
 
-/// A Control Plane with a transfer directory, as a separate process.
+/// A Control Plane as a separate process. It has no checkpoint directory: artifact bytes it
+/// serves are relayed from the Worker Host holding them.
 struct Services {
     _directory: tempfile::TempDir,
     _control: Process,
@@ -479,10 +479,7 @@ struct Services {
 async fn services(credentials: &Credentials, database: &str) -> Result<Services> {
     let directory = tempfile::tempdir()?;
     let mut command = credentials.command(&["control-plane"]);
-    command
-        .env("SUPERTAG_DATABASE_URL", database)
-        .arg("--transfer-directory")
-        .arg(directory.path().join("cas"));
+    command.env("SUPERTAG_DATABASE_URL", database);
     let mut control = Process::spawn(command, directory.path())?;
     let public = control.address().await?;
     Ok(Services {
@@ -718,13 +715,14 @@ async fn audit_names_every_changed_resource(database: &str) -> Result<()> {
     Ok(())
 }
 
-/// Captures one artifact file of `bytes` from a Task the Operator Token submitted.
+/// Captures one artifact file of `bytes` from a Task the Operator Token submitted. The returned
+/// storage holds the bytes, as the capturing Worker Host does, and relays them while it lives.
 async fn capture_artifact(
     credentials: &Credentials,
     channel: ProtocolChannel,
     secret: &str,
     bytes: &[u8],
-) -> Result<String> {
+) -> Result<(String, held_artifacts::HeldArtifacts)> {
     let mut operator = operator_client::OperatorClient::new(channel.clone());
     let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
     operator
@@ -786,12 +784,12 @@ async fn capture_artifact(
         generation,
     )?)
     .await?;
-    let blob = BlobReference {
-        sha256: format!("{:x}", Sha256::digest(bytes)),
-        byte_length: bytes.len() as u64,
-    };
-    let mut parts = vec![ArtifactUpload {
-        part: Some(artifact_upload::Part::Begin(CommitArtifactCaptureRequest {
+    let held =
+        held_artifacts::HeldArtifacts::register(channel.clone(), &credentials.host, generation)
+            .await?;
+    let blob = held.hold(&attempt.attempt_id, bytes);
+    let artifact = held
+        .commit(CommitArtifactCaptureRequest {
             attempt: Some(attempt.clone()),
             operation_id: "capture".into(),
             description: Some(ArtifactDescription {
@@ -805,22 +803,8 @@ async fn capture_artifact(
                 ..Default::default()
             }],
             ..Default::default()
-        })),
-    }];
-    for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
-        parts.push(ArtifactUpload {
-            part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                file_index: 0,
-                data: chunk.to_vec(),
-            })),
-        });
-    }
-    let mut upload = credentials.host(tokio_stream::iter(parts), generation)?;
-    upload.set_timeout(Duration::from_secs(30));
-    let artifact = artifact_transfers_client::ArtifactTransfersClient::new(channel)
-        .upload_capture(upload)
-        .await?
-        .into_inner();
+        })
+        .await?;
     host.finish_task(credentials.host(
         FinishTaskRequest {
             task_id: attempt.task_id,
@@ -833,7 +817,7 @@ async fn capture_artifact(
         generation,
     )?)
     .await?;
-    Ok(artifact.summary.context("summary")?.artifact_id)
+    Ok((artifact.summary.context("summary")?.artifact_id, held))
 }
 
 async fn revoked_token_ends_an_in_flight_download(database: &str) -> Result<()> {
@@ -848,7 +832,8 @@ async fn revoked_token_ends_an_in_flight_download(database: &str) -> Result<()> 
     let bytes: Vec<u8> = (0..24 * 1024 * 1024)
         .map(|index| (index % 251) as u8)
         .collect();
-    let artifact_id = capture_artifact(&credentials, channel.clone(), &secret, &bytes).await?;
+    let (artifact_id, _held) =
+        capture_artifact(&credentials, channel.clone(), &secret, &bytes).await?;
     let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
     let download = |token: &str| {
         let mut download = authenticated_request(

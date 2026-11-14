@@ -866,11 +866,16 @@ impl Store {
         let token = Uuid::new_v4().to_string();
         save(&mut tx, &value).await?;
         sqlx::query("UPDATE supertag_v2_github_publications SET publisher=$1,lease_token=$2,lease_expires_at_ms=$3,recovery_only=$4,planned=0 WHERE publication_id=$5").bind(principal).bind(&token).bind(now.saturating_add(LEASE_MS)).bind(i64::from(recovery)).bind(&value.publication_id).execute(&mut *tx).await?;
+        let holder = match &value.delivery {
+            Some(delivery) => Some(crate::workspaces::delivery_holder_in(&mut tx, delivery).await?),
+            None => None,
+        };
         let response = ClaimGithubPublicationResponse {
             publication: Some(value.clone()),
             lease_token: token,
             valid_for_ms: LEASE_MS as u64,
             read_only: recovery,
+            holder,
         };
         sqlx::query("INSERT INTO supertag_v2_github_publication_claims(publisher,operation_id,publication_id,response) VALUES($1,$2,$3,$4)").bind(principal).bind(&input.operation_id).bind(&value.publication_id).bind(response.encode_to_vec()).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -909,12 +914,17 @@ impl Store {
             ));
         }
         sqlx::query("UPDATE supertag_v2_github_publications SET lease_expires_at_ms=$1 WHERE publication_id=$2").bind(until).bind(&value.publication_id).execute(&mut *tx).await?;
+        let holder = match &value.delivery {
+            Some(delivery) => Some(crate::workspaces::delivery_holder_in(&mut tx, delivery).await?),
+            None => None,
+        };
         tx.commit().await?;
         Ok(ClaimGithubPublicationResponse {
             publication: Some(value),
             lease_token: input.lease_token.clone(),
             valid_for_ms: (until - now) as u64,
             read_only,
+            holder,
         })
     }
 }

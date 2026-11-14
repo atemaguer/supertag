@@ -1,5 +1,7 @@
 //! Signed HTTP Slack ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "support/held_artifacts.rs"]
+mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -678,7 +680,6 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
 async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     database: String,
 ) -> Result<()> {
-    use sha2::Digest;
     use supertag_protocol::{HOST_GENERATION_HEADER, v2::*};
     let directory = tempfile::tempdir()?;
     let credentials = Credentials::new();
@@ -686,7 +687,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     let mut command = credentials.command(&["control-plane"]);
     command
         .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(directory.path().join("cas"));
     let mut cp = Process::spawn(command, directory.path(), "context-cp")?;
     let private = cp.endpoints(1).await?.remove(0);
@@ -821,43 +822,31 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     )?)
     .await?;
     let bytes = b"source evidence\n".to_vec();
-    let blob = BlobReference {
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
-        byte_length: bytes.len() as u64,
-    };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel.clone());
-    let captured = transfers
-        .upload_capture(host_request(
-            tokio_stream::iter(vec![
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Begin(CommitArtifactCaptureRequest {
-                        attempt: Some(attempt.clone()),
-                        operation_id: "capture".into(),
-                        description: Some(ArtifactDescription {
-                            title: "Prior shared evidence".into(),
-                            kind: "report".into(),
-                            summary: Some("Frozen source result".into()),
-                        }),
-                        files: vec![ArtifactFile {
-                            path: "report.txt".into(),
-                            blob: Some(blob.clone()),
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    })),
-                },
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                        file_index: 0,
-                        data: bytes.clone(),
-                    })),
-                },
-            ]),
-            &credentials,
-            registered.generation,
-        )?)
-        .await?
-        .into_inner();
+    // The capturing host holds the bytes and relays them while it stays connected.
+    let held = held_artifacts::HeldArtifacts::register(
+        channel.clone(),
+        &credentials.host,
+        registered.generation,
+    )
+    .await?;
+    let blob = held.hold(&attempt.attempt_id, &bytes);
+    let captured = held
+        .commit(CommitArtifactCaptureRequest {
+            attempt: Some(attempt.clone()),
+            operation_id: "capture".into(),
+            description: Some(ArtifactDescription {
+                title: "Prior shared evidence".into(),
+                kind: "report".into(),
+                summary: Some("Frozen source result".into()),
+            }),
+            files: vec![ArtifactFile {
+                path: "report.txt".into(),
+                blob: Some(blob.clone()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+        .await?;
     let artifact = captured.summary.context("missing summary")?.artifact_id;
     host.finish_task(host_request(
         FinishTaskRequest {
@@ -928,6 +917,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         registered.generation,
     )?)
     .await?;
+    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel.clone());
     let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel);
     let acquired = acquisitions
         .acquire(host_request(

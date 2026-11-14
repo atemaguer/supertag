@@ -9,13 +9,14 @@ A deployment has up to three roles:
 
 | Role | Reachability | State |
 | --- | --- | --- |
-| Control Plane | The one public endpoint, for operators, Worker Hosts, and Gateways. It terminates its own TLS and speaks gRPC | PostgreSQL, and a volume for transfer files such as Session checkpoints and workspace bundles |
+| Control Plane | The one public endpoint, for operators, Worker Hosts, and Gateways. It terminates its own TLS and speaks gRPC | PostgreSQL, and a volume for Session checkpoints |
 | **Gateway** (optional) | No public API: it connects to the Control Plane as a client. It receives collaboration surface webhooks through your reverse proxy, delivers replies, and sends operator notifications | A volume for connector state and the file credential vault, or HashiCorp Vault |
 | Worker Hosts | Outbound only | Each host's own state directory |
 
 Deploy the Gateway only when you connect Slack, GitHub, Linear, Lark, or Microsoft Teams, or send
-operator notifications. The Control Plane keeps captured artifact files in its transfer directory,
-so put that directory on a persistent volume.
+operator notifications. The Control Plane stores no artifact or Workspace delivery
+files: each Worker Host keeps what its Tasks produce, so give Worker Hosts persistent state
+directories.
 
 ## Before you start
 

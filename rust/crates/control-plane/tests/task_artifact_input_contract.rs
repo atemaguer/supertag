@@ -69,6 +69,7 @@ async fn capture(
     operation: &str,
 ) -> CapturedArtifact {
     let request = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
@@ -117,6 +118,7 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let host = support::register_host(&store, "input-host").await;
+    support::hold_artifacts(&store, &host).await;
     let destination = objective(&store, "same-objective").await;
     let producer = start(&store, &host, "produce").await;
     assert_eq!(producer.task_id, destination.starting_task_id);

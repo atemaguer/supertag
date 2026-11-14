@@ -3192,7 +3192,7 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     command
         .arg("control-plane")
         // Codex Session checkpoints are stored through the Control Plane.
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(directory.join("checkpoints"))
         .env("SUPERTAG_DATABASE_URL", &database);
     let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;

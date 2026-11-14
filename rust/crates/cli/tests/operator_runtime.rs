@@ -1,3 +1,5 @@
+#[path = "support/held_artifacts.rs"]
+mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -13,7 +15,6 @@ use supertag_protocol::negotiation::ProtocolChannel;
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use supertag_protocol::{HOST_GENERATION_HEADER, authenticated_request, v2::*};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -210,7 +211,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
     let create_control = || {
         let mut control = control_plane(&secret, &token, "operator:alice");
         control
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(&blobs)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
@@ -287,8 +288,11 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
     )?)
     .await?;
 
-    let bytes = b"artifact bytes kept in transfer storage, never the Control Plane database";
-    let digest = format!("{:x}", Sha256::digest(bytes));
+    let bytes = b"artifact bytes kept on the Worker Host, never on the Control Plane";
+    let mut held =
+        held_artifacts::HeldArtifacts::register(alice.clone(), &host_token, generation).await?;
+    let blob = held.hold(&attempt.attempt_id, bytes);
+    let empty = held.hold(&attempt.attempt_id, b"");
     let capture = CommitArtifactCaptureRequest {
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
@@ -301,46 +305,31 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
             ArtifactFile {
                 git_output: None,
                 path: "report.txt".into(),
-                blob: Some(BlobReference {
-                    sha256: digest.clone(),
-                    byte_length: bytes.len() as u64,
-                }),
+                blob: Some(blob.clone()),
             },
             ArtifactFile {
                 git_output: None,
                 path: "empty".into(),
-                blob: Some(BlobReference {
-                    sha256: format!("{:x}", Sha256::digest([])),
-                    byte_length: 0,
-                }),
+                blob: Some(empty),
             },
         ],
         ..Default::default()
     };
-    let stream = |data: Vec<u8>| {
-        tokio_stream::iter([
-            ArtifactUpload {
-                part: Some(artifact_upload::Part::Begin(capture.clone())),
-            },
-            ArtifactUpload {
-                part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                    file_index: 0,
-                    data,
-                })),
-            },
-        ])
-    };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(alice.clone());
-    let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(alice);
-    let error = transfers
-        .upload_capture(artifact_host_request(
-            stream(vec![b'x'; bytes.len()]),
-            &host_token,
-            generation,
-        )?)
+    let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(alice.clone());
+    // A capture must name the host's registered storage, which holds the bytes.
+    let error = artifact_host_request(
+        CommitArtifactCaptureRequest {
+            source_storage_id: Some(Uuid::new_v4().to_string()),
+            ..capture.clone()
+        },
+        &host_token,
+        generation,
+    )?;
+    let error = attempt_artifacts_client::AttemptArtifactsClient::new(alice)
+        .commit_capture(error)
         .await
         .unwrap_err();
-    assert_eq!(error.code(), Code::InvalidArgument);
+    assert_eq!(error.code(), Code::PermissionDenied);
     let list = ListCapturedArtifactsRequest {
         task_id: task.task_id.clone(),
         ..Default::default()
@@ -353,17 +342,10 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
             .artifacts
             .is_empty()
     );
-    let captured = transfers
-        .upload_capture(artifact_host_request(
-            stream(bytes.to_vec()),
-            &host_token,
-            generation,
-        )?)
-        .await?
-        .into_inner();
+    let captured = held.commit(capture.clone()).await?;
     assert_eq!(captured.files.len(), 2);
-    assert_eq!(std::fs::read(blobs.join(digest))?, bytes);
     control_plane_holds_no_artifact_bytes(&database, bytes).await?;
+    control_plane_state_holds_no_artifact_bytes(&blobs, bytes)?;
 
     control.kill().await?;
     let (mut control, endpoint) = service(create_control()).await?;
@@ -390,33 +372,51 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
             .code(),
         Code::NotFound
     );
-    let mut returned = alice_transfers
-        .download_file(authenticated_request(download, &token, None)?)
-        .await?
-        .into_inner();
+    // Until the holding host reconnects, the reader learns which host holds the bytes.
+    let offline = alice_transfers
+        .download_file(authenticated_request(download.clone(), &token, None)?)
+        .await
+        .unwrap_err();
+    assert_eq!(offline.code(), Code::Unavailable, "{offline:?}");
     assert!(
-        matches!(returned.message().await?.and_then(|message| message.part),
-        Some(artifact_download::Part::File(file)) if file.path == "report.txt")
+        offline.message().contains("held by Worker Host local"),
+        "{offline:?}"
     );
-    let mut result = Vec::new();
-    while let Some(message) = returned.message().await? {
-        let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
-            anyhow::bail!("expected artifact data");
-        };
-        result.extend(chunk);
-    }
-    assert_eq!(result, bytes);
+    held.reconnect(channel(&endpoint).await?).await?;
+    let read = |transfers: &mut artifact_transfers_client::ArtifactTransfersClient<_>| {
+        let mut transfers = transfers.clone();
+        let request = authenticated_request(download.clone(), &token, None);
+        async move {
+            let mut returned = transfers.download_file(request?).await?.into_inner();
+            ensure!(
+                matches!(returned.message().await?.and_then(|message| message.part),
+                Some(artifact_download::Part::File(file)) if file.path == "report.txt")
+            );
+            let mut result = Vec::new();
+            while let Some(message) = returned.message().await? {
+                let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
+                    anyhow::bail!("expected artifact data");
+                };
+                result.extend(chunk);
+            }
+            Ok(result)
+        }
+    };
+    assert_eq!(read(&mut alice_transfers).await?, bytes);
+    // The Control Plane verifies relayed bytes against the receipt.
+    held.corrupt(&attempt.attempt_id, &blob, &vec![b'x'; bytes.len()]);
+    let corrupt = read(&mut alice_transfers).await.unwrap_err();
     assert_eq!(
-        alice_transfers
-            .upload_capture(artifact_host_request(
-                stream(bytes.to_vec()),
-                &host_token,
-                generation
-            )?)
-            .await?
-            .into_inner(),
-        captured
+        corrupt
+            .downcast_ref::<tonic::Status>()
+            .map(tonic::Status::code),
+        Some(Code::DataLoss),
+        "{corrupt:?}"
     );
+    held.corrupt(&attempt.attempt_id, &blob, bytes);
+    control_plane_state_holds_no_artifact_bytes(&blobs, bytes)?;
+    held.reconnect(channel(&endpoint).await?).await?;
+    assert_eq!(held.commit(capture).await?, captured);
     if let Some(binary) = tui {
         let mut host = worker_host_client::WorkerHostClient::new(channel(&endpoint).await?);
         host.finish_task(artifact_host_request(
@@ -442,6 +442,25 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
         tui_save_task_file(directory.path(), binary, &endpoint, &token, bytes).await?;
     }
     control.kill().await?;
+    Ok(())
+}
+
+/// No file under the Control Plane's checkpoint directory holds artifact bytes.
+fn control_plane_state_holds_no_artifact_bytes(directory: &Path, bytes: &[u8]) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let path = entry?.path();
+        if path.is_file() {
+            let content = std::fs::read(&path)?;
+            ensure!(
+                !content.windows(bytes.len()).any(|window| window == bytes),
+                "Control Plane state holds artifact bytes in {}",
+                path.display()
+            );
+        }
+    }
     Ok(())
 }
 

@@ -778,7 +778,9 @@ type ClaimGithubPublicationResponse struct {
 	LeaseToken  string                 `protobuf:"bytes,2,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
 	ValidForMs  uint64                 `protobuf:"varint,3,opt,name=valid_for_ms,json=validForMs,proto3" json:"valid_for_ms,omitempty"`
 	// Recovery claims may observe and settle proven results, but cannot write.
-	ReadOnly      bool `protobuf:"varint,4,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	ReadOnly bool `protobuf:"varint,4,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	// The Worker Host holding the delivery's bundle, which the publisher reads through the relay.
+	Holder        *BlobHolder `protobuf:"bytes,5,opt,name=holder,proto3" json:"holder,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -839,6 +841,13 @@ func (x *ClaimGithubPublicationResponse) GetReadOnly() bool {
 		return x.ReadOnly
 	}
 	return false
+}
+
+func (x *ClaimGithubPublicationResponse) GetHolder() *BlobHolder {
+	if x != nil {
+		return x.Holder
+	}
+	return nil
 }
 
 type PlanGithubPublicationRequest struct {
@@ -1135,14 +1144,15 @@ const file_supertag_runtime_v2_github_publications_proto_rawDesc = "" +
 	"\x16GithubPublicationLease\x12%\n" +
 	"\x0epublication_id\x18\x01 \x01(\tR\rpublicationId\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
-	"leaseToken\"\xca\x01\n" +
+	"leaseToken\"\x83\x02\n" +
 	"\x1eClaimGithubPublicationResponse\x12H\n" +
 	"\vpublication\x18\x01 \x01(\v2&.supertag.runtime.v2.GithubPublicationR\vpublication\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
 	"leaseToken\x12 \n" +
 	"\fvalid_for_ms\x18\x03 \x01(\x04R\n" +
 	"validForMs\x12\x1b\n" +
-	"\tread_only\x18\x04 \x01(\bR\breadOnly\"\x8b\x02\n" +
+	"\tread_only\x18\x04 \x01(\bR\breadOnly\x127\n" +
+	"\x06holder\x18\x05 \x01(\v2\x1f.supertag.runtime.v2.BlobHolderR\x06holder\"\x8b\x02\n" +
 	"\x1cPlanGithubPublicationRequest\x12A\n" +
 	"\x05lease\x18\x01 \x01(\v2+.supertag.runtime.v2.GithubPublicationLeaseR\x05lease\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12I\n" +
@@ -1218,6 +1228,7 @@ var file_supertag_runtime_v2_github_publications_proto_goTypes = []any{
 	(*BeginGithubPublicationEffectRequest)(nil),  // 12: supertag.runtime.v2.BeginGithubPublicationEffectRequest
 	(*RecordGithubPublicationEffectRequest)(nil), // 13: supertag.runtime.v2.RecordGithubPublicationEffectRequest
 	(*WorkspaceDeliveryReference)(nil),           // 14: supertag.runtime.v2.WorkspaceDeliveryReference
+	(*BlobHolder)(nil),                           // 15: supertag.runtime.v2.BlobHolder
 }
 var file_supertag_runtime_v2_github_publications_proto_depIdxs = []int32{
 	14, // 0: supertag.runtime.v2.GithubPublication.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
@@ -1226,35 +1237,36 @@ var file_supertag_runtime_v2_github_publications_proto_depIdxs = []int32{
 	2,  // 3: supertag.runtime.v2.GithubPublication.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestReceipt
 	3,  // 4: supertag.runtime.v2.ListGithubPublicationsResponse.publications:type_name -> supertag.runtime.v2.GithubPublication
 	3,  // 5: supertag.runtime.v2.ClaimGithubPublicationResponse.publication:type_name -> supertag.runtime.v2.GithubPublication
-	9,  // 6: supertag.runtime.v2.PlanGithubPublicationRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
-	2,  // 7: supertag.runtime.v2.PlanGithubPublicationRequest.existing:type_name -> supertag.runtime.v2.GithubPullRequestReceipt
-	9,  // 8: supertag.runtime.v2.BeginGithubPublicationEffectRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
-	1,  // 9: supertag.runtime.v2.BeginGithubPublicationEffectRequest.phase:type_name -> supertag.runtime.v2.GithubPublicationPhase
-	9,  // 10: supertag.runtime.v2.RecordGithubPublicationEffectRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
-	1,  // 11: supertag.runtime.v2.RecordGithubPublicationEffectRequest.phase:type_name -> supertag.runtime.v2.GithubPublicationPhase
-	0,  // 12: supertag.runtime.v2.RecordGithubPublicationEffectRequest.state:type_name -> supertag.runtime.v2.GithubPublicationState
-	2,  // 13: supertag.runtime.v2.RecordGithubPublicationEffectRequest.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestReceipt
-	4,  // 14: supertag.runtime.v2.GithubPublications.Get:input_type -> supertag.runtime.v2.GetGithubPublicationRequest
-	5,  // 15: supertag.runtime.v2.GithubPublications.List:input_type -> supertag.runtime.v2.ListGithubPublicationsRequest
-	7,  // 16: supertag.runtime.v2.GithubPublications.Cancel:input_type -> supertag.runtime.v2.CancelGithubPublicationRequest
-	8,  // 17: supertag.runtime.v2.GithubPublisher.Claim:input_type -> supertag.runtime.v2.ClaimGithubPublicationRequest
-	9,  // 18: supertag.runtime.v2.GithubPublisher.Renew:input_type -> supertag.runtime.v2.GithubPublicationLease
-	11, // 19: supertag.runtime.v2.GithubPublisher.Plan:input_type -> supertag.runtime.v2.PlanGithubPublicationRequest
-	12, // 20: supertag.runtime.v2.GithubPublisher.BeginEffect:input_type -> supertag.runtime.v2.BeginGithubPublicationEffectRequest
-	13, // 21: supertag.runtime.v2.GithubPublisher.RecordEffect:input_type -> supertag.runtime.v2.RecordGithubPublicationEffectRequest
-	3,  // 22: supertag.runtime.v2.GithubPublications.Get:output_type -> supertag.runtime.v2.GithubPublication
-	6,  // 23: supertag.runtime.v2.GithubPublications.List:output_type -> supertag.runtime.v2.ListGithubPublicationsResponse
-	3,  // 24: supertag.runtime.v2.GithubPublications.Cancel:output_type -> supertag.runtime.v2.GithubPublication
-	10, // 25: supertag.runtime.v2.GithubPublisher.Claim:output_type -> supertag.runtime.v2.ClaimGithubPublicationResponse
-	10, // 26: supertag.runtime.v2.GithubPublisher.Renew:output_type -> supertag.runtime.v2.ClaimGithubPublicationResponse
-	3,  // 27: supertag.runtime.v2.GithubPublisher.Plan:output_type -> supertag.runtime.v2.GithubPublication
-	3,  // 28: supertag.runtime.v2.GithubPublisher.BeginEffect:output_type -> supertag.runtime.v2.GithubPublication
-	3,  // 29: supertag.runtime.v2.GithubPublisher.RecordEffect:output_type -> supertag.runtime.v2.GithubPublication
-	22, // [22:30] is the sub-list for method output_type
-	14, // [14:22] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	15, // 6: supertag.runtime.v2.ClaimGithubPublicationResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
+	9,  // 7: supertag.runtime.v2.PlanGithubPublicationRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
+	2,  // 8: supertag.runtime.v2.PlanGithubPublicationRequest.existing:type_name -> supertag.runtime.v2.GithubPullRequestReceipt
+	9,  // 9: supertag.runtime.v2.BeginGithubPublicationEffectRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
+	1,  // 10: supertag.runtime.v2.BeginGithubPublicationEffectRequest.phase:type_name -> supertag.runtime.v2.GithubPublicationPhase
+	9,  // 11: supertag.runtime.v2.RecordGithubPublicationEffectRequest.lease:type_name -> supertag.runtime.v2.GithubPublicationLease
+	1,  // 12: supertag.runtime.v2.RecordGithubPublicationEffectRequest.phase:type_name -> supertag.runtime.v2.GithubPublicationPhase
+	0,  // 13: supertag.runtime.v2.RecordGithubPublicationEffectRequest.state:type_name -> supertag.runtime.v2.GithubPublicationState
+	2,  // 14: supertag.runtime.v2.RecordGithubPublicationEffectRequest.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestReceipt
+	4,  // 15: supertag.runtime.v2.GithubPublications.Get:input_type -> supertag.runtime.v2.GetGithubPublicationRequest
+	5,  // 16: supertag.runtime.v2.GithubPublications.List:input_type -> supertag.runtime.v2.ListGithubPublicationsRequest
+	7,  // 17: supertag.runtime.v2.GithubPublications.Cancel:input_type -> supertag.runtime.v2.CancelGithubPublicationRequest
+	8,  // 18: supertag.runtime.v2.GithubPublisher.Claim:input_type -> supertag.runtime.v2.ClaimGithubPublicationRequest
+	9,  // 19: supertag.runtime.v2.GithubPublisher.Renew:input_type -> supertag.runtime.v2.GithubPublicationLease
+	11, // 20: supertag.runtime.v2.GithubPublisher.Plan:input_type -> supertag.runtime.v2.PlanGithubPublicationRequest
+	12, // 21: supertag.runtime.v2.GithubPublisher.BeginEffect:input_type -> supertag.runtime.v2.BeginGithubPublicationEffectRequest
+	13, // 22: supertag.runtime.v2.GithubPublisher.RecordEffect:input_type -> supertag.runtime.v2.RecordGithubPublicationEffectRequest
+	3,  // 23: supertag.runtime.v2.GithubPublications.Get:output_type -> supertag.runtime.v2.GithubPublication
+	6,  // 24: supertag.runtime.v2.GithubPublications.List:output_type -> supertag.runtime.v2.ListGithubPublicationsResponse
+	3,  // 25: supertag.runtime.v2.GithubPublications.Cancel:output_type -> supertag.runtime.v2.GithubPublication
+	10, // 26: supertag.runtime.v2.GithubPublisher.Claim:output_type -> supertag.runtime.v2.ClaimGithubPublicationResponse
+	10, // 27: supertag.runtime.v2.GithubPublisher.Renew:output_type -> supertag.runtime.v2.ClaimGithubPublicationResponse
+	3,  // 28: supertag.runtime.v2.GithubPublisher.Plan:output_type -> supertag.runtime.v2.GithubPublication
+	3,  // 29: supertag.runtime.v2.GithubPublisher.BeginEffect:output_type -> supertag.runtime.v2.GithubPublication
+	3,  // 30: supertag.runtime.v2.GithubPublisher.RecordEffect:output_type -> supertag.runtime.v2.GithubPublication
+	23, // [23:31] is the sub-list for method output_type
+	15, // [15:23] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_github_publications_proto_init() }

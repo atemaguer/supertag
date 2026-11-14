@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
-    v2::{transfers_client::TransfersClient, workspace_download, workspace_upload, *},
+    v2::{transfers_client::TransfersClient, workspace_download, *},
     valid_workspace_id, validate_workspace_delivery,
 };
 use supertag_workspaces::{
@@ -609,6 +609,8 @@ impl Transfers {
         }
         Ok((reference, bytes))
     }
+    /// Keeps the delivery's patch and bundle in this host's artifact storage, then records the
+    /// delivery. The Control Plane stores neither: it relays them from this host to readers.
     pub(crate) async fn upload_workspace(
         &self,
         attempt: &Attempt,
@@ -616,48 +618,42 @@ impl Transfers {
         pending: &PendingWorkspace,
         reference: WorkspaceDeliveryReference,
     ) -> Result<WorkspaceDeliveryReference, Status> {
-        let patch = read_blob(
-            &pending.delivery.patch_path,
-            reference
-                .patch
-                .as_ref()
-                .ok_or_else(|| Status::data_loss("missing patch receipt"))?,
-        )?;
-        let bundle = read_blob(
-            &pending.delivery.bundle_path,
-            reference
-                .bundle
-                .as_ref()
-                .ok_or_else(|| Status::data_loss("missing bundle receipt"))?,
-        )?;
-        let begin = WorkspaceUpload {
-            part: Some(workspace_upload::Part::Begin(WorkspaceDeliveryRequest {
+        let storage = self.storage.clone().ok_or_else(|| {
+            Status::failed_precondition("this Worker Host has no artifact storage for deliveries")
+        })?;
+        let patch_blob = reference
+            .patch
+            .clone()
+            .ok_or_else(|| Status::data_loss("missing patch receipt"))?;
+        let bundle_blob = reference
+            .bundle
+            .clone()
+            .ok_or_else(|| Status::data_loss("missing bundle receipt"))?;
+        let patch = read_blob(&pending.delivery.patch_path, &patch_blob)?;
+        let bundle = read_blob(&pending.delivery.bundle_path, &bundle_blob)?;
+        let attempt_id = attempt.attempt_id.clone();
+        tokio::task::spawn_blocking(move || {
+            storage.retain_blob(&attempt_id, &patch_blob, &patch)?;
+            storage.retain_blob(&attempt_id, &bundle_blob, &bundle)
+        })
+        .await
+        .map_err(|_| Status::internal("Workspace delivery storage failed"))?
+        .map_err(|_| {
+            Status::data_loss("could not keep the Workspace delivery on this Worker Host")
+        })?;
+        let mut upstream = request(
+            WorkspaceDeliveryRequest {
                 attempt: Some(attempt.inspect()),
                 delivery: Some(reference.clone()),
-            })),
-        };
-        let patches = (0..patch.len())
-            .step_by(CHECKPOINT_CHUNK_BYTES)
-            .map(move |offset| WorkspaceUpload {
-                part: Some(workspace_upload::Part::PatchChunk(
-                    patch[offset..patch.len().min(offset + CHECKPOINT_CHUNK_BYTES)].to_vec(),
-                )),
-            });
-        let bundles = (0..bundle.len())
-            .step_by(CHECKPOINT_CHUNK_BYTES)
-            .map(move |offset| WorkspaceUpload {
-                part: Some(workspace_upload::Part::BundleChunk(
-                    bundle[offset..bundle.len().min(offset + CHECKPOINT_CHUNK_BYTES)].to_vec(),
-                )),
-            });
-        let messages = std::iter::once(begin).chain(patches).chain(bundles);
-        let mut upstream = request(tokio_stream::iter(messages), token)
-            .map_err(|_| Status::internal("cannot authenticate workspace upload"))?;
-        upstream.set_timeout(Duration::from_secs(120));
+            },
+            token,
+        )
+        .map_err(|_| Status::internal("cannot authenticate workspace delivery"))?;
+        upstream.set_timeout(Duration::from_secs(30));
         let received =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                .upload_workspace(upstream)
+                .commit_workspace(upstream)
                 .await?
                 .into_inner();
         if received != reference {

@@ -178,8 +178,9 @@ impl Store {
                     "workspace delivery does not match the accepted pins".into(),
                 ));
             }
-            sqlx::query("INSERT INTO supertag_v2_workspace_deliveries (attempt_id,task_id,reference) VALUES ($1,$2,$3)")
-                .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(reference.encode_to_vec()).execute(&mut *tx).await?;
+            // The reporting host holds the patch and bundle; the Control Plane stores neither.
+            sqlx::query("INSERT INTO supertag_v2_workspace_deliveries (attempt_id,task_id,reference,holder_host_id) VALUES ($1,$2,$3,$4)")
+                .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(reference.encode_to_vec()).bind(host.id()).execute(&mut *tx).await?;
         }
         tx.commit().await?;
         Ok(reference.clone())
@@ -240,6 +241,45 @@ impl Store {
         let task = self.get_task(&input.task_id).await?;
         task.workspace_delivery
             .ok_or_else(|| StoreError::NotFound("Task has no published workspace delivery".into()))
+    }
+}
+
+/// The Worker Host holding a committed delivery's bytes, for a reader already authorized for
+/// exactly this reference.
+pub(crate) async fn delivery_holder_in(
+    tx: &mut Transaction<'_, Any>,
+    reference: &WorkspaceDeliveryReference,
+) -> Result<BlobHolder> {
+    let row = sqlx::query(
+        "SELECT attempt_id,holder_host_id FROM supertag_v2_workspace_deliveries
+         WHERE reference=$1 AND committed_at_ms IS NOT NULL",
+    )
+    .bind(reference.encode_to_vec())
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| StoreError::NotFound("Workspace delivery was not recorded".into()))?;
+    let host_id: String = row.try_get("holder_host_id")?;
+    if host_id.is_empty() {
+        return Err(StoreError::NotFound(
+            "Workspace delivery has no holding Worker Host".into(),
+        ));
+    }
+    Ok(BlobHolder {
+        host_id,
+        attempt_id: row.try_get("attempt_id")?,
+    })
+}
+
+impl Store {
+    /// The Worker Host holding a committed delivery's bytes. Callers authorize the reference first.
+    pub async fn workspace_delivery_holder(
+        &self,
+        reference: &WorkspaceDeliveryReference,
+    ) -> Result<BlobHolder> {
+        let mut tx = self.pool.begin().await?;
+        let holder = delivery_holder_in(&mut tx, reference).await?;
+        tx.commit().await?;
+        Ok(holder)
     }
 }
 
@@ -452,13 +492,17 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
     async fn get_review_artifact(
         &self,
         request: Request<GetReviewArtifactRequest>,
-    ) -> std::result::Result<Response<WorkspaceDeliveryReference>, Status> {
+    ) -> std::result::Result<Response<HeldWorkspaceDelivery>, Status> {
         let host = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .get_review_artifact(&host, &request.into_inner())
-                .await?,
-        ))
+        let delivery = self
+            .store
+            .get_review_artifact(&host, &request.into_inner())
+            .await?;
+        let holder = self.store.workspace_delivery_holder(&delivery).await?;
+        Ok(Response::new(HeldWorkspaceDelivery {
+            delivery: Some(delivery),
+            holder: Some(holder),
+        }))
     }
 
     async fn get_continuation(
@@ -470,7 +514,11 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
             .store
             .get_workspace_continuation(&host, &request.into_inner())
             .await?;
-        Ok(Response::new(WorkspaceContinuation { delivery }))
+        let holder = match &delivery {
+            Some(delivery) => Some(self.store.workspace_delivery_holder(delivery).await?),
+            None => None,
+        };
+        Ok(Response::new(WorkspaceContinuation { delivery, holder }))
     }
 
     async fn reserve_delivery(
@@ -500,14 +548,17 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
     async fn get_artifact(
         &self,
         request: Request<GetWorkspaceArtifactRequest>,
-    ) -> std::result::Result<Response<WorkspaceDeliveryReference>, Status> {
+    ) -> std::result::Result<Response<HeldWorkspaceDelivery>, Status> {
         let principal = self.actor(&request)?;
         let input = request.into_inner();
         self.store
             .ensure_task_access(&principal, &input.task_id)
             .await?;
-        Ok(Response::new(
-            self.store.get_workspace_artifact(&input).await?,
-        ))
+        let delivery = self.store.get_workspace_artifact(&input).await?;
+        let holder = self.store.workspace_delivery_holder(&delivery).await?;
+        Ok(Response::new(HeldWorkspaceDelivery {
+            delivery: Some(delivery),
+            holder: Some(holder),
+        }))
     }
 }

@@ -59,6 +59,8 @@ const (
 	CheckpointDirectoryName = "supertag.runtime.v2.CheckpointDirectory"
 	// WorkspaceDirectoryName is the fully-qualified name of the WorkspaceDirectory service.
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
+	// HostRelayName is the fully-qualified name of the HostRelay service.
+	HostRelayName = "supertag.runtime.v2.HostRelay"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
 	// HarnessWorkspaceName is the fully-qualified name of the HarnessWorkspace service.
@@ -342,9 +344,9 @@ const (
 	// TransfersDownloadCheckpointProcedure is the fully-qualified name of the Transfers's
 	// DownloadCheckpoint RPC.
 	TransfersDownloadCheckpointProcedure = "/supertag.runtime.v2.Transfers/DownloadCheckpoint"
-	// TransfersUploadWorkspaceProcedure is the fully-qualified name of the Transfers's UploadWorkspace
+	// TransfersCommitWorkspaceProcedure is the fully-qualified name of the Transfers's CommitWorkspace
 	// RPC.
-	TransfersUploadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/UploadWorkspace"
+	TransfersCommitWorkspaceProcedure = "/supertag.runtime.v2.Transfers/CommitWorkspace"
 	// TransfersDownloadWorkspaceProcedure is the fully-qualified name of the Transfers's
 	// DownloadWorkspace RPC.
 	TransfersDownloadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspace"
@@ -387,6 +389,10 @@ const (
 	// WorkspaceDirectoryGetReviewArtifactProcedure is the fully-qualified name of the
 	// WorkspaceDirectory's GetReviewArtifact RPC.
 	WorkspaceDirectoryGetReviewArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact"
+	// HostRelayAwaitProcedure is the fully-qualified name of the HostRelay's Await RPC.
+	HostRelayAwaitProcedure = "/supertag.runtime.v2.HostRelay/Await"
+	// HostRelayDeliverProcedure is the fully-qualified name of the HostRelay's Deliver RPC.
+	HostRelayDeliverProcedure = "/supertag.runtime.v2.HostRelay/Deliver"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
 	// HarnessConfirmExecutionLimitsProcedure is the fully-qualified name of the Harness's
@@ -3810,7 +3816,8 @@ func (UnimplementedConnectorHandler) ReleaseConnector(context.Context, *connect.
 type TransfersClient interface {
 	UploadCheckpoint(context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
 	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error)
-	UploadWorkspace(context.Context) *connect.ClientStreamForClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
+	// Records a delivery whose patch and bundle the calling Worker Host already holds.
+	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
@@ -3841,10 +3848,10 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
 			connect.WithClientOptions(opts...),
 		),
-		uploadWorkspace: connect.NewClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference](
+		commitWorkspace: connect.NewClient[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference](
 			httpClient,
-			baseURL+TransfersUploadWorkspaceProcedure,
-			connect.WithSchema(transfersMethods.ByName("UploadWorkspace")),
+			baseURL+TransfersCommitWorkspaceProcedure,
+			connect.WithSchema(transfersMethods.ByName("CommitWorkspace")),
 			connect.WithClientOptions(opts...),
 		),
 		downloadWorkspace: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload](
@@ -3884,7 +3891,7 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 type transfersClient struct {
 	uploadCheckpoint            *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
 	downloadCheckpoint          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
-	uploadWorkspace             *connect.Client[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
+	commitWorkspace             *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	downloadWorkspace           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact   *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
@@ -3902,9 +3909,9 @@ func (c *transfersClient) DownloadCheckpoint(ctx context.Context, req *connect.R
 	return c.downloadCheckpoint.CallServerStream(ctx, req)
 }
 
-// UploadWorkspace calls supertag.runtime.v2.Transfers.UploadWorkspace.
-func (c *transfersClient) UploadWorkspace(ctx context.Context) *connect.ClientStreamForClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference] {
-	return c.uploadWorkspace.CallClientStream(ctx)
+// CommitWorkspace calls supertag.runtime.v2.Transfers.CommitWorkspace.
+func (c *transfersClient) CommitWorkspace(ctx context.Context, req *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return c.commitWorkspace.CallUnary(ctx, req)
 }
 
 // DownloadWorkspace calls supertag.runtime.v2.Transfers.DownloadWorkspace.
@@ -3936,7 +3943,8 @@ func (c *transfersClient) VerifyWorkspaceOutputRemote(ctx context.Context, req *
 type TransfersHandler interface {
 	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
 	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error
-	UploadWorkspace(context.Context, *connect.ClientStream[runtimev2.WorkspaceUpload]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	// Records a delivery whose patch and bundle the calling Worker Host already holds.
+	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
@@ -3963,10 +3971,10 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
 		connect.WithHandlerOptions(opts...),
 	)
-	transfersUploadWorkspaceHandler := connect.NewClientStreamHandler(
-		TransfersUploadWorkspaceProcedure,
-		svc.UploadWorkspace,
-		connect.WithSchema(transfersMethods.ByName("UploadWorkspace")),
+	transfersCommitWorkspaceHandler := connect.NewUnaryHandler(
+		TransfersCommitWorkspaceProcedure,
+		svc.CommitWorkspace,
+		connect.WithSchema(transfersMethods.ByName("CommitWorkspace")),
 		connect.WithHandlerOptions(opts...),
 	)
 	transfersDownloadWorkspaceHandler := connect.NewServerStreamHandler(
@@ -4005,8 +4013,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersUploadCheckpointHandler.ServeHTTP(w, r)
 		case TransfersDownloadCheckpointProcedure:
 			transfersDownloadCheckpointHandler.ServeHTTP(w, r)
-		case TransfersUploadWorkspaceProcedure:
-			transfersUploadWorkspaceHandler.ServeHTTP(w, r)
+		case TransfersCommitWorkspaceProcedure:
+			transfersCommitWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceProcedure:
 			transfersDownloadWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceArtifactProcedure:
@@ -4034,8 +4042,8 @@ func (UnimplementedTransfersHandler) DownloadCheckpoint(context.Context, *connec
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCheckpoint is not implemented"))
 }
 
-func (UnimplementedTransfersHandler) UploadWorkspace(context.Context, *connect.ClientStream[runtimev2.WorkspaceUpload]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.UploadWorkspace is not implemented"))
+func (UnimplementedTransfersHandler) CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.CommitWorkspace is not implemented"))
 }
 
 func (UnimplementedTransfersHandler) DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
@@ -4187,8 +4195,8 @@ type WorkspaceDirectoryClient interface {
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
+	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
 }
 
 // NewWorkspaceDirectoryClient constructs a client for the supertag.runtime.v2.WorkspaceDirectory
@@ -4226,13 +4234,13 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(workspaceDirectoryMethods.ByName("CommitDelivery")),
 			connect.WithClientOptions(opts...),
 		),
-		getArtifact: connect.NewClient[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference](
+		getArtifact: connect.NewClient[runtimev2.GetWorkspaceArtifactRequest, runtimev2.HeldWorkspaceDelivery](
 			httpClient,
 			baseURL+WorkspaceDirectoryGetArtifactProcedure,
 			connect.WithSchema(workspaceDirectoryMethods.ByName("GetArtifact")),
 			connect.WithClientOptions(opts...),
 		),
-		getReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDeliveryReference](
+		getReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.HeldWorkspaceDelivery](
 			httpClient,
 			baseURL+WorkspaceDirectoryGetReviewArtifactProcedure,
 			connect.WithSchema(workspaceDirectoryMethods.ByName("GetReviewArtifact")),
@@ -4247,8 +4255,8 @@ type workspaceDirectoryClient struct {
 	getContinuation   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
 	reserveDelivery   *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	commitDelivery    *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
-	getArtifact       *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference]
-	getReviewArtifact *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDeliveryReference]
+	getArtifact       *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.HeldWorkspaceDelivery]
+	getReviewArtifact *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.HeldWorkspaceDelivery]
 }
 
 // GetSource calls supertag.runtime.v2.WorkspaceDirectory.GetSource.
@@ -4272,12 +4280,12 @@ func (c *workspaceDirectoryClient) CommitDelivery(ctx context.Context, req *conn
 }
 
 // GetArtifact calls supertag.runtime.v2.WorkspaceDirectory.GetArtifact.
-func (c *workspaceDirectoryClient) GetArtifact(ctx context.Context, req *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+func (c *workspaceDirectoryClient) GetArtifact(ctx context.Context, req *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
 	return c.getArtifact.CallUnary(ctx, req)
 }
 
 // GetReviewArtifact calls supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact.
-func (c *workspaceDirectoryClient) GetReviewArtifact(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+func (c *workspaceDirectoryClient) GetReviewArtifact(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
 	return c.getReviewArtifact.CallUnary(ctx, req)
 }
 
@@ -4288,8 +4296,8 @@ type WorkspaceDirectoryHandler interface {
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
+	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
 }
 
 // NewWorkspaceDirectoryHandler builds an HTTP handler from the service implementation. It returns
@@ -4374,12 +4382,108 @@ func (UnimplementedWorkspaceDirectoryHandler) CommitDelivery(context.Context, *c
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.CommitDelivery is not implemented"))
 }
 
-func (UnimplementedWorkspaceDirectoryHandler) GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+func (UnimplementedWorkspaceDirectoryHandler) GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetArtifact is not implemented"))
 }
 
-func (UnimplementedWorkspaceDirectoryHandler) GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+func (UnimplementedWorkspaceDirectoryHandler) GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact is not implemented"))
+}
+
+// HostRelayClient is a client for the supertag.runtime.v2.HostRelay service.
+type HostRelayClient interface {
+	Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest]) (*connect.ServerStreamForClient[runtimev2.RelayRequest], error)
+	Deliver(context.Context) *connect.ClientStreamForClient[runtimev2.RelayFrame, runtimev2.RelayDelivered]
+}
+
+// NewHostRelayClient constructs a client for the supertag.runtime.v2.HostRelay service. By default,
+// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
+// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
+// or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHostRelayClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostRelayClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hostRelayMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostRelay").Methods()
+	return &hostRelayClient{
+		await: connect.NewClient[runtimev2.AwaitRelayRequest, runtimev2.RelayRequest](
+			httpClient,
+			baseURL+HostRelayAwaitProcedure,
+			connect.WithSchema(hostRelayMethods.ByName("Await")),
+			connect.WithClientOptions(opts...),
+		),
+		deliver: connect.NewClient[runtimev2.RelayFrame, runtimev2.RelayDelivered](
+			httpClient,
+			baseURL+HostRelayDeliverProcedure,
+			connect.WithSchema(hostRelayMethods.ByName("Deliver")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hostRelayClient implements HostRelayClient.
+type hostRelayClient struct {
+	await   *connect.Client[runtimev2.AwaitRelayRequest, runtimev2.RelayRequest]
+	deliver *connect.Client[runtimev2.RelayFrame, runtimev2.RelayDelivered]
+}
+
+// Await calls supertag.runtime.v2.HostRelay.Await.
+func (c *hostRelayClient) Await(ctx context.Context, req *connect.Request[runtimev2.AwaitRelayRequest]) (*connect.ServerStreamForClient[runtimev2.RelayRequest], error) {
+	return c.await.CallServerStream(ctx, req)
+}
+
+// Deliver calls supertag.runtime.v2.HostRelay.Deliver.
+func (c *hostRelayClient) Deliver(ctx context.Context) *connect.ClientStreamForClient[runtimev2.RelayFrame, runtimev2.RelayDelivered] {
+	return c.deliver.CallClientStream(ctx)
+}
+
+// HostRelayHandler is an implementation of the supertag.runtime.v2.HostRelay service.
+type HostRelayHandler interface {
+	Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest], *connect.ServerStream[runtimev2.RelayRequest]) error
+	Deliver(context.Context, *connect.ClientStream[runtimev2.RelayFrame]) (*connect.Response[runtimev2.RelayDelivered], error)
+}
+
+// NewHostRelayHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHostRelayHandler(svc HostRelayHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hostRelayMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostRelay").Methods()
+	hostRelayAwaitHandler := connect.NewServerStreamHandler(
+		HostRelayAwaitProcedure,
+		svc.Await,
+		connect.WithSchema(hostRelayMethods.ByName("Await")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostRelayDeliverHandler := connect.NewClientStreamHandler(
+		HostRelayDeliverProcedure,
+		svc.Deliver,
+		connect.WithSchema(hostRelayMethods.ByName("Deliver")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HostRelay/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HostRelayAwaitProcedure:
+			hostRelayAwaitHandler.ServeHTTP(w, r)
+		case HostRelayDeliverProcedure:
+			hostRelayDeliverHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHostRelayHandler returns CodeUnimplemented from all methods.
+type UnimplementedHostRelayHandler struct{}
+
+func (UnimplementedHostRelayHandler) Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest], *connect.ServerStream[runtimev2.RelayRequest]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostRelay.Await is not implemented"))
+}
+
+func (UnimplementedHostRelayHandler) Deliver(context.Context, *connect.ClientStream[runtimev2.RelayFrame]) (*connect.Response[runtimev2.RelayDelivered], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostRelay.Deliver is not implemented"))
 }
 
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.

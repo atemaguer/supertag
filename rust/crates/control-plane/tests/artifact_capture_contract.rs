@@ -30,7 +30,9 @@ async fn exercise(url: &str) {
         .task
         .unwrap();
     let host = support::register_host(&store, "producer").await;
+    support::hold_artifacts(&store, &host).await;
     let intruder = support::register_host(&store, "intruder").await;
+    support::hold_artifacts(&store, &intruder).await;
     let assignment = store.claim_task(&host, "claim").await.unwrap().unwrap();
     let attempt = InspectAttemptRequest {
         task_id: task.task_id.clone(),
@@ -67,7 +69,7 @@ async fn exercise(url: &str) {
                 byte_length: 12,
             }),
         }],
-        source_storage_id: None,
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
     };
     assert!(matches!(
         store.commit_artifact_capture(&host, &capture).await,
@@ -164,6 +166,7 @@ async fn exercise(url: &str) {
         reservation
     );
     let late = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         operation_id: "late".into(),
         ..capture
     };
@@ -238,6 +241,7 @@ async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority,
         .await
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: "deliverable".into(),
         description: Some(ArtifactDescription {

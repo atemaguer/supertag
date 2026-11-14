@@ -27,7 +27,6 @@ use uuid::Uuid;
 
 use crate::{
     Attempt, CoordinationClients,
-    adapter::upload_records,
     artifact_snapshots::{Capture, CollectedOutput, Snapshots},
     checkpoints::Transfers,
     workspaces::{PreparedWorkspace, Workspaces},
@@ -318,16 +317,14 @@ impl PendingOutputs {
         let capture = match capture {
             Capture::Committed(receipt) => receipt,
             Capture::Pending(manifest, selected) => {
-                let mut request = authenticated_request(
-                    tokio_stream::iter(upload_records(manifest.clone(), selected)),
-                    token,
-                    None,
-                )?;
+                // This host already holds the bytes; the Control Plane records only the manifest.
+                drop(selected);
+                let mut request = authenticated_request(manifest.clone(), token, None)?;
                 request.set_timeout(Duration::from_secs(60));
                 let receipt = coordination
-                    .artifacts
+                    .acquisitions
                     .clone()
-                    .upload_capture(request)
+                    .commit_capture(request)
                     .await?
                     .into_inner();
                 if receipt.files != manifest.files

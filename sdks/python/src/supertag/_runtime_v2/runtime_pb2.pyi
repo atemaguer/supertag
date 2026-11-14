@@ -1406,6 +1406,50 @@ class SetHostDrainingRequest(_message.Message):
     draining: bool
     def __init__(self, host_id: _Optional[str] = ..., draining: _Optional[bool] = ...) -> None: ...
 
+class BlobHolder(_message.Message):
+    __slots__ = ("host_id", "attempt_id")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    attempt_id: str
+    def __init__(self, host_id: _Optional[str] = ..., attempt_id: _Optional[str] = ...) -> None: ...
+
+class AwaitRelayRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RelayRequest(_message.Message):
+    __slots__ = ("relay_id", "attempt_id", "blob")
+    RELAY_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    BLOB_FIELD_NUMBER: _ClassVar[int]
+    relay_id: str
+    attempt_id: str
+    blob: BlobReference
+    def __init__(self, relay_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., blob: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+
+class RelayFrame(_message.Message):
+    __slots__ = ("relay_id", "chunk", "failure")
+    RELAY_ID_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_FIELD_NUMBER: _ClassVar[int]
+    relay_id: str
+    chunk: bytes
+    failure: str
+    def __init__(self, relay_id: _Optional[str] = ..., chunk: _Optional[bytes] = ..., failure: _Optional[str] = ...) -> None: ...
+
+class RelayDelivered(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class HeldWorkspaceDelivery(_message.Message):
+    __slots__ = ("delivery", "holder")
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    HOLDER_FIELD_NUMBER: _ClassVar[int]
+    delivery: WorkspaceDeliveryReference
+    holder: BlobHolder
+    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ...) -> None: ...
+
 class HarnessWorkspaceRequest(_message.Message):
     __slots__ = ("read", "write", "edit", "glob", "grep", "list", "command")
     READ_FIELD_NUMBER: _ClassVar[int]
@@ -3135,20 +3179,12 @@ class WorkspaceDeliveryRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
 
 class WorkspaceContinuation(_message.Message):
-    __slots__ = ("delivery",)
+    __slots__ = ("delivery", "holder")
     DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    HOLDER_FIELD_NUMBER: _ClassVar[int]
     delivery: WorkspaceDeliveryReference
-    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
-
-class WorkspaceUpload(_message.Message):
-    __slots__ = ("begin", "patch_chunk", "bundle_chunk")
-    BEGIN_FIELD_NUMBER: _ClassVar[int]
-    PATCH_CHUNK_FIELD_NUMBER: _ClassVar[int]
-    BUNDLE_CHUNK_FIELD_NUMBER: _ClassVar[int]
-    begin: WorkspaceDeliveryRequest
-    patch_chunk: bytes
-    bundle_chunk: bytes
-    def __init__(self, begin: _Optional[_Union[WorkspaceDeliveryRequest, _Mapping]] = ..., patch_chunk: _Optional[bytes] = ..., bundle_chunk: _Optional[bytes] = ...) -> None: ...
+    holder: BlobHolder
+    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ...) -> None: ...
 
 class WorkspaceDownload(_message.Message):
     __slots__ = ("reference", "chunk")

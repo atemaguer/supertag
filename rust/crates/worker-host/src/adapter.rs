@@ -8,7 +8,6 @@ mod questions;
 mod review_artifacts;
 mod work_sessions;
 mod workspace;
-pub(crate) use artifact_capture::upload_records;
 pub(crate) use workspace::RemoteWorkspace;
 mod workstreams;
 

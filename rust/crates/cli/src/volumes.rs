@@ -38,7 +38,7 @@ pub enum VolumeCommand {
         #[arg(long)]
         operation_id: String,
     },
-    /// Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost.
+    /// Download and re-verify one recorded copy, even when the Worker Host that produced it is offline.
     Download {
         copy_id: String,
         /// Local file to create with the verified copy. It must not already exist.

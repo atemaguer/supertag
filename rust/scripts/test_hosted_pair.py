@@ -72,7 +72,7 @@ class HostedPair(unittest.TestCase):
             "--lark-state-directory", "/var/lib/supertag/lark", "--notify", "webhook:https://h.example/x#ops"])
         self.assertEqual(self.read("control-plane.args").splitlines(), [
             "control-plane", "--listen", "127.0.0.1:3434", "--websocket-listen", "0.0.0.0:8080",
-            "--transfer-directory", "/var/lib/supertag/transfers"])
+            "--checkpoint-directory", "/var/lib/supertag/checkpoints"])
         control, gateway = self.environment("control-plane"), self.environment("gateway")
         for name in ("SUPERTAG_LARK_APP_ID", "SUPERTAG_NOTIFY_SECRET_OPS", "SUPERTAG_CLIENT_CERT_FILE",
                      "SUPERTAG_GATEWAY_CREDENTIAL"):

@@ -599,8 +599,7 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
 async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     use sha2::{Digest, Sha256};
     use v2::{
-        ArtifactDownload, ArtifactFile, ArtifactUpload, BlobReference, CapturedArtifact,
-        DownloadArtifactFileRequest,
+        ArtifactDownload, ArtifactFile, BlobReference, DownloadArtifactFileRequest,
         artifact_download::Part,
         artifact_transfers_server::{ArtifactTransfers, ArtifactTransfersServer},
     };
@@ -611,13 +610,6 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     struct Transfers;
     #[tonic::async_trait]
     impl ArtifactTransfers for Transfers {
-        async fn upload_capture(
-            &self,
-            _: Request<tonic::Streaming<ArtifactUpload>>,
-        ) -> std::result::Result<tonic::Response<CapturedArtifact>, Status> {
-            Err(Status::unimplemented("unused"))
-        }
-
         type DownloadFileStream =
             tokio_stream::Iter<std::vec::IntoIter<std::result::Result<ArtifactDownload, Status>>>;
 

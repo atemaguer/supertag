@@ -17,7 +17,7 @@ use supertag_protocol::{
         checkpoint_download, checkpoint_upload,
         transfers_server::{Transfers, TransfersServer},
         workspace_directory_client::WorkspaceDirectoryClient,
-        workspace_download, workspace_upload, *,
+        workspace_download, *,
     },
     validate_checkpoint_reference, validate_workspace_delivery,
 };
@@ -32,7 +32,11 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::Api;
 
 mod artifacts;
+mod relay;
 pub mod volumes;
+
+pub(crate) use relay::RelayHub;
+use relay::{Incoming, RelayError};
 
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(25);
 const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -67,38 +71,103 @@ pub struct FetchedSource {
     pub keep: Box<dyn std::any::Any + Send + Sync>,
 }
 
+/// Serves the Control Plane's byte transfers. It stores Session checkpoints in an optional private
+/// directory and nothing else: artifact and Workspace delivery bytes stay on the Worker Host that
+/// produced them (or a Volume), and reach readers through [`RelayHub`] without being written here.
 #[derive(Clone)]
 pub struct ApiTransfers {
     api: Api,
-    directory: Option<PathBuf>,
+    checkpoints: Option<PathBuf>,
     capacity: Arc<Semaphore>,
     github_sources: Option<Arc<dyn WorkspaceSources>>,
     volumes: volumes::ArtifactVolumeMappings,
+    relay: Arc<RelayHub>,
 }
 
 impl ApiTransfers {
-    pub fn new(api: Api, directory: Option<PathBuf>) -> Result<Self> {
-        if let Some(directory) = &directory {
+    pub fn new(api: Api, checkpoints: Option<PathBuf>) -> Result<Self> {
+        if let Some(directory) = &checkpoints {
             DirBuilder::new()
                 .mode(0o700)
                 .recursive(true)
                 .create(directory)
-                .context("create Control Plane transfer directory")?;
+                .context("create Control Plane checkpoint directory")?;
             let metadata = directory.symlink_metadata()?;
             ensure!(
                 metadata.is_dir()
                     && metadata.mode() & 0o077 == 0
                     && metadata.uid() == unsafe { libc::geteuid() },
-                "Control Plane transfer directory must be private"
+                "Control Plane checkpoint directory must be private"
             );
         }
         Ok(Self {
             api,
-            directory,
+            checkpoints,
             capacity: Arc::new(Semaphore::new(16)),
             github_sources: None,
             volumes: volumes::ArtifactVolumeMappings::default(),
+            relay: Arc::default(),
         })
+    }
+
+    /// Ends every Worker Host relay stream once `shutdown` is cancelled.
+    pub(crate) fn close_relays_on(&self, shutdown: tokio_util::sync::CancellationToken) {
+        let relay = self.relay.clone();
+        tokio::spawn(async move {
+            shutdown.cancelled().await;
+            relay.close();
+        });
+    }
+
+    /// The `HostRelay` service Worker Hosts answer relay requests through.
+    pub fn host_relay_service(&self) -> host_relay_server::HostRelayServer<Self> {
+        host_relay_server::HostRelayServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    /// Writes one blob held by `holder` into `destination`, verifying its length and digest.
+    /// The GitHub publisher uses this to read a delivery bundle; the caller deletes the file.
+    pub async fn relay_to_file(
+        &self,
+        holder: &BlobHolder,
+        blob: &BlobReference,
+        destination: &Path,
+    ) -> Result<()> {
+        let mut incoming = self
+            .relay
+            .open(holder, blob)
+            .await
+            .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(destination)
+            .await?;
+        let mut digest = Sha256::new();
+        let mut length = 0u64;
+        let read = async {
+            while let Some(chunk) = incoming.next().await? {
+                length += chunk.len() as u64;
+                ensure!(
+                    length <= blob.byte_length,
+                    "relayed blob exceeds its receipt"
+                );
+                digest.update(&chunk);
+                file.write_all(&chunk).await?;
+            }
+            Ok::<_, anyhow::Error>(())
+        };
+        timeout(WORKSPACE_TRANSFER_TIMEOUT, read)
+            .await
+            .map_err(|_| anyhow::anyhow!("relayed blob read timed out"))??;
+        ensure!(
+            length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
+            "relayed blob does not match its receipt"
+        );
+        file.sync_all().await?;
+        Ok(())
     }
 
     pub fn with_github_sources(mut self, sources: Arc<dyn WorkspaceSources>) -> Self {
@@ -128,9 +197,7 @@ impl ApiTransfers {
         &self,
         request: Request<Streaming<CheckpointUpload>>,
     ) -> Result<Response<CheckpointReference>, Status> {
-        let directory = self.directory.as_ref().ok_or_else(|| {
-            Status::failed_precondition("Control Plane transfer storage is not configured")
-        })?;
+        let directory = self.checkpoint_directory()?;
         let (metadata, _, mut stream) = request.into_parts();
         let begin = match stream.message().await?.and_then(|message| message.part) {
             Some(checkpoint_upload::Part::Begin(begin)) => begin,
@@ -186,20 +253,12 @@ impl ApiTransfers {
             .await
     }
 
-    async fn upload_workspace_delivery(
+    /// Records a delivery whose bytes the calling host already holds. No bytes reach this tier.
+    async fn commit_workspace_delivery(
         &self,
-        request: Request<Streaming<WorkspaceUpload>>,
+        request: Request<WorkspaceDeliveryRequest>,
     ) -> Result<Response<WorkspaceDeliveryReference>, Status> {
-        let directory = self.directory()?;
-        let (metadata, _, mut stream) = request.into_parts();
-        let begin = match stream.message().await?.and_then(|message| message.part) {
-            Some(workspace_upload::Part::Begin(begin)) => begin,
-            _ => {
-                return Err(Status::invalid_argument(
-                    "workspace upload requires an opening record",
-                ));
-            }
-        };
+        let (metadata, _, begin) = request.into_parts();
         let delivery = begin
             .delivery
             .as_ref()
@@ -219,30 +278,6 @@ impl ApiTransfers {
                 "Control Plane returned a different workspace reservation",
             ));
         }
-
-        let mut patch =
-            StagedBlob::new(directory, delivery.patch.clone().expect("validated patch"))?;
-        let mut bundle = StagedBlob::new(
-            directory,
-            delivery.bundle.clone().expect("validated bundle"),
-        )?;
-        while let Some(message) = stream.message().await? {
-            match message.part {
-                Some(workspace_upload::Part::PatchChunk(bytes)) => patch.append(&bytes).await?,
-                Some(workspace_upload::Part::BundleChunk(bytes)) => bundle.append(&bytes).await?,
-                _ => {
-                    return Err(Status::invalid_argument(
-                        "expected a workspace artifact chunk",
-                    ));
-                }
-            }
-        }
-        patch.verify().await?;
-        bundle.verify().await?;
-        patch.persist(directory).await?;
-        bundle.persist(directory).await?;
-        sync_directory(directory).await?;
-
         let mut commit = Request::new(begin);
         *commit.metadata_mut() = metadata;
         self.api
@@ -255,25 +290,35 @@ impl ApiTransfers {
     async fn get_workspace_reference(
         &self,
         request: Request<InspectAttemptRequest>,
-    ) -> Result<Option<WorkspaceDeliveryReference>, Status> {
-        self.api
+    ) -> Result<Option<(WorkspaceDeliveryReference, BlobHolder)>, Status> {
+        let continuation = self
+            .api
             .forward_host(request, true, |channel, request| async move {
                 workspace_client(channel).get_continuation(request).await
             })
-            .await
-            .map(|response| response.into_inner().delivery)
+            .await?
+            .into_inner();
+        match (continuation.delivery, continuation.holder) {
+            (Some(delivery), Some(holder)) => Ok(Some((delivery, holder))),
+            (None, _) => Ok(None),
+            (Some(_), None) => Err(Status::data_loss(
+                "Workspace continuation has no holding Worker Host",
+            )),
+        }
     }
 
     async fn get_review_reference(
         &self,
         request: Request<GetReviewArtifactRequest>,
-    ) -> Result<WorkspaceDeliveryReference, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                workspace_client(channel).get_review_artifact(request).await
-            })
-            .await
-            .map(Response::into_inner)
+    ) -> Result<(WorkspaceDeliveryReference, BlobHolder), Status> {
+        held(
+            self.api
+                .forward_host(request, true, |channel, request| async move {
+                    workspace_client(channel).get_review_artifact(request).await
+                })
+                .await?
+                .into_inner(),
+        )
     }
 
     async fn authorize_upload<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -283,9 +328,9 @@ impl ApiTransfers {
         Ok(())
     }
 
-    fn directory(&self) -> Result<&Path, Status> {
-        self.directory.as_deref().ok_or_else(|| {
-            Status::failed_precondition("Control Plane transfer storage is not configured")
+    fn checkpoint_directory(&self) -> Result<&Path, Status> {
+        self.checkpoints.as_deref().ok_or_else(|| {
+            Status::failed_precondition("Control Plane checkpoint storage is not configured")
         })
     }
 
@@ -299,6 +344,7 @@ impl ApiTransfers {
     async fn workspace_download<F, Authorization>(
         &self,
         reference: WorkspaceDeliveryReference,
+        holder: BlobHolder,
         kind: WorkspaceArtifactKind,
         authorize: F,
     ) -> Result<Response<ReceiverStream<Result<WorkspaceDownload, Status>>>, Status>
@@ -314,12 +360,17 @@ impl ApiTransfers {
         }
         .expect("validated blob reference");
         let permit = self.acquire()?;
-        let file = open_blob(&self.directory()?.join(&blob.sha256)).await?;
+        let source = Source::Relay(
+            self.relay
+                .open(&holder, &blob)
+                .await
+                .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?,
+        );
         let header = WorkspaceDownload {
             part: Some(workspace_download::Part::Reference(reference)),
         };
         Ok(Response::new(download_stream(
-            file,
+            source,
             permit,
             blob,
             header,
@@ -427,7 +478,7 @@ impl Transfers for ApiTransfers {
                 },
             )),
         };
-        let file = open_blob(&fetched.bundle.path).await?;
+        let file = Source::File(open_blob(&fetched.bundle.path).await?);
         let service = self.clone();
         let authorize = move || {
             let service = service.clone();
@@ -484,7 +535,8 @@ impl Transfers for ApiTransfers {
         };
         validate_checkpoint_reference(&reference)?;
         let permit = self.acquire()?;
-        let file = open_blob(&self.directory()?.join(&reference.sha256)).await?;
+        let file =
+            Source::File(open_blob(&self.checkpoint_directory()?.join(&reference.sha256)).await?);
         let blob = BlobReference {
             sha256: reference.sha256.clone(),
             byte_length: reference.byte_length,
@@ -521,18 +573,12 @@ impl Transfers for ApiTransfers {
         )))
     }
 
-    async fn upload_workspace(
+    async fn commit_workspace(
         &self,
-        request: Request<Streaming<WorkspaceUpload>>,
+        request: Request<WorkspaceDeliveryRequest>,
     ) -> Result<Response<WorkspaceDeliveryReference>, Status> {
         self.authorize_upload(&request).await?;
-        let _permit = self.acquire()?;
-        timeout(
-            WORKSPACE_TRANSFER_TIMEOUT,
-            self.upload_workspace_delivery(request),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("workspace upload timed out"))?
+        self.commit_workspace_delivery(request).await
     }
 
     type DownloadWorkspaceStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
@@ -543,7 +589,7 @@ impl Transfers for ApiTransfers {
     ) -> Result<Response<Self::DownloadWorkspaceStream>, Status> {
         let attempt = request.get_ref().clone();
         let metadata = request.metadata().clone();
-        let Some(reference) = self.get_workspace_reference(request).await? else {
+        let Some((reference, holder)) = self.get_workspace_reference(request).await? else {
             return Ok(Response::new(empty_stream()));
         };
         let service = self.clone();
@@ -554,7 +600,11 @@ impl Transfers for ApiTransfers {
             let mut request = Request::new(attempt.clone());
             *request.metadata_mut() = metadata.clone();
             async move {
-                if service.get_workspace_reference(request).await?.as_ref() == Some(&expected) {
+                if service
+                    .get_workspace_reference(request)
+                    .await?
+                    .is_some_and(|(current, _)| current == expected)
+                {
                     Ok(())
                 } else {
                     Err(Status::permission_denied(
@@ -563,7 +613,7 @@ impl Transfers for ApiTransfers {
                 }
             }
         };
-        self.workspace_download(reference, WorkspaceArtifactKind::Bundle, authorize)
+        self.workspace_download(reference, holder, WorkspaceArtifactKind::Bundle, authorize)
             .await
     }
 
@@ -577,7 +627,7 @@ impl Transfers for ApiTransfers {
     ) -> Result<Response<Self::DownloadReviewArtifactStream>, Status> {
         let input = request.get_ref().clone();
         let metadata = request.metadata().clone();
-        let reference = self.get_review_reference(request).await?;
+        let (reference, holder) = self.get_review_reference(request).await?;
         let expected = reference.clone();
         let service = self.clone();
         let authorize = move || {
@@ -586,7 +636,7 @@ impl Transfers for ApiTransfers {
             let mut request = Request::new(input.clone());
             *request.metadata_mut() = metadata.clone();
             async move {
-                if service.get_review_reference(request).await? == expected {
+                if service.get_review_reference(request).await?.0 == expected {
                     Ok(())
                 } else {
                     Err(Status::permission_denied(
@@ -595,7 +645,7 @@ impl Transfers for ApiTransfers {
                 }
             }
         };
-        self.workspace_download(reference, WorkspaceArtifactKind::Patch, authorize)
+        self.workspace_download(reference, holder, WorkspaceArtifactKind::Patch, authorize)
             .await
     }
 
@@ -606,7 +656,7 @@ impl Transfers for ApiTransfers {
         let kind = request.get_ref().kind();
         let input = request.get_ref().clone();
         let metadata = request.metadata().clone();
-        let delivery = self.get_workspace_artifact(request).await?;
+        let (delivery, holder) = self.get_workspace_artifact(request).await?;
         let expected = delivery.clone();
         let service = self.clone();
         // Recheck the operator's credential, such as a revoked Operator Token, while streaming.
@@ -616,7 +666,7 @@ impl Transfers for ApiTransfers {
             let mut request = Request::new(input.clone());
             *request.metadata_mut() = metadata.clone();
             async move {
-                if service.get_workspace_artifact(request).await? == expected {
+                if service.get_workspace_artifact(request).await?.0 == expected {
                     Ok(())
                 } else {
                     Err(Status::permission_denied(
@@ -625,7 +675,8 @@ impl Transfers for ApiTransfers {
                 }
             }
         };
-        self.workspace_download(delivery, kind, authorize).await
+        self.workspace_download(delivery, holder, kind, authorize)
+            .await
     }
 }
 
@@ -633,14 +684,90 @@ impl ApiTransfers {
     async fn get_workspace_artifact(
         &self,
         request: Request<GetWorkspaceArtifactRequest>,
-    ) -> Result<WorkspaceDeliveryReference, Status> {
-        Ok(self
-            .api
-            .forward(request, |channel, request| async move {
-                workspace_client(channel).get_artifact(request).await
-            })
-            .await?
-            .into_inner())
+    ) -> Result<(WorkspaceDeliveryReference, BlobHolder), Status> {
+        held(
+            self.api
+                .forward(request, |channel, request| async move {
+                    workspace_client(channel).get_artifact(request).await
+                })
+                .await?
+                .into_inner(),
+        )
+    }
+}
+
+#[tonic::async_trait]
+impl host_relay_server::HostRelay for ApiTransfers {
+    type AwaitStream = ReceiverStream<Result<RelayRequest, Status>>;
+
+    async fn r#await(
+        &self,
+        request: Request<AwaitRelayRequest>,
+    ) -> Result<Response<Self::AwaitStream>, Status> {
+        let host = self.api.registered_host(&request).await?;
+        let host_id = host_id(&host)?;
+        Ok(Response::new(self.relay.connect(host_id, host.generation)))
+    }
+
+    async fn deliver(
+        &self,
+        request: Request<Streaming<RelayFrame>>,
+    ) -> Result<Response<RelayDelivered>, Status> {
+        let host = self.api.registered_host(&request).await?;
+        let host_id = host_id(&host)?;
+        self.relay
+            .deliver(&host_id, host.generation, request.into_inner())
+            .await
+            .map(Response::new)
+    }
+}
+
+fn host_id(caller: &crate::Caller) -> Result<String, Status> {
+    caller
+        .principal
+        .strip_prefix("host:")
+        .map(str::to_owned)
+        .ok_or_else(|| Status::permission_denied("caller is not a Worker Host"))
+}
+
+fn held(held: HeldWorkspaceDelivery) -> Result<(WorkspaceDeliveryReference, BlobHolder), Status> {
+    match held {
+        HeldWorkspaceDelivery {
+            delivery: Some(delivery),
+            holder: Some(holder),
+        } => Ok((delivery, holder)),
+        _ => Err(Status::data_loss(
+            "Workspace delivery has no holding Worker Host",
+        )),
+    }
+}
+
+/// The reader-facing error for a relay that could not start.
+fn relay_status(error: RelayError, host: &str, what: &str) -> Status {
+    match error {
+        RelayError::Offline => Status::unavailable(format!(
+            "{what} bytes are held by Worker Host {host}, which is not connected to the Control Plane"
+        )),
+        RelayError::Failed(status) => status,
+    }
+}
+
+/// Where a download's bytes come from: a local file this process reads (a checkpoint, a GitHub
+/// source bundle, or a transient Volume snapshot), or the Worker Host relaying them.
+pub(crate) enum Source {
+    File(tokio::fs::File),
+    Relay(Incoming),
+}
+
+impl Source {
+    async fn next(&mut self, buffer: &mut [u8]) -> Result<Option<Vec<u8>>, Status> {
+        match self {
+            Self::File(file) => {
+                let size = file.read(buffer).await.map_err(storage_error)?;
+                Ok((size > 0).then(|| buffer[..size].to_vec()))
+            }
+            Self::Relay(incoming) => incoming.next().await,
+        }
     }
 }
 
@@ -653,8 +780,22 @@ struct StagedBlob {
 }
 
 impl StagedBlob {
+    /// Stages in the system temporary directory; the file is deleted when it is dropped.
+    fn transient(expected: BlobReference) -> Result<Self, Status> {
+        Self::staged(
+            tempfile::NamedTempFile::new().map_err(storage_error)?,
+            expected,
+        )
+    }
+
     fn new(directory: &Path, expected: BlobReference) -> Result<Self, Status> {
-        let staged = tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?;
+        Self::staged(
+            tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?,
+            expected,
+        )
+    }
+
+    fn staged(staged: tempfile::NamedTempFile, expected: BlobReference) -> Result<Self, Status> {
         let handle =
             tokio::fs::File::from_std(staged.as_file().try_clone().map_err(storage_error)?);
         Ok(Self {
@@ -707,7 +848,7 @@ fn empty_stream<T>() -> ReceiverStream<T> {
 }
 
 fn download_stream<T, Chunk, Check, Authorization>(
-    mut file: tokio::fs::File,
+    mut source: Source,
     permit: tokio::sync::OwnedSemaphorePermit,
     expected: BlobReference,
     header: T,
@@ -737,16 +878,15 @@ where
                     authorize().await?;
                     checked = tokio::time::Instant::now();
                 }
-                let size = file.read(&mut buffer).await.map_err(storage_error)?;
-                if size == 0 {
+                let Some(bytes) = source.next(&mut buffer).await? else {
                     break;
-                }
-                length += size as u64;
+                };
+                length += bytes.len() as u64;
                 if length > expected.byte_length {
                     return Err(Status::data_loss("blob size does not match its receipt"));
                 }
-                digest.update(&buffer[..size]);
-                if send.send(Ok(chunk(buffer[..size].to_vec()))).await.is_err() {
+                digest.update(&bytes);
+                if send.send(Ok(chunk(bytes))).await.is_err() {
                     return Ok(());
                 }
             }
@@ -846,7 +986,7 @@ fn workspace_client(channel: ProtocolChannel) -> WorkspaceDirectoryClient<Protoc
 
 fn storage_error(error: std::io::Error) -> Status {
     supertag_protocol::terminal_text::warn(&format!(
-        "Control Plane transfer storage error: {}",
+        "Control Plane checkpoint or Volume storage error: {}",
         error.kind()
     ));
     Status::internal("blob storage operation failed")

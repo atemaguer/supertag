@@ -14,9 +14,9 @@ the [glossary](../reference/glossary.md) for other terms, and
 | Local | `supertag up` runs it, with a Gateway, from `~/.supertag/supertag.yaml` | SQLite at `~/.supertag/runtime.sqlite3`, or PostgreSQL from the `control-plane` service's `database` |
 | Hosted | `supertag control-plane` in a container, from the files `supertag setup deployment` writes | PostgreSQL from `SUPERTAG_DATABASE_URL` |
 
-The Control Plane creates and migrates its schema when it starts. It keeps transfer files, such
-as Session checkpoints, workspace bundles, and captured artifact files, in `--transfer-directory`.
-None of those bytes enter the database.
+The Control Plane creates and migrates its schema when it starts. It keeps Session checkpoints in
+`--checkpoint-directory`, outside the database. It stores no artifact or Workspace delivery
+bytes: the Worker Host that produced them keeps them, and the Control Plane relays them to readers.
 
 ### Listeners
 
@@ -143,23 +143,29 @@ backlogs.
 ## Artifact storage
 
 An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps its
-catalog in the database and its files in the transfer directory. For copies that outlive that
-directory, map artifact Volumes with `--artifact-volume VOLUME_ID=DIRECTORY` or
+catalog in the database and never stores its files. The Worker Host whose Task captured them keeps
+them, and the Control Plane relays them to readers while that host is connected. A read of an
+offline host's files fails with an error naming the host. For copies that stay readable while it
+is offline, map artifact Volumes with `--artifact-volume VOLUME_ID=DIRECTORY` or
 `--artifact-s3-volumes FILE` and copy files there with `supertag volume copy`. Worker Hosts run
-with `--artifact-transfer-listen` keep their own copies and serve each other directly. See
+with `--artifact-transfer-listen` also serve each other directly. Workspace deliveries, the patch
+and bundle behind `supertag fetch`, follow the same rule without Volume copies. See
 [Artifacts](../reference/artifacts.md).
 
 ## Replicas
 
-Several Control Plane processes can share one PostgreSQL database and one transfer directory on a
+Several Control Plane processes can share one PostgreSQL database and one checkpoint directory on a
 shared volume. Put them behind one TCP load balancer or private DNS name, keep their clocks in
-sync, and run the same release on all of them. A SQLite database serves one process. See
+sync, and run the same release on all of them. Each Worker Host's relay stream reaches one
+replica, so only that replica can relay its artifacts and Workspace deliveries. A read through
+another replica fails with the offline error; Volume copies are readable through every replica
+that maps the Volume. A SQLite database serves one process. See
 [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
 
 ## Back up
 
-- **PostgreSQL**: back it up with your provider's backups or `pg_dump`, and back up the transfer
-  directory's volume with it.
+- **PostgreSQL**: back it up with your provider's backups or `pg_dump`, and back up the checkpoint
+  directory's volume with it. Back up each Worker Host's artifact storage too.
 - **Local SQLite**: stop the services with `supertag down`, then copy `~/.supertag`. Copying a
   running database can capture a torn write.
 - **Gateway**: back up its volume, which holds the file credential vault and connector state, or

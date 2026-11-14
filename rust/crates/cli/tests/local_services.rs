@@ -1092,7 +1092,7 @@ impl Central {
         };
         let mut plane = Command::new(BIN)
             .args(["control-plane", "--listen", "127.0.0.1:0"])
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(checkpoints.path().join("checkpoints"))
             .env_clear()
             .env("SUPERTAG_DATABASE_URL", database)

@@ -15,10 +15,12 @@ Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 [Context Set](glossary.md#context-set), [Volume](glossary.md#volume), and
 [Workspace](glossary.md#workspace).
 
-The catalog lives in the Control Plane's database; the bytes never do. A capture streams each file
-to the Control Plane's private transfer directory, stored by SHA-256 digest. A Worker Host with
-direct transfer configured also keeps its own copy and serves it to other Worker Hosts. An
-operator can copy a file to a Volume for a copy that outlives both.
+The Control Plane never stores artifact bytes, on disk or in its database. The Worker Host that
+captures an artifact keeps the files in its own artifact storage and registers only the manifest.
+A reader, such as another Task's Worker Host or an operator, asks the Control Plane for a file. The
+Control Plane checks access, asks the holding Worker Host for those exact bytes, and relays them
+to the reader in flight. It verifies their size and SHA-256 digest on the way. An operator can copy
+a file to a Volume for a copy that stays readable while its Worker Host is offline.
 
 ```mermaid
 sequenceDiagram
@@ -26,11 +28,12 @@ sequenceDiagram
     participant Control as Control Plane
     participant Consumer as Consuming Worker Host
 
-    Producer->>Producer: Freeze and verify bytes in its journal
-    Producer->>Control: Upload the files and register the manifest
-    Consumer->>Control: Resolve an admitted artifact input
-    Control-->>Consumer: Return metadata and locations
-    Consumer->>Producer: With direct transfer: request bytes with a grant
+    Producer->>Producer: Freeze, verify, and keep the bytes
+    Producer->>Control: Register the manifest and holding storage
+    Consumer->>Control: Request an admitted artifact file
+    Control->>Producer: Ask for the exact bytes over its relay stream
+    Producer-->>Control: Stream the bytes
+    Control-->>Consumer: Relay them without storing, verifying size and digest
     Consumer->>Consumer: Verify size and digest
 ```
 
@@ -133,14 +136,14 @@ Untracked reports are still captured when selected, including reports in a Git-i
 ### Transfer recovery
 
 The Worker Host freezes output bytes in its execution journal, under its state directory, before
-it releases the execution environment. After a restart it retries the upload and catalog
+it releases the execution environment. After a restart it retries keeping the bytes and the catalog
 registration for the same Task Attempt; the harness is not run again. Registration uses a stable
 operation ID, so a lost response does not create a second artifact. Keep the state directory on
 persistent storage: it holds execution metadata, so protect it like other Worker Host state.
 
 A crash before bytes are frozen or before cleanup is confirmed leaves an uncertain Task Attempt,
 which needs inspection; it is not rerun automatically. Losing the Worker Host's state directory
-also loses outputs that have not reached the Control Plane. No filesystem watcher can recover files
+also loses outputs not yet moved to its artifact storage. No filesystem watcher can recover files
 that an agent deletes before final collection. Integrity failures and permanent catalog conflicts
 keep the journal evidence and stop automatic retries; they need operator recovery.
 
@@ -307,33 +310,53 @@ not as instructions that change the consuming Task's allowed actions.
 ### Where artifact bytes live
 
 Artifact metadata and artifact bytes have different homes. The Control Plane database is the
-authoritative catalog for identity, provenance, allowed access, and known copies. The bytes live
-in up to three places:
+authoritative catalog for identity, provenance, allowed access, and which Worker Host holds each
+capture. The Control Plane stores no artifact bytes. The bytes live in up to two places:
 
 | Copy | Where | Made by |
 | --- | --- | --- |
-| Control Plane copy | The Control Plane's `--transfer-directory`, one file per SHA-256 digest. Locally, `~/.supertag/checkpoints` | Every capture |
-| Worker Host copy | The producing Worker Host's `--artifact-source-directory` | A Worker Host run with `--artifact-transfer-listen` and `--artifact-source-directory` |
+| Worker Host copy | The producing Worker Host's artifact storage: `STATE_DIRECTORY/artifacts`, or the directory named by `--artifact-directory` | Every capture |
 | Volume copy | An artifact Volume the Control Plane maps with `--artifact-volume` or `--artifact-s3-volumes` | An operator, with `supertag volume copy` |
 
-The transfer directory is private storage outside the database. Several Control Plane replicas
-share one on a shared volume. Back it up with the database: a capture whose Control Plane copy is
-lost is reachable only through a Worker Host copy or a Volume copy.
+A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
+SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
+that host's state under `~/.supertag`, shared by all of the host's execution lanes. Keep the
+directory on persistent storage, and back it up with the database.
+
+### How readers reach the bytes
+
+Every Worker Host keeps one relay stream open to the Control Plane while it runs. When an
+authorized reader asks for a file, the Control Plane looks for a verified Volume copy it maps
+first. Otherwise it asks the holding Worker Host for the exact bytes over that stream, then relays
+them to the reader without writing them to disk. It checks their size and digest against the
+catalog, and fails the read when they differ.
+
+When the holding Worker Host is not connected and no Volume copy is readable, the read fails. The
+error names that Worker Host, for example:
+
+```text
+no reachable copy of these artifact bytes: their Worker Host is not connected to the Control Plane
+and no verified Volume copy is readable (held by Worker Host laptop)
+```
+
+Restart that Worker Host, or copy its artifacts to a Volume before it goes away. A Volume copy
+stays readable while the holding Worker Host is offline.
 
 ### Direct transfer between Worker Hosts
 
-A Worker Host with `--artifact-transfer-listen ADDRESS` and `--artifact-source-directory DIR`
-keeps the files its Tasks capture in that directory and advertises the listener. Its TLS
-certificate and key come from `--artifact-transfer-tls-cert` and `--artifact-transfer-tls-key`.
-A consuming Worker Host pins each producer's origin with `--artifact-peer HOST_ID=ORIGIN`, and its
-CA with `--artifact-peer-ca-file`. The consumer asks the Control Plane for a short-lived transfer
-grant scoped to one file, producer, consumer, and expiry, then downloads the file from the
-producer and checks its size and SHA-256 digest. A retried transfer never reruns the producer.
+A Worker Host with `--artifact-transfer-listen ADDRESS` also serves the files in its artifact
+storage directly to other Worker Hosts. Its TLS certificate and key come from
+`--artifact-transfer-tls-cert` and `--artifact-transfer-tls-key`. A consuming Worker Host pins each
+producer's origin with `--artifact-peer HOST_ID=ORIGIN`, and its CA with `--artifact-peer-ca-file`.
+The consumer asks the Control Plane for a short-lived transfer grant scoped to one file, producer,
+consumer, and expiry. It then downloads the file from the producer and checks its size and SHA-256
+digest. The bytes skip the Control Plane's relay entirely. When the peer cannot serve the file,
+the consumer falls back to the relay. A retried transfer never reruns the producer.
 
 ### Volume copies
 
-An artifact Volume holds copies that outlive the Control Plane's transfer directory and every
-Worker Host. The Control Plane owner consents to each Volume's storage when starting it:
+An artifact Volume holds copies that stay readable while the producing Worker Host is offline or
+gone. The Control Plane owner consents to each Volume's storage when starting it:
 `--artifact-volume VOLUME_ID=/absolute/private/directory` for a directory, or a JSON file passed to
 `--artifact-s3-volumes` that maps each `s3://` Volume to its endpoint, region, and the environment
 variables that hold its keys. Register the Volume, then copy one file:
@@ -346,19 +369,20 @@ supertag get volume-copy
 supertag volume download COPY_ID --output findings.md
 ```
 
-`volume download` reads the copy back and verifies it, even after the transfer directory is lost.
-When its own copy is missing, the Control Plane also serves artifact downloads from a recorded
-Volume copy. `supertag delete volume` is refused while reserved or verified copies depend on the
-Volume.
+`volume copy` relays the bytes from the holding Worker Host into the Volume, so that Worker Host
+must be connected. Repeating a copy that already reached the Volume succeeds while it is offline.
+`volume download` reads the copy back and verifies it. Artifact downloads also use a recorded
+Volume copy, whether or not the holding Worker Host is connected. `supertag delete volume` is
+refused while reserved or verified copies depend on the Volume.
 
 ### Operator downloads
 
 `supertag artifact download ARTIFACT_ID --path PATH --output FILE` writes one file only when its size
-and digest match, and never overwrites an existing file. When neither the Control Plane copy nor a
-Volume copy is available, it writes nothing and reports that the source is unavailable.
+and digest match, and never overwrites an existing file. When neither the holding Worker Host nor a
+Volume copy is reachable, it writes nothing and reports the error above, naming the Worker Host.
 
-Automatic replication and repair are not implemented. Back up the transfer directory, every
-required Worker Host copy, artifact Volumes, and the catalog database together.
+Automatic replication and repair are not implemented. Back up every Worker Host's artifact
+storage, artifact Volumes, and the catalog database together.
 
 ### Limits
 
@@ -383,10 +407,9 @@ recipient Worker Host, and expiry. Knowing an artifact ID or digest is insuffici
 
 Availability follows configured storage, rather than catalog presence alone:
 
-| Copy | Survives the producing Worker Host's loss | Survives loss of the transfer directory |
+| Copy | Readable while the producing Worker Host is offline | Survives the producing Worker Host's loss |
 | --- | --- | --- |
-| Control Plane copy | Yes | No |
-| Worker Host copy | No | Yes, while that host's disk lasts |
+| Worker Host copy | No | No |
 | Volume copy | Yes | Yes, while the Volume lasts |
 
 SuperTag does not silently rerun the producing Task to reconstruct lost bytes.

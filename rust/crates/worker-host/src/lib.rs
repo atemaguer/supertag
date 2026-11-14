@@ -62,7 +62,8 @@ use supertag_protocol::{
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
-        attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
+        attempt_workstreams_client::AttemptWorkstreamsClient, host_relay_client::HostRelayClient,
+        worker_host_client::WorkerHostClient,
     },
 };
 use tokio::time::{self, Instant};
@@ -94,6 +95,8 @@ pub struct HostOptions {
     pub shared_execution: Option<SharedExecutionConfig>,
     pub context_catalog: context::ContextCatalog,
     pub mcp_catalog: McpCatalog,
+    /// Where this host keeps the artifact and Workspace delivery bytes it holds; `None` keeps them in
+    /// `STATE_DIRECTORY/artifacts`.
     pub artifact_source: Option<ArtifactSourceConfig>,
     pub artifact_peers: ArtifactPeers,
     pub workspace_mounts: WorkspaceMounts,
@@ -308,11 +311,12 @@ pub async fn run(
         let artifact_storage = options
             .artifact_source
             .as_ref()
-            .map(|source| source.directory.clone());
+            .map(|source| source.directory.clone())
+            .unwrap_or_else(|| state_directory.join("artifacts"));
         options.workspace_mounts.protect(
             &state_directory,
             &local_roots,
-            artifact_storage.as_deref(),
+            Some(artifact_storage.as_path()),
         )?;
     }
     let workspaces =
@@ -398,21 +402,29 @@ pub async fn run(
     let acquisitions = AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let serving = match options.artifact_source.take() {
-        Some(config) => Some(
-            config
-                .bind(&options.state_directory, &local_roots)
-                .await?
-                .serve(acquisitions.clone(), &token, &shutdown)
-                .await?,
-        ),
-        None => None,
-    };
+    // This host holds every artifact and Workspace delivery it produces; the Control Plane relays
+    // them to readers through this host's relay stream.
+    let serving = options
+        .artifact_source
+        .take()
+        .unwrap_or_else(|| ArtifactSourceConfig::in_state(&options.state_directory))
+        .bind(&options.state_directory, &local_roots)
+        .await?
+        .serve(
+            acquisitions.clone(),
+            HostRelayClient::with_interceptor(channel.clone(), headers.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            &token,
+            &shutdown,
+        )
+        .await?;
     let coordination = CoordinationClients {
         acquisitions,
-        artifact_source: serving.as_ref().map(|service| service.storage.clone()),
+        artifact_source: Some(serving.storage.clone()),
         artifact_peers: options.artifact_peers.clone(),
-        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
+        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
+            .with_storage(serving.storage.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
             options
                 .control_plane
@@ -454,7 +466,9 @@ pub async fn run(
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
     };
-    let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
+    // Workspace deliveries stay in this host's artifact storage; only their digests go upstream.
+    let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone())
+        .with_storage(serving.storage.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);

@@ -226,6 +226,10 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("ArtifactTransfers", "*", HOST),
     ("Transfers", "*", HOST),
     ("Transfers", "DownloadWorkspaceArtifact", OC),
+    // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's
+    // relay: only the host the relay asked.
+    ("HostRelay", "Await", HOST),
+    ("HostRelay", "Deliver", HOST),
     // Surfaces.
     ("Connector", "*", GATEWAY),
     ("ReplyProgress", "*", GATEWAY),
@@ -615,6 +619,10 @@ mod tests {
             roles("Transfers/DownloadWorkspaceArtifact"),
             ["operator", "client"]
         );
+        assert_eq!(roles("HostRelay/Await"), ["host"]);
+        assert_eq!(roles("HostRelay/Deliver"), ["host"]);
+        assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["host"]);
+        assert_eq!(roles("Transfers/CommitWorkspace"), ["host"]);
         assert_eq!(roles("Connector/AcceptEvent"), ["gateway"]);
         assert_eq!(roles("OperatorNotifications/Claim"), ["gateway"]);
         assert_eq!(roles("Enrollments/Enroll"), ["auth-key"]);

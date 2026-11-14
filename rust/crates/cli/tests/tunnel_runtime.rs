@@ -14,6 +14,8 @@
 //!   itself;
 //! - with Docker, the same deployment behind a real HTTP/1.1-only nginx that forwards only
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
+#[path = "support/holding_host.rs"]
+mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -471,7 +473,7 @@ impl Deployment {
 
         let mut command = binary(&["control-plane", "--websocket-listen", "127.0.0.1:0"]);
         command
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(root.join("transfers"))
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
@@ -1643,7 +1645,10 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     );
     watched_change(&mut events, &task_id).await?;
 
-    // The Workspace the host uploaded comes back as a streamed download.
+    // The Control Plane stores no delivery: the host, back without a Workspace to claim work for,
+    // relays it through its tunnel, and the operator receives it as a streamed download.
+    let _holding =
+        holding_host::serve(deployment.worker_host(&public, &state, Path::new(ADAPTER))).await?;
     let delivery = &task["workspace_delivery"];
     assert_eq!(delivery["changed_files"], 2, "{task}");
     let bundle = root.join("delivery.bundle");

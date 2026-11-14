@@ -13,8 +13,8 @@ async fn locations(
     artifact_id: &str,
     path: &str,
 ) -> Result<Vec<ArtifactVolumeLocation>, tonic::Status> {
-    let request = LocateArtifactVolumeCopiesRequest {
-        target: Some(locate_artifact_volume_copies_request::Target::Operator(
+    let request = LocateArtifactCopiesRequest {
+        target: Some(locate_artifact_copies_request::Target::Operator(
             DownloadArtifactFileRequest {
                 artifact_id: artifact_id.into(),
                 path: path.into(),
@@ -23,7 +23,7 @@ async fn locations(
         volume_ids: vec!["durable".into(), "object".into()],
     };
     Ok(plane
-        .locate_volume_copies(authenticated_request(
+        .locate_copies(authenticated_request(
             request,
             "private-key",
             Some(principal),
@@ -128,6 +128,7 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let host = support::register_host(&store, "volume-writer").await;
+    support::hold_artifacts(&store, &host).await;
     let task = store
         .send_message(
             OP,
@@ -166,6 +167,7 @@ async fn exercise(url: &str) {
         byte_length: 10,
     };
     let capture = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
@@ -233,6 +235,31 @@ async fn exercise(url: &str) {
             .await
             .unwrap()
             .is_empty()
+    );
+    // Without a Volume copy, the capturing Worker Host is the only holder of the bytes.
+    let located = plane
+        .locate_copies(
+            authenticated_request(
+                LocateArtifactCopiesRequest {
+                    target: Some(locate_artifact_copies_request::Target::Operator(
+                        DownloadArtifactFileRequest {
+                            artifact_id: copy.artifact_id.clone(),
+                            path: "report.txt".into(),
+                        },
+                    )),
+                    volume_ids: vec![],
+                },
+                "private-key",
+                Some(OP),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        located.holder.map(|holder| holder.host_id).as_deref(),
+        Some("volume-writer")
     );
     assert_eq!(
         locations(&plane, "operator:other", &copy.artifact_id, "report.txt")

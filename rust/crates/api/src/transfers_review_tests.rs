@@ -1,14 +1,12 @@
 use super::*;
 use crate::PRINCIPAL;
-use std::{
-    os::unix::fs::PermissionsExt,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use supertag_protocol::host_generation;
 use supertag_protocol::{
     authenticated_request,
     v2::{
         credential_directory_server::{CredentialDirectory, CredentialDirectoryServer},
+        host_relay_client::HostRelayClient,
         transfers_client::TransfersClient,
         workspace_directory_server::{WorkspaceDirectory, WorkspaceDirectoryServer},
     },
@@ -59,7 +57,7 @@ impl WorkspaceDirectory for Directory {
     async fn get_review_artifact(
         &self,
         request: Request<GetReviewArtifactRequest>,
-    ) -> Result<Response<WorkspaceDeliveryReference>, Status> {
+    ) -> Result<Response<HeldWorkspaceDelivery>, Status> {
         assert_eq!(
             request.metadata().get("authorization").unwrap(),
             "Bearer private-token"
@@ -82,7 +80,13 @@ impl WorkspaceDirectory for Directory {
         if self.reads.fetch_add(1, Ordering::SeqCst) >= self.deny_after.load(Ordering::SeqCst) {
             return Err(Status::permission_denied("review authority expired"));
         }
-        Ok(Response::new(self.reference.clone()))
+        Ok(Response::new(HeldWorkspaceDelivery {
+            delivery: Some(self.reference.clone()),
+            holder: Some(BlobHolder {
+                host_id: "reviewer-host".into(),
+                attempt_id: "producer-attempt".into(),
+            }),
+        }))
     }
     async fn get_continuation(
         &self,
@@ -105,7 +109,7 @@ impl WorkspaceDirectory for Directory {
     async fn get_artifact(
         &self,
         _: Request<GetWorkspaceArtifactRequest>,
-    ) -> Result<Response<WorkspaceDeliveryReference>, Status> {
+    ) -> Result<Response<HeldWorkspaceDelivery>, Status> {
         panic!("review transfer must not use operator Task-ID artifact access")
     }
 }
@@ -143,10 +147,51 @@ fn request(review_id: &str, token: &str, generation: u64) -> Request<GetReviewAr
     request
 }
 
+fn host_request<T>(message: T) -> Request<T> {
+    let mut request = authenticated_request(message, HOST_TOKEN, None).unwrap();
+    request
+        .metadata_mut()
+        .insert(supertag_protocol::HOST_GENERATION_HEADER, 7u64.into());
+    request
+}
+
+/// The holding Worker Host: answers every relay request with the current `bytes`.
+async fn holder(
+    address: std::net::SocketAddr,
+    bytes: Arc<std::sync::Mutex<Vec<u8>>>,
+) -> anyhow::Result<ServerTask> {
+    let channel = Endpoint::from_shared(format!("http://{address}"))?
+        .connect()
+        .await?;
+    let mut requests = HostRelayClient::new(channel.clone())
+        .r#await(host_request(AwaitRelayRequest {}))
+        .await?
+        .into_inner();
+    Ok(ServerTask(tokio::spawn(async move {
+        while let Ok(Some(request)) = requests.message().await {
+            assert_eq!(request.attempt_id, "producer-attempt");
+            let content = bytes.lock().unwrap().clone();
+            let mut frames = vec![RelayFrame {
+                part: Some(relay_frame::Part::RelayId(request.relay_id)),
+            }];
+            frames.extend(content.chunks(7).map(|chunk| RelayFrame {
+                part: Some(relay_frame::Part::Chunk(chunk.to_vec())),
+            }));
+            let _ = HostRelayClient::new(channel.clone())
+                .deliver(host_request(tokio_stream::iter(frames)))
+                .await;
+        }
+        Ok(())
+    })))
+}
+
 async fn api(
     channel: ProtocolChannel,
-    directory: &Path,
-) -> anyhow::Result<(ServerTask, TransfersClient<tonic::transport::Channel>)> {
+) -> anyhow::Result<(
+    ServerTask,
+    TransfersClient<tonic::transport::Channel>,
+    std::net::SocketAddr,
+)> {
     let api = Api::new(
         channel,
         "private-token".into(),
@@ -155,20 +200,21 @@ async fn api(
     )?;
     let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
     let address = incoming.local_addr()?;
+    // The API tier stores no Workspace delivery bytes: it has no checkpoint directory here.
+    let transfers = ApiTransfers::new(api, None)?;
     let server = tokio::spawn(
         Server::builder()
-            .add_service(ApiTransfers::new(api, Some(directory.into()))?.service())
+            .add_service(transfers.host_relay_service())
+            .add_service(transfers.service())
             .serve_with_incoming(incoming),
     );
     let client = TransfersClient::connect(format!("http://{address}")).await?;
-    Ok((ServerTask(server), client))
+    Ok((ServerTask(server), client, address))
 }
 
 #[tokio::test]
 async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eof()
 -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
     let bytes = b"diff --git a/setup.sh b/setup.sh\n+untrusted patch text\n";
     let blob = BlobReference {
         sha256: format!("{:x}", Sha256::digest(bytes)),
@@ -189,7 +235,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
         reads: Arc::default(),
         deny_after: Arc::new(AtomicUsize::new(usize::MAX)),
     };
-    std::fs::write(directory.path().join(&blob.sha256), bytes)?;
+    let held = Arc::new(std::sync::Mutex::new(bytes.to_vec()));
     let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
     let address = incoming.local_addr()?;
     let _private = ServerTask(tokio::spawn(
@@ -203,11 +249,18 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
         .await?;
 
     for _ in 0..2 {
-        let (_server, mut client) = api(
-            supertag_protocol::negotiation::bind_current(channel.clone()),
-            directory.path(),
-        )
+        let (_server, mut client, address) = api(supertag_protocol::negotiation::bind_current(
+            channel.clone(),
+        ))
         .await?;
+        // With the holding host offline, the reader learns which host holds the bytes.
+        let offline = client
+            .download_review_artifact(request("review", HOST_TOKEN, 7))
+            .await
+            .unwrap_err();
+        assert_eq!(offline.code(), Code::Unavailable);
+        assert!(offline.message().contains("Worker Host reviewer-host"));
+        let _holder = holder(address, held.clone()).await?;
         for (token, generation, review, expected) in [
             ("operator-token", 7, "review", Code::PermissionDenied),
             (HOST_TOKEN, 6, "review", Code::PermissionDenied),
@@ -241,11 +294,9 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     }
     assert!(state.reads.load(Ordering::SeqCst) >= 4);
 
-    let (_server, mut client) = api(
-        supertag_protocol::negotiation::bind_current(channel),
-        directory.path(),
-    )
-    .await?;
+    let (_server, mut client, address) =
+        api(supertag_protocol::negotiation::bind_current(channel)).await?;
+    let _holder = holder(address, held.clone()).await?;
     state.reads.store(0, Ordering::SeqCst);
     state.deny_after.store(1, Ordering::SeqCst);
     let mut stream = client
@@ -262,7 +313,7 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     assert_eq!(failure.code(), Code::PermissionDenied);
 
     state.deny_after.store(usize::MAX, Ordering::SeqCst);
-    std::fs::write(directory.path().join(&blob.sha256), b"corrupt")?;
+    *held.lock().unwrap() = b"corrupt".to_vec();
     let mut stream = client
         .download_review_artifact(request("review", HOST_TOKEN, 7))
         .await?

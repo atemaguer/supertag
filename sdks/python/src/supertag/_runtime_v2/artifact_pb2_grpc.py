@@ -144,9 +144,9 @@ class ArtifactCatalog:
 
 
 class ArtifactDirectoryStub:
-    """Internal to the Control Plane. Only its API tier serves bytes; the state
-    owner verifies authority and records provenance and metadata after the API
-    tier verifies durable storage.
+    """Internal to the Control Plane. The state owner verifies authority and records
+    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
+    tier relays bytes from that host or a Volume and stores none.
     """
 
     def __init__(self, channel):
@@ -200,10 +200,10 @@ class ArtifactDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.FromString,
                 _registered_method=True)
-        self.LocateVolumeCopies = channel.unary_unary(
-                '/supertag.runtime.v2.ArtifactDirectory/LocateVolumeCopies',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.FromString,
+        self.LocateCopies = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactDirectory/LocateCopies',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesResponse.FromString,
                 _registered_method=True)
         self.RegisterArtifactSource = channel.unary_unary(
                 '/supertag.runtime.v2.ArtifactDirectory/RegisterArtifactSource',
@@ -223,9 +223,9 @@ class ArtifactDirectoryStub:
 
 
 class ArtifactDirectoryServicer:
-    """Internal to the Control Plane. Only its API tier serves bytes; the state
-    owner verifies authority and records provenance and metadata after the API
-    tier verifies durable storage.
+    """Internal to the Control Plane. The state owner verifies authority and records
+    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
+    tier relays bytes from that host or a Volume and stores none.
     """
 
     def ReserveCapture(self, request, context):
@@ -282,7 +282,7 @@ class ArtifactDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def LocateVolumeCopies(self, request, context):
+    def LocateCopies(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -354,10 +354,10 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.SerializeToString,
             ),
-            'LocateVolumeCopies': grpc.unary_unary_rpc_method_handler(
-                    servicer.LocateVolumeCopies,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.SerializeToString,
+            'LocateCopies': grpc.unary_unary_rpc_method_handler(
+                    servicer.LocateCopies,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesResponse.SerializeToString,
             ),
             'RegisterArtifactSource': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterArtifactSource,
@@ -383,9 +383,9 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactDirectory:
-    """Internal to the Control Plane. Only its API tier serves bytes; the state
-    owner verifies authority and records provenance and metadata after the API
-    tier verifies durable storage.
+    """Internal to the Control Plane. The state owner verifies authority and records
+    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
+    tier relays bytes from that host or a Volume and stores none.
     """
 
     @staticmethod
@@ -632,7 +632,7 @@ class ArtifactDirectory:
             _registered_method=True)
 
     @staticmethod
-    def LocateVolumeCopies(request,
+    def LocateCopies(request,
             target,
             options=(),
             channel_credentials=None,
@@ -645,9 +645,9 @@ class ArtifactDirectory:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.ArtifactDirectory/LocateVolumeCopies',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactVolumeCopiesResponse.FromString,
+            '/supertag.runtime.v2.ArtifactDirectory/LocateCopies',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -750,6 +750,11 @@ class AttemptArtifactsStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.CommitCapture = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptArtifacts/CommitCapture',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
+                _registered_method=True)
         self.Find = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptArtifacts/Find',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.FindAttemptArtifactsRequest.SerializeToString,
@@ -790,6 +795,13 @@ class AttemptArtifactsStub:
 class AttemptArtifactsServicer:
     """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
+
+    def CommitCapture(self, request, context):
+        """Records a capture whose bytes the calling Worker Host already holds.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Find(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -836,6 +848,11 @@ class AttemptArtifactsServicer:
 
 def add_AttemptArtifactsServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'CommitCapture': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitCapture,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.SerializeToString,
+            ),
             'Find': grpc.unary_unary_rpc_method_handler(
                     servicer.Find,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.FindAttemptArtifactsRequest.FromString,
@@ -882,6 +899,33 @@ def add_AttemptArtifactsServicer_to_server(servicer, server):
 class AttemptArtifacts:
     """Public Worker Host API. Identity and generation come from the authenticated Worker Host.
     """
+
+    @staticmethod
+    def CommitCapture(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptArtifacts/CommitCapture',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CommitArtifactCaptureRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Find(request,
@@ -1074,7 +1118,8 @@ class AttemptArtifacts:
 
 
 class ArtifactTransfersStub:
-    """Missing associated documentation comment in .proto file."""
+    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -1082,11 +1127,6 @@ class ArtifactTransfersStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.UploadCapture = channel.stream_unary(
-                '/supertag.runtime.v2.ArtifactTransfers/UploadCapture',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactUpload.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
-                _registered_method=True)
         self.DownloadFile = channel.unary_stream(
                 '/supertag.runtime.v2.ArtifactTransfers/DownloadFile',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DownloadArtifactFileRequest.SerializeToString,
@@ -1100,13 +1140,8 @@ class ArtifactTransfersStub:
 
 
 class ArtifactTransfersServicer:
-    """Missing associated documentation comment in .proto file."""
-
-    def UploadCapture(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """
 
     def DownloadFile(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -1123,11 +1158,6 @@ class ArtifactTransfersServicer:
 
 def add_ArtifactTransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'UploadCapture': grpc.stream_unary_rpc_method_handler(
-                    servicer.UploadCapture,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactUpload.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.SerializeToString,
-            ),
             'DownloadFile': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadFile,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.DownloadArtifactFileRequest.FromString,
@@ -1147,34 +1177,8 @@ def add_ArtifactTransfersServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ArtifactTransfers:
-    """Missing associated documentation comment in .proto file."""
-
-    @staticmethod
-    def UploadCapture(request_iterator,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.stream_unary(
-            request_iterator,
-            target,
-            '/supertag.runtime.v2.ArtifactTransfers/UploadCapture',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactUpload.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.CapturedArtifact.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
+    """Downloads relayed from a Volume copy or the holding Worker Host.
+    """
 
     @staticmethod
     def DownloadFile(request,

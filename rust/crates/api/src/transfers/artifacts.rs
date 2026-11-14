@@ -1,13 +1,14 @@
 use super::*;
 use supertag_protocol::artifacts::{
-    MAX_ARTIFACT_FILE_BYTES, validate_artifact_path, validate_capture_manifest,
+    MAX_ARTIFACT_FILE_BYTES, artifact_source_unavailable, validate_artifact_path,
+    validate_capture_manifest,
 };
 
 const ARTIFACT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
 const VOLUME_SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
 const VOLUME_READ_TIMEOUT: Duration = Duration::from_secs(12);
 
-use locate_artifact_volume_copies_request::Target;
+use locate_artifact_copies_request::Target;
 
 impl ApiTransfers {
     pub fn attempt_artifacts_service(
@@ -53,21 +54,20 @@ impl ApiTransfers {
             .ok_or_else(|| Status::not_found("artifact file was not found"))
     }
 
-    async fn locate_volume_copies(
+    pub(super) async fn locate_copies(
         &self,
         metadata: tonic::metadata::MetadataMap,
         target: Target,
         ids: &[String],
-    ) -> Result<LocateArtifactVolumeCopiesResponse, Status> {
+    ) -> Result<LocateArtifactCopiesResponse, Status> {
         let attempt = matches!(target, Target::Attempt(_));
-        let mut request = Request::new(LocateArtifactVolumeCopiesRequest {
+        let mut request = Request::new(LocateArtifactCopiesRequest {
             target: Some(target),
             volume_ids: ids.to_vec(),
         });
         *request.metadata_mut() = metadata;
-        let call = |channel, request| async move {
-            artifact_client(channel).locate_volume_copies(request).await
-        };
+        let call =
+            |channel, request| async move { artifact_client(channel).locate_copies(request).await };
         let response = if attempt {
             self.api.forward_host(request, true, call).await?
         } else {
@@ -76,21 +76,27 @@ impl ApiTransfers {
         Ok(response.into_inner())
     }
 
+    /// Opens the bytes of one authorized artifact file: a verified Volume copy this Control Plane
+    /// maps, otherwise the Worker Host holding the producing Attempt's bytes, through the relay.
     async fn open_artifact(
         &self,
         metadata: &tonic::metadata::MetadataMap,
         target: Target,
         blob: &BlobReference,
-    ) -> Result<tokio::fs::File, Status> {
-        if let Some(file) = open_optional_blob(&self.directory()?.join(&blob.sha256)).await? {
-            return Ok(file);
-        }
+    ) -> Result<Source, Status> {
         let ids = self.volumes.candidate_ids();
+        let batches: Vec<&[String]> = if ids.is_empty() {
+            vec![&[]]
+        } else {
+            ids.chunks(32).collect()
+        };
         let search = async {
-            for batch in ids.chunks(32) {
+            let mut holder = None;
+            for batch in batches {
                 let found = self
-                    .locate_volume_copies(metadata.clone(), target.clone(), batch)
+                    .locate_copies(metadata.clone(), target.clone(), batch)
                     .await?;
+                holder = holder.or(found.holder);
                 for location in found.locations {
                     if let Ok(Ok(file)) = timeout(
                         VOLUME_READ_TIMEOUT,
@@ -98,19 +104,23 @@ impl ApiTransfers {
                     )
                     .await
                     {
-                        return Ok(Some(file));
+                        return Ok((Some(file), holder));
                     }
                 }
             }
-            Ok::<_, Status>(None)
+            Ok::<_, Status>((None, holder))
         };
-        match timeout(VOLUME_SEARCH_TIMEOUT, search).await {
-            Ok(result) => result?.ok_or_else(|| {
-                Status::data_loss(supertag_protocol::artifacts::ARTIFACT_SOURCE_UNAVAILABLE)
-            }),
-            Err(_) => Err(Status::deadline_exceeded(
-                "artifact Volume lookup timed out",
-            )),
+        let (file, holder) = timeout(VOLUME_SEARCH_TIMEOUT, search)
+            .await
+            .map_err(|_| Status::deadline_exceeded("artifact copy lookup timed out"))??;
+        if let Some(file) = file {
+            return Ok(Source::File(file));
+        }
+        let holder = holder.ok_or_else(|| artifact_source_unavailable(None))?;
+        match self.relay.open(&holder, blob).await {
+            Ok(incoming) => Ok(Source::Relay(incoming)),
+            Err(RelayError::Offline) => Err(artifact_source_unavailable(Some(&holder.host_id))),
+            Err(RelayError::Failed(status)) => Err(status),
         }
     }
 
@@ -128,21 +138,19 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    async fn capture_artifact(
+    /// Records a capture whose bytes the calling Worker Host already holds in its registered
+    /// artifact storage. No bytes reach the Control Plane.
+    async fn commit_held_capture(
         &self,
-        request: Request<Streaming<ArtifactUpload>>,
+        request: Request<CommitArtifactCaptureRequest>,
     ) -> Result<Response<CapturedArtifact>, Status> {
-        let directory = self.directory()?;
-        let (metadata, _, mut stream) = request.into_parts();
-        let begin = match stream.message().await?.and_then(|message| message.part) {
-            Some(artifact_upload::Part::Begin(begin)) => begin,
-            _ => {
-                return Err(Status::invalid_argument(
-                    "artifact upload requires a capture manifest",
-                ));
-            }
-        };
+        let (metadata, _, begin) = request.into_parts();
         validate_capture_manifest(&begin)?;
+        if begin.source_storage_id.is_none() {
+            return Err(Status::failed_precondition(
+                "artifact capture requires the Worker Host's registered artifact storage",
+            ));
+        }
         let mut reserve = Request::new(begin.clone());
         *reserve.metadata_mut() = metadata.clone();
         let reserved = self
@@ -152,33 +160,6 @@ impl ApiTransfers {
             })
             .await?
             .into_inner();
-
-        for (index, file) in begin.files.iter().enumerate() {
-            let reference = file.blob.clone().expect("validated artifact manifest");
-            let mut staged = StagedBlob::new(directory, reference.clone())?;
-            while staged.length < reference.byte_length {
-                let Some(artifact_upload::Part::Chunk(chunk)) =
-                    stream.message().await?.and_then(|message| message.part)
-                else {
-                    return Err(Status::invalid_argument("artifact file upload ended early"));
-                };
-                if chunk.file_index as usize != index {
-                    return Err(Status::invalid_argument(
-                        "artifact file chunks are out of order",
-                    ));
-                }
-                staged.append(&chunk.data).await?;
-            }
-            staged.verify().await?;
-            staged.persist(directory).await?;
-        }
-        if stream.message().await?.is_some() {
-            return Err(Status::invalid_argument(
-                "artifact upload has unexpected trailing data",
-            ));
-        }
-        sync_directory(directory).await?;
-
         let mut commit = Request::new(begin);
         *commit.metadata_mut() = metadata;
         let response = self
@@ -223,6 +204,16 @@ impl artifact_catalog_server::ArtifactCatalog for ApiTransfers {
 
 #[tonic::async_trait]
 impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
+    async fn commit_capture(
+        &self,
+        request: Request<CommitArtifactCaptureRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.authorize_upload(&request).await?;
+        timeout(ARTIFACT_TRANSFER_TIMEOUT, self.commit_held_capture(request))
+            .await
+            .map_err(|_| Status::deadline_exceeded("artifact capture commit timed out"))?
+    }
+
     async fn register_artifact_source(
         &self,
         request: Request<RegisterArtifactSourceRequest>,
@@ -357,17 +348,6 @@ impl artifact_transfers_server::ArtifactTransfers for ApiTransfers {
             authorize,
             ARTIFACT_TRANSFER_TIMEOUT,
         )))
-    }
-
-    async fn upload_capture(
-        &self,
-        request: Request<Streaming<ArtifactUpload>>,
-    ) -> Result<Response<CapturedArtifact>, Status> {
-        self.authorize_upload(&request).await?;
-        let _permit = self.acquire()?;
-        timeout(ARTIFACT_TRANSFER_TIMEOUT, self.capture_artifact(request))
-            .await
-            .map_err(|_| Status::deadline_exceeded("artifact upload timed out"))?
     }
 
     type DownloadFileStream = ReceiverStream<Result<ArtifactDownload, Status>>;

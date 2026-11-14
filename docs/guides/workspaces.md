@@ -121,7 +121,9 @@ supertag task download TASK_ID --kind patch --output change.patch
 ```
 
 `fetch` also takes a Session ID, to import that Session's latest delivery. A Task with no
-commits delivers nothing.
+commits delivers nothing. The Control Plane stores no delivery: it relays the bundle or patch
+from the Worker Host that ran the Task, so that host must be running and connected. Otherwise the
+command fails and names the host.
 
 ## Build on earlier work in the same Session
 

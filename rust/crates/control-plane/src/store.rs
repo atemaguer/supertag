@@ -94,7 +94,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 78;
+        const SCHEMA_VERSION: i64 = 79;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -259,6 +259,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0076_auth_key_join_operations.sql"),
                 include_str!("../migrations/sqlite/0077_cleanup_failure.sql"),
                 include_str!("../migrations/sqlite/0078_workspace_base_ref.sql"),
+                include_str!("../migrations/sqlite/0079_delivery_holder.sql"),
             ]
         } else {
             [
@@ -342,6 +343,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0076_auth_key_join_operations.sql"),
                 include_str!("../migrations/postgresql/0077_cleanup_failure.sql"),
                 include_str!("../migrations/postgresql/0078_workspace_base_ref.sql"),
+                include_str!("../migrations/postgresql/0079_delivery_holder.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

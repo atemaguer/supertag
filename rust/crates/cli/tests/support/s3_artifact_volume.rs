@@ -215,7 +215,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
         "s3://evidence-bucket/wrong-prefix",
     )?)
     .await?;
-    let (artifact_id, bytes, blob) = capture(&credentials, &public).await?;
+    let (artifact_id, bytes, blob, mut held) = capture(&credentials, &public).await?;
     let registered = json(volume(
         &credentials,
         &public,
@@ -259,6 +259,9 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
         SOURCE,
     )?)
     .await?;
+    // Copies relay the bytes from the holding Worker Host.
+    held.reconnect(super::protocol::dial(public.clone()).await?)
+        .await?;
     let divergence = vec![b'x'; bytes.len()];
     object_state.lock().unwrap().competing_write = Some(divergence.clone());
     refused(volume(&credentials, &public, &copy_args), "verified").await?;
@@ -333,7 +336,8 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     // A bad first candidate cannot shadow the independently verified later copy.
     std::fs::write(&file_path, &divergence)?;
     stop(&mut control).await?;
-    std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
+    // The holding Worker Host goes offline; only the Volume copies remain reachable.
+    held.disconnect();
     let (mut control, public) = service(mapped_plane(
         &credentials,
         &root,
@@ -369,7 +373,7 @@ async fn s3_volume_copy_checks_mapping_sigv4_and_immutable_readback(
     object_state.lock().unwrap().bytes = Some(vec![b'x'; bytes.len()]);
     refused(
         capture_download(&credentials, &public, &artifact_id, &output),
-        "no usable verified Volume copy",
+        "no reachable copy of these artifact bytes",
     )
     .await?;
     refused(volume(&credentials, &public, &download), "verified").await?;

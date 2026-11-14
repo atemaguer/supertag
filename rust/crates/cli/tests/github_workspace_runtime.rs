@@ -1,4 +1,6 @@
 //! Real split services fetch only the pinned source from a loopback GitHub/Git fixture.
+#[path = "support/holding_host.rs"]
+mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -361,7 +363,7 @@ async fn scenario(
         let mut plane = command(&["control-plane", "--listen", listen]);
         plane
             .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(root.join("artifacts"))
             .arg("--github-workspace-directory")
             .arg(root.join("sources"))
@@ -490,13 +492,20 @@ async fn scenario(
         ),
     )?;
     fs::set_permissions(&adapter, fs::Permissions::from_mode(0o700))?;
-    let worker = |state: &str, mapped: bool| {
-        let mut host = command(&["worker-host", "--control-plane", &public, "--once"]);
+    // Every host process presents the same credential, so they share one artifact directory, as
+    // the lanes of one Worker Host do. The Control Plane relays deliveries from it.
+    let host_command = |state: &str, mapped: bool, once: bool| {
+        let mut host = command(&["worker-host", "--control-plane", &public]);
+        if once {
+            host.arg("--once");
+        }
         host.arg("--adapter")
             .arg(&adapter)
             .arg("--adapter-arg=--workspace-fixture")
             .arg("--state-directory")
-            .arg(root.join(state));
+            .arg(root.join(state))
+            .arg("--artifact-directory")
+            .arg(holding_host::artifact_directory(root));
         // A malicious ambient provider value is not part of the adapter profile.
         host.env("SUPERTAG_GITHUB_TOKEN", "ambient-must-not-reach-adapter");
         if mapped {
@@ -513,6 +522,7 @@ async fn scenario(
         }
         host
     };
+    let worker = |state: &str, mapped: bool| host_command(state, mapped, true);
     let first = json(cli(&[
         "task",
         "submit",
@@ -536,7 +546,21 @@ async fn scenario(
         wait_source_pin(&cli, first_id, &commit).await?;
         assert_eq!(source_lookups.load(Ordering::SeqCst), 1);
     }
-    success(worker("host-one", true)).await?;
+    // After each `--once` host exits, an unmapped host, which claims no Workspace Task, keeps the
+    // deliveries reachable for the publisher and readers. It registers a new generation, so it
+    // stops before the next host runs.
+    let mut holding: Option<tokio::process::Child> = None;
+    let mut holders = 0;
+    let mut run = async |state: &str| -> Result<()> {
+        holding = None;
+        success(worker(state, true)).await?;
+        holders += 1;
+        holding = Some(
+            holding_host::serve(host_command(&format!("holder-{holders}"), false, false)).await?,
+        );
+        Ok(())
+    };
+    run("host-one").await?;
     let first = json(cli(&["get", "task", first_id])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert!(fs::read_to_string(root.join("setup-runs"))?.lines().count() >= 1);
@@ -634,7 +658,7 @@ async fn scenario(
     ]))
     .await?;
     let second_id = field(&second, "task_id")?;
-    success(worker("host-two", true)).await?;
+    run("host-two").await?;
     let second = json(cli(&["get", "task", second_id])).await?;
     assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], first_head);
@@ -674,7 +698,7 @@ async fn scenario(
         .await?;
         let fresh_id = field(&fresh, "task_id")?;
         wait_source_pin(&cli, fresh_id, &next_commit).await?;
-        success(worker("host-new-session", true)).await?;
+        run("host-new-session").await?;
         let fresh = json(cli(&["get", "task", fresh_id])).await?;
         assert_eq!(fresh["state"], "TASK_STATE_SUCCEEDED", "{fresh}");
         assert_eq!(

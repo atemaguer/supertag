@@ -218,8 +218,8 @@ machine, and hosts that enrolled without an ephemeral key. A remote sandbox, suc
 E2B, is always ephemeral: its Task files are lost when the sandbox stops, whatever host started
 it.
 
-Captured artifact files also reach the Control Plane's transfer directory, so an ephemeral host's
-artifacts outlive it while that directory lasts. See [Artifacts](artifacts.md#where-artifact-bytes-live).
+The Control Plane stores no artifact bytes, so an ephemeral host's artifacts are lost with it
+unless they were copied to a Volume. See [Artifacts](artifacts.md#where-artifact-bytes-live).
 
 ## Operator Tokens
 
