@@ -43,8 +43,8 @@ Worker Host will have, and asks for a Control Plane port, a harness, and the Tag
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
-  and the `lead` Tag, bound to the repository's Workspace at the commit checked out when `init`
-  ran; and
+  and the `lead` Tag, bound to the repository's Workspace and following the branch checked out
+  when `init` ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace.
 
 When you choose Claude Code, Cursor, or OpenCode, `init` explains that it runs commands as you,
@@ -53,8 +53,10 @@ defaulting to yes. The answer becomes the host's `allow-unsandboxed-commands`; w
 lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to undo it. See
 [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
 
-New Sessions of `lead` start from that commit. To move them to a newer one, apply a Tag manifest
-with a new `workspace.baseCommit`, or replace it with `workspace.ref` to follow a branch; see
+Each new Session of `lead` starts from that branch's current commit (`workspace.ref`), so commits
+you make there reach the next Session. When HEAD is detached, `init` pins the checked-out commit
+(`workspace.baseCommit`) instead and says so. To follow another branch or pin a commit, apply a
+Tag manifest; see
 [Work in a repository with Workspaces](../guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 `supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
@@ -165,12 +167,14 @@ and [Define and complete an Objective](../guides/objectives.md).
 
 ```sh
 supertag get inbox-item
+supertag watch inbox-item
 supertag question answer TASK_ID "Use the staging database."
 supertag approval approve APPROVAL_ID
 supertag approval deny APPROVAL_ID --reason "Not before the release freeze."
 supertag objective review flaky-tests approve
 ```
 
+`watch inbox-item` prints each item once as it appears, until you stop it.
 `question answer TASK_ID -` reads the answer from standard input, which keeps a long or sensitive
 answer out of the shell history and the process list. See
 [Respond to an Objective](../guides/objective-decisions.md).

@@ -395,14 +395,16 @@ class ListArtifactVolumesResponse(_message.Message):
     def __init__(self, volumes: _Optional[_Iterable[_Union[ArtifactVolume, _Mapping]]] = ..., next_after_id: _Optional[str] = ...) -> None: ...
 
 class DeleteArtifactVolumeRequest(_message.Message):
-    __slots__ = ("operation_id", "volume_id", "expected_revision")
+    __slots__ = ("operation_id", "volume_id", "expected_revision", "dry_run")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     volume_id: str
     expected_revision: int
-    def __init__(self, operation_id: _Optional[str] = ..., volume_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+    dry_run: bool
+    def __init__(self, operation_id: _Optional[str] = ..., volume_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class DeleteArtifactVolumeResponse(_message.Message):
     __slots__ = ("deleted",)

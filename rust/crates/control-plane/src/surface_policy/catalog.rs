@@ -360,11 +360,19 @@ impl Store {
         name("Surface location ID", &input.location_id)?;
         let hash = policy::digest("delete-surface-location", input);
         let (mut tx, _) = self.write().await?;
-        if let Some(value) = policy::replay(&mut tx, principal, &input.operation_id, &hash).await? {
+        if !input.dry_run
+            && let Some(value) =
+                policy::replay(&mut tx, principal, &input.operation_id, &hash).await?
+        {
             return Ok(value);
         }
         delete_location_in(&mut tx, &input.location_id, input.expected_revision).await?;
         let response = DeletePolicyResourceResponse { deleted: true };
+        if input.dry_run {
+            // A dry run makes every check the deletion makes, then rolls it back unrecorded.
+            tx.rollback().await?;
+            return Ok(response);
+        }
         policy::receipt(&mut tx, principal, &input.operation_id, &hash, &response).await?;
         tx.commit().await?;
         Ok(response)

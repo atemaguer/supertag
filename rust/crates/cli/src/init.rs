@@ -135,8 +135,46 @@ fn no_sign_in(harnesses: &[Found]) -> anyhow::Error {
 struct Repository {
     root: PathBuf,
     name: String,
-    /// The commit the lead Tag's Tasks start from.
-    head: String,
+    /// Where the lead Tag's Sessions start.
+    start: Start,
+}
+
+/// Where the lead Tag's Sessions start: the current branch, followed as it moves, or, when HEAD is
+/// detached, the checked-out commit.
+#[derive(Debug, PartialEq, Eq)]
+enum Start {
+    Branch(String),
+    Commit(String),
+}
+
+impl Start {
+    /// The Tag manifest's `workspace` binding.
+    fn binding(&self, workspace: &str) -> serde_json::Value {
+        match self {
+            Start::Branch(branch) => json!({ "id": workspace, "ref": branch }),
+            Start::Commit(commit) => json!({ "id": workspace, "baseCommit": commit }),
+        }
+    }
+
+    /// How init's closing summary describes it.
+    fn describe(&self) -> String {
+        match self {
+            Start::Branch(branch) => format!("following branch {branch}"),
+            Start::Commit(commit) => format!(
+                "starting from commit {commit}. HEAD is detached, so the Tag is pinned to that commit; check out a branch and run supertag init again to follow it instead"
+            ),
+        }
+    }
+}
+
+/// The current branch when it can be followed, otherwise the checked-out commit.
+fn start(branch: Option<&str>, head: &str) -> Start {
+    match branch {
+        Some(branch) if supertag_protocol::valid_git_branch(branch) => {
+            Start::Branch(branch.to_owned())
+        }
+        _ => Start::Commit(head.to_owned()),
+    }
 }
 
 fn repository() -> Result<Repository> {
@@ -160,6 +198,17 @@ fn repository() -> Result<Repository> {
         root.display()
     );
     let head = String::from_utf8(commits.stdout)?.trim().to_owned();
+    // Fails with a detached HEAD.
+    let branch = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()?;
+    let branch = if branch.status.success() {
+        Some(String::from_utf8(branch.stdout)?.trim().to_owned())
+    } else {
+        None
+    };
     let base = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -167,7 +216,7 @@ fn repository() -> Result<Repository> {
     Ok(Repository {
         name: sanitize(base).unwrap_or_else(|| "workspace".into()),
         root,
-        head,
+        start: start(branch.as_deref(), &head),
     })
 }
 
@@ -467,12 +516,12 @@ pub async fn init(args: InitArgs) -> Result<()> {
         local_config::load(Some(path.clone()), &state)?.context("supertag.yaml missing")?;
     up(&state, config).await?;
     outln!(
-        "\nTag {} runs {} on this machine, in Workspace {} ({}), starting from commit {}.",
+        "\nTag {} runs {} on this machine, in Workspace {} ({}), {}.",
         answers.tag,
         answers.harness.harness(),
         answers.workspace,
         repository.root.display(),
-        repository.head
+        repository.start.describe()
     );
     outln!(
         "Run supertag in your terminal to talk to it. To keep SuperTag running after restarts, add restart: unless-stopped to both services in {} and run supertag up.",
@@ -673,7 +722,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "spec": {
                             "roles": [ROLE],
                             "execution": execution,
-                            "workspace": { "id": answers.workspace, "baseCommit": repository.head },
+                            "workspace": repository.start.binding(&answers.workspace),
                         },
                     },
                 ],
@@ -696,7 +745,24 @@ mod tests {
     }
 
     #[test]
-    fn binds_the_lead_tag_to_the_repository_at_its_current_commit() {
+    fn follows_the_current_branch_and_pins_a_detached_head() {
+        let head = "4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d";
+        assert_eq!(
+            start(Some("feature/login"), head),
+            Start::Branch("feature/login".into())
+        );
+        assert_eq!(start(None, head), Start::Commit(head.into()));
+        // A branch the Tag ref cannot name is pinned like a detached HEAD.
+        assert_eq!(start(Some("-odd"), head), Start::Commit(head.into()));
+        assert!(start(None, head).describe().contains("HEAD is detached"));
+        assert_eq!(
+            start(Some("main"), head).describe(),
+            "following branch main"
+        );
+    }
+
+    #[test]
+    fn binds_the_lead_tag_to_the_repository_on_its_current_branch() {
         let answers = Answers {
             port: DEFAULT_PORT,
             harness: Found::Codex,
@@ -706,25 +772,33 @@ mod tests {
             tag: "lead".into(),
         };
         let head = "4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d";
-        let repository = Repository {
-            root: PathBuf::from("/work/app"),
-            name: "app".into(),
-            head: head.into(),
-        };
-        let document = document(&answers, &repository);
-        let provision = document["services"]["control-plane"]["provision"]
-            .as_array()
-            .unwrap()
-            .clone();
-        assert_eq!(
-            provision[2]["spec"]["workspace"],
-            json!({ "id": "app", "baseCommit": head })
-        );
-        let sources = provision
-            .into_iter()
-            .map(crate::manifests::ProvisionSource::Inline)
-            .collect();
-        assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 3);
+        for (start, binding) in [
+            (
+                Start::Branch("main".into()),
+                json!({ "id": "app", "ref": "main" }),
+            ),
+            (
+                Start::Commit(head.into()),
+                json!({ "id": "app", "baseCommit": head }),
+            ),
+        ] {
+            let repository = Repository {
+                root: PathBuf::from("/work/app"),
+                name: "app".into(),
+                start,
+            };
+            let document = document(&answers, &repository);
+            let provision = document["services"]["control-plane"]["provision"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert_eq!(provision[2]["spec"]["workspace"], binding);
+            let sources = provision
+                .into_iter()
+                .map(crate::manifests::ProvisionSource::Inline)
+                .collect();
+            assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 3);
+        }
     }
 
     #[test]

@@ -104,6 +104,7 @@ async fn exercise(url: &str) {
             &DeleteTeamRequest {
                 operation_id: "delete-team".into(),
                 team: team.team_id.clone(),
+                dry_run: false,
             },
         )
         .await

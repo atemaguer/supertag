@@ -138,6 +138,7 @@ async fn contract(url: String) {
         operation_id: "delete-edit".into(),
         reference: "edit".into(),
         expected_revision: p.revision,
+        dry_run: false,
     };
     assert!(matches!(
         store.delete_permission_set(OP, &del).await,
@@ -279,6 +280,34 @@ async fn contract(url: String) {
         expected_revision: 2,
         ..del
     };
+    // A dry run checks the deletion, deletes nothing, and records no operation.
+    let dry_run = DeletePolicyResourceRequest {
+        dry_run: true,
+        ..delete.clone()
+    };
+    assert!(
+        store
+            .delete_permission_set(OP, &dry_run)
+            .await
+            .unwrap()
+            .deleted
+    );
+    assert_eq!(
+        store.get_permission_set(OP, "edit").await.unwrap().revision,
+        2
+    );
+    assert!(matches!(
+        store
+            .delete_permission_set(
+                OP,
+                &DeletePolicyResourceRequest {
+                    expected_revision: 1,
+                    ..dry_run.clone()
+                }
+            )
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
     assert!(
         store
             .delete_permission_set(OP, &delete)
@@ -536,6 +565,7 @@ async fn composition(store: &Store) {
                 operation_id: "delete-recreated".into(),
                 reference: old.set_id.clone(),
                 expected_revision: old.revision,
+                dry_run: false,
             },
         )
         .await

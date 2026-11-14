@@ -76,12 +76,15 @@ pub struct CopyListArgs {
 // verified copies depend on it.
 #[derive(Args)]
 pub struct DeleteArgs {
-    /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
-    operation_id: String,
+    operation_id: Option<String>,
     /// The revision you last read. The change is refused when the resource has changed since.
     #[arg(long)]
     expected_revision: u64,
+    /// Check the deletion and show what it would remove, without deleting anything.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 fn client(
@@ -163,8 +166,11 @@ pub(crate) async fn delete(
         .delete(request(
             DeleteArtifactVolumeRequest {
                 volume_id,
-                operation_id: args.operation_id,
+                operation_id: args
+                    .operation_id
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                 expected_revision: args.expected_revision,
+                dry_run: args.dry_run,
             },
             &token,
         )?)

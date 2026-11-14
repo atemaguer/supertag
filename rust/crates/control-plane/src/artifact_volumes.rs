@@ -347,11 +347,18 @@ impl Store {
         name("operation ID", &input.operation_id)?;
         let digest = hash("delete", input);
         let (mut tx, _) = self.write().await?;
-        if let Some(result) = prior(&mut tx, principal, &input.operation_id, &digest).await? {
+        if !input.dry_run
+            && let Some(result) = prior(&mut tx, principal, &input.operation_id, &digest).await?
+        {
             return Ok(result);
         }
         delete_in(&mut tx, &input.volume_id, input.expected_revision).await?;
         let result = DeleteArtifactVolumeResponse { deleted: true };
+        if input.dry_run {
+            // A dry run makes every check the deletion makes, then rolls it back unrecorded.
+            tx.rollback().await?;
+            return Ok(result);
+        }
         record(&mut tx, principal, &input.operation_id, &digest, &result).await?;
         tx.commit().await?;
         Ok(result)

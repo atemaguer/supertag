@@ -749,6 +749,7 @@ async fn bounded_batches_and_hops(url: &str) {
             &DeleteTeamRequest {
                 operation_id: "delete-batch-team".into(),
                 team: "batch-team".into(),
+                dry_run: false,
             },
         )
         .await

@@ -59,6 +59,9 @@ pub struct DeleteArgs {
     /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
     operation_id: Option<String>,
+    /// Check the deletion and show what it would remove, without deleting anything.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 fn client(
@@ -114,6 +117,7 @@ pub(crate) async fn delete(
                 workspace_id: workspace_id.clone(),
                 expected_revision: args.expected_revision,
                 operation_id: operation_id.clone(),
+                dry_run: args.dry_run,
             },
             &token,
         )?)

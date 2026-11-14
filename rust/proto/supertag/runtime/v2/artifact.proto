@@ -283,7 +283,13 @@ message PutArtifactVolumeRequest {
 message GetArtifactVolumeRequest { string volume_id = 1; }
 message ListArtifactVolumesRequest { uint32 limit = 1; string after_id = 2; }
 message ListArtifactVolumesResponse { repeated ArtifactVolume volumes = 1; string next_after_id = 2; }
-message DeleteArtifactVolumeRequest { string operation_id = 1; string volume_id = 2; uint64 expected_revision = 3; }
+message DeleteArtifactVolumeRequest {
+  string operation_id = 1;
+  string volume_id = 2;
+  uint64 expected_revision = 3;
+  // Checks the deletion without deleting or recording the operation.
+  bool dry_run = 4;
+}
 message DeleteArtifactVolumeResponse { bool deleted = 1; }
 message CopyArtifactToVolumeRequest {
   string operation_id = 1;

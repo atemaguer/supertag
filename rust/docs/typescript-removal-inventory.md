@@ -202,27 +202,31 @@ semantic pass over the long reference pages.
    TypeScript SDK with `control-plane-client` and `harness`. The CLI ships as native archives on
    a GitHub Release with a curl installer (`install.sh`), and publishing the release publishes
    the npm and Python SDKs after their archives are attached.
-2. **Ledger rows this removal puts into effect.** Removing the TypeScript code makes each row
-   below final in this checkout, though the ledger still records it as awaiting approval. Approve
-   them, or keep the code, before the removal merges. The code remains at `6c934be8`.
-   - Proposed drops:
+2. **Ledger rows this removal puts into effect.** Approved by the operator on 2026-11-14 and
+   recorded in each ledger row as final with the TypeScript code removed:
+   - Dropped:
      - `{ secretRef: NAME }` stdio MCP environment references ("stdio MCP servers and MCP
        credential redirect protection").
-     - The metrics inbox section, native subagent figures, reservations, reply retries, RPC
-       counters, and separate placement latency ("Workstream post store, coordination metrics,
-       spend aggregation").
+     - The metrics inbox section, native subagent figures, reservations, reply retries, and RPC
+       counters ("Workstream post store, coordination metrics, spend aggregation"); separate
+       placement latency moved to the backlog.
      - The `task.worker-host-removed` Task event ("Auth Keys, enrollment, revoke, drain/resume
        hosts").
      - The TypeScript operator commands without a Rust command: `message tag`,
-       `message objective`, `watch inbox`, `--output yaml`, `worker-profile`, `delete --dry-run`,
-       `delete surface`, `enroll worker-host --out`, `create objective --workspace|--dry-run`, and
-       `list objective --owner`.
-   - Changes not yet approved:
+       `message objective`, `--output yaml`, `worker-profile`, `delete surface`,
+       `enroll worker-host --out`, `create objective --workspace|--dry-run`, and
+       `list objective --owner`. `watch inbox` and `delete --dry-run` were ported instead, as
+       `watch inbox-item` and `delete KIND NAME --dry-run`.
+     - Workspace write-back after a failed Task Attempt, and whole-bucket S3 sources.
+     - The TypeScript and Python operator clients, the Python durable Worker (Python keeps
+       harness adapters only), and the generated manifest JSON Schemas.
+   - Changes kept:
      - JSON written with `\u` escapes for unsafe characters, and exit code 2 for usage errors
        ("CLI help, plain language, terminal safety").
      - The audit sink is off unless configured, where TypeScript wrote to standard error.
      - Revoking a removed host stays an explicit `supertag host revoke`.
-     - No Workspace write-back after a failed Task Attempt, and no whole-bucket S3 sources.
+     - `SUPERTAG_CONTROL_PLANE_URL` selects the Control Plane, not TypeScript's
+       `SUPERTAG_CONTROL_PLANE`.
    - Open: redacting host-supplied uncertainty reasons, marked "to port in the final cleanup
      pass". After the removal its TypeScript reference exists only at `6c934be8`.
    - Partial: the 53 Partial rows keep their recorded gaps; their TypeScript reference

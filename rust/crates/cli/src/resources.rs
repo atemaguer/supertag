@@ -281,7 +281,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "inbox-item",
         "inbox-items",
         "Inbox Item",
-        LIST_ONLY,
+        [false, true, false, true],
     ),
 ];
 
@@ -823,8 +823,21 @@ pub async fn describe(connection: Connection, args: DescribeArgs) -> Result<()> 
     Ok(())
 }
 
+/// `supertag delete KIND NAME`. With `--dry-run` the Control Plane makes every check the deletion
+/// makes, including whether something still uses the resource, and deletes nothing; the command
+/// prints the change as `diff` does.
 pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()> {
-    print(async {
+    let (label, dry_run) = match &command {
+        DeleteCommand::Team { id, args } => (format!("Team/{id}"), args.dry_run),
+        DeleteCommand::PermissionSet { id, args } => (format!("PermissionSet/{id}"), args.dry_run),
+        DeleteCommand::ContextSet { id, args } => (format!("ContextSet/{id}"), args.dry_run),
+        DeleteCommand::Volume { id, args } => (format!("Volume/{id}"), args.dry_run),
+        DeleteCommand::Workspace { id, args } => (format!("Workspace/{id}"), args.dry_run),
+        DeleteCommand::SurfaceLocation { id, args } => {
+            (format!("SurfaceLocation/{id}"), args.dry_run)
+        }
+    };
+    let deleted = async {
         match command {
             DeleteCommand::Team { id, args } => teams::delete(connection, id, args).await,
             DeleteCommand::PermissionSet { id, args } => {
@@ -841,6 +854,16 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
                 surface_policy::delete_location(connection, id, args).await
             }
         }
-    })
-    .await
+    };
+    if dry_run {
+        deleted.await?;
+        outln!("{}", dry_run_line(&label));
+        return Ok(());
+    }
+    print(deleted).await
+}
+
+/// What `delete --dry-run` prints: the line `diff` prints for a deletion.
+fn dry_run_line(label: &str) -> String {
+    format!("delete {}", crate::terminal::text(label))
 }

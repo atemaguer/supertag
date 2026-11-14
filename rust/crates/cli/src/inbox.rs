@@ -364,3 +364,178 @@ fn notification_status(status: InboxNotificationStatus) -> &'static str {
         InboxNotificationStatus::Unavailable => "unavailable",
     }
 }
+
+/// How often `watch inbox-item` rereads the inbox.
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+/// Most pages one reread of the inbox reads.
+const WATCH_PAGES: usize = 20;
+
+/// What `watch inbox-item` follows.
+pub(crate) struct WatchItems {
+    pub objective: String,
+    pub kind: Option<Kind>,
+    pub json: bool,
+    /// Stop after printing this many items.
+    pub limit: Option<u64>,
+}
+
+/// `watch inbox-item`: prints every item already waiting, then each new item once as it appears,
+/// until interrupted. The inbox is reread every [`WATCH_INTERVAL`]. An item that leaves the inbox
+/// and returns prints again. A failure before anything prints ends the command; a later one is
+/// reported and the next reread tries again, unless no retry can fix it.
+pub(crate) async fn watch_items(connection: Connection, args: WatchItems) -> Result<()> {
+    let (channel, token) = connect_operator(connection).await?;
+    let mut client = client(channel);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut printed = 0_u64;
+    let mut read = false;
+    loop {
+        match read_all(&mut client, &token, &args).await {
+            Ok(items) => {
+                let mut current = std::collections::BTreeSet::new();
+                for item in items {
+                    let identity = (item.key.clone(), item.occurrence.clone());
+                    current.insert(identity.clone());
+                    if seen.contains(&identity) {
+                        continue;
+                    }
+                    if args.json {
+                        crate::terminal::print_json(&item_json(item))?;
+                    } else {
+                        outln!("{}", item_line(&item));
+                    }
+                    printed += 1;
+                    if args.limit.is_some_and(|limit| printed >= limit) {
+                        return Ok(());
+                    }
+                }
+                seen = current;
+                read = true;
+            }
+            Err(error) => {
+                let permanent = error.downcast_ref::<tonic::Status>().is_some_and(|status| {
+                    matches!(
+                        status.code(),
+                        tonic::Code::InvalidArgument
+                            | tonic::Code::PermissionDenied
+                            | tonic::Code::Unauthenticated
+                            | tonic::Code::Unimplemented
+                    )
+                });
+                if !read || permanent {
+                    return Err(error);
+                }
+                errln!("Could not read the inbox; trying again: {error:#}");
+            }
+        }
+        tokio::time::sleep(WATCH_INTERVAL).await;
+    }
+}
+
+async fn read_all(
+    client: &mut inbox_client::InboxClient<ProtocolChannel>,
+    token: &str,
+    args: &WatchItems,
+) -> Result<Vec<InboxItem>> {
+    let mut items = Vec::new();
+    let mut cursor = String::new();
+    for _ in 0..WATCH_PAGES {
+        let page = client
+            .list_items(request(
+                ListInboxItemsRequest {
+                    objective_id: args.objective.clone(),
+                    kind: args
+                        .kind
+                        .map_or(InboxItemKind::Unspecified, Into::into)
+                        .into(),
+                    page_size: 100,
+                    cursor,
+                },
+                token,
+            )?)
+            .await?
+            .into_inner();
+        items.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_empty() {
+            break;
+        }
+    }
+    Ok(items)
+}
+
+/// One inbox item as `watch inbox-item` prints it: its kind, what it belongs to, and what it asks.
+fn item_line(item: &InboxItem) -> String {
+    let kind = Kind::value_variants()
+        .iter()
+        .find(|kind| InboxItemKind::from(**kind) == item.kind())
+        .and_then(|kind| kind.to_possible_value())
+        .map_or_else(
+            || kind_name(item.kind()).replace('_', "-"),
+            |value| value.get_name().to_owned(),
+        );
+    let mut line = format!("{kind} {}", crate::terminal::text(&item.key));
+    for (name, value) in [("objective", &item.objective_id), ("task", &item.task_id)] {
+        if !value.is_empty() {
+            line += &format!(" {name}={}", crate::terminal::text(value));
+        }
+    }
+    let detail = item
+        .question
+        .as_ref()
+        .map(|question| question.text.as_str())
+        .or_else(|| {
+            item.approval
+                .as_ref()
+                .map(|approval| approval.summary.as_str())
+        })
+        .filter(|text| !text.is_empty())
+        .unwrap_or(&item.reason);
+    if !detail.is_empty() {
+        let first = detail.lines().next().unwrap_or_default();
+        line += &format!(": {}", crate::terminal::text(first));
+    }
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_watched_item_prints_on_one_safe_line() {
+        let item = InboxItem {
+            key: "question:task-1".into(),
+            kind: InboxItemKind::Question as i32,
+            objective_id: "launch".into(),
+            task_id: "task-1".into(),
+            question: Some(InboxQuestion {
+                text: "Which region?\u{1b}[2J\nSecond line".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            item_line(&item),
+            "question question:task-1 objective=launch task=task-1: Which region? [2J"
+        );
+        let item = InboxItem {
+            key: "approval:a1".into(),
+            kind: InboxItemKind::Approval as i32,
+            reason: "needs approval".into(),
+            approval: Some(InboxApproval {
+                summary: "Push to main".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(item_line(&item), "approval approval:a1: Push to main");
+        let item = InboxItem {
+            key: "limit:launch".into(),
+            kind: InboxItemKind::ObjectiveLimit as i32,
+            reason: "budget reached".into(),
+            ..Default::default()
+        };
+        assert_eq!(item_line(&item), "limit limit:launch: budget reached");
+    }
+}

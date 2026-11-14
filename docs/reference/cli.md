@@ -4145,6 +4145,8 @@ Options:
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
@@ -4170,6 +4172,8 @@ Options:
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
   -h, --help
           Print help
 ```
@@ -4193,6 +4197,8 @@ Options:
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
   -h, --help
           Print help
 ```
@@ -4202,7 +4208,7 @@ Options:
 ```text
 Remove a Volume's metadata when no reserved or verified copies depend on it
 
-Usage: supertag delete volume [OPTIONS] --operation-id <OPERATION_ID> --expected-revision <EXPECTED_REVISION> <ID>
+Usage: supertag delete volume [OPTIONS] --expected-revision <EXPECTED_REVISION> <ID>
 
 Arguments:
   <ID>  Volume ID
@@ -4211,11 +4217,13 @@ Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --operation-id <OPERATION_ID>
-          Idempotency key: a retry with the same key returns the first result instead of acting twice
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --expected-revision <EXPECTED_REVISION>
           The revision you last read. The change is refused when the resource has changed since
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
   -h, --help
           Print help
 ```
@@ -4239,6 +4247,8 @@ Options:
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
   -h, --help
           Print help
 ```
@@ -4262,6 +4272,8 @@ Options:
           Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --dry-run
+          Check the deletion and show what it would remove, without deleting anything
   -h, --help
           Print help
 ```
@@ -4274,19 +4286,23 @@ Stream change notices, reconnecting from the last resume token
 Usage: supertag watch [OPTIONS] [KIND]...
 
 Arguments:
-  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes [possible values: tag, task, conversation-message, objective, team, workstream-post]
+  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item]
 
 Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --objective <OBJECTIVE>
+          With `watch inbox-item`: only items for this Objective
+      --kind <KIND>
+          With `watch inbox-item`: only items of this kind [possible values: question, budget, limit, task-attention, approval, mcp-login]
       --settle-seconds <SETTLE_SECONDS>
           With `watch objective ID`: seconds to wait after the Objective closes for its running Sessions to record their turns [default: 10]
       --resume-token <RESUME_TOKEN>
           Continue after the last notice a previous watch printed
       --limit <LIMIT>
-          Stop after this many change notices
+          Stop after this many change notices, or inbox items with `watch inbox-item`
       --reconnect-seconds <RECONNECT_SECONDS>
           Seconds to keep reconnecting with the last resume token after the connection drops. Zero exits on the first disconnect [default: 60]
       --output <OUTPUT>

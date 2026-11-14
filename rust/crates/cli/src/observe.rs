@@ -586,6 +586,8 @@ pub enum WatchKindArg {
     Team,
     #[value(alias = "workstream-posts")]
     WorkstreamPost,
+    #[value(alias = "inbox-items")]
+    InboxItem,
 }
 
 /// Change streams `watch` follows that are not resources `get` reads: messages in a Session's
@@ -594,16 +596,19 @@ pub enum WatchKindArg {
 pub(crate) const WATCH_EVENT_STREAMS: &[[&str; 2]] =
     &[["conversation-message", "conversation-messages"]];
 
-impl From<WatchKindArg> for WatchKind {
-    fn from(value: WatchKindArg) -> Self {
-        match value {
+impl WatchKindArg {
+    /// The change notices this kind follows. Inbox items have none: `watch inbox-item` rereads
+    /// the inbox instead.
+    fn notices(self) -> Option<WatchKind> {
+        Some(match self {
             WatchKindArg::Tag => WatchKind::Tag,
             WatchKindArg::Task => WatchKind::Task,
             WatchKindArg::ConversationMessage => WatchKind::ConversationMessage,
             WatchKindArg::Objective => WatchKind::Objective,
             WatchKindArg::Team => WatchKind::Team,
             WatchKindArg::WorkstreamPost => WatchKind::WorkstreamPost,
-        }
+            WatchKindArg::InboxItem => return None,
+        })
     }
 }
 
@@ -651,9 +656,16 @@ impl clap::builder::TypedValueParser for WatchTargetParser {
 #[derive(Args)]
 pub struct WatchArgs {
     /// Only these kinds of change; omit for every kind. `watch objective ID` follows one
-    /// Objective's progress as a timeline until it closes.
+    /// Objective's progress as a timeline until it closes. `watch inbox-item` prints each item
+    /// waiting on a person once, as it appears.
     #[arg(value_name = "KIND", value_parser = WatchTargetParser)]
     kinds: Vec<WatchTarget>,
+    /// With `watch inbox-item`: only items for this Objective.
+    #[arg(long)]
+    objective: Option<String>,
+    /// With `watch inbox-item`: only items of this kind.
+    #[arg(long = "kind", value_name = "KIND", value_enum)]
+    item_kind: Option<crate::inbox::Kind>,
     /// With `watch objective ID`: seconds to wait after the Objective closes for its running
     /// Sessions to record their turns.
     #[arg(long, default_value_t = 10)]
@@ -661,7 +673,7 @@ pub struct WatchArgs {
     /// Continue after the last notice a previous watch printed.
     #[arg(long)]
     resume_token: Option<String>,
-    /// Stop after this many change notices.
+    /// Stop after this many change notices, or inbox items with `watch inbox-item`.
     #[arg(long)]
     limit: Option<u64>,
     /// Seconds to keep reconnecting with the last resume token after the
@@ -677,6 +689,14 @@ pub struct WatchArgs {
 /// resume token, so no notice is missed or repeated across reconnects; a
 /// resync notice means the feed moved past the token and state must be reread.
 pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
+    let inbox = args
+        .kinds
+        .iter()
+        .any(|target| matches!(target, WatchTarget::Kind(WatchKindArg::InboxItem)));
+    anyhow::ensure!(
+        inbox || (args.objective.is_none() && args.item_kind.is_none()),
+        "--objective and --kind apply only to watch inbox-item"
+    );
     if let [
         WatchTarget::Kind(WatchKindArg::Objective),
         WatchTarget::Id(id),
@@ -690,11 +710,33 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
         )
         .await;
     }
+    if inbox {
+        anyhow::ensure!(
+            args.kinds.len() == 1,
+            "watch inbox-item follows only the inbox; watch other kinds separately"
+        );
+        anyhow::ensure!(
+            args.resume_token.is_none(),
+            "watch inbox-item prints every waiting item first, so it takes no --resume-token"
+        );
+        return crate::inbox::watch_items(
+            connection,
+            crate::inbox::WatchItems {
+                objective: args.objective.unwrap_or_default(),
+                kind: args.item_kind,
+                json: args.output == Output::Json,
+                limit: args.limit,
+            },
+        )
+        .await;
+    }
     let kinds = args
         .kinds
         .iter()
         .map(|target| match target {
-            WatchTarget::Kind(kind) => Ok(WatchKind::from(*kind) as i32),
+            WatchTarget::Kind(kind) => {
+                Ok(kind.notices().expect("inbox items are watched above") as i32)
+            }
             WatchTarget::Id(id) => Err(anyhow::anyhow!(
                 "unknown kind {}; to follow one Objective, run supertag watch objective ID",
                 crate::terminal::text(id)

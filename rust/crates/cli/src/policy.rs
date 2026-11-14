@@ -307,6 +307,9 @@ pub struct DeleteArgs {
     /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
     operation_id: Option<String>,
+    /// Check the deletion and show what it would remove, without deleting anything.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 fn client(channel: ProtocolChannel) -> policy_catalog_client::PolicyCatalogClient<ProtocolChannel> {
@@ -373,6 +376,7 @@ pub(crate) async fn delete(
             reference,
             expected_revision: args.expected_revision,
             operation_id: operation_id(args.operation_id),
+            dry_run: args.dry_run,
         },
         &token,
     )?;

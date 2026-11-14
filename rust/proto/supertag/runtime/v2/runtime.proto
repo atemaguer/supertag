@@ -2475,6 +2475,8 @@ message UpdateTeamRequest {
 message DeleteTeamRequest {
   string operation_id = 1;
   string team = 2;
+  // Checks the deletion and returns the Team without deleting it or recording the operation.
+  bool dry_run = 3;
 }
 
 message WorkstreamPost {

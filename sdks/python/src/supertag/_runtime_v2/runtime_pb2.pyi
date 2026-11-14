@@ -3397,12 +3397,14 @@ class UpdateTeamRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., expected_revision: _Optional[int] = ..., name: _Optional[str] = ..., members: _Optional[_Union[TeamMembers, _Mapping]] = ..., max_concurrency: _Optional[int] = ...) -> None: ...
 
 class DeleteTeamRequest(_message.Message):
-    __slots__ = ("operation_id", "team")
+    __slots__ = ("operation_id", "team", "dry_run")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     team: str
-    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ...) -> None: ...
+    dry_run: bool
+    def __init__(self, operation_id: _Optional[str] = ..., team: _Optional[str] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class WorkstreamPost(_message.Message):
     __slots__ = ("post_id", "team_id", "author_tag_id", "to_tag_ids", "body", "source_task_id", "sequence", "created_at_ms")

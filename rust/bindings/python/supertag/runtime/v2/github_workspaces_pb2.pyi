@@ -73,14 +73,16 @@ class ListGithubWorkspacesResponse(_message.Message):
     def __init__(self, workspaces: _Optional[_Iterable[_Union[GithubWorkspace, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class DeleteGithubWorkspaceRequest(_message.Message):
-    __slots__ = ("operation_id", "workspace_id", "expected_revision")
+    __slots__ = ("operation_id", "workspace_id", "expected_revision", "dry_run")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     workspace_id: str
     expected_revision: int
-    def __init__(self, operation_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+    dry_run: bool
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class DeleteGithubWorkspaceResponse(_message.Message):
     __slots__ = ()
