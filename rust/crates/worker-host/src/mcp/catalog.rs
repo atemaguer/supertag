@@ -399,7 +399,8 @@ pub struct McpCatalogEntry {
     pub auth: &'static str,
     /// The URL an `"oauth": true` server's login is for.
     pub login_url: Option<String>,
-    /// Worker Host variables the server reads that are unset here.
+    /// Worker Host variables the server reads that are unset here, and credential files this
+    /// host would refuse.
     pub missing: Vec<String>,
 }
 
@@ -422,7 +423,9 @@ impl McpCatalog {
                             EnvSource::Variable(variable) => {
                                 variable_missing(variable).then(|| variable.clone())
                             }
-                            EnvSource::File(source) => file_missing(&source.file),
+                            EnvSource::File(source) => {
+                                file_missing(&source.file, ENV_FILE_BYTES, false)
+                            }
                         })
                         .collect()
                 } else {
@@ -437,8 +440,9 @@ impl McpCatalog {
                         server
                             .header_file
                             .values()
+                            .map(|path| (path, ENV_FILE_BYTES, false))
                             .chain(server.auth().files())
-                            .filter_map(|path| file_missing(path)),
+                            .filter_map(|(path, limit, lines)| file_missing(path, limit, lines)),
                     );
                     missing
                 };
@@ -764,7 +768,7 @@ fn http_server(
             !header_files.iter().any(|(other, _)| *other == name),
             "duplicate MCP request header"
         );
-        let file = CredentialFile::new(path, 4096, false).with_context(field)?;
+        let file = CredentialFile::new(path, ENV_FILE_BYTES, false).with_context(field)?;
         // Read now so a missing file refuses the start; the proxy reads it again at each use.
         let value = file.read().with_context(|| {
             format!(
@@ -818,6 +822,9 @@ pub(super) fn header_secrets(value: &str) -> Vec<String> {
 /// output; `env` is meant for credentials, which are longer.
 pub(super) const TRACKED_ENV_VALUE_BYTES: usize = 8;
 
+/// The largest value a header file or a stdio server's variable file holds, on one line.
+const ENV_FILE_BYTES: usize = 4096;
+
 fn stdio_server(
     server: &ServerConfig,
     command: &[String],
@@ -863,7 +870,7 @@ fn stdio_server(
                     })?
             }
             EnvSource::File(source) => {
-                let file = CredentialFile::new(&source.file, 4096, false)
+                let file = CredentialFile::new(&source.file, ENV_FILE_BYTES, false)
                     .with_context(|| format!("MCP server {name}: {variable}"))?;
                 // Read now so a missing file refuses the start; the launch reads it again.
                 let value = file.read().with_context(|| {
@@ -965,8 +972,9 @@ impl CredentialFile {
 }
 
 /// The path `supertag mcp list` shows for a file it cannot read as a credential file.
-fn file_missing(path: &Path) -> Option<String> {
-    let file = CredentialFile::new(path, 32 * 1024, true);
+/// The file must hold a value the Worker Host would accept for its field.
+fn file_missing(path: &Path, limit: usize, lines: bool) -> Option<String> {
+    let file = CredentialFile::new(path, limit, lines);
     match file {
         Ok(file) if file.read().is_ok() => None,
         Ok(file) => Some(file.path().display().to_string()),
@@ -1555,6 +1563,52 @@ mod tests {
         assert!(
             McpCatalog::parse(header.to_string().as_bytes(), |_| Some("Bearer x".into())).is_err()
         );
+    }
+
+    #[test]
+    fn listing_reports_a_credential_file_the_worker_host_would_refuse() {
+        let root = tempfile::tempdir().unwrap();
+        let file = |name: &str, contents: &str| {
+            let path = root.path().join(name);
+            fs::write(&path, contents).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            path
+        };
+        let one = file("one", "one-line-credential-value\n");
+        let lines = file("lines", "first-line\nsecond-line\n");
+        let long = file("long", &"x".repeat(5 * 1024));
+        let key = file("key", "-----BEGIN KEY-----\nAAAA\n-----END KEY-----\n");
+        let catalog = root.path().join("catalog.json");
+        let config = json!({"version":1,"servers":[
+            {"name":"header","url":"https://header.example.test/mcp",
+                "headerFile":{"X-One":one,"X-Lines":lines,"X-Long":long}},
+            {"name":"stdio","command":["/bin/true"],
+                "env":{"ONE":{"file":one},"LINES":{"file":lines},"LONG":{"file":long}}},
+            // A key may span lines and hold more than a header value.
+            {"name":"app","url":"https://app.example.test/mcp",
+                "githubApp":{"appId":1,"installationId":2,"privateKeyFile":key}},
+            {"name":"refresh","url":"https://refresh.example.test/mcp",
+                "oauth":{"refreshTokenFile":lines}},
+            {"name":"secret","url":"https://secret.example.test/mcp",
+                "clientCredentials":{"clientId":"id","clientSecretFile":lines}}
+        ]});
+        fs::write(&catalog, config.to_string()).unwrap();
+        fs::set_permissions(&catalog, fs::Permissions::from_mode(0o600)).unwrap();
+        let missing: BTreeMap<_, _> = McpCatalog::entries(&catalog)
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.name, entry.missing))
+            .collect();
+        let refused = vec![lines.display().to_string(), long.display().to_string()];
+        let sorted = |mut values: Vec<String>| {
+            values.sort();
+            values
+        };
+        assert_eq!(sorted(missing["header"].clone()), sorted(refused.clone()));
+        assert_eq!(sorted(missing["stdio"].clone()), sorted(refused));
+        assert!(missing["app"].is_empty());
+        assert!(missing["refresh"].is_empty());
+        assert_eq!(missing["secret"], [lines.display().to_string()]);
     }
 
     #[test]

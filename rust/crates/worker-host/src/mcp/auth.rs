@@ -55,6 +55,28 @@ const KEY_BYTES: usize = 32 * 1024;
 const VALUE_BYTES: usize = 8 * 1024;
 const REFRESH_MARGIN_MS: i64 = 60_000;
 pub(super) const GITHUB_API: &str = "https://api.github.com";
+const REFRESH_TOKEN: &str = "oauth.refreshToken";
+const CLIENT_ID: &str = "clientCredentials.clientId";
+const CLIENT_SECRET: &str = "clientCredentials.clientSecret";
+const ASSERTION_KEY: &str = "clientCredentials.assertionKey";
+const PRIVATE_KEY: &str = "githubApp.privateKey";
+
+/// The largest value a credential field holds, and whether it may span lines, as a PEM key or
+/// a refresh token's JSON may.
+fn limits(field: &str) -> (usize, bool) {
+    match field {
+        CLIENT_ID => (1024, false),
+        ASSERTION_KEY | PRIVATE_KEY => (KEY_BYTES, true),
+        REFRESH_TOKEN => (VALUE_BYTES, true),
+        _ => (VALUE_BYTES, false),
+    }
+}
+
+/// The file a credential field's `*File` names, read as that field is.
+fn field_file(field: &str, path: &Path) -> Result<CredentialFile> {
+    let (limit, lines) = limits(field);
+    CredentialFile::new(path, limit, lines)
+}
 
 /// `"oauth"`: `true` for this host's `supertag mcp login`, or a refresh token from a variable.
 #[derive(Deserialize)]
@@ -142,11 +164,12 @@ impl AuthConfig<'_> {
         }
     }
 
-    /// Each credential field of the minted form: its `*Env` variable and `*File` path.
-    fn sources(&self) -> Vec<(Option<&String>, Option<&PathBuf>)> {
+    /// Each credential field of the minted form: its name, `*Env` variable, and `*File` path.
+    fn sources(&self) -> Vec<(&'static str, Option<&String>, Option<&PathBuf>)> {
         let mut sources = Vec::new();
         if let OAuthConfig::RefreshToken(config) = self.oauth {
             sources.push((
+                REFRESH_TOKEN,
                 config.refresh_token_env.as_ref(),
                 config.refresh_token_file.as_ref(),
             ));
@@ -154,14 +177,17 @@ impl AuthConfig<'_> {
         if let Some(config) = self.client_credentials {
             sources.extend([
                 (
+                    CLIENT_ID,
                     config.client_id_env.as_ref(),
                     config.client_id_file.as_ref(),
                 ),
                 (
+                    CLIENT_SECRET,
                     config.client_secret_env.as_ref(),
                     config.client_secret_file.as_ref(),
                 ),
                 (
+                    ASSERTION_KEY,
                     config.assertion_key_env.as_ref(),
                     config.assertion_key_file.as_ref(),
                 ),
@@ -169,6 +195,7 @@ impl AuthConfig<'_> {
         }
         if let Some(config) = self.github_app {
             sources.push((
+                PRIVATE_KEY,
                 config.private_key_env.as_ref(),
                 config.private_key_file.as_ref(),
             ));
@@ -180,15 +207,19 @@ impl AuthConfig<'_> {
     pub(super) fn variables(&self) -> Vec<String> {
         self.sources()
             .into_iter()
-            .filter_map(|(variable, _)| variable.cloned())
+            .filter_map(|(_, variable, _)| variable.cloned())
             .collect()
     }
 
-    /// The host-local files a minted form reads.
-    pub(super) fn files(&self) -> Vec<&PathBuf> {
+    /// The host-local files a minted form reads, each with its field's largest value and
+    /// whether that value may span lines.
+    pub(super) fn files(&self) -> Vec<(&PathBuf, usize, bool)> {
         self.sources()
             .into_iter()
-            .filter_map(|(_, file)| file)
+            .filter_map(|(field, _, path)| {
+                let (limit, lines) = limits(field);
+                path.map(|path| (path, limit, lines))
+            })
             .collect()
     }
 
@@ -298,6 +329,9 @@ struct StoredRefreshToken {
 
 #[derive(Default)]
 struct RefreshState {
+    /// The refresh token value the access token and any rotation descend from: a replaced
+    /// file starts over from its new value, with its own client.
+    source: Option<String>,
     access: Option<(String, i64)>,
     /// A refresh token the authorization server rotated to, kept in memory.
     rotated: Option<String>,
@@ -325,9 +359,9 @@ pub(super) fn resolve(
     // would drop every tool output that happens to contain it. A client ID is public.
     let mut read = |field: &str,
                     (variable, path): (Option<&String>, Option<&PathBuf>),
-                    limit: usize,
                     secret: bool|
      -> Result<Option<(Credential, String)>> {
+        let (limit, _) = limits(field);
         let (credential, value) = match (variable, path) {
             (None, None) => return Ok(None),
             (Some(_), Some(_)) => {
@@ -351,13 +385,8 @@ pub(super) fn resolve(
                 (Credential::Value(value.clone()), value)
             }
             (None, Some(path)) => {
-                // A key or a refresh token's JSON may span lines.
-                let file = CredentialFile::new(
-                    path,
-                    limit,
-                    limit > VALUE_BYTES || field == "oauth.refreshToken",
-                )
-                .with_context(|| format!("MCP server {name}: {field}File"))?;
+                let file = field_file(field, path)
+                    .with_context(|| format!("MCP server {name}: {field}File"))?;
                 let credential = Credential::File(file);
                 let value = credential.current(name, field)?;
                 (credential, value)
@@ -371,12 +400,11 @@ pub(super) fn resolve(
     let form = if let Some(config) = config.client_credentials {
         let token_url = token_url(name, config.token_url.as_deref())?;
         let id = read(
-            "clientCredentials.clientId",
+            CLIENT_ID,
             (
                 config.client_id_env.as_ref(),
                 config.client_id_file.as_ref(),
             ),
-            1024,
             false,
         )?;
         let client_id = match (&config.client_id, id) {
@@ -389,27 +417,25 @@ pub(super) fn resolve(
             ),
         };
         let secret = read(
-            "clientCredentials.clientSecret",
+            CLIENT_SECRET,
             (
                 config.client_secret_env.as_ref(),
                 config.client_secret_file.as_ref(),
             ),
-            VALUE_BYTES,
             true,
         )?;
         let key = read(
-            "clientCredentials.assertionKey",
+            ASSERTION_KEY,
             (
                 config.assertion_key_env.as_ref(),
                 config.assertion_key_file.as_ref(),
             ),
-            KEY_BYTES,
             true,
         )?;
         let credential = match (secret, key) {
             (Some((secret, _)), None) => ClientCredential::Secret(secret),
             (None, Some((key, pem))) => {
-                signing_key(name, "clientCredentials.assertionKey", &pem)?;
+                signing_key(name, ASSERTION_KEY, &pem)?;
                 ClientCredential::Assertion(key)
             }
             _ => bail!(
@@ -443,18 +469,17 @@ pub(super) fn resolve(
             "MCP server {name}: githubApp needs the App's numeric appId and the installation's numeric installationId"
         );
         let (key, pem) = read(
-            "githubApp.privateKey",
+            PRIVATE_KEY,
             (
                 config.private_key_env.as_ref(),
                 config.private_key_file.as_ref(),
             ),
-            KEY_BYTES,
             true,
         )?
         .with_context(|| {
             format!("MCP server {name}: githubApp needs privateKeyEnv or privateKeyFile")
         })?;
-        signing_key(name, "githubApp.privateKey", &pem)?;
+        signing_key(name, PRIVATE_KEY, &pem)?;
         Form::GithubApp {
             app_id: config.app_id,
             installation_id: config.installation_id,
@@ -480,12 +505,11 @@ pub(super) fn resolve(
     } else if let OAuthConfig::RefreshToken(config) = config.oauth {
         let token_url = token_url(name, config.token_url.as_deref())?;
         let (source, value) = read(
-            "oauth.refreshToken",
+            REFRESH_TOKEN,
             (
                 config.refresh_token_env.as_ref(),
                 config.refresh_token_file.as_ref(),
             ),
-            VALUE_BYTES,
             true,
         )?
         .with_context(|| {
@@ -630,9 +654,9 @@ impl MintedAuth {
                 installation_id,
                 key,
             } => {
-                let pem = key.current(server, "githubApp.privateKey")?;
+                let pem = key.current(server, PRIVATE_KEY)?;
                 secrets.push(pem.clone());
-                let key = signing_key(server, "githubApp.privateKey", &pem)?;
+                let key = signing_key(server, PRIVATE_KEY, &pem)?;
                 let issued = now_ms() / 1000 - 60;
                 let jwt = sign_jwt(
                     &key,
@@ -677,7 +701,7 @@ impl MintedAuth {
                 scope,
                 token_url,
             } => {
-                let client_id = &client_id.current(server, "clientCredentials.clientId")?;
+                let client_id = &client_id.current(server, CLIENT_ID)?;
                 let endpoint = self.endpoint(client, url, token_url.as_deref()).await?;
                 let mut form = vec![
                     ("grant_type", "client_credentials".to_owned()),
@@ -689,7 +713,7 @@ impl MintedAuth {
                 let mut basic = None;
                 match credential {
                     ClientCredential::Secret(secret) => {
-                        let secret = secret.current(server, "clientCredentials.clientSecret")?;
+                        let secret = secret.current(server, CLIENT_SECRET)?;
                         if secret.len() >= TRACKED_ENV_VALUE_BYTES {
                             secrets.push(secret.clone());
                         }
@@ -699,9 +723,9 @@ impl MintedAuth {
                         ));
                     }
                     ClientCredential::Assertion(key) => {
-                        let pem = key.current(server, "clientCredentials.assertionKey")?;
+                        let pem = key.current(server, ASSERTION_KEY)?;
                         secrets.push(pem.clone());
-                        let key = signing_key(server, "clientCredentials.assertionKey", &pem)?;
+                        let key = signing_key(server, ASSERTION_KEY, &pem)?;
                         let issued = now_ms() / 1000;
                         let assertion = sign_jwt(
                             &key,
@@ -742,6 +766,18 @@ impl MintedAuth {
             } => {
                 // One refresh at a time, so a rotating refresh token is spent once.
                 let mut state = state.lock().await;
+                // The value is read at each use: a replaced file, such as a new export from
+                // `supertag mcp login NAME --export`, discards the old login's access token
+                // and rotation.
+                let value = source.current(server, REFRESH_TOKEN)?;
+                let stored = stored_refresh_token(server, &value)?;
+                secrets.extend(stored.secrets());
+                if state.source.as_ref() != Some(&value) {
+                    *state = RefreshState {
+                        source: Some(value),
+                        ..RefreshState::default()
+                    };
+                }
                 if let Some(rotated) = &state.rotated {
                     secrets.push(rotated.clone());
                 }
@@ -755,9 +791,6 @@ impl MintedAuth {
                         secrets,
                     });
                 }
-                let stored =
-                    stored_refresh_token(server, &source.current(server, "oauth.refreshToken")?)?;
-                secrets.extend(stored.secrets());
                 let endpoint = self.endpoint(client, url, token_url.as_deref()).await?;
                 let refresh_token = state
                     .rotated
@@ -1520,6 +1553,197 @@ mod tests {
         let mut fourth = Session::new(client().unwrap(), server, None);
         assert!(matches!(
             fourth.initialize().await,
+            Err(Failure::Unavailable)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_replaced_refresh_token_file_takes_effect_at_the_next_attempt() {
+        let (address, served) = serve(vec![
+            (
+                200,
+                "application/json",
+                json!({"access_token":"access-1","refresh_token":"refresh-2","expires_in":3600})
+                    .to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+            (
+                200,
+                "application/json",
+                json!({"access_token":"access-3","expires_in":3600}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+        ])
+        .await;
+        let origin = format!("http://127.0.0.1:{}", address.port());
+        let directory = tempfile::tempdir().unwrap();
+        let file = credential_file(
+            directory.path(),
+            "refresh",
+            r#"{"refresh_token":"refresh-1","client_id":"client-a"}"#,
+        );
+        let parsed = catalog(
+            json!({"name":"docs","url":format!("{origin}/mcp"),
+                "oauth":{"refreshTokenFile":file,"tokenUrl":format!("{origin}/token")}}),
+            &[],
+        )
+        .unwrap();
+        let server = http(&parsed, "docs");
+        let mut first = Session::new(client().unwrap(), server.clone(), None);
+        first.initialize().await.unwrap();
+        // An unchanged file keeps the access token and the rotation it bought.
+        let mut second = Session::new(client().unwrap(), server.clone(), None);
+        second.initialize().await.unwrap();
+        // A new export, for another client, starts over from its own refresh token, before the
+        // old access token expires.
+        std::fs::write(
+            &file,
+            r#"{"refresh_token":"refresh-new","client_id":"client-b","client_secret":"client-b-secret"}"#,
+        )
+        .unwrap();
+        let mut third = Session::new(client().unwrap(), server, None);
+        third.initialize().await.unwrap();
+        for token in ["refresh-new", "client-b-secret", "access-3"] {
+            assert!(third.tokens.contains(&token.to_owned()), "{token}");
+        }
+        assert!(!third.tokens.contains(&"refresh-2".to_owned()));
+        let requests = served.await.unwrap();
+        assert_eq!(requests[0].line, "POST /token HTTP/1.1");
+        assert_eq!(form(&requests[0])["refresh_token"], "refresh-1");
+        for index in [1, 3] {
+            assert!(
+                requests[index]
+                    .headers
+                    .contains(&"authorization: bearer access-1".into()),
+                "{index}"
+            );
+        }
+        assert_eq!(requests[5].line, "POST /token HTTP/1.1");
+        let body = form(&requests[5]);
+        assert_eq!(body["refresh_token"], "refresh-new");
+        assert_eq!(body["client_id"], "client-b");
+        assert_eq!(body["client_secret"], "client-b-secret");
+        assert!(
+            requests[6]
+                .headers
+                .contains(&"authorization: bearer access-3".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn replaced_key_files_sign_the_next_attempt() {
+        let directory = tempfile::tempdir().unwrap();
+        let key = credential_file(directory.path(), "key.pem", RSA_KEY);
+        // A GitHub App key: each Attempt signs its App JWT with the file's key then.
+        let (address, served) = serve(vec![
+            (
+                201,
+                "application/json",
+                json!({"token":"ghs_one"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+            (
+                201,
+                "application/json",
+                json!({"token":"ghs_two"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+        ])
+        .await;
+        let origin = format!("http://127.0.0.1:{}", address.port());
+        let parsed = catalog(
+            json!({"name":"gh","url":format!("{origin}/mcp"),
+                "githubApp":{"appId":12,"installationId":34,"privateKeyFile":key}}),
+            &[],
+        )
+        .unwrap();
+        let mut server = http(&parsed, "gh");
+        *server.github_api = Url::parse(&format!("{origin}/api/")).unwrap();
+        // The test server lowercases headers, so the App JWT's header is compared lowercased.
+        let algorithm = |request: &Request| {
+            request
+                .headers
+                .iter()
+                .find_map(|header| header.strip_prefix("authorization: bearer "))
+                .unwrap()
+                .split('.')
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        let encoded = |alg: &str| {
+            URL_SAFE_NO_PAD
+                .encode(json!({"alg": alg, "typ": "JWT"}).to_string())
+                .to_ascii_lowercase()
+        };
+        let mut first = Session::new(client().unwrap(), server.clone(), None);
+        first.initialize().await.unwrap();
+        std::fs::write(&key, EC_KEY).unwrap();
+        let mut second = Session::new(client().unwrap(), server.clone(), None);
+        second.initialize().await.unwrap();
+        // Each key the Attempt read is withheld from its Task-visible output.
+        assert!(first.tokens.contains(&RSA_KEY.trim().to_owned()));
+        assert!(second.tokens.contains(&EC_KEY.trim().to_owned()));
+        let requests = served.await.unwrap();
+        assert_eq!(algorithm(&requests[0]), encoded("RS256"));
+        assert_eq!(algorithm(&requests[3]), encoded("ES256"));
+
+        // A client assertion key: likewise.
+        std::fs::write(&key, EC_KEY).unwrap();
+        let (address, served) = serve(vec![
+            (
+                200,
+                "application/json",
+                json!({"access_token":"cc-1"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+            (
+                200,
+                "application/json",
+                json!({"access_token":"cc-2"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+        ])
+        .await;
+        let origin = format!("http://127.0.0.1:{}", address.port());
+        let parsed = catalog(
+            json!({"name":"cc","url":format!("{origin}/mcp"),"clientCredentials":{
+                "clientId":"client-1","assertionKeyFile":key,"tokenUrl":format!("{origin}/token")}}),
+            &[],
+        )
+        .unwrap();
+        let server = http(&parsed, "cc");
+        let mut first = Session::new(client().unwrap(), server.clone(), None);
+        first.initialize().await.unwrap();
+        std::fs::write(&key, RSA_KEY).unwrap();
+        let mut second = Session::new(client().unwrap(), server, None);
+        second.initialize().await.unwrap();
+        let requests = served.await.unwrap();
+        let signed = |request: &Request| {
+            let assertion = form(request)["client_assertion"].clone();
+            let header: Value = serde_json::from_slice(
+                &URL_SAFE_NO_PAD
+                    .decode(assertion.split('.').next().unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+            header["alg"].as_str().unwrap().to_owned()
+        };
+        assert_eq!(signed(&requests[0]), "ES256");
+        assert_eq!(signed(&requests[3]), "RS256");
+        // A key file that no longer holds a key makes the server unavailable for the Attempt.
+        std::fs::write(&key, "not a key\n").unwrap();
+        let mut third = Session::new(client().unwrap(), http(&parsed, "cc"), None);
+        assert!(matches!(
+            third.initialize().await,
             Err(Failure::Unavailable)
         ));
     }
