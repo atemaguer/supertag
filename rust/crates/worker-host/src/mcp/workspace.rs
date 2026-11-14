@@ -347,6 +347,7 @@ fn stdio_server(
             Transport::Stdio(StdioServer {
                 command: launch,
                 env: BTreeMap::new(),
+                env_files: BTreeMap::new(),
                 cwd: None,
                 sandboxed: true,
             }),
@@ -379,6 +380,7 @@ fn stdio_server(
         Transport::Stdio(StdioServer {
             command: launch,
             env,
+            env_files: BTreeMap::new(),
             cwd: Some(PathBuf::from(snapshot)),
             sandboxed: false,
         }),
@@ -452,6 +454,7 @@ fn http_server(
             name: name.to_owned(),
             endpoint,
             headers,
+            header_files: Vec::new(),
             oauth: false,
             minted: None,
             github_api: Box::new(reqwest::Url::parse(super::auth::GITHUB_API)?),

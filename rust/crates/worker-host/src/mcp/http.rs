@@ -3,7 +3,11 @@ use std::time::Duration;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde_json::{Value, json};
 
-use super::{Failure, catalog::HttpServer, oauth::McpLoginStore};
+use super::{
+    Failure,
+    catalog::{HttpServer, header_secrets, header_value},
+    oauth::McpLoginStore,
+};
 
 pub(super) const PROTOCOL_VERSION: &str = "2025-11-25";
 const SESSION: &str = "mcp-session-id";
@@ -32,6 +36,8 @@ pub(super) struct Session {
     access_token: Option<header::HeaderValue>,
     /// Headers a minted form supplied for this Attempt.
     minted: Box<header::HeaderMap>,
+    /// Headers read from the server's `headerFile` files for this Attempt.
+    files: Box<header::HeaderMap>,
     /// Every access token this session sent; all are withheld from Task-visible output.
     pub(super) tokens: Vec<String>,
 }
@@ -58,17 +64,33 @@ impl Session {
             login,
             access_token: None,
             minted: Box::default(),
+            files: Box::default(),
             tokens: Vec::new(),
         }
     }
 
     /// Whether this server's credentials can be fetched again after a refusal.
     fn renewable(&self) -> bool {
-        self.login.is_some() || self.server.minted.is_some()
+        self.login.is_some() || self.server.minted.is_some() || !self.server.header_files.is_empty()
     }
 
-    /// Mints this server's headers: again when the server refused `rejected`.
+    /// Mints this server's headers, reading its header files again: again when the server
+    /// refused `rejected`.
     async fn mint(&mut self, rejected: Option<&str>) -> Result<(), Failure> {
+        let mut files = header::HeaderMap::new();
+        for (name, file) in &self.server.header_files {
+            let value = file.read().map_err(|_| Failure::Unavailable)?;
+            files.insert(
+                name.clone(),
+                header_value(&value).map_err(|_| Failure::Unavailable)?,
+            );
+            for secret in header_secrets(&value) {
+                if !secret.is_empty() && !self.tokens.contains(&secret) {
+                    self.tokens.push(secret);
+                }
+            }
+        }
+        *self.files = files;
         let Some(minted) = self.server.minted.clone() else {
             return Ok(());
         };
@@ -138,6 +160,7 @@ impl Session {
             .client
             .request(method, self.server.endpoint.clone())
             .headers(self.server.headers.clone())
+            .headers((*self.files).clone())
             .headers((*self.minted).clone())
             .header(header::ACCEPT, "application/json, text/event-stream")
             .header(PROTOCOL, self.version);

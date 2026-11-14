@@ -382,10 +382,17 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     }]);
     let config = serde_json::json!({"version":1,"servers":[{
         "name":"catalog","url":format!("{endpoint}/mcp"),
-        "headerEnv":{"Authorization":"CATALOG_MCP_AUTH"},
+        "headerFile":{"Authorization":directory.path().join("catalog-auth")},
         "resources":{"tools":{"list_docs":mapping,"publish":mapping}}
     }]});
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    // The header value lives in an owner-only file the Worker Host reads at each Attempt.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(directory.path().join("catalog-auth"))?
+        .write_all(b"Bearer synthetic-catalog-credential\n")?;
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -462,7 +469,6 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         let mut host = worker(state);
         host.arg("--mcp-catalog")
             .arg(&catalog)
-            .env("CATALOG_MCP_AUTH", "Bearer synthetic-catalog-credential")
             .env("CATALOG_MCP_URL", &endpoint);
         host
     };
@@ -582,10 +588,20 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
                 .context("fixture path")?,
             journal.to_str().context("journal path")?,
         ],
-        "env":{"CATALOG_TOKEN":"CATALOG_MCP_AUTH"},
+        "env":{
+            "CATALOG_TOKEN":"CATALOG_MCP_AUTH",
+            "CATALOG_FILE_TOKEN":{"file":directory.join("catalog-token")},
+        },
         "resources":{"tools":{"list_docs":mapping,"publish":mapping}}
     }]});
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    // A credential file the Worker Host reads at each launch; only its path is in the catalog.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(directory.join("catalog-token"))?
+        .write_all(b"synthetic-file-credential\n")?;
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -753,11 +769,19 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         let launch: Value = serde_json::from_slice(&std::fs::read(directory.join(&name))?)?;
         let environment = launch["env"].as_object().context("launch environment")?;
         assert_eq!(environment["CATALOG_TOKEN"], "synthetic-catalog-credential");
+        assert_eq!(
+            environment["CATALOG_FILE_TOKEN"],
+            "synthetic-file-credential"
+        );
         for key in environment.keys() {
             assert!(
                 matches!(
                     key.as_str(),
-                    "CATALOG_TOKEN" | "PATH" | "HOME" | "__CF_USER_TEXT_ENCODING"
+                    "CATALOG_TOKEN"
+                        | "CATALOG_FILE_TOKEN"
+                        | "PATH"
+                        | "HOME"
+                        | "__CF_USER_TEXT_ENCODING"
                 ),
                 "unexpected stdio MCP variable {key}"
             );

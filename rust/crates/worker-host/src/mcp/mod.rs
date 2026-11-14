@@ -99,7 +99,7 @@ impl Session {
             }
             catalog::Transport::Stdio(stdio) if stdio.sandboxed => {
                 // A sandboxed server never receives a Worker Host variable.
-                if !stdio.env.is_empty() || stdio.cwd.is_some() {
+                if !stdio.env.is_empty() || !stdio.env_files.is_empty() || stdio.cwd.is_some() {
                     return Err(Failure::Denied);
                 }
                 Self::Stdio(stdio::Session::start_sandbox(
@@ -137,7 +137,7 @@ impl Session {
                 .into_iter()
                 .chain(session.tokens.iter().cloned())
                 .collect(),
-            Self::Stdio(_) => Vec::new(),
+            Self::Stdio(session) => session.secrets.clone(),
         }
     }
 

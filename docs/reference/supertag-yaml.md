@@ -634,6 +634,23 @@ stops the host with a message that names the server and the reference, never a v
   `supertag mcp login NAME --export` prints. A rotated refresh token replaces the old one until
   the host stops.
 
+### MCP credentials on a Rust deployment
+
+On a Rust deployment, a Worker Host reads its MCP servers from an owner-only JSON catalog that
+`--mcp-catalog PATH` names, not from `mcp` in this file. See `--mcp-catalog` in the
+[Rust CLI reference](../../rust/docs/cli-reference.md). Each credential field there names a
+Worker Host variable, such as `headerEnv`, `clientSecretEnv`, or `privateKeyEnv`. Or it names a
+file through the matching `File` field, such as `headerFile`, `clientSecretFile`, or
+`privateKeyFile`. A stdio server's `env` value is a variable name or `{"file": PATH}`. File
+references differ from the ones above:
+
+- The path is absolute or starts with `~/`. The catalog has no directory for a relative path.
+- The file must be a regular file you own, not a symbolic link, with no group or other
+  permissions, such as mode `0600`. Only a private key or a refresh token's JSON may span lines.
+- The Worker Host reads each file when it starts, and again for each Task Attempt and each
+  refetch after a 401 or 403. A replaced file takes effect without a restart.
+- `{ secretRef: NAME }` is not supported, because the catalog has no `secrets` map.
+
 ### MCP OAuth login
 
 `supertag mcp login NAME` runs the MCP authorization flow in a browser on this machine. It uses

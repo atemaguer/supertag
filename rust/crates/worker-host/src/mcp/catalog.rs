@@ -3,7 +3,7 @@ use std::{
     fs::OpenOptions,
     io::Read,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, ensure};
@@ -54,6 +54,8 @@ pub(super) struct HttpServer {
     pub(super) name: String,
     pub(super) endpoint: Url,
     pub(super) headers: HeaderMap,
+    /// Headers whose values are read from host-local files at each Attempt (`headerFile`).
+    pub(super) header_files: Vec<(HeaderName, CredentialFile)>,
     /// Whether the Authorization header comes from this host's `supertag mcp login`.
     pub(super) oauth: bool,
     /// Headers minted for each Attempt: client credentials, a GitHub App, a helper, or a
@@ -64,11 +66,13 @@ pub(super) struct HttpServer {
 }
 
 /// A server the Worker Host launches for each Task Attempt. Only `env`, resolved from the
-/// Worker Host environment when the catalog loads, and a minimal default environment reach it.
+/// Worker Host environment when the catalog loads, `env_files`, read at each launch, and a
+/// minimal default environment reach it.
 #[derive(Clone)]
 pub(super) struct StdioServer {
     pub(super) command: Vec<String>,
     pub(super) env: BTreeMap<String, String>,
+    pub(super) env_files: BTreeMap<String, CredentialFile>,
     /// A Workspace server runs in the Worker-owned snapshot of its Task's base commit.
     pub(super) cwd: Option<std::path::PathBuf>,
     /// A Workspace server of a remote Workspace runs inside the Task's sandbox, in the
@@ -305,7 +309,11 @@ pub(super) struct ServerConfig {
     pub(super) tenant_id: Option<String>,
     #[serde(default)]
     pub(super) header_env: BTreeMap<String, String>,
-    /// `true` for this host's `supertag mcp login`, or `{"refreshTokenEnv": VAR}`.
+    /// Request headers whose values are host-local files, each holding the full header value.
+    #[serde(default)]
+    pub(super) header_file: BTreeMap<String, PathBuf>,
+    /// `true` for this host's `supertag mcp login`, or `{"refreshTokenEnv": VAR}` or
+    /// `{"refreshTokenFile": PATH}`.
     #[serde(default)]
     pub(super) oauth: OAuthConfig,
     /// An OAuth client-credentials grant with a client secret or a JWT client assertion.
@@ -348,7 +356,7 @@ pub(super) enum EnvSource {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FileSource {
-    file: std::path::PathBuf,
+    file: PathBuf,
 }
 
 #[derive(Default, Deserialize)]
@@ -414,19 +422,25 @@ impl McpCatalog {
                             EnvSource::Variable(variable) => {
                                 variable_missing(variable).then(|| variable.clone())
                             }
-                            EnvSource::File(source) => read_env_file(&source.file)
-                                .is_err()
-                                .then(|| source.file.display().to_string()),
+                            EnvSource::File(source) => file_missing(&source.file),
                         })
                         .collect()
                 } else {
-                    server
+                    let mut missing: Vec<_> = server
                         .header_env
                         .values()
                         .cloned()
                         .chain(server.auth().variables())
                         .filter(|source| variable_missing(source))
-                        .collect()
+                        .collect();
+                    missing.extend(
+                        server
+                            .header_file
+                            .values()
+                            .chain(server.auth().files())
+                            .filter_map(|path| file_missing(path)),
+                    );
+                    missing
                 };
                 let (target, auth, login_url) = match (&server.url, &server.command) {
                     (_, Some(command)) => (
@@ -444,7 +458,11 @@ impl McpCatalog {
                         url.clone(),
                         match server.auth().label() {
                             Some(label) => label,
-                            None if server.header_env.is_empty() => "none",
+                            None if server.header_env.is_empty()
+                                && server.header_file.is_empty() =>
+                            {
+                                "none"
+                            }
                             None => "headers",
                         },
                         None,
@@ -545,7 +563,9 @@ impl McpCatalog {
                 }
                 (None, Some(command)) => {
                     ensure!(
-                        server.header_env.is_empty() && !server.auth().any(),
+                        server.header_env.is_empty()
+                            && server.header_file.is_empty()
+                            && !server.auth().any(),
                         "MCP server {}: a stdio server has no HTTP authentication; pass its credentials in env",
                         server.name
                     );
@@ -593,6 +613,16 @@ impl McpCatalog {
                         http.endpoint.as_str(),
                         headers_by_name,
                     ))?);
+                    // A file is read at each use, so the binding names the file, not a value.
+                    if !http.header_files.is_empty() {
+                        identity.update(b"\0header-files\0");
+                        let files: BTreeMap<_, _> = http
+                            .header_files
+                            .iter()
+                            .map(|(name, file)| (name.as_str(), file.path()))
+                            .collect();
+                        identity.update(serde_json::to_vec(&files)?);
+                    }
                     // A login's tokens rotate; the binding names the login, not a token.
                     if http.oauth {
                         identity.update(b"\0oauth-login\0");
@@ -607,6 +637,15 @@ impl McpCatalog {
                 Transport::Stdio(stdio) => {
                     identity.update(b"supertag-mcp-stdio-provider-binding-v1\0");
                     identity.update(serde_json::to_vec(&(&stdio.command, &stdio.env))?);
+                    if !stdio.env_files.is_empty() {
+                        identity.update(b"\0env-files\0");
+                        let files: BTreeMap<_, _> = stdio
+                            .env_files
+                            .iter()
+                            .map(|(name, file)| (name, file.path()))
+                            .collect();
+                        identity.update(serde_json::to_vec(&files)?);
+                    }
                 }
             }
             for binding in &bindings {
@@ -679,22 +718,24 @@ fn http_server(
     let endpoint = validate_url(url)?;
     secrets.insert(endpoint.as_str().into());
     ensure!(
-        server.header_env.len() <= 16,
+        server.header_env.len() + server.header_file.len() <= 16,
         "too many MCP request headers"
     );
-    let mut headers = HeaderMap::new();
-    for (name, variable) in &server.header_env {
+    let header_name = |name: &str| -> Result<HeaderName> {
         let name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| anyhow::anyhow!("invalid MCP request header"))?;
-        ensure!(
-            valid_header(&name) && valid_env(variable),
-            "invalid MCP request header binding"
-        );
+        ensure!(valid_header(&name), "invalid MCP request header binding");
         ensure!(
             !(server.auth().any() && name == reqwest::header::AUTHORIZATION),
             "MCP server {}: its oauth, clientCredentials, githubApp, or helper supplies the Authorization header",
             server.name
         );
+        Ok(name)
+    };
+    let mut headers = HeaderMap::new();
+    for (name, variable) in &server.header_env {
+        let name = header_name(name)?;
+        ensure!(valid_env(variable), "invalid MCP request header binding");
         let value = environment(variable)
             .filter(|value| !value.trim().is_empty() && value.len() <= 4096)
             .ok_or_else(|| {
@@ -702,30 +743,75 @@ fn http_server(
                     "a configured MCP header environment variable is missing or invalid"
                 )
             })?;
-        let mut header = HeaderValue::from_str(&value)
+        let header = header_value(&value)
             .map_err(|_| anyhow::anyhow!("invalid MCP header environment value"))?;
-        header.set_sensitive(true);
         ensure!(
             headers.insert(name, header).is_none(),
             "duplicate MCP request header"
         );
-        if let Some((scheme, credential)) = value.split_once(' ')
-            && (scheme.eq_ignore_ascii_case("bearer") || scheme.eq_ignore_ascii_case("basic"))
-            && !credential.trim().is_empty()
-        {
-            secrets.insert(credential.trim().into());
-        }
-        secrets.insert(value);
+        secrets.extend(header_secrets(&value));
+    }
+    let mut header_files = Vec::new();
+    for (name, path) in &server.header_file {
+        let field = || format!("MCP server {}: headerFile {name}", server.name);
+        let name = header_name(name)?;
+        ensure!(
+            !headers.contains_key(&name),
+            "{}: set the header in headerEnv or headerFile, not both",
+            field()
+        );
+        ensure!(
+            !header_files.iter().any(|(other, _)| *other == name),
+            "duplicate MCP request header"
+        );
+        let file = CredentialFile::new(path, 4096, false).with_context(field)?;
+        // Read now so a missing file refuses the start; the proxy reads it again at each use.
+        let value = file.read().with_context(|| {
+            format!(
+                "{} reads {}, which must be an owner-only file holding the header value",
+                field(),
+                file.path().display()
+            )
+        })?;
+        header_value(&value).with_context(|| {
+            format!(
+                "{} reads {}, which holds no valid header value",
+                field(),
+                file.path().display()
+            )
+        })?;
+        secrets.extend(header_secrets(&value));
+        header_files.push((name, file));
     }
     let minted = auth::resolve(&server.auth(), url, environment, secrets)?.map(std::sync::Arc::new);
     Ok(HttpServer {
         name: server.name.clone(),
         endpoint,
         headers,
+        header_files,
         oauth: server.auth().oauth_login(),
         minted,
         github_api: Box::new(Url::parse(auth::GITHUB_API)?),
     })
+}
+
+/// A sensitive request header value.
+pub(super) fn header_value(value: &str) -> Result<HeaderValue> {
+    let mut header = HeaderValue::from_str(value)?;
+    header.set_sensitive(true);
+    Ok(header)
+}
+
+/// The values a header value reveals: itself, and the credential of a Bearer or Basic value.
+pub(super) fn header_secrets(value: &str) -> Vec<String> {
+    let mut secrets = vec![value.to_owned()];
+    if let Some((scheme, credential)) = value.split_once(' ')
+        && (scheme.eq_ignore_ascii_case("bearer") || scheme.eq_ignore_ascii_case("basic"))
+        && !credential.trim().is_empty()
+    {
+        secrets.push(credential.trim().to_owned());
+    }
+    secrets
 }
 
 /// Values shorter than this are passed to a stdio server but are too short to recognize in its
@@ -753,6 +839,7 @@ fn stdio_server(
         "MCP server {name} sets too many environment variables"
     );
     let mut env = BTreeMap::new();
+    let mut env_files = BTreeMap::new();
     for (variable, source) in &server.env {
         ensure!(
             valid_server_env(variable),
@@ -775,12 +862,22 @@ fn stdio_server(
                         )
                     })?
             }
-            EnvSource::File(source) => read_env_file(&source.file).with_context(|| {
-                format!(
-                    "MCP server {name}: {variable} reads {}, which must be an absolute path to an owner-only file holding one value",
-                    source.file.display()
-                )
-            })?,
+            EnvSource::File(source) => {
+                let file = CredentialFile::new(&source.file, 4096, false)
+                    .with_context(|| format!("MCP server {name}: {variable}"))?;
+                // Read now so a missing file refuses the start; the launch reads it again.
+                let value = file.read().with_context(|| {
+                    format!(
+                        "MCP server {name}: {variable} reads {}, which must be an owner-only file holding one value",
+                        file.path().display()
+                    )
+                })?;
+                if value.len() >= TRACKED_ENV_VALUE_BYTES {
+                    secrets.insert(value);
+                }
+                env_files.insert(variable.clone(), file);
+                continue;
+            }
         };
         if value.len() >= TRACKED_ENV_VALUE_BYTES {
             secrets.insert(value.clone());
@@ -790,39 +887,98 @@ fn stdio_server(
     Ok(StdioServer {
         command: command.to_vec(),
         env,
+        env_files,
         cwd: None,
         sandboxed: false,
     })
 }
 
-/// A credential file a stdio server's variable reads: absolute, owner-only, regular, and at
-/// most 4 KiB, holding one value. Surrounding whitespace is not part of the value, as in
-/// TypeScript.
-fn read_env_file(path: &Path) -> Result<String> {
-    ensure!(path.is_absolute(), "credential file path is not absolute");
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    // SAFETY: geteuid takes no parameters and has no caller invariants.
-    let uid = unsafe { libc::geteuid() };
-    ensure!(
-        metadata.is_file()
-            && metadata.uid() == uid
-            && metadata.mode() & 0o077 == 0
-            && metadata.len() <= 4097,
-        "credential file must be a bounded, owner-only regular file"
-    );
-    let mut bytes = Vec::new();
-    file.take(4098).read_to_end(&mut bytes)?;
-    let value = String::from_utf8(bytes)?;
-    let value = value.trim();
-    ensure!(
-        !value.is_empty() && value.len() <= 4096 && !value.contains(['\0', '\n']),
-        "credential file must hold one value"
-    );
-    Ok(value.to_owned())
+/// A host-local credential file a catalog field names: `{"file": PATH}` for a stdio server's
+/// variable, or a `*File` field of an HTTP server. As in TypeScript, a leading `~` is the home
+/// directory and surrounding whitespace is not part of the value. The path must otherwise be
+/// absolute, and the file an owner-only regular file that is not a symbolic link. The catalog
+/// reads it when it loads, so a missing file refuses the start, and again at each use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CredentialFile {
+    path: PathBuf,
+    /// The largest value the file may hold.
+    limit: usize,
+    /// Whether the value may span lines, as a PEM key or a refresh token's JSON may.
+    lines: bool,
+}
+
+impl CredentialFile {
+    pub(super) fn new(path: &Path, limit: usize, lines: bool) -> Result<Self> {
+        let path = match path.to_str() {
+            Some("~") => home()?,
+            Some(value) if value.starts_with("~/") => home()?.join(&value[2..]),
+            _ => path.to_owned(),
+        };
+        ensure!(
+            path.is_absolute(),
+            "credential file path is neither absolute nor under ~/"
+        );
+        Ok(Self { path, limit, lines })
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The file's value now. Messages name the path, never the contents.
+    pub(super) fn read(&self) -> Result<String> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&self.path)
+            .map_err(|_| anyhow::anyhow!("credential file could not be opened"))?;
+        let metadata = file.metadata()?;
+        // SAFETY: geteuid takes no parameters and has no caller invariants.
+        let uid = unsafe { libc::geteuid() };
+        ensure!(
+            metadata.is_file() && metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+            "credential file must be an owner-only regular file"
+        );
+        // Room for surrounding whitespace, such as a trailing newline.
+        let limit = self.limit as u64 + 64;
+        let mut bytes = Vec::new();
+        file.take(limit + 1).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() as u64 <= limit,
+            "credential file must hold one value of at most {} bytes",
+            self.limit
+        );
+        let value = String::from_utf8(bytes)
+            .map_err(|_| anyhow::anyhow!("credential file must hold UTF-8 text"))?;
+        let value = value.trim();
+        ensure!(
+            !value.is_empty() && value.len() <= self.limit && !value.contains('\0'),
+            "credential file must hold one value of at most {} bytes",
+            self.limit
+        );
+        ensure!(
+            self.lines || !value.contains(['\n', '\r']),
+            "credential file must hold one line"
+        );
+        Ok(value.to_owned())
+    }
+}
+
+/// The path `supertag mcp list` shows for a file it cannot read as a credential file.
+fn file_missing(path: &Path) -> Option<String> {
+    let file = CredentialFile::new(path, 32 * 1024, true);
+    match file {
+        Ok(file) if file.read().is_ok() => None,
+        Ok(file) => Some(file.path().display().to_string()),
+        Err(_) => Some(path.display().to_string()),
+    }
+}
+
+fn home() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .context("HOME is required for a ~/ credential file")
 }
 
 pub(super) fn valid_server_env(value: &str) -> bool {
@@ -1046,7 +1202,13 @@ mod tests {
         let Transport::Stdio(server) = &catalog.servers["db"].transport else {
             panic!("stdio server expected");
         };
-        assert_eq!(server.env["DB_TOKEN"], "file-secret-value-1c9e");
+        // The launch reads the file again; the catalog keeps only its path.
+        assert!(server.env.is_empty());
+        assert_eq!(server.env_files["DB_TOKEN"].path(), private);
+        assert_eq!(
+            server.env_files["DB_TOKEN"].read().unwrap(),
+            "file-secret-value-1c9e"
+        );
         assert!(
             catalog
                 .secrets
@@ -1071,6 +1233,82 @@ mod tests {
             assert!(
                 !error.unwrap().contains("file-secret-value-1c9e"),
                 "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn credential_files_expand_home_and_refuse_shared_linked_or_oversized_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = |name: &str, contents: &str, mode: u32| {
+            let path = directory.path().join(name);
+            fs::write(&path, contents).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            path
+        };
+        let value = "credential-file-value-5d21";
+        // As in TypeScript, `~` and `~/PATH` are under the home directory.
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        assert_eq!(
+            CredentialFile::new(Path::new("~/keys/app.pem"), 64, false)
+                .unwrap()
+                .path(),
+            home.join("keys/app.pem")
+        );
+        assert_eq!(
+            CredentialFile::new(Path::new("~"), 64, false)
+                .unwrap()
+                .path(),
+            home
+        );
+        for relative in ["token", "./token", "~other/token", ""] {
+            assert!(
+                CredentialFile::new(Path::new(relative), 64, false).is_err(),
+                "{relative}"
+            );
+        }
+        let read = |path: &Path, limit: usize, lines: bool| {
+            CredentialFile::new(path, limit, lines)
+                .unwrap()
+                .read()
+                .map_err(|error| format!("{error:#}"))
+        };
+        let private = file("private", &format!("\t{value}\r\n\n"), 0o600);
+        assert_eq!(read(&private, 64, false).unwrap(), value);
+        assert_eq!(
+            read(&file("readonly", value, 0o400), 64, false).unwrap(),
+            value
+        );
+        // A PEM key spans lines; other values must not.
+        let pem = file(
+            "pem",
+            "-----BEGIN KEY-----\nAAAA\n-----END KEY-----\n",
+            0o600,
+        );
+        assert!(read(&pem, 64, true).is_ok());
+        assert!(read(&pem, 64, false).is_err());
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&private, &link).unwrap();
+        for (refused, limit) in [
+            (file("group-readable", value, 0o640), 64),
+            (file("world-readable", value, 0o604), 64),
+            (file("group-writable", value, 0o620), 64),
+            (link, 64),
+            (directory.path().to_owned(), 64),
+            (directory.path().join("absent"), 64),
+            (file("oversized", value, 0o600), value.len() - 1),
+            (
+                file("padded", &format!("{value}{}", " ".repeat(200)), 0o600),
+                64,
+            ),
+            (file("empty", " \n", 0o600), 64),
+            (file("nul", "credential\0file-value", 0o600), 64),
+        ] {
+            let error = read(&refused, limit, false).unwrap_err();
+            // A message names the path at most, never the contents.
+            assert!(
+                !error.contains(value) && !error.contains("credential\0"),
+                "{error}"
             );
         }
     }

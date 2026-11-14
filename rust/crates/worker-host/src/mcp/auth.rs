@@ -8,15 +8,17 @@
 //! - `"oauth": {"refreshTokenEnv": VAR}`: a refresh token from a Worker Host variable, such as
 //!   the value `supertag mcp login NAME --export` prints on a machine with a browser.
 //!
-//! Every value is read from a Worker Host variable when the catalog loads, so a missing or
-//! malformed credential refuses the start. Tokens are minted for each Task Attempt and again when
+//! Each credential field is a pair: `*Env` names a Worker Host variable, read when the catalog
+//! loads, and `*File` names a host-local owner-only file, read when the catalog loads and again
+//! at each use, so a rotated file takes effect without a restart. A missing or malformed
+//! credential refuses the start. Tokens are minted for each Task Attempt and again when
 //! the server refuses one (401 or 403). Token requests never follow a redirect, and a token
 //! endpoint the server's metadata advertises is trusted only on the server's own origin; another
 //! origin must be configured as `tokenUrl`. Messages name servers and variables, never values.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
@@ -40,7 +42,7 @@ use serde_json::{Value, json};
 use tokio::{io::AsyncReadExt, process::Command, sync::Mutex, time};
 
 use super::{
-    catalog::{TRACKED_ENV_VALUE_BYTES, valid_header},
+    catalog::{CredentialFile, TRACKED_ENV_VALUE_BYTES, valid_header},
     oauth::{
         access_token, discover_token_endpoint, now_ms, safe_endpoint, token_request,
         token_response, valid_token,
@@ -71,7 +73,8 @@ impl Default for OAuthConfig {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct RefreshTokenConfig {
-    refresh_token_env: String,
+    refresh_token_env: Option<String>,
+    refresh_token_file: Option<PathBuf>,
     token_url: Option<String>,
 }
 
@@ -80,8 +83,11 @@ pub(super) struct RefreshTokenConfig {
 pub(super) struct ClientCredentialsConfig {
     client_id: Option<String>,
     client_id_env: Option<String>,
+    client_id_file: Option<PathBuf>,
     client_secret_env: Option<String>,
+    client_secret_file: Option<PathBuf>,
     assertion_key_env: Option<String>,
+    assertion_key_file: Option<PathBuf>,
     scope: Option<String>,
     token_url: Option<String>,
 }
@@ -91,7 +97,8 @@ pub(super) struct ClientCredentialsConfig {
 pub(super) struct GithubAppConfig {
     app_id: u64,
     installation_id: u64,
-    private_key_env: String,
+    private_key_env: Option<String>,
+    private_key_file: Option<PathBuf>,
 }
 
 /// The authentication fields of one catalog server.
@@ -135,40 +142,68 @@ impl AuthConfig<'_> {
         }
     }
 
-    /// The Worker Host variables a minted form reads.
-    pub(super) fn variables(&self) -> Vec<String> {
-        let mut variables = Vec::new();
+    /// Each credential field of the minted form: its `*Env` variable and `*File` path.
+    fn sources(&self) -> Vec<(Option<&String>, Option<&PathBuf>)> {
+        let mut sources = Vec::new();
         if let OAuthConfig::RefreshToken(config) = self.oauth {
-            variables.push(config.refresh_token_env.clone());
+            sources.push((
+                config.refresh_token_env.as_ref(),
+                config.refresh_token_file.as_ref(),
+            ));
         }
         if let Some(config) = self.client_credentials {
-            variables.extend(
-                [
-                    &config.client_id_env,
-                    &config.client_secret_env,
-                    &config.assertion_key_env,
-                ]
-                .into_iter()
-                .flatten()
-                .cloned(),
-            );
+            sources.extend([
+                (
+                    config.client_id_env.as_ref(),
+                    config.client_id_file.as_ref(),
+                ),
+                (
+                    config.client_secret_env.as_ref(),
+                    config.client_secret_file.as_ref(),
+                ),
+                (
+                    config.assertion_key_env.as_ref(),
+                    config.assertion_key_file.as_ref(),
+                ),
+            ]);
         }
         if let Some(config) = self.github_app {
-            variables.push(config.private_key_env.clone());
+            sources.push((
+                config.private_key_env.as_ref(),
+                config.private_key_file.as_ref(),
+            ));
         }
-        variables
+        sources
     }
 
-    /// What the server's provider binding names: the form and its public settings, and a
-    /// digest of each credential, so a changed credential is a different binding. A refresh
-    /// token rotates, so its binding names only the form.
+    /// The Worker Host variables a minted form reads.
+    pub(super) fn variables(&self) -> Vec<String> {
+        self.sources()
+            .into_iter()
+            .filter_map(|(variable, _)| variable.cloned())
+            .collect()
+    }
+
+    /// The host-local files a minted form reads.
+    pub(super) fn files(&self) -> Vec<&PathBuf> {
+        self.sources()
+            .into_iter()
+            .filter_map(|(_, file)| file)
+            .collect()
+    }
+
+    /// What the server's provider binding names: the form and its public settings, a digest of
+    /// each credential from a variable, so a changed credential is a different binding, and the
+    /// path of each credential file, which is read at each use. A refresh token rotates, so its
+    /// binding names only the form.
     pub(super) fn identity(&self, environment: &impl Fn(&str) -> Option<String>) -> Value {
         use sha2::{Digest, Sha256};
-        let digest = |variable: &Option<String>| {
-            variable
+        let source = |variable: &Option<String>, file: &Option<PathBuf>| match file {
+            Some(file) => Some(json!({"file": file})),
+            None => variable
                 .as_deref()
                 .and_then(environment)
-                .map(|value| format!("{:x}", Sha256::digest(value.trim().as_bytes())))
+                .map(|value| json!(format!("{:x}", Sha256::digest(value.trim().as_bytes())))),
         };
         json!({
             "oauthRefreshToken": match self.oauth {
@@ -177,16 +212,16 @@ impl AuthConfig<'_> {
             },
             "clientCredentials": self.client_credentials.map(|config| json!({
                 "clientId": config.client_id,
-                "clientIdEnv": digest(&config.client_id_env),
-                "clientSecret": digest(&config.client_secret_env),
-                "assertionKey": digest(&config.assertion_key_env),
+                "clientIdEnv": source(&config.client_id_env, &config.client_id_file),
+                "clientSecret": source(&config.client_secret_env, &config.client_secret_file),
+                "assertionKey": source(&config.assertion_key_env, &config.assertion_key_file),
                 "scope": config.scope,
                 "tokenUrl": config.token_url,
             })),
             "githubApp": self.github_app.map(|config| json!({
                 "appId": config.app_id,
                 "installationId": config.installation_id,
-                "privateKey": digest(&Some(config.private_key_env.clone())),
+                "privateKey": source(&config.private_key_env, &config.private_key_file),
             })),
             "helper": self.helper,
         })
@@ -205,7 +240,7 @@ pub(super) struct MintedAuth {
 
 enum Form {
     ClientCredentials {
-        client_id: String,
+        client_id: Credential,
         credential: ClientCredential,
         scope: Option<String>,
         token_url: Option<String>,
@@ -213,21 +248,44 @@ enum Form {
     GithubApp {
         app_id: u64,
         installation_id: u64,
-        key: SigningKey,
+        key: Credential,
     },
     Helper {
         command: Vec<String>,
     },
     RefreshToken {
-        stored: StoredRefreshToken,
+        source: Credential,
         token_url: Option<String>,
         state: Mutex<RefreshState>,
     },
 }
 
 enum ClientCredential {
-    Secret(String),
-    Assertion(Box<SigningKey>),
+    Secret(Credential),
+    /// A PEM private key, parsed at each use.
+    Assertion(Credential),
+}
+
+/// One credential field's value: from a Worker Host variable, fixed when the catalog loads, or
+/// from a host-local file, read again at each use.
+enum Credential {
+    Value(String),
+    File(CredentialFile),
+}
+
+impl Credential {
+    /// The value now, without naming it in any message.
+    fn current(&self, server: &str, field: &str) -> Result<String> {
+        match self {
+            Self::Value(value) => Ok(value.clone()),
+            Self::File(file) => file.read().with_context(|| {
+                format!(
+                    "MCP server {server} {field}File reads {}, which must be an owner-only file holding one value",
+                    file.path().display()
+                )
+            }),
+        }
+    }
 }
 
 /// A refresh token value: the token itself, or the JSON object `supertag mcp login --export`
@@ -265,54 +323,97 @@ pub(super) fn resolve(
     );
     // A value shorter than TRACKED_ENV_VALUE_BYTES is too short to recognize: withholding it
     // would drop every tool output that happens to contain it. A client ID is public.
-    let mut read = |field: &str, variable: &str, limit: usize, secret: bool| -> Result<String> {
-        ensure!(
-            valid_variable(variable),
-            "MCP server {name}: {field} must name a Worker Host variable not named SUPERTAG_*"
-        );
-        let value = environment(variable)
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .with_context(|| {
-                format!("MCP server {name} {field} reads {variable}, which is not set on this Worker Host")
-            })?;
-        ensure!(
-            value.len() <= limit && !value.contains('\0'),
-            "MCP server {name} {field} reads {variable}, whose value is too long"
-        );
+    let mut read = |field: &str,
+                    (variable, path): (Option<&String>, Option<&PathBuf>),
+                    limit: usize,
+                    secret: bool|
+     -> Result<Option<(Credential, String)>> {
+        let (credential, value) = match (variable, path) {
+            (None, None) => return Ok(None),
+            (Some(_), Some(_)) => {
+                bail!("MCP server {name}: {field} needs one of {field}Env or {field}File, not both")
+            }
+            (Some(variable), None) => {
+                ensure!(
+                    valid_variable(variable),
+                    "MCP server {name}: {field}Env must name a Worker Host variable not named SUPERTAG_*"
+                );
+                let value = environment(variable)
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty())
+                    .with_context(|| {
+                        format!("MCP server {name} {field}Env reads {variable}, which is not set on this Worker Host")
+                    })?;
+                ensure!(
+                    value.len() <= limit && !value.contains('\0'),
+                    "MCP server {name} {field}Env reads {variable}, whose value is too long"
+                );
+                (Credential::Value(value.clone()), value)
+            }
+            (None, Some(path)) => {
+                // A key or a refresh token's JSON may span lines.
+                let file = CredentialFile::new(
+                    path,
+                    limit,
+                    limit > VALUE_BYTES || field == "oauth.refreshToken",
+                )
+                .with_context(|| format!("MCP server {name}: {field}File"))?;
+                let credential = Credential::File(file);
+                let value = credential.current(name, field)?;
+                (credential, value)
+            }
+        };
         if secret && value.len() >= TRACKED_ENV_VALUE_BYTES {
             secrets.insert(value.clone());
         }
-        Ok(value)
+        Ok(Some((credential, value)))
     };
     let form = if let Some(config) = config.client_credentials {
         let token_url = token_url(name, config.token_url.as_deref())?;
-        let client_id = match (&config.client_id, &config.client_id_env) {
-            (Some(id), None) if !id.trim().is_empty() && id.len() <= 1024 => id.trim().to_owned(),
-            (None, Some(variable)) => read("clientCredentials.clientIdEnv", variable, 1024, false)?,
+        let id = read(
+            "clientCredentials.clientId",
+            (
+                config.client_id_env.as_ref(),
+                config.client_id_file.as_ref(),
+            ),
+            1024,
+            false,
+        )?;
+        let client_id = match (&config.client_id, id) {
+            (Some(id), None) if !id.trim().is_empty() && id.len() <= 1024 => {
+                Credential::Value(id.trim().to_owned())
+            }
+            (None, Some((credential, _))) => credential,
             _ => bail!(
-                "MCP server {name}: clientCredentials needs exactly one of clientId or clientIdEnv"
+                "MCP server {name}: clientCredentials needs exactly one of clientId, clientIdEnv, or clientIdFile"
             ),
         };
-        let credential = match (&config.client_secret_env, &config.assertion_key_env) {
-            (Some(variable), None) => ClientCredential::Secret(read(
-                "clientCredentials.clientSecretEnv",
-                variable,
-                VALUE_BYTES,
-                true,
-            )?),
-            (None, Some(variable)) => ClientCredential::Assertion(Box::new(signing_key(
-                name,
-                "clientCredentials.assertionKeyEnv",
-                &read(
-                    "clientCredentials.assertionKeyEnv",
-                    variable,
-                    KEY_BYTES,
-                    true,
-                )?,
-            )?)),
+        let secret = read(
+            "clientCredentials.clientSecret",
+            (
+                config.client_secret_env.as_ref(),
+                config.client_secret_file.as_ref(),
+            ),
+            VALUE_BYTES,
+            true,
+        )?;
+        let key = read(
+            "clientCredentials.assertionKey",
+            (
+                config.assertion_key_env.as_ref(),
+                config.assertion_key_file.as_ref(),
+            ),
+            KEY_BYTES,
+            true,
+        )?;
+        let credential = match (secret, key) {
+            (Some((secret, _)), None) => ClientCredential::Secret(secret),
+            (None, Some((key, pem))) => {
+                signing_key(name, "clientCredentials.assertionKey", &pem)?;
+                ClientCredential::Assertion(key)
+            }
             _ => bail!(
-                "MCP server {name}: clientCredentials needs exactly one of clientSecretEnv or assertionKeyEnv"
+                "MCP server {name}: clientCredentials needs exactly one of a client secret (clientSecretEnv or clientSecretFile) or an assertion key (assertionKeyEnv or assertionKeyFile)"
             ),
         };
         let scope = match &config.scope {
@@ -341,16 +442,23 @@ pub(super) fn resolve(
             config.app_id > 0 && config.installation_id > 0,
             "MCP server {name}: githubApp needs the App's numeric appId and the installation's numeric installationId"
         );
-        let pem = read(
-            "githubApp.privateKeyEnv",
-            &config.private_key_env,
+        let (key, pem) = read(
+            "githubApp.privateKey",
+            (
+                config.private_key_env.as_ref(),
+                config.private_key_file.as_ref(),
+            ),
             KEY_BYTES,
             true,
-        )?;
+        )?
+        .with_context(|| {
+            format!("MCP server {name}: githubApp needs privateKeyEnv or privateKeyFile")
+        })?;
+        signing_key(name, "githubApp.privateKey", &pem)?;
         Form::GithubApp {
             app_id: config.app_id,
             installation_id: config.installation_id,
-            key: signing_key(name, "githubApp.privateKeyEnv", &pem)?,
+            key,
         }
     } else if let Some(command) = config.helper {
         ensure!(
@@ -371,27 +479,22 @@ pub(super) fn resolve(
         }
     } else if let OAuthConfig::RefreshToken(config) = config.oauth {
         let token_url = token_url(name, config.token_url.as_deref())?;
-        let value = read(
-            "oauth.refreshTokenEnv",
-            &config.refresh_token_env,
+        let (source, value) = read(
+            "oauth.refreshToken",
+            (
+                config.refresh_token_env.as_ref(),
+                config.refresh_token_file.as_ref(),
+            ),
             VALUE_BYTES,
             true,
-        )?;
-        let stored = stored_refresh_token(&value);
-        ensure!(
-            valid_token(&stored.refresh_token),
-            "MCP server {name} oauth.refreshTokenEnv reads {}, which holds no refresh token",
-            config.refresh_token_env
-        );
-        secrets.extend(
-            [Some(&stored.refresh_token), stored.client_secret.as_ref()]
-                .into_iter()
-                .flatten()
-                .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES)
-                .cloned(),
-        );
+        )?
+        .with_context(|| {
+            format!("MCP server {name}: oauth needs refreshTokenEnv or refreshTokenFile")
+        })?;
+        let stored = stored_refresh_token(name, &value)?;
+        secrets.extend(stored.secrets());
         Form::RefreshToken {
-            stored,
+            source,
             token_url,
             state: Mutex::default(),
         }
@@ -435,7 +538,29 @@ fn token_url(name: &str, value: Option<&str>) -> Result<Option<String>> {
     Ok(Some(url.into()))
 }
 
-fn stored_refresh_token(value: &str) -> StoredRefreshToken {
+/// Parses a refresh token value, refusing one that holds no refresh token.
+fn stored_refresh_token(server: &str, value: &str) -> Result<StoredRefreshToken> {
+    let stored = parse_refresh_token(value);
+    ensure!(
+        valid_token(&stored.refresh_token),
+        "MCP server {server} oauth.refreshToken holds no refresh token"
+    );
+    Ok(stored)
+}
+
+impl StoredRefreshToken {
+    /// The values withheld from Task-visible output: the token and any client secret.
+    fn secrets(&self) -> Vec<String> {
+        [Some(&self.refresh_token), self.client_secret.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES)
+            .cloned()
+            .collect()
+    }
+}
+
+fn parse_refresh_token(value: &str) -> StoredRefreshToken {
     let raw = || StoredRefreshToken {
         refresh_token: value.to_owned(),
         client_id: None,
@@ -505,9 +630,12 @@ impl MintedAuth {
                 installation_id,
                 key,
             } => {
+                let pem = key.current(server, "githubApp.privateKey")?;
+                secrets.push(pem.clone());
+                let key = signing_key(server, "githubApp.privateKey", &pem)?;
                 let issued = now_ms() / 1000 - 60;
                 let jwt = sign_jwt(
-                    key,
+                    &key,
                     &json!({"iat": issued, "exp": issued + 540, "iss": app_id.to_string()}),
                 )?;
                 secrets.push(jwt.clone());
@@ -549,6 +677,7 @@ impl MintedAuth {
                 scope,
                 token_url,
             } => {
+                let client_id = &client_id.current(server, "clientCredentials.clientId")?;
                 let endpoint = self.endpoint(client, url, token_url.as_deref()).await?;
                 let mut form = vec![
                     ("grant_type", "client_credentials".to_owned()),
@@ -560,15 +689,22 @@ impl MintedAuth {
                 let mut basic = None;
                 match credential {
                     ClientCredential::Secret(secret) => {
+                        let secret = secret.current(server, "clientCredentials.clientSecret")?;
+                        if secret.len() >= TRACKED_ENV_VALUE_BYTES {
+                            secrets.push(secret.clone());
+                        }
                         basic = Some(format!(
                             "Basic {}",
-                            STANDARD.encode(format!("{}:{}", encode(client_id), encode(secret)))
+                            STANDARD.encode(format!("{}:{}", encode(client_id), encode(&secret)))
                         ));
                     }
                     ClientCredential::Assertion(key) => {
+                        let pem = key.current(server, "clientCredentials.assertionKey")?;
+                        secrets.push(pem.clone());
+                        let key = signing_key(server, "clientCredentials.assertionKey", &pem)?;
                         let issued = now_ms() / 1000;
                         let assertion = sign_jwt(
-                            key,
+                            &key,
                             &json!({
                                 "iss": client_id,
                                 "sub": client_id,
@@ -600,7 +736,7 @@ impl MintedAuth {
                 access_token(server, &token_response(server, "token", response).await?)?
             }
             Form::RefreshToken {
-                stored,
+                source,
                 token_url,
                 state,
             } => {
@@ -619,6 +755,9 @@ impl MintedAuth {
                         secrets,
                     });
                 }
+                let stored =
+                    stored_refresh_token(server, &source.current(server, "oauth.refreshToken")?)?;
+                secrets.extend(stored.secrets());
                 let endpoint = self.endpoint(client, url, token_url.as_deref()).await?;
                 let refresh_token = state
                     .rotated
@@ -1059,13 +1198,13 @@ mod tests {
             (
                 json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id"}}),
                 vec![],
-                "exactly one of clientSecretEnv or assertionKeyEnv",
+                "exactly one of a client secret (clientSecretEnv or clientSecretFile) or an assertion key",
                 "",
             ),
             (
                 json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientIdEnv":"CC_ID","clientSecretEnv":"CC_SECRET"}}),
                 vec![("CC_ID", "x"), ("CC_SECRET", "y")],
-                "exactly one of clientId or clientIdEnv",
+                "exactly one of clientId, clientIdEnv, or clientIdFile",
                 "",
             ),
             (
@@ -1130,6 +1269,259 @@ mod tests {
             assert!(error.contains(message), "{server}: {error}");
             assert!(value.is_empty() || !error.contains(value), "{error}");
         }
+    }
+
+    /// An owner-only credential file in `directory`.
+    fn credential_file(directory: &Path, name: &str, contents: &str) -> PathBuf {
+        let path = directory.join(name);
+        std::fs::write(&path, contents).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_every_credential_from_an_owner_only_file_and_refuses_shared_ones() {
+        let url = "https://mcp.example.test/mcp";
+        let directory = tempfile::tempdir().unwrap();
+        let path = |name: &str, contents: &str| credential_file(directory.path(), name, contents);
+        let key = path("app.pem", RSA_KEY);
+        let parsed = catalog(
+            json!({"name":"app","url":url,"githubApp":{"appId":1,"installationId":2,"privateKeyFile":key}}),
+            &[],
+        )
+        .unwrap();
+        assert!(parsed.secrets.iter().any(|secret| secret == RSA_KEY.trim()));
+        let binding = parsed.servers["app"].capability.provider_binding.clone();
+        // A file is read at each use, so its binding names the file, not the key it holds now.
+        std::fs::write(&key, EC_KEY).unwrap();
+        let rotated = catalog(
+            json!({"name":"app","url":url,"githubApp":{"appId":1,"installationId":2,"privateKeyFile":key}}),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(rotated.servers["app"].capability.provider_binding, binding);
+        let parsed = catalog(
+            json!({"name":"cc","url":url,"clientCredentials":{
+                "clientIdFile":path("id", "client-id-from-file\n"),
+                "clientSecretFile":path("secret", " client-secret-from-file \n"),
+            }}),
+            &[],
+        )
+        .unwrap();
+        assert!(
+            parsed
+                .secrets
+                .contains(&"client-secret-from-file".to_owned())
+        );
+        assert!(!parsed.secrets.contains(&"client-id-from-file".to_owned()));
+        let parsed = catalog(
+            json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","assertionKeyFile":path("cc.pem", EC_KEY)}}),
+            &[],
+        )
+        .unwrap();
+        assert!(parsed.secrets.iter().any(|secret| secret == EC_KEY.trim()));
+        // A refresh token file may hold the JSON `supertag mcp login --export` prints, on lines.
+        let parsed = catalog(
+            json!({"name":"docs","url":url,"oauth":{"refreshTokenFile":path("refresh", "{\n  \"refresh_token\": \"refresh-from-file\",\n  \"client_secret\": \"exported-file-secret\"\n}\n")}}),
+            &[],
+        )
+        .unwrap();
+        for secret in ["refresh-from-file", "exported-file-secret"] {
+            assert!(parsed.secrets.contains(&secret.to_owned()), "{secret}");
+        }
+        let parsed = catalog(
+            json!({"name":"h","url":url,"headerFile":{"Authorization":path("header", "Bearer header-from-file\n")},"headerEnv":{"X-Team":"TEAM_HEADER"}}),
+            &[("TEAM_HEADER", "team-header-value")],
+        )
+        .unwrap();
+        let server = http(&parsed, "h");
+        assert_eq!(server.header_files.len(), 1);
+        assert!(!server.headers.contains_key(reqwest::header::AUTHORIZATION));
+        for secret in ["Bearer header-from-file", "header-from-file"] {
+            assert!(parsed.secrets.contains(&secret.to_owned()), "{secret}");
+        }
+        let entries_file = directory.path().join("catalog.json");
+        std::fs::write(
+            &entries_file,
+            json!({"version":1,"servers":[
+                {"name":"h","url":url,"headerFile":{"Authorization":directory.path().join("absent")}},
+                {"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientSecretFile":path("secret", "client-secret-from-file")}},
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&entries_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // `supertag mcp list` names an unreadable file, never a value.
+        let entries = McpCatalog::entries(&entries_file).unwrap();
+        assert_eq!(
+            entries[0].missing,
+            [directory.path().join("absent").display().to_string()]
+        );
+        assert_eq!(entries[0].auth, "headers");
+        assert!(entries[1].missing.is_empty());
+
+        let shared = path("shared", "shared-secret-value");
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let secret = path("secret", "file-secret-value");
+        for (server, message) in [
+            (
+                json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientSecretFile":shared}}),
+                "clientCredentials.clientSecretFile reads",
+            ),
+            (
+                json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientSecretFile":"secret"}}),
+                "clientCredentials.clientSecretFile",
+            ),
+            (
+                json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientSecretEnv":"CC_SECRET","clientSecretFile":secret}}),
+                "needs one of clientCredentials.clientSecretEnv or clientCredentials.clientSecretFile, not both",
+            ),
+            (
+                json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","clientIdFile":secret,"clientSecretFile":secret}}),
+                "exactly one of clientId, clientIdEnv, or clientIdFile",
+            ),
+            (
+                json!({"name":"cc","url":url,"clientCredentials":{"clientId":"id","assertionKeyFile":secret}}),
+                "is not an RSA or EC private key in PEM form",
+            ),
+            (
+                json!({"name":"app","url":url,"githubApp":{"appId":1,"installationId":2}}),
+                "githubApp needs privateKeyEnv or privateKeyFile",
+            ),
+            (
+                json!({"name":"app","url":url,"githubApp":{"appId":1,"installationId":2,"privateKeyFile":shared}}),
+                "githubApp.privateKeyFile reads",
+            ),
+            (
+                json!({"name":"docs","url":url,"oauth":{}}),
+                "oauth needs refreshTokenEnv or refreshTokenFile",
+            ),
+            (
+                json!({"name":"docs","url":url,"oauth":{"refreshTokenFile":directory.path().join("absent")}}),
+                "oauth.refreshTokenFile reads",
+            ),
+            (
+                json!({"name":"h","url":url,"headerFile":{"Authorization":shared}}),
+                "headerFile Authorization reads",
+            ),
+            (
+                json!({"name":"h","url":url,"headerFile":{"Authorization":secret},"headerEnv":{"Authorization":"H_AUTH"}}),
+                "set the header in headerEnv or headerFile, not both",
+            ),
+            (
+                json!({"name":"h","url":url,"helper":["/bin/sh"],"headerFile":{"Authorization":secret}}),
+                "supplies the Authorization header",
+            ),
+            (
+                json!({"name":"h","url":url,"headerFile":{"X-Key":secret,"x-key":secret}}),
+                "duplicate MCP request header",
+            ),
+            (
+                json!({"name":"h","url":url,"headerFile":{"Host":secret}}),
+                "invalid MCP request header binding",
+            ),
+            (
+                json!({"name":"h","command":["/bin/cat"],"headerFile":{"Authorization":secret}}),
+                "a stdio server has no HTTP authentication",
+            ),
+        ] {
+            let error = catalog(
+                server.clone(),
+                &[
+                    ("CC_SECRET", "env-secret-value"),
+                    ("H_AUTH", "Bearer env-header"),
+                ],
+            )
+            .err()
+            .map(|error| format!("{error:#}"))
+            .unwrap_or_else(|| panic!("{server} was accepted"));
+            assert!(error.contains(message), "{server}: {error}");
+            assert!(
+                !error.contains("shared-secret-value") && !error.contains("file-secret-value"),
+                "{error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn credential_files_are_read_again_for_each_attempt() {
+        let directory = tempfile::tempdir().unwrap();
+        // A client secret file: each Attempt's token request uses the file's value then.
+        let (address, served) = serve(vec![
+            (
+                200,
+                "application/json",
+                json!({"access_token":"cc-access-1"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+            (
+                200,
+                "application/json",
+                json!({"access_token":"cc-access-2"}).to_string(),
+            ),
+            (200, "application/json", initialize()),
+            (202, "application/json", String::new()),
+        ])
+        .await;
+        let origin = format!("http://127.0.0.1:{}", address.port());
+        let secret = credential_file(directory.path(), "secret", "client-secret-one\n");
+        let header = credential_file(directory.path(), "header", "token-header-one\n");
+        let parsed = catalog(
+            json!({"name":"cc","url":format!("{origin}/mcp"),
+                "headerFile":{"X-Api-Key":header},
+                "clientCredentials":{"clientId":"id","clientSecretFile":secret,"tokenUrl":format!("{origin}/token")}}),
+            &[],
+        )
+        .unwrap();
+        let server = http(&parsed, "cc");
+        let mut first = Session::new(client().unwrap(), server.clone(), None);
+        first.initialize().await.unwrap();
+        std::fs::write(&secret, "client-secret-two\n").unwrap();
+        std::fs::write(&header, "token-header-two\n").unwrap();
+        let mut second = Session::new(client().unwrap(), server.clone(), None);
+        second.initialize().await.unwrap();
+        // The values each Attempt read are withheld from its Task-visible output.
+        for (session, secret, header) in [
+            (&first, "client-secret-one", "token-header-one"),
+            (&second, "client-secret-two", "token-header-two"),
+        ] {
+            assert!(session.tokens.contains(&secret.to_owned()), "{secret}");
+            assert!(session.tokens.contains(&header.to_owned()), "{header}");
+        }
+        let requests = served.await.unwrap();
+        for (index, secret, header) in [
+            (0, "client-secret-one", "token-header-one"),
+            (3, "client-secret-two", "token-header-two"),
+        ] {
+            let basic = format!(
+                "authorization: basic {}",
+                STANDARD.encode(format!("id:{secret}"))
+            )
+            .to_ascii_lowercase();
+            assert!(requests[index].headers.contains(&basic), "{index}");
+            assert!(
+                requests[index + 1]
+                    .headers
+                    .contains(&format!("x-api-key: {header}")),
+                "{index}"
+            );
+        }
+        // A file that is no longer an owner-only file makes the server unavailable for the
+        // Attempt, before any request.
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut third = Session::new(client().unwrap(), server.clone(), None);
+        assert!(matches!(
+            third.initialize().await,
+            Err(Failure::Unavailable)
+        ));
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_file(&header).unwrap();
+        let mut fourth = Session::new(client().unwrap(), server, None);
+        assert!(matches!(
+            fourth.initialize().await,
+            Err(Failure::Unavailable)
+        ));
     }
 
     #[tokio::test]
