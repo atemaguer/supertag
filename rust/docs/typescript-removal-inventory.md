@@ -171,7 +171,7 @@ exist, and required every tracked TypeScript test file to be cited. The ledger i
 - still checks every cited Rust test name against the current Rust sources, so renaming or
   deleting Rust evidence fails;
 - requires every other cited path (Rust, Go, Python, scripts, and docs included) to exist now,
-  unless it is in `tests/rust-port-baseline/removed-at-cutover.txt`, the 1,367 tracked files at
+  unless it is in `tests/rust-port-baseline/removed-at-cutover.txt`, the 1,359 tracked files at
   `6c934be8` that the cutover deleted (both steps). A later deletion of a cited file therefore fails;
 - checks the test-file assignment against `frozen-test-files.txt`, the 591 TypeScript, Go, and
   Python test files at `6c934be8`.

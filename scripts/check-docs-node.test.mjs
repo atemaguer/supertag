@@ -27,11 +27,11 @@ test("requirements describe managed harness telemetry and credential limits", ()
     resolve(root, "docs/operations/requirements.md"),
     "utf8",
   ).replace(/\s+/gu, " ");
-  assert.match(requirements, /default Worker runs `codex exec`/u);
-  assert.match(requirements, /--codex-execution-mode app-server/u);
-  assert.match(requirements, /no supported telemetry opt-out for managed Claude Workers/u);
+  assert.match(requirements, /Codex adapter runs `codex app-server`/u);
+  assert.match(requirements, /analytics\.enabled=false/u);
+  assert.match(requirements, /no supported telemetry opt-out for Claude Code Tasks/u);
   assert.match(requirements, /does not forward `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING`/u);
-  assert.match(requirements, /does not use credentials from `opencode auth login`/u);
+  assert.match(requirements, /OpenCode receives only provider environment credentials/u);
   assert.match(requirements, /copies `~\/\.codex\/auth\.json`/u);
   assert.match(requirements, /long-lived ChatGPT refresh token/u);
   assert.match(requirements, /leaves `experimental\.openTelemetry` unset/u);

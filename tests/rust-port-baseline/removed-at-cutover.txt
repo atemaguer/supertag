@@ -1,7 +1,5 @@
 .dockerignore
-.github/workflows/publish.yml
 .github/workflows/release-cli.yml
-.github/workflows/verify-installer.yml
 apps/cli/action-command.test.ts
 apps/cli/cancelled-task-description.test.ts
 apps/cli/coordination.test.ts
@@ -194,9 +192,6 @@ deploy/railway/railway.json
 deploy/shared/package.json
 deploy/shared/src/index.ts
 deploy/shared/tsconfig.json
-docs/guides/deploy-fly.md
-docs/guides/deploy-railway.md
-docs/guides/deployment-setup.md
 docs/reference/operator-api/README.md
 docs/reference/operator-api/access.md
 docs/reference/operator-api/conversation.md
@@ -251,7 +246,6 @@ examples/shared-organization/verify.mjs
 examples/shared-organization/worker-auth.d.mts
 examples/shared-organization/worker-auth.mjs
 examples/shared-organization/worker.mjs
-install.sh
 packages/control-plane/artifact-transfer-catalog.test.ts
 packages/control-plane/budget-notifications.test.ts
 packages/control-plane/budget-report.test.ts
@@ -879,7 +873,6 @@ scripts/test-verify-lib.mjs
 scripts/test-verify-reporter.mjs
 scripts/test-verify.mjs
 scripts/verify-artifact-organization.ts
-scripts/verify-public-installer.sh
 scripts/with-test-postgres.mjs
 scripts/with-test-postgres.test.mjs
 scripts/worklet-grpc-docker-soak.ts
@@ -1180,7 +1173,6 @@ tests/python-execution-conformance.test.ts
 tests/python-session-conformance.test.ts
 tests/recover-worklet-host.test.ts
 tests/redaction-rule.test.ts
-tests/release-version.test.ts
 tests/remote-worker-transport.test.ts
 tests/removed-host.test.ts
 tests/repository-execution.test.ts
