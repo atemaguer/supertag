@@ -13,6 +13,7 @@ import {
   startCoordinationHttp,
   startTaskMcpHttp,
   TaskState,
+  tagPortfolio,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { CURSOR_WORKER_POLICY, cursorToolsForSplit, runCursor } from "../index.js";
 import {
@@ -238,6 +239,7 @@ export async function runAdapter(
         const prompt = [
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
+          safeText(tagPortfolio(run), secrets),
           shared
             ? "Use paths relative to the fixed shared root in the admitted file tools."
             : run.remoteWorkspace

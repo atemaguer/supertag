@@ -43,6 +43,7 @@ mod spend;
 mod store;
 mod surface_objectives;
 mod surface_policy;
+mod tag_sessions;
 mod tags;
 mod task_artifact_inputs;
 mod teams;

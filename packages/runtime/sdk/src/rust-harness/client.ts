@@ -13,6 +13,7 @@ import {
   HarnessWorkspace,
   HarnessWorkstreams,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import { HarnessTagSessions } from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 
 /** This is a Worker-owned, execution-scoped transport, never a public control-plane client. */
 export async function readBootstrap(input: AsyncIterable<Uint8Array>) {
@@ -62,6 +63,8 @@ export function harnessClient(endpoint: string, token: string) {
   const workstreams = createClient(HarnessWorkstreams, transport);
   const mailbox = createClient(HarnessMailbox, transport);
   const workSessions = createClient(HarnessWorkSessions, transport);
+  // The Tag's other Sessions and its Objectives, for a root turn.
+  const tagSessions = createClient(HarnessTagSessions, transport);
   const workspace = createClient(HarnessWorkspace, transport);
   const artifacts = createClient(HarnessArtifacts, transport);
   const mcp = createClient(HarnessMcp, transport);
@@ -75,6 +78,7 @@ export function harnessClient(endpoint: string, token: string) {
     workstreams,
     mailbox,
     workSessions,
+    tagSessions,
     workspace,
     artifacts,
     mcp,

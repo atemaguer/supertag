@@ -46,10 +46,13 @@ cancelled or reaches its time limit, and it cleans up processes the adapter leav
 
 Further services on the same endpoint let an adapter ask the operator a question
 (`HarnessQuestions`), post to a Team's Workstream (`HarnessWorkstreams`), send Mailbox messages
-(`HarnessMailbox`), start or continue work Sessions (`HarnessWorkSessions`), capture artifacts
-(`HarnessArtifacts`), use MCP servers the host offers (`HarnessMcp`), and record external effects
-so a retry does not repeat them (`HarnessEffects`). The run's capabilities say which of these the
-Task may use. The messages are defined in
+(`HarnessMailbox`), start or continue work Sessions (`HarnessWorkSessions`), list, search, and
+read the Tag's other Sessions and Objectives or create an Objective a person asked for
+(`HarnessTagSessions`), capture artifacts (`HarnessArtifacts`), use MCP servers the host offers
+(`HarnessMcp`), and record external effects so a retry does not repeat them (`HarnessEffects`).
+The run's capabilities say which of these the Task may use. When the Task reads the Tag's
+Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter
+adds to the turn's context. The messages are defined in
 [`runtime.proto`](../../rust/proto/supertag/runtime/v2/runtime.proto) and its siblings.
 
 ## Write one in Python

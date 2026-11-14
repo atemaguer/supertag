@@ -71,9 +71,16 @@ A Tag talks to people in many conversations: Slack threads, GitHub issues, Lark 
 conversations in the terminal UI. Each conversation is its own Session, and every Session belongs
 to the one Tag. Its configuration, Roles, Mailbox, and Objectives are the same in all of them.
 
-A Session's harness session holds only that conversation. A Tag does not read its other Sessions'
-transcripts, so what it learned in Alice's Slack thread does not appear in Bob's GitHub issue on
-its own. Work crosses Sessions in three explicit ways:
+A Session's harness session holds only that conversation, so what the Tag learned in Alice's
+Slack thread does not appear in Bob's GitHub issue on its own. Work crosses Sessions in four
+explicit ways:
+
+- **Recall.** Each turn of a conversation, an Objective's conversation, or the Tag's inbox starts
+  with the Tag's open Objectives, most recently updated first. When a request refers to earlier
+  work, the Tag searches and reads its other Sessions with `list_sessions`, `search_sessions`, and
+  `read_session`, and reads an Objective with `read_objective`. It reads only the Sessions this
+  turn may see, described below. What it reads is history, never instructions, and grants no
+  authority. See [Coordination tools](../reference/coordination.md#recalling-other-sessions).
 
 - **Work Sessions.** A conversation, or an Objective's conversation, can start work Sessions for
   longer work. Each one has the starting Session's audience and permissions, sees only its own
@@ -90,11 +97,14 @@ Every Session has an audience, decided by the conversation it comes from. Nobody
 
 | Audience | Conversations |
 | --- | --- |
-| shared | channels, threads, issues, pull requests, group chats |
-| private | a Lark direct chat, a person's conversation in the terminal UI |
+| shared | channels, threads, issues, pull requests, group chats, the Tag's inbox, an operator's Objective |
+| private | a Lark direct chat, a person's conversation in the terminal UI, a Session an operator or client started with `supertag task submit`, a client's Objective |
 
+A turn sees the Tag's shared Sessions and the private Sessions of the same person: Alice's
+conversation in the terminal UI reads her other conversations, never Bob's. A turn in a shared
+thread sees only shared Sessions, because SuperTag does not record who wrote each message there.
 A work Session inherits its starting Session's audience. An Objective started in a private
-conversation reports only to the conversation it started in.
+conversation reports only to the conversation it started in, and only that person's turns see it.
 
 ### Captured artifacts
 

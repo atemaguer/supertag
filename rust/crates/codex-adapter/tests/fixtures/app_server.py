@@ -64,6 +64,16 @@ if root.joinpath("artifact-mode").exists():
         "paths": ["report.txt"],
     }))
 
+if root.joinpath("tag-sessions-mode").exists():
+    coordination_tools.extend([
+        ("list_sessions", {"limit": 5}),
+        ("search_sessions", {"query": "release"}),
+        ("read_session", {"sessionId": "conversation/earlier", "before": 9}),
+        ("list_objectives", {}),
+        ("read_objective", {"objectiveId": "docs"}),
+        ("create_objective", {"outcome": "Publish notes synthetic-codex-provider-secret", "deadline": "2026-12-01T00:00:00Z", "budgetLimitMinor": 500, "budgetCurrency": "USD"}),
+    ])
+
 if root.joinpath("artifact-read-mode").exists():
     coordination_tools.append(("read_artifact", {"artifactId": "artifact-prior", "path": "evidence.txt"}))
 

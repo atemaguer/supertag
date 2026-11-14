@@ -34,6 +34,7 @@ pub(crate) enum Arguments {
     Send(DirectMessage),
     Start(StartSession),
     Continue(ContinueSession),
+    TagSessions(crate::tag_sessions::Call),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

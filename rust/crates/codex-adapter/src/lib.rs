@@ -9,6 +9,7 @@ mod events;
 mod pricing;
 mod questions;
 mod skills;
+mod tag_sessions;
 
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::Stdio, time::Duration};
 
@@ -126,12 +127,14 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         capture_artifact: attached.may_capture_artifacts,
         acquire_artifacts: attached.may_acquire_artifacts,
         attach_artifacts: attached.may_materialize_artifacts,
+        tag_sessions: capabilities.may_read_tag_sessions,
     };
     let tools = previous_tools.unwrap_or(questions::Tools {
         coordination: inventory,
         capture_artifact: attached.checkpoint.is_none() && attached.may_capture_artifacts,
         acquire_artifacts: attached.checkpoint.is_none() && attached.may_acquire_artifacts,
         attach_artifacts: attached.checkpoint.is_none() && attached.may_materialize_artifacts,
+        tag_sessions: attached.checkpoint.is_none() && capabilities.may_read_tag_sessions,
     });
     let mut questions = questions::Bridge::new(
         (channel, artifact_channel),

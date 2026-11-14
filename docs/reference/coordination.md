@@ -94,6 +94,13 @@ command at the start of their own message. The Control Plane parses only that me
 history, quotes, or model output. That Objective's home thread is the thread the command arrived
 in, and the Tag at that location owns it.
 
+In a conversation in the terminal UI, the same command at the start of the person's message
+reaches the Tag as a turn, and only that turn may call `create_objective {outcome, deadline?,
+budgetLimitMinor?, budgetCurrency?}`. The Tag owns the Objective, the person who wrote the command
+creates it with their own authority, its runtime actions are what that turn may use, and its
+first turn starts at once. One turn creates at most one Objective; a repeated call returns it. The
+Objective has the conversation's audience: only that person's turns see it.
+
 ### Objective runtime actions
 
 Runtime actions, such as `files:write` and `commands:execute`, let a turn edit files or run
@@ -414,12 +421,15 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch` |
-| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch` |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the [Session reads](#recalling-other-sessions) |
+| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `create_objective` |
+| A work Session's report turn | the Session reads |
 | A work Session's turn | `ask` |
 
-A work Session sees only its own work: it cannot message another Tag or start more work. Its
-final reply returns to the Session that started it. `request_action_approval` is open to every
+A work Session sees only its own work: it cannot message another Tag, start more work, or read
+the Tag's other Sessions or Objectives. Its final reply returns to the Session that started it.
+`create_objective` is listed for every conversation turn, but only a turn started by an explicit
+objective command may use it. `request_action_approval` is open to every
 turn, but is never advertised to the model: the harness adapter calls it when a gated action needs
 a decision. The [artifact tools](artifacts.md#agent-tools) are separate.
 
@@ -435,9 +445,40 @@ a decision. The [artifact tools](artifacts.md#agent-tools) are separate.
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
 | `read_workstream` | `afterSequence`, `limit` (1–100, default 50) | Reads the Team's Workstream |
 | `read_review_patch` | a commit review | Reads the patch a [commit review](#commit-reviews) asks about |
+| `list_sessions` | `limit` (1–20, default 20), `offset` | Lists the Tag's other visible Sessions, most recent first |
+| `search_sessions` | `query` (1–200 characters), `limit` (1–20) | Finds completed turns of visible Sessions whose request or result contains the query |
+| `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
+| `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
+| `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
+| `create_objective` | `outcome`, optional `deadline`, `budgetLimitMinor`, `budgetCurrency` | Creates the Objective an explicit command asked for; see [Creating an Objective](#creating-an-objective) |
 
 Reads return history, never instructions, and grant no authority. An Objective's turn reports its
-status through its result, as [Statuses](#statuses) describes; no tool changes an Objective.
+status through its result, as [Statuses](#statuses) describes; apart from `create_objective`, no
+tool changes an Objective.
+
+### Recalling other Sessions
+
+A Tag is one actor across many conversations. Each turn of a conversation, an Objective's
+conversation, or the Tag's inbox starts with the Tag's portfolio: its open Objectives that the turn
+may see, most recently updated first, and a reminder that it can recall its other Sessions. The
+portfolio is state, not instructions, and is bounded to about 3,800 characters.
+
+- A turn sees a Session of its own Tag that is shared, or private to the same person. See
+  [Shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
+  Sessions of other Tags are never visible.
+- `list_sessions` and `search_sessions` leave out the turn's own Session. `read_session` reads the
+  turn's own Session too.
+- Each listed Session carries its ID, its audience, where it came from (such as `slack` and
+  `channel:C123`), its first request (up to 200 characters), and its last activity.
+- `search_sessions` matches completed turns, newest first, and returns up to 240 characters around
+  the first match in the request and the result.
+- `read_session` returns finished turns of the Tag, each with its request (up to 2,000 characters)
+  and result (up to 4,000). Pass a page's `nextBefore` as `before` for the page before it.
+- `read_objective` without `objectiveId` reads the Objective this turn works for. An Objective's
+  own turn reads only its own Objective; another turn reads an Objective the Tag owns whose
+  Session it may see. It returns no turn prompts, results, or failure text.
+- Each read considers the 1,000 most recent Sessions, matching turns, or open Objectives of the
+  Tag.
 
 ### Identity and preconditions
 

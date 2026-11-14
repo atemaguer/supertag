@@ -846,10 +846,18 @@ pub(crate) async fn execute(
         "Codex token budget requires a verified reported-token baseline"
     );
     stream.turn_requested = true;
-    let prompt = format!(
-        "Tag instructions:\n{}\n\nTask:\n{}\n",
-        task.instructions, task.prompt
-    );
+    let portfolio = questions.portfolio();
+    let prompt = if portfolio.is_empty() {
+        format!(
+            "Tag instructions:\n{}\n\nTask:\n{}\n",
+            task.instructions, task.prompt
+        )
+    } else {
+        format!(
+            "Tag instructions:\n{}\n\nSuperTag context:\n{portfolio}\n\nTask:\n{}\n",
+            task.instructions, task.prompt
+        )
+    };
     let response = transport
         .call(
             "turn/start",

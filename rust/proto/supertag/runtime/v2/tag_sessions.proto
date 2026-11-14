@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+import "supertag/runtime/v2/objective_overview.proto";
+
+// A Tag is one actor across many Sessions. A root turn of a Tag (a conversation's, an
+// Objective's, the inbox's, or a Work Session report) reads the Tag's other Sessions and its
+// Objectives with these calls; a Work Session sees only its own work. What they return is
+// untrusted history and grants no authority.
+//
+// Visibility: a turn sees a Session of its own Tag that is shared (a surface channel, thread,
+// issue, or pull request; the Tag's inbox; an operator's Objective) or private to the same
+// requester (an operator or client conversation, a Lark direct chat). A Work Session has its
+// parent's audience. An Objective is visible when its Session is.
+service AttemptTagSessions {
+  rpc ListSessions(ListTagSessionsRequest) returns (ListTagSessionsResponse);
+  rpc SearchSessions(SearchTagSessionsRequest) returns (SearchTagSessionsResponse);
+  rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
+  rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
+  rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
+  // Only a conversation turn whose message is its requester's explicit
+  // `@SuperTag objective <outcome>` command, at most once per Task.
+  rpc CreateObjective(CreateTagObjectiveRequest) returns (CreateTagObjectiveResponse);
+}
+
+// Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
+// Attempt it supervises; an adapter leaves it unset.
+service HarnessTagSessions {
+  rpc ListSessions(ListTagSessionsRequest) returns (ListTagSessionsResponse);
+  rpc SearchSessions(SearchTagSessionsRequest) returns (SearchTagSessionsResponse);
+  rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
+  rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
+  rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
+  rpc CreateObjective(CreateTagObjectiveRequest) returns (CreateTagObjectiveResponse);
+}
+
+// Who sees a Session from the Tag's other Sessions.
+enum TagSessionAudience {
+  TAG_SESSION_AUDIENCE_UNSPECIFIED = 0;
+  TAG_SESSION_AUDIENCE_SHARED = 1;
+  TAG_SESSION_AUDIENCE_PRIVATE = 2;
+}
+
+message TagSessionSummary {
+  string session_id = 1;
+  TagSessionAudience audience = 2;
+  // The surface it came from, such as `slack`, and where, such as `channel:C123`.
+  string provider = 3;
+  string scope = 4;
+  // The Session's first request, at most 200 characters.
+  string first_request = 5;
+  int64 last_interaction_at_ms = 6;
+}
+
+// At most 20 per page (default 20).
+message ListTagSessionsRequest {
+  InspectAttemptRequest attempt = 1;
+  uint32 limit = 2;
+  uint32 offset = 3;
+}
+
+// Visible Sessions other than the caller's own, most recent activity first.
+message ListTagSessionsResponse {
+  repeated TagSessionSummary sessions = 1;
+}
+
+// `query` is 1 to 200 characters, matched case-insensitively against each
+// succeeded Task's request and result.
+message SearchTagSessionsRequest {
+  InspectAttemptRequest attempt = 1;
+  string query = 2;
+  uint32 limit = 3;
+}
+
+message TagSessionSearchHit {
+  string session_id = 1;
+  string task_id = 2;
+  optional int64 completed_at_ms = 3;
+  string provider = 4;
+  string scope = 5;
+  // At most 240 characters around the first match.
+  string request_excerpt = 6;
+  string result_excerpt = 7;
+}
+
+// Most recent first, never the caller's own Session.
+message SearchTagSessionsResponse {
+  repeated TagSessionSearchHit matches = 1;
+}
+
+// One page of a visible Session's finished Tasks of the caller's Tag, newest
+// page first; `before` is a previous page's `next_before`.
+message ReadTagSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string session_id = 2;
+  uint32 limit = 3;
+  optional uint64 before = 4;
+}
+
+message TagSessionEntry {
+  string task_id = 1;
+  TaskState state = 2;
+  // At most 2,000 characters, then `[truncated]`.
+  string request = 3;
+  // At most 4,000 characters, then `[truncated]`.
+  string result = 4;
+  optional int64 completed_at_ms = 5;
+}
+
+// Entries oldest first. `next_before` is set when an older page may exist.
+message ReadTagSessionResponse {
+  TagSessionSummary session = 1;
+  repeated TagSessionEntry entries = 2;
+  optional uint64 next_before = 3;
+}
+
+message TagObjectiveSummary {
+  string objective_id = 1;
+  ObjectiveStatus status = 2;
+  string outcome = 3;
+  optional int64 deadline_ms = 4;
+  int64 updated_at_ms = 5;
+  // Where its home thread is, when a surface thread started it.
+  string home_provider = 6;
+  string home_scope = 7;
+}
+
+message ListTagObjectivesRequest {
+  InspectAttemptRequest attempt = 1;
+  uint32 limit = 2;
+  uint32 offset = 3;
+}
+
+// Open Objectives the caller's Tag owns whose Session it may see, most
+// recently updated first, and how many there are in all.
+message ListTagObjectivesResponse {
+  repeated TagObjectiveSummary objectives = 1;
+  uint32 total = 2;
+}
+
+// Omit `objective_id` for the Objective this turn works for. An Objective's
+// own turn reads only its own Objective.
+message ReadTagObjectiveRequest {
+  InspectAttemptRequest attempt = 1;
+  optional string objective_id = 2;
+}
+
+// What a Tag reads of an Objective: its record, Team, budget pool, deadline,
+// limit notices, and the status of each of its Sessions. It carries no Task
+// prompts, results, or failure text.
+message TagObjectiveView {
+  Objective objective = 1;
+  ObjectiveOverviewTeam team = 2;
+  ObjectiveBudgetPool pool = 3;
+  ObjectiveDeadlineView deadline = 4;
+  repeated ObjectiveLimitNotice notices = 5;
+  repeated ObjectiveSessionView sessions = 6;
+  uint32 total_sessions = 7;
+  int64 as_of_ms = 8;
+}
+
+// The Tag that runs the turn owns the new Objective. Its runtime actions are
+// what this Task may use, within what the Tag is granted.
+message CreateTagObjectiveRequest {
+  InspectAttemptRequest attempt = 1;
+  string outcome = 2;
+  optional int64 deadline_ms = 3;
+  optional uint64 budget_limit_minor = 4;
+  optional string budget_currency = 5;
+}
+
+message CreateTagObjectiveResponse {
+  Objective objective = 1;
+  // The Objective's first owner turn, queued at once.
+  string started_task_id = 2;
+}

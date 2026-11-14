@@ -2726,6 +2726,7 @@ name = "supertag-codex-adapter"
 version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "libc",
  "serde",
  "serde_json",

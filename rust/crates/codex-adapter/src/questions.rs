@@ -29,6 +29,7 @@ pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
 pub(crate) const ARTIFACT_ACQUIRE_SUFFIX: &str = "+artifact-acquire-v1";
 pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
+pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v1";
 
 #[derive(Clone, Copy)]
 pub(crate) struct Tools {
@@ -36,11 +37,17 @@ pub(crate) struct Tools {
     pub(crate) capture_artifact: bool,
     pub(crate) acquire_artifacts: bool,
     pub(crate) attach_artifacts: bool,
+    /// `list_sessions`, `search_sessions`, `read_session`, `list_objectives`,
+    /// `read_objective`, and `create_objective`.
+    pub(crate) tag_sessions: bool,
 }
 
 impl Tools {
     pub(crate) fn enabled(self) -> bool {
-        self.coordination != Inventory::None || self.capture_artifact || self.acquire_artifacts
+        self.coordination != Inventory::None
+            || self.capture_artifact
+            || self.acquire_artifacts
+            || self.tag_sessions
     }
 
     pub(crate) fn arguments(self, params: &Value) -> Result<Arguments> {
@@ -56,6 +63,12 @@ impl Tools {
             return Ok(Arguments::Acquire(crate::artifact::Acquisition::parse(
                 params,
             )?));
+        }
+        if self.tag_sessions
+            && params["namespace"] == "supertag"
+            && let Some(call) = crate::tag_sessions::arguments(params)?
+        {
+            return Ok(Arguments::TagSessions(call));
         }
         coordination::arguments(params, self.coordination)
     }
@@ -73,6 +86,7 @@ pub(crate) struct Bridge {
     tools: Tools,
     current: Tools,
     coordination: coordination::Client,
+    tag_sessions: crate::tag_sessions::Client,
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
     asked: bool,
@@ -102,6 +116,7 @@ impl Bridge {
             capabilities,
             tools,
             current,
+            tag_sessions: crate::tag_sessions::Client::new(channel.clone()),
             coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
             secrets: vec![],
@@ -114,6 +129,14 @@ impl Bridge {
 
     pub(crate) fn inventory(&self) -> Tools {
         self.tools
+    }
+    /// The Tag portfolio for this turn's context, when this turn reads the Tag's Sessions.
+    pub(crate) fn portfolio(&self) -> &str {
+        if self.tools.tag_sessions && self.capabilities.may_read_tag_sessions {
+            &self.capabilities.tag_portfolio
+        } else {
+            ""
+        }
     }
     pub(crate) fn set_secrets(&mut self, secrets: &[String]) {
         self.secrets = secrets.to_vec();
@@ -147,6 +170,9 @@ impl Bridge {
         if self.tools.attach_artifacts {
             manifest.push_str(ARTIFACT_ATTACH_SUFFIX);
         }
+        if self.tools.tag_sessions {
+            manifest.push_str(TAG_SESSIONS_SUFFIX);
+        }
         manifest
     }
     pub(crate) fn tools(&self) -> Value {
@@ -164,6 +190,12 @@ impl Bridge {
                 .extend(crate::artifact::acquisition_specs(
                     self.tools.attach_artifacts,
                 ));
+        }
+        if self.tools.tag_sessions {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .extend(crate::tag_sessions::tool_specs());
         }
         specs
     }
@@ -322,6 +354,20 @@ impl Bridge {
                         continuation,
                         operation_id,
                         (&self.task_id, &self.tag_id, &self.session_id),
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
+            Arguments::TagSessions(call)
+                if self.current.tag_sessions
+                    && self.capabilities.may_read_tag_sessions
+                    && !self.asked =>
+            {
+                self.tag_sessions
+                    .call(
+                        call,
+                        self.capabilities.may_create_objective,
                         &self.token,
                         &self.secrets,
                     )

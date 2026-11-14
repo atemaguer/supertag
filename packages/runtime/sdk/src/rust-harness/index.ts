@@ -6,6 +6,7 @@ export {
   type CoordinationScope,
   MAILBOX_SEND_ACTION,
   registerCoordinationTools,
+  tagPortfolio,
   validCoordinationArguments,
   WORKSTREAM_POST_ACTION,
 } from "./coordination.js";
@@ -15,5 +16,6 @@ export * from "./gen/supertag/runtime/v2/effects_pb.js";
 export * from "./gen/supertag/runtime/v2/mcp_pb.js";
 export * from "./gen/supertag/runtime/v2/policy_pb.js";
 export * from "./gen/supertag/runtime/v2/runtime_pb.js";
+export * from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 export { redact } from "./redact.js";
 export { startTaskMcpHttp, type TaskMcpHttpServer } from "./task-mcp-http.js";
