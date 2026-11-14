@@ -15,8 +15,8 @@ the [glossary](../reference/glossary.md) for other terms, and
 | Hosted | `supertag control-plane` in a container, from the files `supertag setup deployment` writes | PostgreSQL from `SUPERTAG_DATABASE_URL` |
 
 The Control Plane creates and migrates its schema when it starts. It keeps transfer files, such
-as Session checkpoints and workspace bundles, in `--transfer-directory`. It never stores artifact
-bytes.
+as Session checkpoints, workspace bundles, and captured artifact files, in `--transfer-directory`.
+None of those bytes enter the database.
 
 ### Listeners
 
@@ -142,10 +142,12 @@ backlogs.
 
 ## Artifact storage
 
-An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps only
-its catalog: identity, provenance, access rules, and where each copy lives. The bytes stay on the
-Worker Host that captured them, in its state directory, or on a Volume the host maps. Back up the
-state directory of every Worker Host whose artifacts you need. See [Artifacts](../reference/artifacts.md).
+An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps its
+catalog in the database and its files in the transfer directory. For copies that outlive that
+directory, map artifact Volumes with `--artifact-volume VOLUME_ID=DIRECTORY` or
+`--artifact-s3-volumes FILE` and copy files there with `supertag volume copy`. Worker Hosts run
+with `--artifact-transfer-listen` keep their own copies and serve each other directly. See
+[Artifacts](../reference/artifacts.md).
 
 ## Replicas
 

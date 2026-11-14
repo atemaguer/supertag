@@ -23,8 +23,8 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A Team's **Workstream** is its shared record of posts, and a Tag's **Mailbox** is its inbox for
   messages from other Tags. Teams use these resources to coordinate without merging the private
   conversations of their execution systems.
-- A **Worker Host** is a machine or sandbox that runs Tasks; a **Worker** is the code there that
-  completes a Task.
+- A **Worker Host** is a machine or sandbox that runs Tasks through a harness, an agent system
+  such as Codex.
 
 ## Teammates can ask directly
 
@@ -132,7 +132,7 @@ The originating thread is also the shared place where people observe the work:
 3. completion returns the useful outcome in the original conversation;
 4. a final failure returns a concise error in the same thread.
 
-SuperTag stores outgoing updates separately from the Worker run, so a long-running Task does not
+SuperTag stores outgoing updates separately from the Task Attempt, so a long-running Task does not
 block delivery. On tools that support message updates, SuperTag can replace the acknowledgement
 with the result instead of adding another reply. Routine retries, tool events, and internal IDs stay
 in the audit history instead of filling the conversation.
@@ -148,5 +148,5 @@ in the audit history instead of filling the conversation.
   source.
 - Failed executions do not advance automatic same-Session continuity.
 
-For retrieval limits and Runtime Input resolution details, see the [context resolution reference](../reference/context-resolution.md).
+For retrieval limits and resolution details, see the [context resolution reference](../reference/context-resolution.md).
 For the underlying lifecycle vocabulary, see [Tasks and Sessions](tasks.md).

@@ -37,8 +37,8 @@ The Control Plane owns:
 - scheduling, leases, recovery decisions, cancellation, and reconciliation; and
 - events and audit history.
 
-It keeps transfer files, such as Session checkpoints and workspace bundles, in its transfer
-directory, and never stores artifact bytes. Several Control Plane processes can share one
+It keeps transfer files, such as Session checkpoints, workspace bundles, and captured artifact
+files, in its transfer directory, never in its database. Several Control Plane processes can share one
 PostgreSQL database and one transfer directory; a SQLite database serves one process.
 
 The Gateway terminates collaboration surface connections, turns their events into Tasks through

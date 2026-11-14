@@ -8,7 +8,8 @@ A few terms first:
 - A **Worker** is the code on a Worker Host that completes a Task. A **harness** connects it to an
   agent system such as Codex, Claude Code, or Cursor.
 - The **Control Plane** is the service that records Tasks and their results and keeps the catalog
-  of artifacts, the files Tasks produce. It never stores the artifact files themselves.
+  of artifacts, the files Tasks produce. It keeps their bytes in a transfer directory, never in its
+  database.
 - A **Volume** is named storage that outlives any one machine, such as an S3 bucket.
 
 SuperTag storage works like Docker storage. A container's filesystem disappears with the
@@ -63,35 +64,22 @@ offered: a write through one would bypass the Worker Host's bounded, recorded wr
 
 ## Where artifacts are kept
 
-Artifacts stay on the Worker Host whose Task captured them. The Control Plane keeps only the
-catalog: what each artifact is, who made it, who may use it, and which hosts or Volumes hold a copy. It
-never stores the files, so redeploying a hosted Control Plane loses no artifacts.
+The Control Plane keeps the artifact catalog: what each artifact is, who made it, who may use it,
+and where each copy lives. Each capture also stores the files in the Control Plane's transfer
+directory, a private directory beside its database. Redeploying a hosted Control Plane keeps them
+only when that directory sits on a persistent volume.
 
-Another Task that may use an artifact downloads it directly from the host that holds it. The host
-services that `supertag up` starts on an operator's laptop are persistent, so their copies last as
-long as that disk. A copy held only on an ephemeral Worker Host is lost when that host stops.
-
-A host can store its artifacts on an artifact Volume instead, such as a bucket prefix. Those copies
-outlive the host. Each producing **Task Attempt**, one execution or retry of a Task, has its own
-copies on the Volume. Reporting the same digest from another Task Attempt does not grant access to
-those copies. Hosts that can't reach each other, like two laptops behind NAT, share artifacts
-through a common artifact Volume. Without a reachable host or a shared Volume, the artifact is
-unavailable to that Task, and the error says where it is. For details, see
-[Run the Control Plane](../operations/control-plane.md#artifact-storage) and
+Two other copies can outlive the transfer directory. A Worker Host set up for direct transfer
+keeps its own copy and serves it to other hosts; that copy lasts as long as the host's disk. An
+operator can also copy a file to an artifact Volume, such as a bucket prefix; that copy outlives
+both. For details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
 [Artifacts](../reference/artifacts.md).
-
-Default hosts do not advertise a transfer endpoint reachable from another machine. Dependent Tasks
-that need artifact inputs fail with the unavailable error when placed on another host. The same
-applies to resumed Sessions (continued conversations) restoring harness-home artifacts on another
-host. Configure a shared artifact Volume or a reachable transfer endpoint before moving that work.
-Native Session transcripts remain separate state on the Control Plane; they do not supply missing
-harness-home artifact bytes.
 
 ## Credentials and local access
 
-Catalog grants control what SuperTag Workers fetch. They do not isolate a Task from files its
-operating-system account can read. In particular, `~/.supertag/artifacts`, `file://` artifact
-Volumes, and volume-credential files are readable by Codex read-only and workspace-write sandboxes
+Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
+operating-system account can read. In particular, `~/.supertag/checkpoints`, `file://` artifact
+Volumes, and Volume credential files are readable by Codex read-only and workspace-write sandboxes
 and by unsandboxed Claude Code when running under that account. Those Tasks can read local copies
 without catalog grants, and credentials may give access to other artifacts on a shared Volume.
 Keeping credentials outside the workspace does not prevent these reads. Use separate operating-system
@@ -119,4 +107,4 @@ depends on the storage provider and its retention settings. For the commands, se
 
 - [Work in a repository with Workspaces](../guides/workspaces.md)
 - [Volumes](../reference/resource-model.md#volumes)
-- [Worker Hosts and Workers](workers.md)
+- [Worker Hosts and harnesses](workers.md)

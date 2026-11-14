@@ -239,7 +239,7 @@ supertag.yaml          the services file
 .env                   optional; loaded by the env_file default
 runtime.sqlite3        the local Control Plane's SQLite database
 credentials.json       the file credential vault: the local operator credential and surface secrets
-checkpoints/           Session checkpoints and other transfer files
+checkpoints/           the transfer directory: Session checkpoints, bundles, artifact files
 logs/                  supervisor, control-plane, gateway, and hosts/ logs
 ```
 

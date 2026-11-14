@@ -80,7 +80,7 @@ It does not implicitly grant channel history, repository contents, issue creatio
 Before work starts, SuperTag combines the Tag with the current request:
 
 ```text
-Tag + origin + requester + active context + active permissions + Worker policy
+Tag + origin + requester + active context + active permissions + execution settings
   = Task with recorded policy
 ```
 

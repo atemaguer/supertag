@@ -14,8 +14,8 @@ A deployment has up to three roles:
 | Worker Hosts | Outbound only | Each host's own state directory |
 
 Deploy the Gateway only when you connect Slack, GitHub, Linear, Lark, or Microsoft Teams, or send
-operator notifications. The Control Plane never stores artifact bytes; they stay on Worker Hosts
-and the Volumes you map.
+operator notifications. The Control Plane keeps captured artifact files in its transfer directory,
+so put that directory on a persistent volume.
 
 ## Before you start
 

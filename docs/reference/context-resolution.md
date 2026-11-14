@@ -17,9 +17,7 @@ Other terms on this page are defined in the glossary: [Objective](glossary.md#ob
 [Control Plane](glossary.md#control-plane), [Worker Host](glossary.md#worker-host),
 [host service](glossary.md#host-service),
 [harness adapter](glossary.md#harness-adapter),
-[Workspace](glossary.md#workspace), [Runtime Input Provider](glossary.md#context-set),
-[Runtime Input](glossary.md#context-set), and
-[Workspace Resolver](glossary.md#workspace).
+and [Workspace](glossary.md#workspace).
 
 ## Stored Task inputs
 
@@ -27,8 +25,8 @@ The **Control Plane** is the service that stores the
 [organization](glossary.md#autonomous-organization) and accepts its work. When it accepts a Task, it
 stores two independent snapshots:
 
-- **Context Plan** — the versioned declarations of knowledge that may be added, including Skills,
-  cross-Session artifact selections, and custom types called Context Items.
+- **Context Plan** — the versioned declarations of knowledge that may be added, called Context
+  Items: Skills and cross-Session artifact selections.
 - **Authorization snapshot** — the applicable Role policy, active Permission Sets, and allowed
   resources and actions.
 
@@ -86,60 +84,54 @@ for capture, retrieval, storage, and attachment limits.
 
 ## Skills
 
-The Context Plan carries stable Skill identity plus optional version/digest pins, never filesystem paths or package bytes. A host service's `skills` path names a local directory of Skill packages or a JSON catalog file. The catalog resolves and allowlists packages:
+The Context Plan carries a Skill's stable identity, plus optional version and digest pins, never
+filesystem paths or package bytes. The Worker Host's Skill catalog resolves and allowlists the
+packages: a host service's `skills` path, or `supertag worker-host --skill-catalog PATH`. It names
+a directory of Skill packages or a JSON catalog file:
 
 ```json
 {
   "version": 1,
   "skills": [
     { "id": "code-review", "version": "1", "path": "./skills/code-review" }
+  ],
+  "github": [
+    { "repository": "acme/skills", "path": "catalog", "revision": "main", "skills": ["release"] }
   ]
 }
 ```
 
-For a directory catalog, each immediate child directory is a Skill named after that directory and contains `SKILL.md`. JSON entries may also declare a version. Resolution rejects unregistered identities, pin mismatches, symbolic links, duplicate identities, and oversized packages. Workspace Skills selected by `spec.skills` replace Context Set Skills with the same name. Codex receives native `.agents/skills`; Claude Code receives an isolated MCP-disabled plugin wrapper as a harness-specific adaptation detail.
+In a directory catalog, each immediate child directory is a Skill named after that directory and
+contains `SKILL.md`. A `github` entry names Skill directories in a GitHub repository. A new Task
+pins the revision's current commit, and its retries keep it on any host. Resolution rejects
+unregistered identities, pin mismatches, symbolic links, duplicate identities, and oversized
+packages. The host delivers each Skill read-only: Codex receives it in its disposable native home,
+and Claude Code receives it as an isolated plugin.
+
+## Context Item types
+
+| Type | Version | Resolved by | Result |
+| --- | --- | --- | --- |
+| `supertag/skill` | 1 | The Worker Host's Skill catalog | The pinned Skill package |
+| `supertag/artifacts` | 1 | The Control Plane, at admission | Bounded artifact metadata summaries |
+
+Each Item has a `type`, a `version`, an `itemKey` unique within its Context Set, `required`, and a
+bounded, non-secret `config`. A Worker Host advertises the types it can resolve: `supertag/skill`
+only when it has a Skill catalog. Only a Worker Host that advertises every required Item's type
+claims the Task; an optional Item the host cannot resolve is recorded as an omission. The Control
+Plane stores other types, but no Worker Host resolves them.
 
 ## Operational targets are not context
 
 A repository needed for one Task is an operational target, not a Context Item. At admission, the
-Control Plane deterministically captures an immutable workspace plan from the origin, explicit
-request text, or a sole eligible permission. Ambiguous and unavailable requests are recorded rather
-than guessed. The Workspace Resolver then resolves only that captured target and checks the
-authorization snapshot before touching credentials.
-
-For GitHub:
+Control Plane captures an immutable Workspace selection from the Tag's binding, the origin, or the
+request. Ambiguous and unavailable requests are recorded rather than guessed. For a GitHub
+Workspace:
 
 1. a GitHub-origin Task selects its repository;
-2. another surface may name `owner/repository`;
-3. a single permitted repository may be the default;
-4. multiple eligible repositories with no selection require clarification.
+2. a message on another collaboration surface may select a GitHub Workspace the Tag's Permission
+   Sets allow;
+3. later turns of the thread keep that selection.
 
-The Worker resolves an immutable commit, caches/stages the snapshot read-only, and records provenance without recording its credential or cache path.
-
-## Extension points
-
-- `ContextResolverRegistry` — built-in or namespaced custom Context Plan items.
-- `WorkspaceResolverRegistry` — operational targets such as repositories.
-- `ToolProviderRegistry` — permission-derived hosted tools.
-- `isTagActionAllowed` / `assertTagActionAllowed` — explicit provider authority checks.
-
-The three registries implement the Runtime Input Provider contract and receive a Resolution Context. These seams remain separate so context selection cannot accidentally authorize a collaboration surface action.
-
-## Custom Context Item contract
-
-Context Item types are an open set behind one strict envelope:
-
-| Field | Meaning |
-| --- | --- |
-| `type` | Namespaced contract identity, such as `acme.io/runbook` |
-| `version` | Positive integer understood by the resolver |
-| `itemKey` | Stable identity within the Context Set |
-| `required` | Whether missing compatible support must fail closed |
-| `config` | Bounded, non-secret JSON captured at admission |
-| `snapshot` | Optional immutable data added by a trusted Control Plane built-in |
-
-Workers advertise supported type/version pairs. Scheduling considers every required Context Item before assigning a Task. The Worker then selects an exact resolver, records optional omissions, and attaches each produced Runtime Input to its originating `itemKey`.
-
-Custom types normally resolve into portable Runtime Inputs such as `resource`, `instruction`, or `skill`. A harness therefore consumes a small stable input vocabulary without understanding every custom Context Item type.
-
-See [Add a custom Context type](context-resolution.md) for TypeScript and Python examples.
+The Worker Host checks out the pinned commit and records provenance without recording a credential
+or cache path. See [Work in a repository with Workspaces](../guides/workspaces.md).

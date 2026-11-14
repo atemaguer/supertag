@@ -46,8 +46,8 @@ next turn. See [Define and complete an Objective](../guides/objectives.md).
 ## Task
 
 A Task records what the requester asked SuperTag to do. It keeps the status, policy, execution
-needs, source, and final result. Each Task Attempt records the execution recipe that ran it; the Tag and
-Session do not choose a permanent recipe.
+needs, source, and final result. Each Task Attempt records the Worker Host, harness, and model that ran it; the
+Tag and Session do not choose a permanent host.
 
 A Task may remain pending while no compatible execution capacity is ready. Losing a connection to
 an execution machine does not erase the Task.
@@ -61,8 +61,8 @@ mention `@SuperTag` again.
 
 Continuity within a Session is automatic and limited to that conversation. Each Session maps to one
 native harness session. A new Task resumes that native session whenever the harness can load it: the
-same Tag, the same Session, the same harness, and the same reply audience. A different profile of
-the same harness, or a newer revision of it, can resume too.
+same Tag, the same Session, the same harness, and the same reply audience. Another Worker Host
+that serves the same harness can resume it too.
 
 Resuming carries the conversation, not authority. Each Task runs under the permissions, Context
 Sets, workspace, and tools admitted for that Task, so a policy change applies on the next turn.
@@ -268,76 +268,36 @@ other Sessions; an agent then inspects or retrieves the selected artifact throug
 
 ## Details for integrators
 
-The sections below explain scheduling and live-input behavior. You can skip them if you only need
+The sections below explain execution settings and live-input behavior. You can skip them if you only need
 the core concepts. They use these [glossary](../reference/glossary.md) terms: the **Control
 Plane** stores and schedules work; a **Worker Host** runs it; a **harness** is the agent system a
 Task runs on.
 [Worker Host selection](../reference/scheduling-and-recovery.md#worker-host-selection) explains
 how the Control Plane ranks hosts and orders the queue.
 
-### Execution requirements
+### Execution settings
 
-`Task.execution` describes placement requirements independently of Tag identity:
-
-```json
-{
-  "requires": [{ "id": "supertag.process-output-streaming", "version": 1 }],
-  "prefers": [{ "id": "supertag.process-input-streaming", "version": 1 }],
-  "harness": "codex"
-}
-```
-
-`requires` filters candidates; `prefers` ranks compatible candidates. Capability versions are
-positive integers. Optional `profile: { "id": "local-codex", "revision": "1" }` constrains
-selection to an exact recipe. An empty object leaves selection to the Control Plane's compatibility
-checks. These requirements do not grant permissions or change the authorization snapshot.
-
-A trusted integrator admitting a collaboration surface event can use the Control Plane embedding API:
-
-```ts
-await controlPlane.ingestSurfaceEvent(event, {
-  execution: { harness: "codex" },
-});
-```
-
-This is an integration option, not an instruction inferred from untrusted message text.
-The CLI creates Tags with `supertag tag put NAME`; a Tag's or Role's `execution` names its harness,
-models, and efforts, and Worker Hosts advertise what they serve.
+A Tag's or Role's `execution` names the harness, models, and reasoning efforts its Tasks may use,
+with the defaults first; a Tag's own settings override its Roles'. Worker Hosts advertise the
+harnesses and models they serve, and a Tag's `runsOn` labels narrow which hosts may run it. These
+settings choose where work runs; they grant no permission. See
+[execution settings](../reference/resource-model.md#execution-settings).
 
 The Control Plane records the selected harness and model on the Task before execution. Recovery
-keeps that selection. A Session's checkpoint can be resumed by any Worker Host that serves the same
-harness.
+keeps that selection. A Session with native state stays on the harness that produced it, and its
+checkpoint can be resumed by any Worker Host that serves that harness.
 
 ### Cancelling a Task
 
 An operator cancels one Task with `supertag task cancel ID`, and every open Task of an Objective
 with `supertag objective cancel ID`. Cancellation stops further
-results from that execution from being accepted. The Task event history records who cancelled it,
-when, and its previous status in `task.cancelled`. This event is saved with the cancellation itself, so
-an interrupted Worker does not need to report the action afterward.
+results from that execution from being accepted, and the Worker Host stops the harness adapter.
+The Task event history records who cancelled it, when, and its previous status. This event is
+saved with the cancellation itself, so an interrupted Worker Host does not need to report the
+action afterward.
 
-A Worker completes its own Task by returning its output. It should not cancel its Task or
-try to accept its own running work to signal completion.
-
-### Reusing an execution selection
-
-The Control Plane remembers a selected profile for each Tag and set of execution
-requirements. Later Tasks prefer that profile while it remains eligible and has
-capacity. Context support is checked again; permissions continue to be enforced by normal
-admission and execution.
-
-If the cached profile is unavailable or no longer compatible, scheduling selects
-another eligible profile and updates the cache. A Session with native state takes precedence. Its
-Task prefers the profile that produced the state while that profile can run the Task, then
-another profile of the same harness. Either way, the Task waits for that profile's capacity rather
-than switch harness. When no profile of that harness can run the Task, scheduling picks any
-eligible profile, and the Task continues from the replayed history.
-
-This is an in-memory scheduling preference, not a Tag binding or a reservation.
-The cache holds at most 1,000 selections, expires each selection after five minutes,
-and evicts the least recently used entry when full. Collaboration surface and Objective
-Tasks share the Control Plane cache. Restarting the Control Plane discards it and triggers
-fresh selection. It does not keep Worker Hosts or sandboxes alive.
+A harness adapter completes its own Task by returning its result. It should not cancel its Task to
+signal completion.
 
 ### Messages while work is running
 
@@ -373,10 +333,10 @@ On macOS and Linux, it tracks detached tools and children whose parents already 
 those processes before committing the Task branch. If process inspection or ownership is uncertain,
 it reports a cleanup failure and withholds the result and normal completion. It also refuses to
 launch Claude Code when process inspection is unavailable. A one-shot Claude Code CLI run and the
-OpenCode adapter use the Control Plane queue. A custom harness can
-advertise `inputMode: "queue"` or `"steer"` alongside its
-`input` control operation; it must process accepted input before reporting successful completion
-and exporting its session state.
+OpenCode adapter use the Control Plane queue. A custom
+[harness adapter](../guides/harness-adapters.md) takes live input with `Harness.TakeLiveInput` and
+records what it did with `SettleLiveInput`; it must process accepted input before it completes the
+Task Attempt and exports its checkpoint.
 
 ### When delivery is uncertain
 
