@@ -15,7 +15,6 @@ docs/guides/objective-decisions.md
 docs/guides/objective-overview.md
 docs/guides/objectives.md
 docs/guides/ongoing-responsibilities.md
-docs/guides/python-workers.md
 docs/guides/tag-messaging.md
 docs/guides/talk-to-a-tag.md
 docs/guides/teams.md
@@ -33,18 +32,6 @@ docs/reference/control-plane-api.md
 docs/reference/coordination.md
 docs/reference/credential-storage.md
 docs/reference/iam.md
-docs/reference/operator-api/access.md
-docs/reference/operator-api/conversation.md
-docs/reference/operator-api/host.md
-docs/reference/operator-api/inbox.md
-docs/reference/operator-api/mailbox.md
-docs/reference/operator-api/objective.md
-docs/reference/operator-api/README.md
-docs/reference/operator-api/resource.md
-docs/reference/operator-api/shared.md
-docs/reference/operator-api/surface.md
-docs/reference/operator-api/team.md
-docs/reference/operator-api/work.md
 docs/reference/resource-model.md
 docs/reference/scheduling-and-recovery.md
 docs/reference/supertag-yaml.md

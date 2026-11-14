@@ -81,11 +81,11 @@ Use [`supertag message tag` or `supertag message objective`](../operations/cli.m
 for scripts that run the CLI. Both accept standard input and JSON output.
 
 For direct integrations, use the [operator API](../reference/control-plane-api.md#send-messages-and-answer-questions). Call
-[`ConversationService.SendMessage`](../reference/operator-api/conversation.md#sendmessage)
+`ConversationService.SendMessage`
 to send to a Tag, or
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
+`ObjectiveService.MessageObjective`
 to send to an Objective. After sending to a Tag, pass its name and the returned Task ID to
-[`ConversationService.FollowMessage`](../reference/operator-api/conversation.md#followmessage)
+`ConversationService.FollowMessage`
 to follow its reply and work Session reports.
 
 For a coding agent that operates SuperTag from a separate conversation, see
@@ -166,7 +166,7 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 
 ## Reference
 
-- [`ConversationService`: sending, reading, and following messages](../reference/operator-api/conversation.md)
+- `ConversationService`: sending, reading, and following messages
 
 ## Next
 

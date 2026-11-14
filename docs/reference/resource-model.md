@@ -708,8 +708,7 @@ spec:
 | `spec.secrets` | Secret name to exactly one of `{ secretRef: NAME }`, `{ env: VARIABLE }`, or `{ file: PATH }`. | Changes |
 
 The [collaboration surface guides](../surfaces/README.md#declare-a-surface-account-in-a-manifest) list each
-provider's options and secrets, and the
-[SurfaceAccount schema](../../spec/manifests/surface-account.schema.json) gives the exact shape.
+provider's options and secrets.
 
 The rules:
 

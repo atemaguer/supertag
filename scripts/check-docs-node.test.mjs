@@ -12,33 +12,8 @@ test("rejects old, shortened, and future Node requirements", () => {
     "Node.js `24.0.0`",
     "Node.js >=20.18.1",
   ])
-    assert.equal(checkNodeVersions("README.md", text, "22.13.0", "18").length, 1);
-  assert.deepEqual(checkNodeVersions("README.md", "Node.js 22.13.0 or newer", "22.13.0", "18"), []);
-});
-
-test("only sandbox bridge pages may document the code's separate minimum", () => {
-  assert.deepEqual(
-    checkNodeVersions(
-      "docs/guides/mcp-tools.md",
-      "The execution environment must provide Node.js 18 or newer",
-      "22.13.0",
-      "18",
-    ),
-    [],
-  );
-  assert.equal(checkNodeVersions("README.md", "Node.js 18", "22.13.0", "18").length, 1);
-  assert.equal(
-    checkNodeVersions("docs/guides/mcp-tools.md", "Node.js 18", "22.13.0", "20").length,
-    1,
-  );
-});
-
-test("does not exempt SuperTag requirements on sandbox bridge pages", () => {
-  assert.equal(
-    checkNodeVersions("docs/guides/mcp-tools.md", "SuperTag requires Node.js 18", "22.13.0", "18")
-      .length,
-    1,
-  );
+    assert.equal(checkNodeVersions("README.md", text, "22.13.0").length, 1);
+  assert.deepEqual(checkNodeVersions("README.md", "Node.js 22.13.0 or newer", "22.13.0"), []);
 });
 
 test("all user documentation agrees with package engines", () => {

@@ -401,8 +401,8 @@ Calls still pass through the Worker's policy proxy, so grants and approvals appl
 proxy stays on the Worker Host's loopback; a colocated harness reaches it through a relay
 on the sandbox's own loopback.
 
-The sandbox image must contain the runtimes used by its stdio servers and the MCP bridge. For
-example, Modal's default `python:3.13-slim` image includes Python but no Node.js. A server declared
+The sandbox image must contain the runtimes used by its stdio servers. For example, Modal's default
+`python:3.13-slim` image includes Python but no Node.js. A server declared
 with `command: "node"` needs Node.js installed from trusted content during preparation. Files from
 the trusted commit, including the server copy, land beside the Task checkout in the prepared image;
 the Task's later changes to its checkout do not replace that copy.
@@ -415,13 +415,9 @@ Workspace on a local profile, or serve the server over HTTP: HTTP servers keep t
 their headers stay on the Worker Host. Install a stdio server's packages in `setup`, because the
 Task's network policy can block `npx -y`.
 
-SuperTag talks to a stdio server through a small Node.js program in the sandbox. So when a
-Workspace selects a stdio server, the prepared image needs Node.js 18 or later. An image without
-`node`, such as `python:3.13-slim`, gets it from the image's own package archive with `apt-get`,
-before the repository is copied in. It installs as root, even when your devcontainer's Dockerfile
-ends with `USER`, and then switches back to that user. On an image without `apt-get`, install Node.js in the image or
-in `setup`. Otherwise preparation fails with
-`Workspace stdio MCP servers need Node.js 18 or later in the sandbox`.
+SuperTag starts each stdio server under a small `python3` supervisor in the sandbox, which stops
+the server's whole process group when its input ends. The image therefore needs `python3`, as
+remote copies already do.
 
 ## 2. Give Worker Hosts the repository
 

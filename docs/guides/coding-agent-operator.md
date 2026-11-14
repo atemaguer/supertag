@@ -182,7 +182,7 @@ mktemp
 ```
 
 Write the quoted question and answer to the returned path with a file-writing tool. Call
-[`InboxService.AnswerQuestion`](../reference/operator-api/inbox.md#answerquestion) with the exact
+`InboxService.AnswerQuestion` with the exact
 `key` from the current operator-eligible question, `text` read from the private file, and an
 `idempotencyKey` for that answer. Reuse that idempotency key and payload on retry. Use the
 [operator API example](../reference/control-plane-api.md#send-messages-and-answer-questions)
@@ -191,7 +191,7 @@ question no longer waits.
 
 To reply yourself, open **Waiting on you** in the terminal UI and select the question. For a
 general follow-up, select the Objective and press `m`, or call
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
+`ObjectiveService.MessageObjective`
 from automation.
 
 If the Objective asks to change application configuration or spend more, the agent presents

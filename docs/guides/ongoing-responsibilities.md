@@ -89,8 +89,8 @@ terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first r
 manager's next turn.
 
 For a monitoring script, use
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective).
-Check [`InboxService.ListInboxItems`](../reference/operator-api/inbox.md#listinboxitems) first and
+`ObjectiveService.MessageObjective`.
+Check `InboxService.ListInboxItems` first and
 hold the report while the manager waits for an answer. Configure the API credentials and save
 `call-operator-api.py` from the
 [operator API example](../reference/control-plane-api.md#send-messages-and-answer-questions).

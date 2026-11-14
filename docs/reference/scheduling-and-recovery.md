@@ -13,7 +13,7 @@ Other terms on this page are defined in the glossary: [Tag](glossary.md#tag),
 
 For the implementer contract behind these rules, see
 [Durable Worklet execution](worker.md#durable-worklet-execution). For the meaning of each stored
-execution field, see [`WorkService`](operator-api/work.md) and
+execution field, see `WorkService` and
 [Execution evidence](control-plane-api.md#execution-evidence). For
 Objective-specific behavior after a restart, see
 [After a Control Plane restart](coordination.md#after-a-control-plane-restart).

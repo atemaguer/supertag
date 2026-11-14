@@ -16,7 +16,7 @@ one process, deployment, and HTTP listener with the API Server. It does not defi
 documented here.
 
 This page explains how to reach and call the API. The
-[operator API reference](operator-api/README.md), generated from the protos, documents every
+operator API reference, generated from the protos, documents every
 service, RPC, message, and field.
 
 Other terms on this page are defined in the glossary: [Tag](glossary.md#tag),
@@ -37,7 +37,7 @@ Use HTTPS outside loopback. Set `SUPERTAG_ADMIN_TOKEN` for every non-loopback Co
 loopback Control Plane generates a local credential under `~/.supertag` when none is configured.
 
 The admin token may call every RPC. An [Operator Token](resource-model.md#operator-tokens),
-a `stop_` secret, may call every one except [`AccessService`](operator-api/access.md), which
+a `stop_` secret, may call every one except `AccessService`, which
 refuses it with `permission_denied`. A revoked or expired Operator Token is refused as
 unauthenticated, with a message that says which. Scoped coordination credentials reach only the
 RPCs that accept them. The Control Plane records the caller as `control-plane-break-glass`,
@@ -54,27 +54,27 @@ the token or its server-side logical credential ID.
 
 The Control Plane serves its operator API as RPCs defined in protobuf, in the package
 `supertag.operator.v1` under
-[`spec/proto/supertag/operator/v1/`](../../spec/proto/supertag/operator/v1/). The
-[operator API reference](operator-api/README.md) lists every RPC with the action it needs, who may
+`spec/proto/supertag/operator/v1/`. The
+operator API reference lists every RPC with the action it needs, who may
 call it, and what the audit log records, and one page per service:
 
 | Service | Serves |
 | --- | --- |
-| [`OrganizationService`](operator-api/organization.md) | `supertag status`, `spend`, `audit`, and metrics |
-| [`ConversationService`](operator-api/conversation.md) | Conversations between an operator and a Tag |
-| [`EventService`](operator-api/event.md) | Change notices for clients that show live state |
-| [`InboxService`](operator-api/inbox.md) | The operator inbox and approval requests |
-| [`ObjectiveService`](operator-api/objective.md) | Objectives |
-| [`WorkService`](operator-api/work.md) | Tasks, Sessions, and artifacts |
-| [`TeamService`](operator-api/team.md) | Teams |
-| [`MailboxService`](operator-api/mailbox.md) | Messages between Tags, Mailbox grants, and Workstream posts |
-| [`HostService`](operator-api/host.md) | Worker Hosts and Auth Keys |
-| [`AccessService`](operator-api/access.md) | Operator Tokens |
-| [`SurfaceService`](operator-api/surface.md) | Surface Accounts, Tag locations, and set activation |
-| [`ResourceService`](operator-api/resource.md) | Configuration resources and server-side apply |
+| `OrganizationService` | `supertag status`, `spend`, `audit`, and metrics |
+| `ConversationService` | Conversations between an operator and a Tag |
+| `EventService` | Change notices for clients that show live state |
+| `InboxService` | The operator inbox and approval requests |
+| `ObjectiveService` | Objectives |
+| `WorkService` | Tasks, Sessions, and artifacts |
+| `TeamService` | Teams |
+| `MailboxService` | Messages between Tags, Mailbox grants, and Workstream posts |
+| `HostService` | Worker Hosts and Auth Keys |
+| `AccessService` | Operator Tokens |
+| `SurfaceService` | Surface Accounts, Tag locations, and set activation |
+| `ResourceService` | Configuration resources and server-side apply |
 
 The conventions every RPC follows, such as pagination and the order in which a call is checked, are
-in [Shared messages and options](operator-api/shared.md#conventions). The Control Plane serves
+in Shared messages and options. The Control Plane serves
 no `/api/v1/` routes.
 
 ### Calling an RPC
@@ -113,12 +113,11 @@ curl -s https://control.example.com/supertag.operator.v1.OrganizationService/Get
 Bodies use proto3 JSON. Field names are lowerCamelCase, enums are their value names, times are
 RFC 3339 strings, and 64-bit integers are strings. A request field the message does not define is
 ignored, not refused. Send `Content-Type: application/proto` for the binary encoding instead. The
-generated clients in TypeScript (`@supertag/operator-api`), Go, and Python
-([`supertag.operator`](../../sdks/python/README.md#call-the-operator-api)) handle all of this.
+generated clients handle all of this.
 
 Authentication is the same `Authorization: Bearer` header. The Control Plane checks the credential
-before it reads the request body. [Method options](operator-api/shared.md#options) in
-[`options.proto`](../../spec/proto/supertag/operator/v1/options.proto) declare who may call each
+before it reads the request body. Method options in
+`options.proto` declare who may call each
 RPC: the operator action the credential must carry, whether only the admin token may call it,
 whether a scoped coordination credential or a Worker Host's own credential may, whether it takes an
 Auth Key instead, and the action the audit log records. An RPC that
@@ -134,9 +133,9 @@ For automation, choose the RPC for the kind of message you want to send.
 
 | To | Call | Identify the target with |
 | --- | --- | --- |
-| Send to a Tag's private conversation | [`ConversationService.SendMessage`](operator-api/conversation.md#sendmessage) | `tag` and an optional `conversation` name |
-| Send a follow-up or report to an Objective | [`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective) | The Objective's `id` |
-| Answer a specific pending question | [`InboxService.AnswerQuestion`](operator-api/inbox.md#answerquestion) | The question's `key` from [`ListInboxItems`](operator-api/inbox.md#listinboxitems) |
+| Send to a Tag's private conversation | `ConversationService.SendMessage` | `tag` and an optional `conversation` name |
+| Send a follow-up or report to an Objective | `ObjectiveService.MessageObjective` | The Objective's `id` |
+| Answer a specific pending question | `InboxService.AnswerQuestion` | The question's `key` from `ListInboxItems` |
 
 Check the inbox before sending a general Objective follow-up. A follow-up sent while a question
 waits can become the answer to that question.
@@ -144,8 +143,8 @@ waits can become the answer to that question.
 All three take `text` and accept an `idempotencyKey`. Assign one key per message and reuse it
 when retrying that same message. The response includes the Task ID of the turn it starts.
 To read or stream an accessible reply, use
-[`GetMessage`](operator-api/conversation.md#getmessage) or
-[`FollowMessage`](operator-api/conversation.md#followmessage) with the returned Tag and Task ID.
+`GetMessage` or
+`FollowMessage` with the returned Tag and Task ID.
 
 The following script calls a unary RPC using Python's standard library. Set
 `SUPERTAG_CONTROL_PLANE_URL` to the API base URL and supply `SUPERTAG_OPERATOR_TOKEN` through
@@ -222,7 +221,7 @@ curl -s https://control.example.com/supertag.operator.v1.ResourceService/ApplyMa
 ### RPC errors
 
 A refused call returns a Connect error: a JSON body with `code`, `message`, and `details`. The one
-detail is a [`supertag.operator.v1.ErrorDetail`](operator-api/shared.md#errordetail) whose `reason`
+detail is a `supertag.operator.v1.ErrorDetail` whose `reason`
 is stable; branch on it, never on `message`.
 
 | Connect code | HTTP status | `ErrorDetail.reason` |
@@ -263,8 +262,8 @@ reply.
 
 ### Server streams
 
-[`ConversationService.FollowMessage`](operator-api/conversation.md#followmessage) and
-[`EventService.Watch`](operator-api/event.md#watch) are server streams. The client sends one
+`ConversationService.FollowMessage` and
+`EventService.Watch` are server streams. The client sends one
 request and reads events until the stream ends. In the Connect protocol, a stream is a `POST` with
 `Content-Type: application/connect+json`. The request body and each event are one frame: a flags
 byte, a 4-byte big-endian length, then the JSON message. A last frame with flags `0x02` carries
@@ -292,7 +291,7 @@ and `data-work-session` parts with stable IDs, so a repeat replaces a part inste
 Every call to an RPC that declares an audit action is recorded, with `path` set to its procedure,
 such as `/supertag.operator.v1.HostService/DrainWorkerHost`, and `status` set to the HTTP status
 its Connect code maps to. Reads, plans, and dry runs are not recorded.
-[`OrganizationService.ListAuditEntries`](operator-api/organization.md#listauditentries) reads the
+`OrganizationService.ListAuditEntries` reads the
 log, and `supertag audit` prints it.
 
 An entry never contains a credential, a secret value, a digest, or a request body. The Control
@@ -331,7 +330,7 @@ SUPERTAG_AUTH_KEY=stak_... supertag connect worklet --transport websocket \
   --worklet-url https://supertag.example.com --worker-host build-east-1
 ```
 
-Redemption calls [`HostService.JoinWorkerHost`](operator-api/host.md#joinworkerhost) with the
+Redemption calls `HostService.JoinWorkerHost` with the
 key as the bearer token in place of an operator credential. The response carries the host's
 one-time credential, its Tags, and whether it is ephemeral. An unknown key fails with
 `unauthenticated`, an expired, revoked, or used key with `permission_denied`, and a key one of whose
@@ -342,9 +341,9 @@ when the answer does not arrive.
 
 A Worker Host may also act on itself with its own credential, without an operator credential. It
 sends the credential as the bearer token and its ID in the `x-supertag-worker-host-id` header to
-[`RevokeWorkerHostCredential`](operator-api/host.md#revokeworkerhostcredential),
-[`DrainWorkerHost`](operator-api/host.md#drainworkerhost), or
-[`ResumeWorkerHost`](operator-api/host.md#resumeworkerhost), and may name only itself.
+`RevokeWorkerHostCredential`,
+`DrainWorkerHost`, or
+`ResumeWorkerHost`, and may name only itself.
 `supertag up` and `supertag down` drain a host service this way before restarting or stopping it,
 and the host resumes itself when it starts again. A host credential authorizes no other RPC.
 
@@ -401,11 +400,11 @@ Resource names make creation idempotent. Repeating Tag creation with the same na
 existing Tag. `Tag.spec.roles` lists the reusable responsibilities assigned to that actor;
 execution requirements belong to Tasks.
 
-The JSON Schemas in [`spec/manifests/`](../../spec/manifests/) describe each manifest kind. They are
+The JSON Schemas in `spec/manifests/` describe each manifest kind. They are
 generated from the protos, as is `manifest.schema.json` for a manifest of any kind.
 
 The current `supertag watch` command observes change by polling these resource versions.
-[`EventService.Watch`](operator-api/event.md#watch) streams notices of changes instead.
+`EventService.Watch` streams notices of changes instead.
 
 ## Versions
 
@@ -433,14 +432,14 @@ execution credential. It offers only the tools that Task's turn may use; see
 [Coordination tools](coordination.md#coordination-tools). The Control Plane derives the acting Tag
 from the credential and refuses a tool the turn does not get.
 
-Operators coordinate through [`InboxService`](operator-api/inbox.md) and
-[`ObjectiveService`](operator-api/objective.md).
+Operators coordinate through `InboxService` and
+`ObjectiveService`.
 
 ## Execution evidence
 
-[`WorkService`](operator-api/work.md) reads of Tasks, Task Attempts, and placement come from
+`WorkService` reads of Tasks, Task Attempts, and placement come from
 records the Control Plane stores, not from a live health check of the Worker Host. Only
-[`InspectTaskExecution`](operator-api/work.md#inspecttaskexecution) asks a Worker Host for its
+`InspectTaskExecution` asks a Worker Host for its
 receipt. It records the Worker events the receipt names and the Control Plane lacks, and neither
 retries execution nor changes Task state.
 
@@ -471,8 +470,8 @@ that can restore its native files and provide compatible tools and workspace acc
 uses its SDK's Session storage callbacks to preserve main and subagent transcript entries.
 Conversation storage does not restore workspace files, running processes, or a sandbox.
 
-[`WorkService.ListSessionStates`](operator-api/work.md#listsessionstates) and
-[`GetSessionState`](operator-api/work.md#getsessionstate) read the stored state. The API retrieves
+`WorkService.ListSessionStates` and
+`GetSessionState` read the stored state. The API retrieves
 stored state rather than starting an execution. Continue the conversation through its existing
 Session; the Control Plane selects a compatible resume point when admitting the next Task. A
 stored archive resumes only for the same Tag and Session, the same reply audience, and the harness

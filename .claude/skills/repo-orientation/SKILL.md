@@ -23,13 +23,15 @@ TypeScript package stays.
 | `packages/runtime/harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
 | `packages/runtime/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
 | `packages/runtime/sdk`, `packages/core` | Shared code for those bridges |
-| `apps/tui` | Go terminal UI; uses `packages/operator-api/go` types |
+| `packages/supertag-ai` | The `supertag-ai` npm TypeScript SDK: Control Plane client and harness adapter client |
+| `apps/tui` | Go terminal UI; runtime.v2 client in `client/`, presentation types in `views/` |
 | `apps/desktop` | Tauri desktop app |
 | `sdks/python` | Python SDK and harness adapters |
 | `deploy/` | Container images and platform definitions for the native services |
 
 ## Boundaries
 
-- No package in this checkout is published to npm. Never suggest installing `@supertag/*`.
+- `supertag-ai` is the only public npm package; never suggest installing `@supertag/*`. Its
+  entry points speak only the native services' `supertag.runtime.v2` APIs.
 - A Node bridge is packaged with the native release by `rust/scripts/node_bridges.py`; a new
   bridge needs an entry there and in `rust/crates/cli/src/node_bridges.rs`.

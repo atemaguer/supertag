@@ -161,8 +161,6 @@ Use these pages when you are implementing an integration, protocol, or Control P
 - [Artifacts](reference/artifacts.md) — storage, limits, handoff, and custom Worker integration
 - [Control Plane model](reference/control-plane.md) — service responsibilities and controllers
 - [Control Plane API Server](reference/control-plane-api.md) — calling the API: endpoints, authentication, errors, and streams
-- [Operator API reference](reference/operator-api/README.md) — every operator RPC, message, and field, generated from the protos:
-  [`OrganizationService`](reference/operator-api/organization.md), [`ConversationService`](reference/operator-api/conversation.md), [`EventService`](reference/operator-api/event.md), [`InboxService`](reference/operator-api/inbox.md), [`ObjectiveService`](reference/operator-api/objective.md), [`WorkService`](reference/operator-api/work.md), [`TeamService`](reference/operator-api/team.md), [`MailboxService`](reference/operator-api/mailbox.md), [`HostService`](reference/operator-api/host.md), [`AccessService`](reference/operator-api/access.md), [`SurfaceService`](reference/operator-api/surface.md), [`ResourceService`](reference/operator-api/resource.md), and [shared messages and options](reference/operator-api/shared.md)
 - [Reliable external actions](reference/action-effects.md) — retries, receipts, and uncertain outcomes
 - [API stability](reference/api-stability.md) — compatibility levels and change policy
 - [Language-neutral wire specification](../spec/README.md) — schemas and protocol versions

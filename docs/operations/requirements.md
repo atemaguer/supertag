@@ -182,9 +182,7 @@ SuperTag does not send product analytics or usage telemetry to SuperTag maintain
 RPC counters stay in process memory and are exposed through its own operator diagnostics.
 Configured integrations still contact their services: the Control Plane, collaboration tools,
 MCP servers, storage, execution providers, and model providers. Disabling telemetry does not
-stop the model requests needed to perform Tasks. The default implementation is
-[process-local RPC counters](../../packages/runtime/sdk/src/rpc-telemetry.ts), connected to
-Control Plane diagnostics.
+stop the model requests needed to perform Tasks.
 
 Harnesses have separate policies. SuperTag isolates their configuration for each Task, so their
 standalone opt-out instructions do not necessarily apply to managed Workers.

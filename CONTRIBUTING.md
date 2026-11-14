@@ -80,28 +80,9 @@ built binary under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
 ### Protobuf contracts
 
-The Rust runtime's protobuf contract lives in `rust/proto`; see
-[binding generation](rust/bindings/README.md). The earlier contracts live in `spec/proto`. The
-terminal UI still uses the generated `supertag.operator.v1` Go types. After editing one, run
-`pnpm proto:generate`. `pnpm check` runs `buf lint` and fails when a checked-in binding is stale.
-Generation writes the Go operator API bindings into the Go module in `packages/operator-api/go`,
-which pins the plugins as tools, so it needs Go 1.26 or later. `go test ./...` in that directory checks the
-generated Go client against the generated handler. It also writes the operator API reference in
-`docs/reference/operator-api/` from the proto comments, so edit those comments rather than the
-pages; `pnpm check` fails when a page is stale.
-
-The Python SDK's operator bindings in `sdks/python/src/supertag/operator/v1` are not part of
-`pnpm proto:generate`. Regenerate them with
-`sdks/python/.venv/bin/python sdks/python/scripts/generate_operator_api.py`, which uses the
-generator versions pinned in the SDK's `dev` extra; the SDK's tests fail when they are stale.
-
-`pnpm proto:breaking` runs `buf breaking` against the latest release tag reachable from `HEAD`, and
-CI runs it on every change. Pass a tag or commit to compare against something else. Until the first
-stable release a breaking change is allowed, but only on purpose: add each change it reports to
-`spec/proto/accepted-breaking-changes.json` in the same commit, with its `type`, its exact
-`message` and a `reason`. The accepted changes apply only while `against` names the release the
-check compares with, so a new release tag starts an empty list. The check also fails on an
-accepted change that no longer occurs, so remove one when you undo it.
+The protobuf contract lives in `rust/proto`; see [binding generation](rust/bindings/README.md).
+`rust/scripts/generate-bindings.py` writes the Go, TypeScript, and Python bindings, using the
+protoc Go plugins pinned as tools in the `rust/bindings/go` module, so it needs Go 1.26 or later.
 
 ## Rust runtime development
 

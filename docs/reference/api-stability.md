@@ -77,10 +77,9 @@ at any time.
 | `SessionStateStore` and continuity resolution | Beta | Exact-ref matching and resume → replay → fresh behavior |
 | Shipped Codex, Claude Code, local execution, E2B, MCP, and collaboration surface providers | Experimental | Provider IDs and documented configuration only; implementation details are not contracts |
 | Control Plane resources and CLI commands | Beta | Documented resource shapes and commands; output prose is not machine-stable |
-| [Operator RPCs](control-plane-api.md#operator-rpcs-experimental): the `supertag.operator.v1` protobuf package served with Connect and gRPC-Web on the API port, documented in the generated [operator API reference](operator-api/README.md) | Experimental | Package, services, RPCs, method options, messages, the `ErrorDetail` reasons, and their proto3 JSON form; fields may change before release, and a change `buf breaking` flags is deliberate. The reference is generated from the proto comments, which define each RPC's behavior; error message prose is not machine-stable |
+| The Control Plane's `supertag.runtime.v2` gRPC services, defined in `rust/proto` | Experimental | Packages, services, RPCs, and messages; fields may change before release. Services negotiate the SuperTag protocol version before their first call |
 | `supertag recover worklet --host NAME` | Beta | The flag selects the host service whose journal recovery writes. Error prose may change. |
-| [`ConversationService`](operator-api/conversation.md) and [`EventService`](operator-api/event.md), the `FollowEventAdapter` in `@supertag/operator-api`, and the coordination tools `create_objective`, `read_objective`, `update_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session`, `start_session`, `continue_session`, `ask`, `send_message`, `post`, and `read_workstream` | Experimental | RPCs, `Message` and `WorkSession` fields, `FollowEvent` parts (`joined`, `waiting`, `textDelta`, `activity`, `finish`, `error`, `workSessionChanged`, `end`, `heartbeat`) and their order and resume rules, `WatchEvent` kinds, resume tokens and `resync`, the adapter's AI SDK UI message chunks (`text-*`, `data-joined`, `data-waiting`, `data-activity`, `data-reply`, `data-work-session`, `finish`, `error`), tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running, and none started or continued once less than 5% of the turn's or Objective's budget pool is left), and one branch per work Session. Output prose may change. |
-| `supertag-ai/control-plane` embedding API | Experimental | Control Plane service boundary; no persistence-schema compatibility promise |
+| The coordination tools `create_objective`, `read_objective`, `update_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session`, `start_session`, `continue_session`, `ask`, `send_message`, `post`, and `read_workstream` | Experimental | Tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running, and none started or continued once less than 5% of the turn's or Objective's budget pool is left), and one branch per work Session. Output prose may change. |
 | Conformance helpers and test fixtures | Beta | Published assertions and fixtures; helper implementation details may change |
 | Undocumented exports, package internals, and database tables | Internal | No compatibility promise |
 
@@ -98,43 +97,17 @@ require explicit `sessions` declarations, including when session support is disa
 
 ## Package entry points
 
-Each `supertag-ai` import path has its own stability level:
+`supertag-ai` is the TypeScript SDK. Each import path has its own stability level:
 
 | Import | Level | Main exports |
 | --- | --- | --- |
-| `supertag-ai` | Beta | `createWorker`, `LocalWorklet`, `LocalExecutionEnvironmentProvider`, `LocalHarnessRuntimeProvider`, `connectWorklet`, `defaultTaskResult`, and core Worker types |
-| `supertag-ai/core` | Beta | Tag, Role, Context Set, Permission Set, Task, Session, and other surface-neutral domain contracts |
-| `supertag-ai/worker` | Beta | Worker, harness, execution environment, Context Resolver, tool, and `SessionStateStore` contracts |
-| `supertag-ai/testing` | Beta | Conformance probes such as `runWorkerConformance` and `assertConformance` |
-| `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
-| `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
-| `supertag-ai/coordination` | Experimental | `CoordinationClient`, which lists the operator inbox through `InboxService`, and the inbox messages it returns |
 | `supertag-ai/control-plane-client` | Experimental | `createControlPlaneClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
 | `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), and execution-scoped `supertag.runtime.v2` clients |
-| `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
-| `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |
-| `supertag-ai/harnesses/codex`, `/claude-code`, `/cursor`, `/opencode` | Experimental | Shipped Codex, Claude Code, Cursor, and OpenCode harnesses |
-| `supertag-ai/environments/e2b`, `/modal`, `/shared-execution` | Experimental | Shipped E2B, Modal, and shared execution environments |
-| `supertag-ai/resources/github` | Experimental | Permission-derived MCP and workspace integrations |
-
-The root entry point re-exports the common Worker and Worklet symbols, including `createWorker`,
-`LocalWorklet`, and `connectWorklet`. Import them from `supertag-ai`. The same symbols are also
-exported from `supertag-ai/worker` or `supertag-ai/transport`; either path works.
-
-Concrete scheduling selection helpers and process-output buffering are internal. Artifact
-transfer signing, verification, grant bounds, and the transfer HTTP path are also internal.
-These helpers are not exported from `supertag-ai/worker`. Documented extension helpers,
-including `descriptorForProfile` and `LocalHarnessExecutionControl`, remain available.
 
 The Python SDK exposes `create_worker`, `WorkerOptions`, and `RuntimeInputProvider` for Worker
 composition. `RuntimeInputPipeline` is internal and is not exported from `supertag` or listed in
-`supertag.runtime.__all__`. Python remote Worklets use protocol 18 only, authenticate with
-`credential`, and require `DurableLocalWorklet` with a persistent journal.
-
-The Python SDK's operator API client, `supertag.operator`, installed with the `operator` extra, is
-Experimental: `OperatorClient`, `OperatorClientSync`, `error_detail`, `ErrorDetail`, `Code`,
-`ConnectError`, `OPERATOR_API_VERSION`, and the generated `supertag.operator.v1` modules. They
-follow the operator protos and change with them.
+`supertag.runtime.__all__`. Python Workers run in process; the Worker Host runs them through a
+harness adapter such as `supertag.openai_agents_adapter`.
 
 The Python SDK's `supertag.control_plane_client` module, installed with the `runtime` extra, is
 Experimental. `ControlPlaneClient` and `ControlPlaneClientSync` connect to a Rust Control Plane
@@ -190,11 +163,6 @@ Every Control Plane response carries a `SuperTag-Version` header, including erro
 unauthenticated `GET /healthz` also returns `version` in its body and nothing else about the
 build. The CLI sends `SuperTag-Client-Version` on each request. A Control Plane without the
 header predates version reporting, so the CLI cannot judge the pair.
-
-Worklets require transport protocol 18 and durable acceptance for remote execution. Older transport
-versions and the `pairingToken` handshake are rejected. `supertag describe worker-host` shows the
-negotiated protocol. Connections follow the [Worklet transport](../../spec/worklet-transport.md)
-rules.
 
 ## Contract changes
 

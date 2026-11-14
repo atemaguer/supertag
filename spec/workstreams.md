@@ -29,12 +29,10 @@ empty page leaves the cursor unchanged. Reads consume nothing and create no deli
 
 ## Operator RPC
 
-`supertag.operator.v1.MailboxService/ListWorkstreamPosts` takes `team`, an optional
-`afterSequence`, `pageSize` (0 means 50, at most 200), and `pageToken`, and returns `posts` with
-`tagNames`. It needs the admin token or an Operator Token with the `read_mailbox` action. The Team
-is matched by ID first, then by name; a Team that does not exist fails with `NotFound`. The CLI
-exposes it as `supertag list workstream-post --team TEAM`. See
-[MailboxService](../docs/reference/operator-api/mailbox.md).
+`supertag.runtime.v2.Teams/ListWorkstreamPosts` takes `team`, an optional `after_sequence`,
+`limit`, and `cursor`, and returns `posts` and `next_cursor`. The Team is matched by ID first,
+then by name; a Team that does not exist fails with `NOT_FOUND`. The CLI exposes it as
+`supertag get workstream-post --team TEAM`.
 
 ## Coordination tools
 

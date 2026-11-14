@@ -86,8 +86,6 @@ Each provider takes these options and secrets. The setup variable is the environ
 
 Write each secret as `{ env: VARIABLE }`, `{ file: PATH }`, or `{ secretRef: NAME }`. The optional
 `displayName` replaces the name the provider reports; for Teams it is the tenant's display name.
-The [SurfaceAccount schema](../../spec/manifests/surface-account.schema.json) gives the exact
-shape.
 
 ## Credentials
 

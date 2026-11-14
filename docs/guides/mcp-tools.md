@@ -147,8 +147,8 @@ import { connectExecutionEnvironmentMcpClient } from "supertag-ai/worker";
 const connection = await connectExecutionEnvironmentMcpClient(environment, toolInput);
 ```
 
-The execution environment must provide Node.js 18 or newer (including `fetch`) and supervised
-streaming process input and output. The helper starts a small Node.js bridge in that environment.
+The execution environment must provide supervised streaming process input and output. The helper
+starts a small bridge in that environment.
 For stdio it launches the server; for HTTP it connects from the environment's network. The bridge
 owns the MCP session and returns allowed schemas and results over supervised process streams.
 
