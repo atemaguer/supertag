@@ -48,7 +48,7 @@ metadata:
   name: shared-engineering
 spec:
   items:
-    - itemKey: skill:code-review
+    - item_key: skill:code-review
       type: supertag/skill
       version: 1
       required: true
@@ -128,7 +128,7 @@ metadata:
 spec:
   permissions:
     - { target: mcp, action: "sentry/get_issue_details" }
-    - { target: mcp, action: "sentry/update_issue", approval: required }
+    - { target: mcp, action: "sentry/update_issue", approval_required: true }
     - { target: mcp, action: "notion/*" }
 ```
 
@@ -140,7 +140,7 @@ the exact rules.
 ### Actions that need a decision
 
 Some granted actions should still wait for a person, such as merging a pull request or running
-commands during a release. Mark those permissions `approval: required`. List `approvers` to let a
+commands during a release. Mark those permissions `approval_required: true`. List `approvers` to let a
 specific operator or a Tag, such as a release manager Tag, decide instead of any operator.
 
 ```yaml
@@ -155,10 +155,10 @@ spec:
     - target: mcp
       action: "github/merge_pull_request"
       resource: "repository:acme/api"
-      approval: required
+      approval_required: true
     - target: runtime
       action: commands:execute
-      approval: required
+      approval_required: true
 ```
 
 A gated collaboration surface or MCP call does not run. It returns "approval pending" with a request ID, and the AI

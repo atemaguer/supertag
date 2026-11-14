@@ -57,7 +57,7 @@ first: the Tag that started that Session decides whether to answer it or to ask 
 ## 2. Decide an approval request
 
 An **approval request** appears when a Tag wants an action that a **Permission Set**, the list of
-actions a turn may perform, marks `approval: required`. The inbox shows it as kind `approval`,
+actions a turn may perform, marks `approval_required: true`. The inbox shows it as kind `approval`,
 with its summary, the requesting Tag, and whether a Task Attempt is waiting on it.
 
 ```sh

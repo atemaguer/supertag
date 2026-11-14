@@ -53,7 +53,7 @@ whole system rather than another first-class resource.
 - <a id="permission-set"></a>**Permission Set** — actions that a Task is allowed to perform through external tools or its
   execution system.
 - <a id="approval-request"></a>**approval request** — a recorded ask for a person or named approver
-  to allow an action marked `approval: required`, or a planned list of them. See
+  to allow an action marked `approval_required: true`, or a planned list of them. See
   [Approval requests](coordination.md#approval-requests).
 - <a id="context-item"></a>**Context Item** — one named, versioned declaration inside a Context Set.
 - <a id="context-plan"></a>**Context Plan** — the versioned Context Items, Skills, and artifact selections that SuperTag

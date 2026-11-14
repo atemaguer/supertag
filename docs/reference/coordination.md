@@ -109,7 +109,7 @@ commands. `runtimeActions` is the Objective's ceiling for them.
   that Tag's Roles narrowed to this list. The Permission Sets of the home thread's location do not
   apply: the Objective is not a conversation there.
 - An inherited action keeps its approval requirement. A turn waits for approval when its own
-  Permission Sets, or the owner's, mark the action `approval: required`.
+  Permission Sets, or the owner's, mark the action `approval_required: true`.
 - If both the Objective and the delegating Task allow `files:delegate-write`, a different
   Team member whose Role grants `files:write` can write in its delegated Session. The
   owner's own Sessions receive no write access from this grant.
@@ -567,7 +567,7 @@ number of Objectives may name one Team.
 
 An approval request records one ask for a person or a named approver. SuperTag creates one, of
 kind `surface-action`, when a Worker is about to forward a collaboration surface call whose
-permission has `approval: required`.
+permission has `approval_required: true`.
 
 Each request stores the Objective, Task, Task Attempt, requesting Tag, the actions, a `sha256`
 digest of the tool arguments, a short sanitized summary, and the Permission Sets that required it.

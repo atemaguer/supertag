@@ -115,7 +115,7 @@ and Claude Code receives it as an isolated plugin.
 | `supertag/skill` | 1 | The Worker Host's Skill catalog | The pinned Skill package |
 | `supertag/artifacts` | 1 | The Control Plane, at admission | Bounded artifact metadata summaries |
 
-Each Item has a `type`, a `version`, an `itemKey` unique within its Context Set, `required`, and a
+Each Item has a `type`, a `version`, an `item_key` unique within its Context Set, `required`, and a
 bounded, non-secret `config`. A Worker Host advertises the types it can resolve: `supertag/skill`
 only when it has a Skill catalog. Only a Worker Host that advertises every required Item's type
 claims the Task; an optional Item the host cannot resolve is recorded as an omission. The Control

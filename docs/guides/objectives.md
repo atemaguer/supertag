@@ -135,7 +135,7 @@ supertag objective set-runtime-actions docs-review --runtime-action files:write 
   --runtime-action commands:execute --state-directory ~/.supertag
 ```
 
-The update applies to turns that start afterwards. An action marked `approval: required` still
+The update applies to turns that start afterwards. An action marked `approval_required: true` still
 waits for approval, whoever runs it. See [Approval](../reference/iam.md#approval).
 
 Give a lead `files:delegate-write` in its Role's Permission Set when it coordinates edits

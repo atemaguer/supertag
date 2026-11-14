@@ -40,15 +40,16 @@ and [execution environments](glossary.md#execution-environment).
   to eligible Worker Hosts. You assign work to a Tag by name. Its configuration, open
   assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.
-  A permission can carry `approval: required`, and `spec.approvers` lists the operators
+  A permission can carry `approval_required: true`, and `spec.approvers` lists the operators
   (`operator:<id>`) and Tags (`tag:<name or id>`) that may decide. See [IAM approval](iam.md#approval).
 - **Context Set** — reusable knowledge and [Skills](glossary.md#skill) that may enter a Task.
 - **Role** — passive reusable policy for a responsibility, combining instructions, Context Sets, and Permission Sets.
-- **Volume** — a named storage location, such as a bucket prefix or a directory on the Worker
-  Host, and the name of the credential that reaches it; see [Volumes](#volumes).
-- **Workspace** — a named repository that [Objectives](#operational-resources) may work in, with an optional git `source`,
-  a base `ref`, one `setup` command, and a `delivery` mode. Worker Hosts declare local checkouts
-  of it or clone its source; see [Workspaces](#workspaces).
+- **Volume** — a named storage location, a directory or an S3 bucket prefix: a Workspace Volume
+  whose data Tasks receive as copies, or an artifact Volume that holds artifact copies; see
+  [Volumes](#volumes).
+- **Workspace** — a named repository that a Tag's Tasks work in. A Worker Host maps a local
+  repository to it by name, or the Control Plane holds a GitHub repository for it; see
+  [Workspaces](#workspaces).
 - **Surface Account** — an enrolled external workspace or account; credentials remain in the
   credential vault. `supertag setup surface` enrolls one interactively, and a SurfaceAccount
   manifest declares one; see [Declared Surface Accounts](#declared-surface-accounts).
@@ -57,8 +58,7 @@ Roles, Permission Sets, and Context Sets are shared resources. A Tag lists the R
 can be activated directly at one of a Tag's locations when it is situational, or referenced by a Role when it
 follows an enduring responsibility. Team membership places the Tag in the organization; the Task
 gives it current direction. A Tag's Worker Host bindings define where its Tasks may run; the
-scheduler then chooses a compatible Worker, harness, and execution environment on one of those
-hosts. None of these resources becomes a separate actor.
+scheduler then chooses a compatible harness and model on one of those hosts. None of these resources becomes a separate actor.
 
 ## Operational resources
 
@@ -87,7 +87,7 @@ hosts. None of these resources becomes a separate actor.
   [findings](coordination.md#review-findings): problems the Task reports about its own work, each
   with a severity, a summary and an optional location. A finding is part of the result, not a
   separate resource.
-- **Task Attempt** records one Worker execution or retry.
+- **Task Attempt** records one execution or retry of a Task on a Worker Host.
 - An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag get approval`, not an applied resource.
   See [Approval requests](coordination.md#approval-requests).
@@ -133,10 +133,10 @@ language-neutral envelope is defined in
 [`spec/resource-envelope.schema.json`](../../spec/resource-envelope.schema.json).
 
 The relationship between Tags and Roles follows that same boundary: `Tag.spec.roles` is desired
-configuration, while `Role.status.assignedTags` is a read-only projection. `Tag.spec.workerHosts`
-is the desired pool of enrolled Worker Host IDs. An empty pool is valid configuration, but the
-Control Plane rejects new Tasks for that Tag until an operator binds at least one host. A host that
-joins with an Auth Key is added to the pool of each of the key's Tags. Storage records used to
+configuration, while `Role.status.assignedTags` is a read-only projection. A Tag's Worker Host
+bindings are not a manifest field: a host that joins with an Auth Key is bound to each of the key's
+Tags, and a host in the same `supertag.yaml` as its Control Plane may run every Tag. A Tag with no
+bound host waits for one. Storage records used to
 preserve policy across admission and recovery are internal implementation details rather than
 additional resources.
 
@@ -221,8 +221,8 @@ machine, and hosts that enrolled without an ephemeral key. A remote sandbox, suc
 E2B, is always ephemeral: its Task files are lost when the sandbox stops, whatever host started
 it.
 
-The Control Plane stores no artifact bytes. Each Worker Host keeps the artifacts its Tasks capture
-in its own state directory, so an artifact is only as durable as the hosts that hold it.
+Captured artifact files also reach the Control Plane's transfer directory, so an ephemeral host's
+artifacts outlive it while that directory lasts. See [Artifacts](artifacts.md#where-artifact-bytes-live).
 
 ## Operator Tokens
 
@@ -230,41 +230,35 @@ An Operator Token lets one teammate or machine manage a shared Control Plane wit
 token. Each token has a name, and SuperTag records what it does as `token:NAME`. When a teammate
 leaves or a laptop is lost, revoking that one token is enough; nobody else's access changes.
 
-```yaml
-apiVersion: supertag/v1
-kind: OperatorToken
-metadata:
-  name: laptop-2
-spec: {}
-status:
-  phase: active
-  operatorId: token:laptop-2
-  expiresAt: "2026-12-30T00:00:00.000Z"
-  lastUsedAt: "2026-10-01T09:30:00.000Z"
+```sh
+supertag operator-token create laptop-2 --state-directory ~/.supertag
+supertag get operator-token laptop-2 --state-directory ~/.supertag
 ```
+
+`get operator-token` shows a token without its secret:
 
 | Field | Meaning |
 | --- | --- |
-| `status.phase` | `active`, `expired`, or `revoked`. |
-| `status.operatorId` | The operator ID recorded for the token's changes, such as `token:laptop-2`. |
-| `status.expiresAt` | Fixed at creation: 90 days later. |
-| `status.lastUsedAt` | The last request the token authenticated, updated at most once a minute. |
-| `status.revokedAt` | When the token was revoked. |
+| `phase` | `active`, `expired`, or `revoked`. |
+| `operator_id` | The operator ID recorded for the token's changes, such as `operator:token:laptop-2`. |
+| `expires_at_ms` | Fixed at creation: 90 days later. |
+| `last_used_at_ms` | The last request the token authenticated, updated at most once a minute. |
+| `rotated_at_ms`, `secret_revision` | The last `supertag operator-token rotate` and how many secrets the token has had. |
+| `revoked_at_ms` | When the token was revoked. |
 
 The admin token and Operator Tokens differ in one way:
 
 | Credential | Can |
 | --- | --- |
-| Admin token (`SUPERTAG_ADMIN_TOKEN`) | Everything, including creating, listing, and revoking Operator Tokens. Changes are recorded as `control-plane-break-glass`. |
+| Admin token | Everything, including creating, listing, rotating, and revoking Operator Tokens. Changes are recorded under the Control Plane's configured operator ID, such as `local`. |
 | Operator Token | Everything else the admin token can: apply and delete resources, create Auth Keys, create and direct Objectives, decide approvals, message, cancel, and read. Changes are recorded as `token:NAME`. |
-| Scoped coordination credential | Only the named coordination commands, Objectives, and Teams. See [scoped operator credentials](../operations/control-plane.md#identities-and-access). |
 
 The rules:
 
 - The secret starts with `stop_`. It is shown once, when the token is created. The Control Plane
   stores only its SHA-256 digest and compares digests in constant time. `list` and `get` never show
   the secret.
-- Tokens have no update. Names are never reused, so `token:NAME` always means one token.
+- Tokens have no update; `rotate` replaces the secret and keeps the name. Names are never reused, so `token:NAME` always means one token.
 - Revoking a token refuses it on the next request. An expired token is refused the same way.
 - Approval policies can name a token as an approver: `operator:token:laptop-2`.
 - Operator Tokens are imperative only. They do not appear in manifests.
@@ -274,7 +268,8 @@ The rules:
 A label is a short placement hint on a Worker Host, such as `macos`, `gpu`, or `workspace:app`.
 Bindings and labels answer different questions:
 
-- A Tag's bound Worker Hosts (`spec.workerHosts`) are the hosts that may run its Tasks.
+- A Tag's bound Worker Hosts are the hosts that may run its Tasks: those whose Auth Key named the
+  Tag, and a local host service, which may run every Tag.
 - A Tag's `spec.runsOn` labels choose among those hosts. A host is eligible only when it is bound
   to the Tag and carries every label in `runsOn`. An empty list means any bound host.
 
@@ -287,7 +282,6 @@ kind: Tag
 metadata:
   name: ios-builder
 spec:
-  workerHosts: [mac-mini-1, mac-mini-2]
   runsOn: [macos, arm64]
 ```
 
@@ -297,7 +291,7 @@ language. A host carries three kinds of label:
 
 | Kind | Labels | Set by |
 | --- | --- | --- |
-| Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server a host service provides](../surfaces/worker-tools.md) | The Worker Host |
+| Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server in the host's catalog](../surfaces/worker-tools.md) | The Worker Host |
 | Declared | Any label, such as `gpu` | `supertag worker-host --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
@@ -317,9 +311,9 @@ label. For an `mcp:NAME` label, it also names the missing MCP server, such as `N
 provides MCP server sentry`.
 
 A Task granted `commands:execute` also skips an **unsandboxed harness**: one that runs commands
-as the host's user, without an operating-system sandbox, such as Claude Code or OpenCode on a host
-service. It runs on one only when the host service lists it in `allow-unsandboxed-commands`.
-Otherwise it runs on another Worker, such as Codex, or waits; its scheduling record names the
+as the host's user, without an operating-system sandbox: Cursor or OpenCode on a local host. It
+runs on one only when the host service lists it in `allow-unsandboxed-commands`. Otherwise it runs
+on another Worker Host, such as one serving Codex, or waits; its scheduling record names the
 requirement `allow-unsandboxed-commands:HOST`, and `supertag describe task` explains it. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
@@ -341,8 +335,8 @@ spec:
   purpose: Review changes before they merge.
   execution:
     harness: codex
-    model: [gpt-6-sol]        # allowed models; the first is the default
-    effort: [medium, high]    # allowed efforts; the first is the default
+    models: [gpt-6-sol]        # allowed models; the first is the default
+    efforts: [medium, high]    # allowed efforts; the first is the default
 ```
 
 `spec.execution` takes the same three fields on a Role and on a Tag:
@@ -350,12 +344,12 @@ spec:
 | Field | Value | Meaning |
 | --- | --- | --- |
 | `harness` | One harness name, such as `codex` or `claude-code` | Tasks run only on that harness. |
-| `model` | One model, or a list | One value means only this model. A list allows each, and the first is the default. |
-| `effort` | `low`, `medium`, or `high`, or a list of them | Same rule as `model`. |
+| `models` | A list of model IDs | Each is allowed, and the first is the default. |
+| `efforts` | A list of `low`, `medium`, and `high` | Same rule as `models`. |
 
-A `harness` or `model` left out allows anything the Worker Host offers and uses the host's
-default. Effort is different: when neither the Tag nor its Roles set `effort`, Tasks start at
-`low`, and `medium` and `high` stay allowed. An `effort` list keeps its own first value as the
+A `harness` or `models` left out allows anything the Worker Host offers and uses the host's
+default. Effort is different: when neither the Tag nor its Roles set `efforts`, Tasks start at
+`low`, and `medium` and `high` stay allowed. An `efforts` list keeps its own first value as the
 default. Starting low keeps routine work cheap; the actors raise effort when work needs it. A Role sets
 the default and allowed range for its Tags. A Tag's own `spec.execution` overrides its Roles' field
 by field, so the Tag wins. When several Roles set a field, the first Role by name wins. A Role's
@@ -546,28 +540,14 @@ A **field manager** is the name recorded for that writer:
 | Field manager | Writes |
 | --- | --- |
 | `apply` | `apply -f` without `--set` |
-| `init` | Starter resources created by `supertag init` |
 | The set name | `apply -f` with `--set NAME` |
-| `cli` | Imperative commands such as `update tag` and `grant mailbox`, Worker Hosts joining with an Auth Key, and any other change made outside apply |
-| `tag:<name>` | Reserved for changes Tags make through tools. No current tool changes a managed field. |
+| `provision` | Resources a `control-plane` service's `provision` creates on `supertag up` |
+| `cli` | Imperative commands such as `tag put`, `placement runs-on`, and `mailbox-grant allow`, Worker Hosts joining with an Auth Key, and any other change made outside apply |
 
-A field is either one value or one entry of a list. Each list entry has its own manager:
-
-| Resource | Field | One entry per |
-| --- | --- | --- |
-| Tag | `spec.roles`, `spec.workerHosts`, `spec.runsOn` | Role name, Worker Host ID, label |
-| Tag | `spec.locations` | Provider and scope ID, such as `slack:C0123` or `teams:TEAM/CHANNEL` |
-| Tag | `spec.acceptsMessagesFrom` | Sender Tag |
-| Role | `spec.contextSets`, `spec.permissionSets` | Set name |
-| Permission Set | `spec.approvers`, `spec.permissions` | Approver; permission target, scope or resource, and action |
-| Context Set | `spec.items` | `itemKey` |
-| Objective | `spec.teams` | Team name |
-| Surface Account | `spec.configuration`, `spec.secrets` | Option name, secret name |
-
-Other fields, such as a Role's `purpose`, are single values. An Objective's lists, such as
-`spec.runtimeActions` and `spec.workspaces`, are single values too. A location's sets and
-`workspaces` belong to its entry, so activating a set there changes that entry. Messages name
-fields by path, such as `spec.purpose` or `spec.locations[slack:C0123]`.
+A field is either one value or one entry of a list. Each entry of a Tag's `spec.roles`,
+`spec.runsOn`, and `spec.acceptsMessagesFrom` has its own manager. Every other field, such as a
+Role's `spec.purpose`, a Permission Set's `spec.permissions`, or a Team's `spec.members`, is a
+single value. Messages name fields by path, such as `spec.purpose` or `spec.roles[Builder]`.
 
 Apply follows four rules for each field:
 
@@ -579,18 +559,16 @@ Apply follows four rules for each field:
 4. **Same value: no conflict.** Setting the value another manager already set moves the field to
    the applying manager. Each field has one manager.
 
-Imperative commands keep their own rule: they change only what they name. SuperTag stores each
-field's value when apply writes it. A field whose value later differs changed outside apply, so it
-belongs to `cli`. A resource with no record, such as one created before field managers existed,
-belongs entirely to `cli`, so its first apply conflicts rather than deletes.
+Imperative commands keep their own rule: they change only what they name. SuperTag stores a digest
+of each field's value when apply writes it. A field whose value later differs changed outside
+apply, so it belongs to `cli`. A resource with no record belongs entirely to `cli`, so its first
+apply conflicts rather than deletes.
 
 An **apply set** is a named group of resources that one input declares. `--set NAME` records every
 resource in the input as a member of that set, and writes as field manager `NAME`.
 A resource belongs to at most one apply set; applying it under another set moves it. `--prune`
-removes the set's members that the input no longer lists: it cancels Objectives first, then deletes
-Tags, sets, Workspaces, and Volumes, and retires Surface Accounts last. It
-deletes each one as [Deletion](#deletion) describes and keeps, and reports, a member that is still
-in use. A kept member stays in the set for the next prune. See
+removes the set's members that the input no longer lists, as [Deletion](#deletion) describes,
+and keeps, and reports, a member that is still in use. A kept member stays in the set for the next prune. See
 [Manage an organization as a set](../operations/resources.md#manage-an-organization-as-a-set).
 
 `supertag.yaml` is not a source of resources. It lists the services `supertag up` runs, and
@@ -608,130 +586,93 @@ kind: Objective
 metadata:
   name: dependency-upkeep
 spec:
-  owner: maintainer
+  ownerTagId: maintainer
   outcome: Keep dependencies current and the build green. Open a pull request for each upgrade.
   ongoing: true
-  workspaces: [app]
-  budget: { minor: 50000, currency: USD }
+  team: upkeep
+  budgetLimitMinor: 50000
+  budgetCurrency: USD
   deadline: "2027-01-01T00:00:00Z"
   runtimeActions: [files:write]
-  team: { members: [maintainer, builder], maxConcurrency: 2 }
 ```
 
-| Field | Meaning | After creation |
-| --- | --- | --- |
-| `metadata.name` | The Objective ID. | Fixed |
-| `spec.owner` | Required. The owner Tag's name. | Fixed |
-| `spec.outcome` | Required. One natural-language statement of the outcome. | Fixed |
-| `spec.ongoing` | `true` for a responsibility that only an operator ends. Default `false`. | Fixed |
-| `spec.workspaces` | Workspace names. | Fixed |
-| `spec.budget` | `minor`, a nonnegative integer, and an optional uppercase `currency`. | Only increases |
-| `spec.deadline` | An ISO timestamp. | Changes |
-| `spec.runtimeActions` | Runtime actions for turns admitted afterwards. Omitted: what the owner's Permission Sets allow when it is created. | Changes |
-| `spec.team` | An existing Team's name, or the Objective's own Team as `members` (Tag names), an optional `name`, and an optional `maxConcurrency` (1 to 1000). | Which Team is fixed; its own Team's fields change |
+| Field | Meaning |
+| --- | --- |
+| `metadata.name` | The Objective ID. |
+| `spec.ownerTagId` | Required. The owner Tag. |
+| `spec.outcome` | Required. One natural-language statement of the outcome. |
+| `spec.ongoing` | `true` for a responsibility that only an operator ends. Default `false`. |
+| `spec.team` | An existing Team, declared as its own `Team` manifest or created with `supertag team create`. |
+| `spec.budgetLimitMinor`, `spec.budgetCurrency` | The budget, in minor units of an uppercase currency. |
+| `spec.deadline` or `spec.deadlineMs` | An RFC 3339 time with a time zone, or milliseconds since the epoch. |
+| `spec.runtimeActions` | Runtime actions its turns may receive. Omitted: what the owner's Permission Sets allow when it is created. |
 
-The rules:
-
-- Applying a new Objective creates it and starts its conversation. An Objective that could not
-  start, such as one whose owner Tag had no Worker Host, starts on a later apply.
-- A change to a fixed field is refused before anything is applied. A new name creates a new
-  Objective. A field another manager owns is reported as a conflict, as for other kinds.
-- A manifest that stops setting `budget`, `deadline`, or `runtimeActions` leaves the stored value.
-- A declared Team's ID is the Objective's ID. Apply creates and updates only the Teams it owns,
-  and leaves a Team the Objective names by name alone.
-- `--prune` cancels a set member the input no longer declares; it is never deleted. A completed
-  member leaves the set unchanged. A cancelled Objective cannot run again, so apply leaves a
-  cancelled declaration as it is and says so.
-- A manifest has no `status`. `supertag get objective ID` returns the full Objective record as
-  JSON.
+Applying an Objective that does not exist creates it and queues its owner's first turn, as
+`supertag objective create` does. Applying it again leaves it alone: change a running Objective
+with `objective set-limits`, `set-runtime-actions`, `pause`, `resume`, `cancel`, or `complete`.
+`supertag get objective ID` returns the full Objective record as JSON.
 
 ## Declared Surface Accounts
 
-A SurfaceAccount manifest declares one Surface Account. Its secrets are references, never
-values:
+A SurfaceAccount manifest records a connected account's identity and the Gateway that serves it.
+It holds no secret: credentials reach that Gateway's vault through `supertag setup surface` or
+`supertag gateway credential store`, on the Gateway's machine. A SurfaceLocation manifest binds
+one place of that account to a Tag and its policy:
 
 ```yaml
 apiVersion: supertag/v1
 kind: SurfaceAccount
-metadata:
-  name: acme-slack
+metadata: { name: acme-slack }
 spec:
-  provider: slack
-  displayName: Acme Slack
-  configuration: { transport: socket }
-  secrets:
-    botToken: { secretRef: slack-bot-token }
-    appToken: { env: SLACK_APP_TOKEN }
+  identity: { provider: slack, team_id: T0123456789 }
+  enabled: true
+  gateway: local
+---
+apiVersion: supertag/v1
+kind: SurfaceLocation
+metadata: { name: eng-channel }
+spec:
+  account_id: acme-slack
+  connector_account_id: T0123456789
+  tag_id: lead
+  scope: { provider: slack, channel_id: C0123456789 }
+  enabled: true
+  permission_set_ids: [local-tools]
+  context_set_ids: []
 ```
 
-| Field | Meaning | After creation |
-| --- | --- | --- |
-| `metadata.name` | 1 to 63 letters, digits, dots, hyphens, or underscores. Tag locations may name the account by it in `account`. | Fixed to one provider account |
-| `spec.provider` | `slack`, `github`, `lark`, `linear`, or `teams`. | Fixed |
-| `spec.displayName` | Optional. Replaces the name the provider reports. | Changes |
-| `spec.configuration` | The provider's non-secret options, with defaults filled in. | Changes; identity options, such as a Teams `tenantId`, may not name another account |
-| `spec.secrets` | Secret name to exactly one of `{ secretRef: NAME }`, `{ env: VARIABLE }`, or `{ file: PATH }`. | Changes |
+| Field | Meaning |
+| --- | --- |
+| `spec.identity` | The provider and the account's provider ID, such as a Slack `team_id`. |
+| `spec.enabled` | Whether the account admits work. |
+| `spec.gateway` | The enrolled Gateway that serves it, by the `NAME` of `gateway:NAME`. |
 
-The [collaboration surface guides](../surfaces/README.md#declare-accounts-and-locations-in-manifests) list each
-provider's options and secrets, and the
-[SurfaceAccount schema](../../spec/manifests/surface-account.schema.json) gives the exact shape.
-
-The rules:
-
-- A literal secret value is invalid anywhere in the manifest.
-- `env` and `file` are read by the applying CLI; a relative `file` path starts from the manifest's
-  directory. `secretRef` is resolved by the caller that applies the manifest; `supertag apply -f`
-  supplies no resolver and refuses it.
-- Apply compares the resolved values with the credential vault. When the account is new or
-  anything changed, the CLI verifies the values with the provider, as `supertag setup surface`
-  does, before any manifest in the input is applied. An unchanged account is neither re-verified
-  nor rewritten.
-- `diff` never reads secrets. It plans the declared fields and references only.
-- The stored resource lists the references in `spec.secrets` beside the fields verification
-  records, such as `externalAccountId`. No value or derivative of a value is stored outside the
-  vault.
-- A name stays bound to the provider account it first named. Credentials for another account, or a
-  second manifest for the same one, are refused. Applying a manifest for an account that setup
-  created names that account and keeps its ID.
-- `supertag get surface-account NAME` returns the account as JSON.
+The [collaboration surface guides](../surfaces/README.md) list each provider's identity and scope
+fields. `supertag get surface-account NAME` returns the account as JSON.
 
 ## Deletion
 
-`supertag delete` removes a Tag, Role, Permission Set, Context Set, Workspace, or Surface
-Account. Objectives are cancelled instead, never deleted. Deletion never erases history, and it refuses a resource that is
-still in use:
+`supertag delete` removes a Team, Permission Set, Context Set, Volume, Workspace, or surface
+location. Tags and Roles are retired instead, and Objectives cancelled; none is erased. Deletion
+never erases history, and it refuses a resource that is still in use:
 
-| Resource | Deleting it | Refused while |
-| --- | --- | --- |
-| Tag | Retires the Tag and removes its locations with their set activations, Worker Host bindings, Mailbox grants in both directions, and Role assignments | It owns an open Objective, belongs to any Team, has a pending or running Task, or a Permission Set names it in `spec.approvers` |
-| Role | Retires the Role and clears its sets | A Tag holds it, or it is built in |
-| Permission Set, Context Set | Deletes the set and its entries | An active Role lists it, or a Tag location activates it |
-| Workspace | Deletes the Workspace | An open Objective names it, or a Tag location lists it |
-| Surface Account | Retires the account and deletes its vault credential | A Tag location uses it, or a Permission Set grants an action through it |
+| Resource | Refused while |
+| --- | --- |
+| Team | An Objective that names it is still open |
+| Permission Set, Context Set | A Role lists it, or a surface location activates it |
+| Volume | Reserved or verified artifact copies depend on it |
+| Workspace | Given an out-of-date `--expected-revision` |
+| Surface location | Given an out-of-date `--expected-revision` |
 
-A Volume has no `supertag delete` form; `apply --set NAME --prune` deletes a Volume that its apply
-set no longer declares.
-
-A Surface Account is named by its manifest name, or, when setup created it, by
-`PROVIDER:EXTERNAL_ID` as `supertag get surface-account` shows. A **retired** account keeps its row for
-delivery history, frees its name, matches no inbound event, and is omitted from `list` and `get`.
-Setting up or applying the same provider account again reconnects it.
-
-An open Objective is one that is not `completed` or `cancelled`. A refusal names every reference.
-There is no force option: remove the references, then delete again. Deletion also removes the
-resource's field-manager record and apply-set membership. A dry run reports the same decision and
-what would go with the resource, without changing anything.
-
-A **retired** Tag has `status.phase: retired` and `status.retiredAt`. Its row stays, so Tasks,
-Sessions, approval requests, Objectives, and artifacts keep pointing at it. It receives no work,
-cannot be messaged or bound to a Worker Host, and Auth Keys that name it can no longer join. `list`
-omits retired Tags; `get` still returns one by name. Only active Tags hold a name, so a new Tag can
-reuse a retired Tag's name. It gets a new ID, and history still names the retired Tag by ID. When
-several retired Tags share a name and no active Tag holds it, `get` returns the latest one retired.
+`supertag tag retire TAG` retires a Tag, and putting a Role with `status: retired` retires the
+Role. A **retired** Tag keeps its row, so Tasks, Sessions, approval requests, Objectives, and
+artifacts keep pointing at it. It receives no work, cannot be messaged, and Auth Keys that name it
+can no longer join. `get tag` without an ID omits retired Tags; `get tag ID` still returns one. A
+new Tag may reuse a retired Tag's name; it gets a new ID.
 
 Deleting a set or Workspace does not change history, because each Task keeps the policy and
-workspace recorded when SuperTag accepted it. A Worker Host that declares a deleted Workspace keeps
-its checkout; SuperTag stops offering the Workspace until one with that name exists again.
+Workspace recorded when SuperTag accepted it. `apply --set NAME --prune` deletes the set's members
+that the input no longer declares, by the same rules.
 
 ## Internal coordination
 

@@ -43,7 +43,7 @@ The Task freezes:
 - active Permission Sets and their approvers;
 - explicit resource/action pairs;
 - MCP server tools granted with `target: mcp`;
-- granted actions marked `approval: required`, with the Permission Sets that require them;
+- granted actions marked `approval_required: true`, with the Permission Sets that require them;
 - capture time.
 
 The Worker Host receives this same snapshot. Later policy changes do not rewrite accepted work.
@@ -63,7 +63,7 @@ Everything outside the intersection is denied. Prompt wording, channel membershi
 
 ## Approval
 
-A permission can require a recorded decision before each use. Add `approval: required` to a
+A permission can require a recorded decision before each use. Add `approval_required: true` to a
 collaboration surface, runtime, or MCP permission. A Permission Set can also list `approvers`.
 
 ```yaml
@@ -77,14 +77,14 @@ spec:
     - operator:release-oncall
   permissions:
     - target: surface
-      surfaceAccountId: SURFACE_ACCOUNT_ID
+      surface_account_id: SURFACE_ACCOUNT_ID
       scope: repository:123456
       reference: acme/api
       action: pull-requests:create
     - target: mcp
       action: "github/merge_pull_request"
       resource: "repository:acme/api"
-      approval: required
+      approval_required: true
     - target: runtime
       action: commands:execute
 ```
@@ -95,7 +95,7 @@ Every active Permission Set applies: Permission Sets activated at the Tag's loca
 its Roles. The result follows three rules, in order:
 
 1. A missing grant denies. Permissions stay an allow-list, so an action no set grants is denied.
-2. Any ask wins over allow. If one set grants an action with `approval: required`, the action
+2. Any ask wins over allow. If one set grants an action with `approval_required: true`, the action
    needs approval even when another set grants it plainly.
 3. Otherwise the grant allows the action.
 
@@ -176,7 +176,7 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
 receives the actions within the Objective's list and, for delegated work, within its delegating
 Task's. Approval travels with the action: a Task waits when its own Permission Sets, or those of
-the Task or owner it inherits the action from, mark it `approval: required`. See
+the Task or owner it inherits the action from, mark it `approval_required: true`. See
 [Objective runtime actions](coordination.md#objective-runtime-actions).
 
 When the Objective and the delegating Task include `files:delegate-write`, a different Team
@@ -199,7 +199,7 @@ metadata:
 spec:
   permissions:
     - { target: mcp, action: "sentry/get_issue_details" }
-    - { target: mcp, action: "sentry/update_issue", approval: required }
+    - { target: mcp, action: "sentry/update_issue", approval_required: true }
     - { target: mcp, action: "notion/*" }
     - { target: mcp, action: "github/create_pull_request", resource: "repository:acme/api" }
 ```
@@ -225,7 +225,7 @@ order:
 1. The tool is granted. Other tools are missing from `tools/list` and refused when called.
 2. The resource. A grant without `resource` covers the tool on any resource. Otherwise the call's
    arguments must name exactly one resource, and a covering grant must name it.
-3. Approval. When an `approval: required` grant covers the call, the proxy asks the Control Plane.
+3. Approval. When an `approval_required: true` grant covers the call, the proxy asks the Control Plane.
    A `once` approval covers only the same arguments, compared by their canonical JSON digest.
 
 A refused call never reaches the server. The proxy fails closed: a call is refused when its
