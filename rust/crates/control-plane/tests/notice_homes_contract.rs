@@ -487,10 +487,21 @@ async fn deployment_default(store: &Store, host: &HostAuthority) {
                 .into()
         )]
     );
-    store
-        .set_default_notification_task(Some(&default))
-        .await
-        .unwrap();
+    assert_eq!(
+        store
+            .set_default_notification_task(Some(&default))
+            .await
+            .unwrap(),
+        None
+    );
+    // Every replica shares the one row; another replica's start reports what it replaced.
+    assert_eq!(
+        store
+            .set_default_notification_task(Some(&default))
+            .await
+            .unwrap(),
+        Some(default.clone())
+    );
     store.sweep_objectives().await.unwrap();
     let posted = notices(&deliver(store).await, "plain");
     assert_eq!(posted.len(), 1, "{posted:?}");
@@ -521,7 +532,10 @@ async fn deployment_default(store: &Store, host: &HostAuthority) {
         "{delivered:?}"
     );
     // Clearing the default leaves later Objectives without a thread.
-    store.set_default_notification_task(None).await.unwrap();
+    assert_eq!(
+        store.set_default_notification_task(None).await.unwrap(),
+        Some(default)
+    );
 }
 
 /// Each part runs on its own database so no part's queued Tasks reach another's claims.

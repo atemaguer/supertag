@@ -10,7 +10,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
 
 /// What the Control Plane says of a removed host's Worker Host.
 #[derive(Debug, PartialEq, Eq)]
@@ -21,13 +20,14 @@ pub(crate) enum Registration {
     Retired,
 }
 
-#[derive(Deserialize)]
+/// The Control Plane and Worker Host ID a host's state directory enrolled with, read from the
+/// enrollment the Worker Host itself writes.
 struct Enrollment {
-    gateway: String,
+    control_plane: String,
     host_id: String,
 }
 
-/// The Gateway and Worker Host ID a host's state directory enrolled with, if it did.
+/// The enrollment a host's state directory holds, if it enrolled.
 fn enrollment(directory: &Path) -> Result<Option<Enrollment>> {
     let path = directory.join("enrollment.json");
     match fs::symlink_metadata(&path) {
@@ -36,10 +36,13 @@ fn enrollment(directory: &Path) -> Result<Option<Enrollment>> {
         Ok(metadata) if !metadata.is_file() => anyhow::bail!("its enrollment is not a file"),
         Ok(_) => {}
     }
-    let bytes = crate::local::read_private(&path).context("read its enrollment")?;
-    Ok(Some(
-        serde_json::from_str(&bytes).context("its enrollment is not valid")?,
-    ))
+    let (control_plane, host_id) = supertag_worker_host::enrolled_host(directory)
+        .context("its enrollment is not valid")?
+        .context("its enrollment disappeared")?;
+    Ok(Some(Enrollment {
+        control_plane,
+        host_id,
+    }))
 }
 
 fn same_origin(left: &str, right: &str) -> bool {
@@ -67,8 +70,8 @@ fn removed(state: &Path, configured: &BTreeSet<String>) -> Result<Vec<(String, P
 }
 
 /// Removes the state of every host service the file no longer names whose Worker Host cannot
-/// run work, and returns a line for each removed or kept one. `local` is the local Gateway this
-/// state directory's supervisor runs; `check` asks its Control Plane about a Worker Host.
+/// run work, and returns a line for each removed or kept one. `local` is the local Control Plane
+/// this state directory's supervisor runs; `check` asks it about a Worker Host.
 pub(crate) async fn retire(
     state: &Path,
     configured: &BTreeSet<String>,
@@ -92,7 +95,7 @@ pub(crate) async fn retire(
                 gone(" and it never enrolled")
             }
             Ok(Some(enrolled))
-                if local.is_some_and(|local| same_origin(local, &enrolled.gateway)) =>
+                if local.is_some_and(|local| same_origin(local, &enrolled.control_plane)) =>
             {
                 match check(&enrolled.host_id).await {
                     Ok(Registration::Retired) => {
@@ -114,7 +117,7 @@ pub(crate) async fn retire(
             Ok(Some(enrolled)) => format!(
                 "Host service {name} is no longer in supertag.yaml. Its Worker Host {} is enrolled with {}: revoke it there with supertag host revoke {}, then remove its state ({shown}).",
                 enrolled.host_id,
-                enrolled.gateway.trim_end_matches('/'),
+                enrolled.control_plane.trim_end_matches('/'),
                 enrolled.host_id
             ),
         };
@@ -142,10 +145,25 @@ mod tests {
         directory
     }
 
-    fn enrolled(gateway: &str) -> String {
-        format!(
-            r#"{{"gateway":"{gateway}/","host_id":"old","operation_id":"o","token":"secret","receipt":{{"generation":1}}}}"#
-        )
+    /// The enrollment a Worker Host writes once `old` enrolled with `control_plane`, under
+    /// `enrolled_name` when a reusable Auth Key suffixed it.
+    fn enrolled_as(control_plane: &str, enrolled_name: Option<&str>) -> String {
+        let mut state = serde_json::json!({
+            "control_plane": format!("{control_plane}/"),
+            "role": "host",
+            "name": "old",
+            "operation_id": "o",
+            "token": "secret",
+            "revision": 1,
+        });
+        if let Some(name) = enrolled_name {
+            state["enrolled_name"] = name.into();
+        }
+        state.to_string()
+    }
+
+    fn enrolled(control_plane: &str) -> String {
+        enrolled_as(control_plane, None)
     }
 
     async fn run(state: &Path, registration: Result<Registration>) -> Vec<String> {
@@ -193,6 +211,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn checks_the_worker_host_id_a_reusable_key_enrolled() {
+        let state = tempfile::tempdir().unwrap();
+        let old = host(
+            state.path(),
+            "old",
+            Some((&enrolled_as(LOCAL, Some("old-2")), 0o600)),
+        );
+        let configured = BTreeSet::new();
+        let lines = retire(state.path(), &configured, Some(LOCAL), async |id: &str| {
+            assert_eq!(id, "old-2");
+            Ok(Registration::Active)
+        })
+        .await
+        .unwrap();
+        assert!(old.join("enrollment.json").exists());
+        assert!(
+            lines[0].contains("Worker Host old-2 is still enrolled"),
+            "{lines:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn keeps_its_state_when_its_control_plane_cannot_answer() {
         let state = tempfile::tempdir().unwrap();
         let old = host(state.path(), "old", Some((&enrolled(LOCAL), 0o600)));
@@ -211,7 +251,7 @@ mod tests {
         let old = host(
             state.path(),
             "old",
-            Some((&enrolled("https://gateway.example"), 0o600)),
+            Some((&enrolled("https://control-plane.example"), 0o600)),
         );
         let configured = BTreeSet::new();
         let lines = retire(state.path(), &configured, Some(LOCAL), async |_: &str| {
@@ -221,14 +261,19 @@ mod tests {
         .unwrap();
         assert!(old.exists());
         assert!(
-            lines[0].contains("enrolled with https://gateway.example: revoke it there"),
+            lines[0].contains("enrolled with https://control-plane.example: revoke it there"),
             "{lines:?}"
         );
     }
 
     #[tokio::test]
     async fn keeps_its_state_when_its_enrollment_cannot_be_read() {
-        for (text, mode) in [("not json", 0o600), (enrolled(LOCAL).as_str(), 0o644)] {
+        let gateway = enrolled(LOCAL).replace(r#""role":"host""#, r#""role":"gateway""#);
+        for (text, mode) in [
+            ("not json", 0o600),
+            (enrolled(LOCAL).as_str(), 0o644),
+            (gateway.as_str(), 0o600),
+        ] {
             let state = tempfile::tempdir().unwrap();
             let old = host(state.path(), "old", Some((text, mode)));
             let configured = BTreeSet::new();

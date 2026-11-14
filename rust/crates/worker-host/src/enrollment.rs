@@ -231,6 +231,22 @@ pub fn enrolled_control_plane(directory: &Path) -> Result<String> {
         .control_plane)
 }
 
+/// The Control Plane URL a Worker Host state directory enrolled with and the Worker Host ID it
+/// enrolled as (`NAME-2` when a reusable Auth Key found `NAME` taken), if it holds an enrollment.
+/// An enrollment whose receipt never arrived is reported too: the Control Plane may hold it.
+pub fn enrolled_host(directory: &Path) -> Result<Option<(String, String)>> {
+    let journal = Journal::open(directory)?;
+    let Some(state) = read(&journal)? else {
+        return Ok(None);
+    };
+    ensure!(
+        state.role == EnrolledRole::Host,
+        "this state directory holds another role's enrollment"
+    );
+    let name = state.enrolled().to_owned();
+    Ok(Some((state.control_plane, name)))
+}
+
 pub(crate) fn host_token(journal: &Journal, control_plane: &Target) -> Result<String> {
     Ok(stored_credential(journal, control_plane, EnrolledRole::Host)?.1)
 }

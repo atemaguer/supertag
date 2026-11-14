@@ -387,6 +387,38 @@ fn configured_services_restart_on_change_render_config_and_refuse_unknown_names(
     assert_eq!(service(&ps, "checker")?["state"], "running", "{ps}");
     assert!(machine.ok(&["up", "--force"])?.contains("left alone"));
 
+    // A host the file no longer names keeps the state the Worker Host enrolled with until it is
+    // revoked; the next up then removes it.
+    let reviewer_state = machine.state.join("hosts/reviewer");
+    assert!(reviewer_state.join("enrollment.json").exists());
+    let third = pids(&ps);
+    config["services"]
+        .as_object_mut()
+        .context("services")?
+        .remove("reviewer");
+    write_yaml(&file, &config)?;
+    let removed = machine.ok(&["up", "--force"])?;
+    wait_gone(&third)?;
+    assert!(
+        removed.contains(&format!(
+            "Host service reviewer is no longer in supertag.yaml, but Worker Host reviewer is still enrolled. Retire it with supertag host revoke reviewer --state-directory {};",
+            machine.state.canonicalize()?.display()
+        )),
+        "{removed}"
+    );
+    assert!(reviewer_state.join("enrollment.json").exists());
+    let state_arg = machine.state.to_str().context("state path")?;
+    machine.ok(&["host", "revoke", "reviewer", "--state-directory", state_arg])?;
+    let retired = machine.ok(&["up"])?;
+    assert!(retired.contains("left alone"), "{retired}");
+    assert!(
+        retired.contains("Removed host service reviewer's state")
+            && retired.contains("Worker Host reviewer is revoked"),
+        "{retired}"
+    );
+    assert!(!reviewer_state.exists());
+    let ps = machine.ps()?;
+
     // Host names never collide with the fixed services' logs.
     let mut reserved = config.clone();
     reserved["services"]["gateway"] = json!({"type": "host", "adapter": ADAPTER});
@@ -404,7 +436,7 @@ fn configured_services_restart_on_change_render_config_and_refuse_unknown_names(
     // Stopped configured services are still listed from the file.
     let ps = machine.ps()?;
     assert!(ps["supervisor"].is_null());
-    assert_eq!(service(&ps, "reviewer")?["state"], "stopped");
+    assert_eq!(service(&ps, "builder")?["state"], "stopped");
 
     // An invalid file fails before anything starts.
     fs::write(&file, "services: {broken: {type: nope}}\n")?;

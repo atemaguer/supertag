@@ -1395,12 +1395,18 @@ async fn control_plane(
     if let Some(audit_log) = &options.audit_log {
         plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(audit_log)?);
     }
-    // The deployment's default thread for Objective notices (TypeScript parity).
-    plane
-        .set_default_notification_task(
-            nonempty_env("SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID").as_deref(),
-        )
+    // The deployment's default thread for Objective notices (TypeScript parity). It is shared
+    // by every replica, so a replica started with another value says what it replaced.
+    let default_notice_task = nonempty_env("SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID");
+    let replaced = plane
+        .set_default_notification_task(default_notice_task.as_deref())
         .await?;
+    if replaced != default_notice_task {
+        errln!(
+            "{}",
+            notice_default_change(replaced.as_deref(), default_notice_task.as_deref())
+        );
+    }
     // A single-machine deployment's own Worker Host and Gateway start enrolled.
     for (variable, role) in [
         (
@@ -2047,6 +2053,21 @@ impl SurfaceSecrets {
             .filter(|value| !value.trim().is_empty())
             .cloned()
             .with_context(|| format!("credential {id} has no {field}"))
+    }
+}
+
+/// What a Control Plane says when its `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID` replaced the default
+/// Objective notice Task that every replica shares.
+fn notice_default_change(replaced: Option<&str>, set: Option<&str>) -> String {
+    let set = match set {
+        Some(task) => format!("is now Task {task}"),
+        None => "is now unset".into(),
+    };
+    match replaced {
+        Some(task) => format!(
+            "The default Objective notice Task {set}; it was Task {task}. Every Control Plane replica shares it, so start each with the same SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID."
+        ),
+        None => format!("The default Objective notice Task {set}."),
     }
 }
 
@@ -2713,8 +2734,23 @@ fn limits_json(limits: &supertag_protocol::v2::ExecutionLimits) -> serde_json::V
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, usage_error_text};
+    use super::{Cli, notice_default_change, usage_error_text};
     use crate::{observe::WATCH_EVENT_STREAMS, resources::KINDS};
+
+    #[test]
+    fn a_replica_says_when_it_replaced_the_shared_notice_default() {
+        assert_eq!(
+            notice_default_change(None, Some("t1")),
+            "The default Objective notice Task is now Task t1."
+        );
+        let cleared = notice_default_change(Some("t1"), None);
+        assert!(
+            cleared.starts_with("The default Objective notice Task is now unset; it was Task t1.")
+                && cleared
+                    .contains("start each with the same SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID"),
+            "{cleared}"
+        );
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()

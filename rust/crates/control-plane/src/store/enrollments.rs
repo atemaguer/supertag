@@ -326,10 +326,10 @@ impl Store {
                 role.plural()
             )));
         }
-        // A join is found again by its operation, since a reusable key's host join may have
-        // enrolled a suffixed name; a join recorded before operations were kept, by its name.
-        let prior: Option<(String, String)> = sqlx::query_as("SELECT name, enrollment_digest FROM supertag_v2_auth_key_joins WHERE key_digest=$1 AND role=$2 AND (operation_digest=$3 OR (operation_digest IS NULL AND name=$4))")
-            .bind(&key).bind(role.as_str()).bind(&operation).bind(&input.name)
+        // A join is found again only by its operation, since a reusable key's host join may
+        // have enrolled a suffixed name.
+        let prior: Option<(String, String)> = sqlx::query_as("SELECT name, enrollment_digest FROM supertag_v2_auth_key_joins WHERE key_digest=$1 AND role=$2 AND operation_digest=$3")
+            .bind(&key).bind(role.as_str()).bind(&operation)
             .fetch_optional(&mut *transaction).await?;
         if let Some((enrolled, prior)) = prior {
             if prior != fingerprint {

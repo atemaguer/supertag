@@ -156,6 +156,17 @@ async fn contract(url: &str) {
         "Which credentials?",
     )
     .await;
+    // Choosing another conversation's thread for an Objective's notices is an operator's call: a
+    // client is refused before the thread is even looked up, and nothing is created.
+    let chooses = CreateObjectiveRequest {
+        notification_task_id: Some("operator-thread".into()),
+        ..objective("mine", "other", None)
+    };
+    let refused = store.create_objective(MALLORY, &chooses).await;
+    assert!(
+        matches!(refused, Err(StoreError::PermissionDenied)),
+        "{refused:?}"
+    );
     // The client's own Objective, waiting on a question too.
     let mine = store
         .create_objective(MALLORY, &objective("mine", "other", None))

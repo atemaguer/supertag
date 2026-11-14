@@ -530,6 +530,20 @@ async fn host_id_suffix_contract(url: &str) {
         enroll(&fleet, "runner", "two", "stolen").await,
         Err(StoreError::PermissionDenied)
     ));
+    // A join recorded without its operation, as before migration 0076, is never replayed: a new
+    // operation that asks for its name enrolls a suffixed host instead of being refused.
+    assert_eq!(
+        enroll(&fleet, "legacy", "old", "t-legacy")
+            .await
+            .unwrap()
+            .name,
+        "legacy"
+    );
+    forget_join_operation(url, "legacy").await;
+    assert_eq!(
+        enroll(&fleet, "legacy", "new", "t-new").await.unwrap().name,
+        "legacy-2"
+    );
     // A name a one-time key enrolled is skipped too.
     let once = create("once", false, 0);
     store.create_auth_key(OPERATOR, &once).await.unwrap();
@@ -573,8 +587,31 @@ async fn host_id_suffix_contract(url: &str) {
     ids.sort_unstable();
     assert_eq!(
         ids,
-        [long.as_str(), "runner", "runner-2", "runner-3", "runner-4"]
+        [
+            long.as_str(),
+            "legacy",
+            "legacy-2",
+            "runner",
+            "runner-2",
+            "runner-3",
+            "runner-4"
+        ]
     );
+}
+
+/// Clears a join's recorded operation, as joins recorded before migration 0076 have none.
+async fn forget_join_operation(url: &str, name: &str) {
+    let statement =
+        format!("UPDATE supertag_v2_auth_key_joins SET operation_digest=NULL WHERE name='{name}'");
+    if url.starts_with("sqlite:") {
+        let mut connection = sqlx::SqliteConnection::connect(url).await.unwrap();
+        connection.execute(statement.as_str()).await.unwrap();
+        connection.close().await.unwrap();
+    } else {
+        let mut connection = sqlx::PgConnection::connect(url).await.unwrap();
+        connection.execute(statement.as_str()).await.unwrap();
+        connection.close().await.unwrap();
+    }
 }
 
 /// Time the Control Plane is down never counts as a host being offline.

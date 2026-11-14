@@ -601,10 +601,19 @@ pub(crate) async fn home_report_in(
 impl crate::Store {
     /// Records the deployment's default notice thread (TypeScript
     /// `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`), or clears it. An Objective with no chosen
-    /// thread and no start thread posts its notices there while the Task verifies. Every
-    /// Control Plane replica of one deployment must be started with the same value.
-    pub async fn set_default_notification_task(&self, task_id: Option<&str>) -> Result<()> {
+    /// thread and no start thread posts its notices there while the Task verifies. It is one
+    /// database row, so every replica decides notice homes and withdrawals alike; a replica
+    /// started with another value replaces it for all of them. Returns the value it replaced.
+    pub async fn set_default_notification_task(
+        &self,
+        task_id: Option<&str>,
+    ) -> Result<Option<String>> {
         let (mut tx, _) = self.write().await?;
+        let previous: Option<String> = sqlx::query_scalar(
+            "SELECT task_id FROM supertag_v2_notification_defaults WHERE singleton=1",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
         sqlx::query("DELETE FROM supertag_v2_notification_defaults")
             .execute(&mut *tx)
             .await?;
@@ -631,7 +640,7 @@ impl crate::Store {
             .await?;
         }
         tx.commit().await?;
-        Ok(())
+        Ok(previous)
     }
 }
 

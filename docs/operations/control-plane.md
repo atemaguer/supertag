@@ -182,7 +182,9 @@ Slack notification destination then reports it instead. In an Objective's notifi
 ### Set the deployment default
 
 Add `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID` to the Control Plane's environment and restart it.
-Start every Control Plane replica with the same value. The shared deployment configuration accepts
+Start every Control Plane replica with the same value: replicas share one default, and a replica
+started with another value, or without it, replaces it for all of them and logs the Task it
+replaced. The shared deployment configuration accepts
 this optional variable on all supported platforms. The
 referenced Task must be one a person's message started in a verified surface conversation; arbitrary Task IDs do not grant
 permission to send to a destination. A headless deployment gets such a Task the same way as any

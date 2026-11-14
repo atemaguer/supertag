@@ -111,10 +111,13 @@ impl ControlPlane {
         self
     }
 
-    /// Records the deployment's default thread for Objective notices, or clears it.
-    pub async fn set_default_notification_task(&self, task_id: Option<&str>) -> anyhow::Result<()> {
-        self.store.set_default_notification_task(task_id).await?;
-        Ok(())
+    /// Records the deployment's default thread for Objective notices, or clears it, and returns
+    /// the value it replaced, which another replica may have recorded.
+    pub async fn set_default_notification_task(
+        &self,
+        task_id: Option<&str>,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(self.store.set_default_notification_task(task_id).await?)
     }
 
     /// Records a credential from the Control Plane's startup configuration, such as the

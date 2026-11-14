@@ -38,6 +38,7 @@ Audited 2026-11-13 against `rust/crates/control-plane`. "Fixed" rows changed in 
 | GitHub publication claims | Write lock; lease rows | Safe |
 | Operator notification claims (`claim_operator_notification`) | Write lock; leased outbox rows; the Inbox is read in the claim's transaction, at the claim's instant | Fixed. The Inbox was read before the lock, so a Gateway could settle, unsent, a message another replica had just recorded for an item its stale read lacked |
 | Notification batching window | `MAX(created_at_ms)` read under the write lock | Safe |
+| Default Objective notice Task (`set_default_notification_task`) | One `supertag_v2_notification_defaults` row each replica rewrites at startup from its `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`, so every replica picks notice homes and withdraws notices from the same value | Safe when every replica starts with the same value. A replica started with another value, or without it, replaces the default for all replicas; it writes the value it replaced to standard error |
 | Apply-set and manifest relationship reconcilers | Write lock; revision fences | Safe |
 | Idempotent admission (operation IDs, provider event receipts) | Unique rows checked under the write lock | Safe |
 | Operator Token last-use time | Conditional `UPDATE`; advisory only | Safe |
