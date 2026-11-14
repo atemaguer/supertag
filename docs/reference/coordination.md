@@ -100,8 +100,7 @@ budgetLimitMinor?, budgetCurrency?}`. The Tag owns the Objective, the person who
 creates it with their own authority, its runtime actions are what that turn may use, and its
 first turn starts at once. One turn creates at most one Objective; a repeated call returns it. The
 Objective has the conversation's audience: only that person's turns see it. The Control Plane
-alone records which conversation created an Objective: Objective commands and API calls refuse
-operation IDs that start with `tag-create-objective:`.
+alone records which conversation created an Objective; no command or API call can set it.
 
 ### Objective runtime actions
 

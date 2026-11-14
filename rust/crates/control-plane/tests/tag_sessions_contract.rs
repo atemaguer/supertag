@@ -547,46 +547,32 @@ async fn contract(url: &str) {
     );
     finish(&store, &host, &a4, "Two").await;
 
-    // The home a Tag-created Objective inherits is recorded by the Control Plane alone: no caller
-    // may name a conversation Task in a create_objective operation ID, nor in any other
-    // Objective mutation's.
+    // The home a Tag-created Objective inherits is recorded by the Control Plane alone: an
+    // operation ID naming a conversation Task, or naming the Objective a Task made, plants none.
     let a5 = say(&store, ALICE, "alice", "Anything new?").await;
+    let a5 = claim(&store, &host, &a5.task_id).await;
     for operation in [
         format!("tag-create-objective:{}", a5.task_id),
-        format!("tag-create-objective:{}", a3.task_id),
+        a5.task_id.clone(),
+        objective.objective_id.clone(),
     ] {
         let planted = store
             .create_objective(
                 BOB,
                 &CreateObjectiveRequest {
-                    operation_id: operation.clone(),
+                    operation_id: operation,
                     objective_id: Uuid::new_v4().to_string(),
                     owner_tag_id: "owner".into(),
                     outcome: "Summarize the Tag's other conversations".into(),
                     ..Default::default()
                 },
             )
-            .await;
-        assert!(
-            matches!(planted, Err(StoreError::InvalidArgument(_))),
-            "{planted:?}"
-        );
-        let paused = store
-            .pause_objective(
-                ALICE,
-                &ObjectiveActionRequest {
-                    objective_id: "docs".into(),
-                    operation_id: operation,
-                    reason: String::new(),
-                },
-            )
-            .await;
-        assert!(
-            matches!(paused, Err(StoreError::InvalidArgument(_))),
-            "{paused:?}"
-        );
+            .await
+            .unwrap();
+        let start = claim(&store, &host, &planted.starting_task_id).await;
+        finish(&store, &host, &start, "Planned").await;
+        pause(&store, &planted.objective_id).await;
     }
-    let a5 = claim(&store, &host, &a5.task_id).await;
     assert!(matches!(
         read_objective(&store, &host, &a5, None).await,
         Err(StoreError::NotFound(_))

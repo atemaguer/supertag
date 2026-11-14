@@ -49,22 +49,6 @@ impl Record {
 /// The completion report posted once to an Objective's home thread.
 const COMPLETION_REPORT_SUMMARY_CHARS: usize = 1500;
 
-/// The operation ID prefix of the Objective a Tag's `create_objective` tool makes from one
-/// conversation Task. Only the Control Plane writes it: its receipt records that Task as the
-/// Objective's home (TS `Objective.surfaceTaskId`), so a caller may not choose it.
-pub(crate) const TAG_CREATE_OPERATION: &str = "tag-create-objective:";
-
-/// A caller's Objective mutation operation ID.
-fn operation(id: &str) -> Result<()> {
-    name("operation ID", id)?;
-    if id.starts_with(TAG_CREATE_OPERATION) {
-        return Err(invalid(
-            "operation IDs starting with tag-create-objective: are reserved for the Control Plane",
-        ));
-    }
-    Ok(())
-}
-
 fn completion_report(objective_id: &str, summary: Option<&str>) -> String {
     let summary = summary.map(str::trim).unwrap_or_default();
     if summary.is_empty() {
@@ -468,25 +452,41 @@ impl Store {
         principal: &str,
         input: &CreateObjectiveRequest,
     ) -> Result<Objective> {
-        operation(&input.operation_id)?;
-        self.create_objective_unchecked(principal, input).await
+        self.create_objective_in_home(principal, input, None).await
     }
 
-    /// Creates an Objective under any operation ID, including the reserved
-    /// [`TAG_CREATE_OPERATION`] one the Tag's `create_objective` tool records its home with.
-    pub(crate) async fn create_objective_unchecked(
+    /// Creates an Objective. Only the Tag's `create_objective` tool passes `home_task`: the
+    /// conversation Task the Objective is made from, whose audience it has (TS
+    /// `Objective.surfaceTaskId`); no public request sets it. A Task makes one Objective, whose
+    /// ID is then its operation ID, so a retry replays it and a changed request conflicts.
+    pub(crate) async fn create_objective_in_home(
         &self,
         principal: &str,
         input: &CreateObjectiveRequest,
+        home_task: Option<&str>,
     ) -> Result<Objective> {
         actor(principal)?;
-        name("operation ID", &input.operation_id)?;
         validate_manifest_objective(input)?;
-        let fingerprint = digest("create", input);
         self.ensure_client_tag(principal, &input.owner_tag_id)
             .await?;
         let (mut tx, order) = self.write().await?;
         let now_ms = self.execution_now_ms();
+        let mut input = std::borrow::Cow::Borrowed(input);
+        if let Some(task) = home_task {
+            let made: Option<String> = sqlx::query_scalar(
+                "SELECT objective_id FROM supertag_v2_objectives WHERE home_task_id=$1",
+            )
+            .bind(task)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let request = input.to_mut();
+            if let Some(made) = made {
+                request.objective_id = made;
+            }
+            request.operation_id = request.objective_id.clone();
+        }
+        name("operation ID", &input.operation_id)?;
+        let fingerprint = digest("create", &*input);
         if let Some(prior) =
             replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
         {
@@ -538,9 +538,9 @@ impl Store {
                 at: timestamp(now_ms)?,
             });
         }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15)")
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id,home_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15,$16)")
             .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).execute(&mut *tx).await?;
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).bind(home_task).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
         let prompt = format!(
@@ -631,7 +631,7 @@ impl Store {
         input: &SetObjectiveRuntimeActionsRequest,
     ) -> Result<Objective> {
         operator(principal)?;
-        operation(&input.operation_id)?;
+        name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         if input.expected_revision == 0 || input.expected_revision > i64::MAX as u64 {
             return Err(invalid("a valid expected Objective revision is required"));
@@ -693,7 +693,7 @@ impl Store {
         input: &SetObjectiveLimitsRequest,
     ) -> Result<Objective> {
         operator(principal)?;
-        operation(&input.operation_id)?;
+        name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         if input.clear_deadline && input.deadline_ms.is_some() {
             return Err(invalid("set or clear the deadline, not both"));
@@ -844,7 +844,7 @@ impl Store {
         action: &str,
     ) -> Result<Objective> {
         actor(principal)?;
-        operation(&input.operation_id)?;
+        name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("reason", &input.reason, 16_384)?;
         let fingerprint = digest(action, input);
@@ -868,7 +868,7 @@ impl Store {
         input: &ReviewObjectiveRequest,
     ) -> Result<Objective> {
         actor(principal)?;
-        operation(&input.operation_id)?;
+        name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("feedback", &input.feedback, 65_536)?;
         let fingerprint = digest("review", input);
@@ -894,7 +894,7 @@ impl Store {
         input: &CompleteObjectiveRequest,
     ) -> Result<Objective> {
         actor(principal)?;
-        operation(&input.operation_id)?;
+        name("operation ID", &input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("summary", &input.summary, 65_536)?;
         let summary = input.summary.trim();

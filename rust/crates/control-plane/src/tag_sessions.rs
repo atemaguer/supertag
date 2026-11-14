@@ -18,7 +18,6 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
-    objectives::TAG_CREATE_OPERATION,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
     work_sessions::{REPORT, task_scope_in},
 };
@@ -154,22 +153,19 @@ async fn audience_at(
         return Ok(Audience::Private(None));
     }
     if let Some(objective) = sqlx::query(
-        "SELECT o.objective_id,o.created_by,o.notification_task_id FROM supertag_v2_objective_sessions s JOIN supertag_v2_objectives o ON o.objective_id=s.objective_id WHERE s.tag_id=$1 AND s.session_id=$2",
+        "SELECT o.created_by,o.notification_task_id,o.home_task_id FROM supertag_v2_objective_sessions s JOIN supertag_v2_objectives o ON o.objective_id=s.objective_id WHERE s.tag_id=$1 AND s.session_id=$2",
     )
     .bind(&tag)
     .bind(&session)
     .fetch_optional(&mut **tx)
     .await?
     {
-        let objective_id: String = objective.try_get("objective_id")?;
         let created_by: String = objective.try_get("created_by")?;
         // An Objective a conversation created with `create_objective` has that conversation's
         // audience (TS `surfaceSessionId`), and one whose notices go to an operator-chosen
         // thread has that thread's (TS `notificationTaskId`).
-        let home = match created_home_in(tx, &objective_id, &tag).await? {
-            Some(Some(task)) => Some(task),
-            // A receipt whose Task does not verify widens nothing.
-            Some(None) => return Ok(Audience::Private(None)),
+        let home: Option<String> = match objective.try_get("home_task_id")? {
+            Some(task) => Some(task),
             None => objective.try_get("notification_task_id")?,
         };
         if let Some(home) = home {
@@ -197,39 +193,6 @@ async fn audience_at(
         return Ok(Audience::Shared);
     }
     surface_audience_in(tx, &tag, &session).await
-}
-
-/// The conversation Task a Tag's `create_objective` tool created `objective` from (TS
-/// `Objective.surfaceTaskId`). Only the Control Plane writes a [`TAG_CREATE_OPERATION`] receipt,
-/// and the Task must be a turn of the Objective's own Tag in a conversation of the receipt's
-/// principal, carrying that principal's own message. `None` without such a receipt, and
-/// `Some(None)` when its Task does not verify.
-async fn created_home_in(
-    tx: &mut Transaction<'_, Any>,
-    objective: &str,
-    tag: &str,
-) -> Result<Option<Option<String>>> {
-    let Some(receipt) = sqlx::query(
-        "SELECT principal,operation_id FROM supertag_v2_objective_operations WHERE objective_id=$1 AND operation_id LIKE 'tag-create-objective:%'",
-    )
-    .bind(objective)
-    .fetch_optional(&mut **tx)
-    .await?
-    else {
-        return Ok(None);
-    };
-    let operation: String = receipt.try_get("operation_id")?;
-    let Some(task) = operation.strip_prefix(TAG_CREATE_OPERATION) else {
-        return Ok(Some(None));
-    };
-    Ok(Some(sqlx::query_scalar(
-        "SELECT t.task_id FROM supertag_v2_tasks t JOIN supertag_v2_conversation_messages m ON m.task_id=t.task_id AND m.session_id=t.session_id JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id AND c.principal=m.principal WHERE t.task_id=$1 AND t.tag_id=$2 AND m.principal=$3",
-    )
-    .bind(task)
-    .bind(tag)
-    .bind(receipt.try_get::<String, _>("principal")?)
-    .fetch_optional(&mut **tx)
-    .await?))
 }
 
 /// A surface thread is shared unless it is a direct chat with one person; any other Session is
@@ -918,16 +881,14 @@ impl Store {
             }
             _ if viewer.objective.is_some() => viewer.objective.clone(),
             _ => {
-                // Only the Control Plane writes this receipt, so no caller can plant the
-                // Objective this conversation created.
-                let created: Option<String> = sqlx::query_scalar(
-                    "SELECT o.objective_id FROM supertag_v2_objective_operations r JOIN supertag_v2_objectives o ON o.objective_id=r.objective_id WHERE r.operation_id=$1 AND o.owner_tag_id=$2",
+                // Only the Control Plane writes an Objective's home Task.
+                sqlx::query_scalar(
+                    "SELECT objective_id FROM supertag_v2_objectives WHERE home_task_id=$1 AND owner_tag_id=$2",
                 )
-                .bind(format!("{TAG_CREATE_OPERATION}{}", viewer.task.task_id))
+                .bind(&viewer.task.task_id)
                 .bind(viewer.tag())
                 .fetch_optional(&mut *tx)
-                .await?;
-                created
+                .await?
             }
         };
         let objective_id = match (&input.objective_id, bound) {
@@ -992,7 +953,7 @@ impl Store {
         host: &HostAuthority,
         input: &CreateTagObjectiveRequest,
     ) -> Result<CreateTagObjectiveResponse> {
-        let (principal, task, created) = {
+        let (principal, task) = {
             let mut tx = self.pool.begin().await?;
             let viewer = self
                 .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
@@ -1004,16 +965,8 @@ impl Store {
                         "Creating an Objective requires an explicit objective command".into(),
                     )
                 })?;
-            // A retried call replays the Objective this Task already created.
-            let created: Option<String> = sqlx::query_scalar(
-                "SELECT objective_id FROM supertag_v2_objective_operations WHERE principal=$1 AND operation_id=$2",
-            )
-            .bind(&principal)
-            .bind(format!("{TAG_CREATE_OPERATION}{}", viewer.task.task_id))
-            .fetch_optional(&mut *tx)
-            .await?;
             tx.commit().await?;
-            (principal, viewer.task, created)
+            (principal, viewer.task)
         };
         let actions = task
             .policy_snapshot
@@ -1024,9 +977,11 @@ impl Store {
                 |authority| authority.actions.clone(),
             );
         let request = CreateObjectiveRequest {
-            operation_id: format!("{TAG_CREATE_OPERATION}{}", task.task_id),
+            // The Store names the operation after the Objective this Task makes, so a retry
+            // replays it.
+            operation_id: String::new(),
             // Random, so no caller can take the ID before this Task creates it.
-            objective_id: created.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            objective_id: uuid::Uuid::new_v4().to_string(),
             owner_tag_id: task.tag_id.clone(),
             outcome: input.outcome.trim().to_owned(),
             ongoing: false,
@@ -1041,7 +996,7 @@ impl Store {
             return Err(invalid("outcome is required"));
         }
         let objective = self
-            .create_objective_unchecked(&principal, &request)
+            .create_objective_in_home(&principal, &request, Some(&task.task_id))
             .await?;
         Ok(CreateTagObjectiveResponse {
             started_task_id: objective.starting_task_id.clone(),
