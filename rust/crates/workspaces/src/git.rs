@@ -1082,13 +1082,20 @@ mod tests {
             tokio::spawn(
                 async move { run(command, &[], &task_token, 1024, COMMAND_TIMEOUT).await },
             );
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !started.exists() {
+        // The shell's redirect creates the file before `echo` writes the PID and its newline.
+        let pid: i32 = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(text) = fs::read_to_string(&started)
+                    && text.ends_with('\n')
+                {
+                    return text;
+                }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
-        .await?;
-        let pid: i32 = fs::read_to_string(started)?.trim().parse()?;
+        .await?
+        .trim()
+        .parse()?;
         token.cancel();
         let result = tokio::time::timeout(Duration::from_secs(5), task).await??;
         ensure!(result.is_err());
