@@ -55,7 +55,12 @@ const SKILL_CATALOG_HELP: &str = r#"Private host allowlist of Skill packages.
 
 A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository."#;
 
-use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    ffi::OsString,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Args, Parser, Subcommand};
@@ -128,7 +133,8 @@ struct Connection {
         conflicts_with = "state_directory"
     )]
     control_plane: Option<String>,
-    /// Use the local services in this state directory instead of a Control Plane URL.
+    /// Use the local services `supertag up` runs from this state directory. Without either
+    /// option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag.
     #[arg(long, global = true)]
     state_directory: Option<PathBuf>,
 }
@@ -2497,6 +2503,34 @@ fn test_host_environment(
     Ok((keep_awake, disk_space))
 }
 
+/// Selects the Control Plane for an operator command when no flag names one.
+const CONTROL_PLANE_ENV: &str = "SUPERTAG_CONTROL_PLANE_URL";
+
+/// The Control Plane `SUPERTAG_CONTROL_PLANE_URL` selects; empty selects none.
+pub(crate) fn environment_control_plane() -> Option<String> {
+    std::env::var(CONTROL_PLANE_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+/// The local Control Plane that `supertag up` runs from `directory`.
+fn local_target(directory: &Path) -> Result<OperatorTarget> {
+    let (url, token) = local::connection(directory).with_context(|| {
+        format!(
+            "no local Control Plane is running from {}; start one with supertag up, or pass --control-plane",
+            directory.display()
+        )
+    })?;
+    Ok(OperatorTarget {
+        url,
+        token,
+        tls: None,
+    })
+}
+
+/// The Control Plane an operator command talks to: `--control-plane` (before or after the
+/// command name), else `--state-directory`, else `SUPERTAG_CONTROL_PLANE_URL`, else the local
+/// services `supertag up` runs from `SUPERTAG_STATE_DIR` or `~/.supertag`.
 fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
     let root = ROOT_CONTROL_PLANE.get().cloned();
     ensure!(
@@ -2509,16 +2543,12 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
             control_plane.is_none(),
             "--control-plane cannot be combined with --state-directory"
         );
-        let (url, token) = local::connection(&directory)?;
-        return Ok(OperatorTarget {
-            url,
-            token,
-            tls: None,
-        });
+        return local_target(&local_config::state_directory(Some(directory))?);
     }
-    let control_plane = control_plane.context(
-        "pass --control-plane URL, --control-plane NAME of a saved Control Plane, or --state-directory",
-    )?;
+    let control_plane = match control_plane.or_else(environment_control_plane) {
+        Some(control_plane) => control_plane,
+        None => return local_target(&local_config::state_directory(None)?),
+    };
     if profiles::is_url(&control_plane) {
         return Ok(OperatorTarget {
             url: control_plane,

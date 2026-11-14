@@ -153,7 +153,9 @@ it will not stop — see [build-a-custom-worker](../build-a-custom-worker/SKILL.
 Credentials and SQLite live in `~/.supertag` unless `SUPERTAG_STATE_DIR` is set. Setting it in
 one shell and not another is a frequent cause of "my collaboration surface disappeared" — the CLI is reading
 a different state directory. Same for `SUPERTAG_DATABASE_URL`: management commands must use the
-same database as the running Control Plane.
+same database as the running Control Plane. An error that no local Control Plane is running from
+a directory names the state directory the command looked in: run `supertag up` there, set
+`SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--control-plane`.
 
 For a local setup from `supertag init`, start with `supertag ps` (service state; for host services,
 connected or not, Tags served, running Task Attempts) and `supertag logs -f SERVICE`. When
