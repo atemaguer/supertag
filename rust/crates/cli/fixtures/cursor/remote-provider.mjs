@@ -538,7 +538,10 @@ const implementation = {
   },
 };
 for (const [service, names] of [
-  [implementation.provider, ["allocate", "stage", "stageCopy", "stop", "snapshot", "removeArtifact"]],
+  [
+    implementation.provider,
+    ["allocate", "stage", "stageCopy", "stop", "snapshot", "removeArtifact"],
+  ],
   [implementation.workspace, ["execute"]],
 ]) {
   for (const name of names) {
