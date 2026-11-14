@@ -109,6 +109,8 @@ async function runFixture() {
         "remote-input-producer",
         "remote-input-consumer",
         "remote-mcp",
+        "copy",
+        "remote-copy",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -123,8 +125,10 @@ async function runFixture() {
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
     const remoteInputs = mode.startsWith("remote-input-");
     const remoteMcp = mode === "remote-mcp";
+    const copies = mode === "copy" || mode === "remote-copy";
     const writable =
       writes ||
+      copies ||
       shared ||
       remoteInputs ||
       remoteMcp ||
@@ -281,6 +285,40 @@ async function runFixture() {
         hidden,
         again,
       });
+    } else if (copies) {
+      // The Worker Host names each staged Workspace Volume copy in the Task instructions.
+      const named = (access) =>
+        JSON.parse(
+          new RegExp(
+            `${access} Workspace data is available at these paths[^:]*: (\\[[^\\]]*\\])`,
+            "u",
+          ).exec(request.prompt)?.[1] ?? "[]",
+        );
+      const [readOnly] = named("Read-only");
+      const [readWrite] = named("Read-write");
+      if (mode === "remote-copy") {
+        assert.match(readOnly, /^volumes\/[0-9a-f]{64}\/ro$/u);
+        assert.match(readWrite, /^volumes\/[0-9a-f]{64}\/rw$/u);
+      } else {
+        assert.ok(readOnly?.startsWith("/") && readWrite?.startsWith("/"), request.prompt);
+      }
+      const rows = await call("read", { file_path: `${readOnly}/rows.csv` });
+      assert.equal(rows.isError, false, rows.text);
+      assert.ok(rows.text.includes("1,2"));
+      const notes = await call("read", { file_path: `${readOnly}/nested/notes.txt` });
+      assert.ok(!notes.isError && notes.text.includes("notes"));
+      const denied = await call("write", { file_path: `${readOnly}/denied.txt`, content: "no\n" });
+      assert.equal(denied.isError, true, "a read-only copy accepted a write");
+      const current = await call("read", { file_path: `${readWrite}/rows.csv` });
+      assert.ok(!current.isError && current.text.includes("x"));
+      for (const [file, content] of [
+        ["rows.csv", "x\ny\n"],
+        ["created/new.txt", "created\n"],
+      ]) {
+        const write = await call("write", { file_path: `${readWrite}/${file}`, content });
+        assert.equal(write.isError, false, write.text);
+      }
+      await trace({ type: "copy", mode, readOnly, readWrite });
     } else if (mode === "remote-input-consumer") {
       const evidence =
         /inputs\/[0-9a-f]{64}\/artifact-[0-9a-f]{64}\/(?:[\w-]+\/)*evidence\.txt/u.exec(

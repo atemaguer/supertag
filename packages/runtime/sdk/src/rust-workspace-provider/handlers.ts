@@ -152,6 +152,28 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           stageInFlight = false;
         }
       },
+      async stageCopy(stream, context) {
+        const inputs = stream[Symbol.asyncIterator]();
+        const first = await inputs.next();
+        if (first.done || first.value.part.case !== "header")
+          throw new ConnectError("Workspace copy header is required", Code.InvalidArgument);
+        const { path, readWrite } = first.value.part.value;
+        async function* parts() {
+          for (;;) {
+            const next = await inputs.next();
+            if (next.done) return;
+            const { part } = next.value;
+            if (part.case === "file") yield { case: "file" as const, value: part.value };
+            else if (part.case === "payload" && part.value.byteLength <= CHUNK_SIZE)
+              yield { case: "payload" as const, value: part.value };
+            else throw new ConnectError("Invalid Workspace copy stream", Code.InvalidArgument);
+          }
+        }
+        return session.stageCopy({ path, readWrite }, parts(), context.signal);
+      },
+      async *captureCopy(request, context) {
+        for await (const part of session.captureCopy(request.path, context.signal)) yield { part };
+      },
       async *capture(_request, context) {
         const { tree, bytes } = await session.capture(context.signal);
         yield { part: { case: "tree", value: tree } };

@@ -299,9 +299,8 @@ pub async fn run(
             supertag_protocol::workspace_mounts::mount_harness(options.harness)
                 && !options.workspaces.is_empty()
                 && local_roots.len() == options.workspaces.len()
-                && options.remote_provider.is_none()
                 && options.shared_execution.is_none(),
-            "Workspace copy mounts require a local Codex or Claude Code Worker Host"
+            "Workspace copy mounts require a Codex, Claude Code, Cursor, or OpenCode Worker Host with local Workspace mappings"
         );
         let state_directory = options.state_directory.clone();
         let artifact_storage = options
@@ -1555,7 +1554,10 @@ async fn run_assignment(
         .await
         {
             Ok((mounted, expires)) => {
-                task.instructions.push_str(&mounted.instructions()?);
+                // A remote Workspace names its copies where the sandbox holds them.
+                if options.remote_provider.is_none() {
+                    task.instructions.push_str(&mounted.instructions()?);
+                }
                 valid_until = expires;
                 Some(mounted)
             }
@@ -1678,6 +1680,7 @@ async fn run_assignment(
                             .filter(|resolved| resolved.sandboxed())
                             .map(|_| workspace.checkout.base_commit.as_str()),
                         environment,
+                        mounted.as_ref(),
                     ),
                     (registration, coordination, token),
                     &cancel,
@@ -1903,7 +1906,6 @@ async fn run_assignment(
     if let Some(reports) = reports {
         let _ = reports.await;
     }
-    drop(mounted);
     if let Some(mcp) = mcp {
         mcp.close().await;
     }
@@ -1926,7 +1928,12 @@ async fn run_assignment(
                     journal,
                     (workspace, workspaces, has_inputs),
                     outputs.take(),
-                    &options.state_directory,
+                    (
+                        &options.state_directory,
+                        mounted
+                            .as_ref()
+                            .map(|mounted| (mounted, &options.workspace_mounts)),
+                    ),
                     (transfers, &attempt, token),
                     &cancel,
                 ),
@@ -1943,6 +1950,7 @@ async fn run_assignment(
                             supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
                         }
                         remote::OUTPUTS_FAILED => remote::OUTPUTS_FAILED,
+                        remote::COPY_CAPTURE_FAILED => remote::COPY_CAPTURE_FAILED,
                         _ => remote::CAPTURE_FAILED,
                     };
                     outcome = adapter::failed(message);

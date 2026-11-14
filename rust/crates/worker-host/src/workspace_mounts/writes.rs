@@ -14,23 +14,35 @@ use prost::Message;
 use std::collections::HashMap;
 use supertag_protocol::{
     v2::{WorkspaceMountWrite, WorkspaceMountWriteStatus, WorkspaceMountWrittenFile},
-    workspace_mounts::MAX_WRITE_FILES,
+    workspace_mounts::{
+        MAX_WORKSPACE_MOUNT_ENTRIES, MAX_WORKSPACE_MOUNT_FILES, MAX_WRITE_FILE_BYTES,
+        MAX_WRITE_FILES,
+    },
 };
 
 /// The most entries a write-back walk visits in one copy.
-const MAX_WALK: usize = 2 * MAX_ENTRIES;
+const MAX_WALK: usize = 2 * MAX_WORKSPACE_MOUNT_ENTRIES;
+/// The most files a write-back walk lists in one copy, as in TypeScript.
+const MAX_WALK_FILES: usize = 2 * MAX_WORKSPACE_MOUNT_FILES;
 /// The most summary bytes one copy's change set may need.
 const MAX_SUMMARY_BYTES: usize = 256 * 1024;
 
-struct Listing {
+struct Listing<'a> {
+    /// What the copy staged, by key, so an unchanged file is never refused.
+    staged: &'a HashMap<&'a str, &'a Copied>,
+    /// The largest file the copy may write back.
+    file_limit: u64,
     files: Vec<Copied>,
     skipped: u64,
     visited: usize,
     device: u64,
     /// The first entry that refuses the copy: the nearest key the summary
     /// can name (empty for the copy root) and why.
-    refusal: Option<(String, &'static str)>,
+    refusal: Option<(String, String)>,
 }
+
+/// Why a changed file refuses a write-back.
+const FILE_TOO_LARGE: &str = "a file exceeds the copy byte limit or 5 GiB";
 
 /// Why an entry name refuses a write-back.
 const UNNAMEABLE: &str = "a file name cannot be written to the Volume";
@@ -56,7 +68,7 @@ pub(crate) fn write_back(
         Err(error) => return Err(error),
     };
     private(&directory)?;
-    let mut indexes: Vec<usize> = directory_names(&directory, 64)?
+    let mut indexes: Vec<usize> = directory_names(&directory, JOURNAL_NAMES)?
         .iter()
         .filter_map(|name| name.strip_suffix(".json")?.parse().ok())
         .collect();
@@ -116,32 +128,42 @@ impl WorkspaceMounts {
             "Workspace copy is not this Attempt's"
         );
         let copy = open_dir_at(&root, name)?;
-        let copied: Vec<Copied> = serde_json::from_slice(&read_regular_at(
-            receipts,
-            &copied_name(index),
-            32 * 1024 * 1024,
-        )?)?;
-        let staged: HashMap<&str, &Copied> = copied
-            .iter()
-            .map(|file| (file.key.as_str(), file))
-            .collect();
-        let mut listing = Listing {
-            files: vec![],
-            skipped: 0,
-            visited: 0,
-            device: copy.metadata()?.dev(),
-            refusal: None,
-        };
-        listing.walk(&copy, "", 0, cancel)?;
-        let mut changed = vec![];
-        let mut skipped = listing.skipped;
-        for file in listing.files {
-            if staged.get(file.key.as_str()) == Some(&&file) {
-                skipped += 1;
-            } else {
-                changed.push(file);
+        let (mut changed, skipped, refusal) = match remote::read_remote(receipts, index)? {
+            // A remote Workspace's copy was listed in the sandbox; its changed
+            // files are already in the host copy.
+            Some(listing) => (listing.files, listing.skipped, listing.refusal),
+            None => {
+                let copied: Vec<Copied> = serde_json::from_slice(&read_regular_at(
+                    receipts,
+                    &copied_name(index),
+                    32 * 1024 * 1024,
+                )?)?;
+                let staged: HashMap<&str, &Copied> = copied
+                    .iter()
+                    .map(|file| (file.key.as_str(), file))
+                    .collect();
+                let mut listing = Listing {
+                    staged: &staged,
+                    file_limit: entry.max_bytes.min(MAX_WRITE_FILE_BYTES),
+                    files: vec![],
+                    skipped: 0,
+                    visited: 0,
+                    device: copy.metadata()?.dev(),
+                    refusal: None,
+                };
+                listing.walk(&copy, "", 0, cancel)?;
+                let mut changed = vec![];
+                let mut skipped = listing.skipped;
+                for file in listing.files {
+                    if staged.get(file.key.as_str()) == Some(&&file) {
+                        skipped += 1;
+                    } else {
+                        changed.push(file);
+                    }
+                }
+                (changed, skipped, listing.refusal)
             }
-        }
+        };
         // Written in full-key order, so the first failure is deterministic.
         changed.sort_unstable_by(|a, b| a.key.cmp(&b.key));
         let mut write = WorkspaceMountWrite {
@@ -155,39 +177,7 @@ impl WorkspaceMounts {
             skipped,
             ..Default::default()
         };
-        let total = changed.iter().map(|file| file.size).sum::<u64>();
-        let summary = changed
-            .iter()
-            .map(|file| file.key.len() + 80)
-            .sum::<usize>();
-        let refusal = if let Some(refusal) = listing.refusal {
-            Some(refusal)
-        } else if let Some(file) = changed.iter().find(|file| file.size > entry.max_bytes) {
-            Some((file.key.clone(), "file exceeds the copy byte limit"))
-        } else if total > entry.max_bytes {
-            Some((
-                changed
-                    .last()
-                    .map(|file| file.key.clone())
-                    .unwrap_or_default(),
-                "change set exceeds the copy byte limit",
-            ))
-        } else if changed.len() > MAX_WRITE_FILES {
-            Some((
-                changed[MAX_WRITE_FILES].key.clone(),
-                "change set exceeds 1000 files",
-            ))
-        } else if summary > MAX_SUMMARY_BYTES {
-            Some((
-                changed
-                    .last()
-                    .map(|file| file.key.clone())
-                    .unwrap_or_default(),
-                "change set summary exceeds its size limit",
-            ))
-        } else {
-            None
-        };
+        let refusal = refusal.or_else(|| bounds(&changed, entry.max_bytes));
         if let Some((key, reason)) = refusal {
             write.status = WorkspaceMountWriteStatus::Refused as i32;
             write.not_attempted = changed
@@ -199,7 +189,7 @@ impl WorkspaceMounts {
                 write.not_attempted.push(key.clone());
             }
             write.error_key = key;
-            write.error_reason = reason.into();
+            write.error_reason = reason;
             return Ok(write);
         }
         for (position, file) in changed.iter().enumerate() {
@@ -305,18 +295,54 @@ impl WorkspaceMounts {
     }
 }
 
-fn write_object(source: &s3::S3Source, copy: &File, file: &Copied) -> Result<()> {
-    let mut input = open_copied(copy, file)?;
-    let mut bytes = Vec::with_capacity(file.size as usize);
-    let sha256 = stream(&mut input, &mut bytes, file.size)?;
-    ensure!(
-        sha256 == file.sha256,
-        "copied file changed during write-back"
-    );
-    tokio::runtime::Handle::current().block_on(source.write(&file.key, bytes, &sha256))
+/// Stream one file to its object. The request is signed with the SHA-256 the walk recorded,
+/// so a file that changed since is refused by the store and by the body's own check.
+/// The first bound a change set exceeds, checked before anything is written:
+/// a file over the copy's limit or 5 GiB, the copy's limit in total, 1000
+/// files, or the summary's size.
+pub(super) fn bounds(changed: &[Copied], max_bytes: u64) -> Option<(String, String)> {
+    let total = changed.iter().map(|file| file.size).sum::<u64>();
+    let summary = changed
+        .iter()
+        .map(|file| file.key.len() + 80)
+        .sum::<usize>();
+    let last = || {
+        changed
+            .last()
+            .map(|file| file.key.clone())
+            .unwrap_or_default()
+    };
+    let (key, reason) = if let Some(file) = changed
+        .iter()
+        .find(|file| file.size > max_bytes.min(MAX_WRITE_FILE_BYTES))
+    {
+        (file.key.clone(), FILE_TOO_LARGE)
+    } else if total > max_bytes {
+        (last(), "change set exceeds the copy byte limit")
+    } else if changed.len() > MAX_WRITE_FILES {
+        (
+            changed[MAX_WRITE_FILES].key.clone(),
+            "change set exceeds 1000 files",
+        )
+    } else if summary > MAX_SUMMARY_BYTES {
+        (last(), "change set summary exceeds its size limit")
+    } else {
+        return None;
+    };
+    Some((key, reason.into()))
 }
 
-fn open_copied(copy: &File, file: &Copied) -> Result<File> {
+fn write_object(source: &s3::S3Source, copy: &File, file: &Copied) -> Result<()> {
+    let input = open_copied(copy, file)?;
+    tokio::runtime::Handle::current().block_on(source.write(
+        &file.key,
+        input,
+        file.size,
+        &file.sha256,
+    ))
+}
+
+pub(super) fn open_copied(copy: &File, file: &Copied) -> Result<File> {
     let parts: Vec<&str> = file.key.split('/').collect();
     let (name, parents) = parts.split_last().context("empty key")?;
     let mut directory = copy.try_clone()?;
@@ -365,10 +391,10 @@ fn stream(input: &mut File, output: &mut impl Write, size: u64) -> Result<String
     Ok(format!("{:x}", hash.finalize()))
 }
 
-impl Listing {
-    fn refuse(&mut self, key: &str, reason: &'static str) {
+impl Listing<'_> {
+    fn refuse(&mut self, key: &str, reason: &str) {
         if self.refusal.is_none() {
-            self.refusal = Some((key.to_owned(), reason));
+            self.refusal = Some((key.to_owned(), reason.to_owned()));
         }
     }
 
@@ -436,7 +462,19 @@ impl Listing {
                         self.refuse(&key, "a file has another link or changed");
                         return Ok(());
                     }
+                    if self.files.len() >= MAX_WALK_FILES {
+                        self.refuse(&key, "the copy holds too many files to write back");
+                        return Ok(());
+                    }
                     let size = metadata.len();
+                    // A file over the limit that the copy did not stage at this size is a
+                    // change that cannot be written: refuse it without reading it.
+                    if size > self.file_limit
+                        && self.staged.get(key.as_str()).map(|file| file.size) != Some(size)
+                    {
+                        self.refuse(&key, FILE_TOO_LARGE);
+                        return Ok(());
+                    }
                     let sha256 = stream(&mut file, &mut std::io::sink(), size)?;
                     self.files.push(Copied { key, size, sha256 });
                 }

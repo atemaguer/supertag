@@ -18,6 +18,7 @@ use crate::{
     remote_provider::RemoteProvider,
     task_artifact_inputs::RemoteInputs,
     task_outputs::PendingOutputs,
+    workspace_mounts::{Mounted, WorkspaceMounts, record_remote, remote_writer},
     workspaces::{PreparedWorkspace, Workspaces},
 };
 
@@ -38,6 +39,8 @@ pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
 }
 
 pub(crate) const CAPTURE_FAILED: &str = "Remote Workspace output could not be captured safely";
+pub(crate) const COPY_CAPTURE_FAILED: &str =
+    "Remote Workspace Volume copies could not be captured safely";
 pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured safely";
 
 pub(crate) async fn prepare(
@@ -45,7 +48,11 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
-    (mcp_commit, environment): (Option<&str>, Option<RemoteDevcontainer>),
+    (mcp_commit, environment, mounted): (
+        Option<&str>,
+        Option<RemoteDevcontainer>,
+        Option<&Mounted>,
+    ),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
 ) -> Result<(RemoteProvider, Option<String>, Instant)> {
@@ -117,7 +124,19 @@ pub(crate) async fn prepare(
             cancel,
         )
         .await?;
-    let instructions = inputs.delivered(&acquisition, cancel).await?;
+    let mut instructions = inputs.delivered(&acquisition, cancel).await?;
+    if let Some(mounted) = mounted {
+        // Each copy was staged on this host with its Volume's credential; only
+        // its files reach the sandbox.
+        for copy in mounted.copies() {
+            provider
+                .stage_copy(copy, &attempt.attempt_id, cancel)
+                .await?;
+        }
+        instructions
+            .get_or_insert_default()
+            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
+    }
     Ok((provider, instructions, execution_ends))
 }
 
@@ -126,7 +145,7 @@ pub(crate) async fn capture(
     journal: &Journal,
     (workspace, workspaces, has_inputs): (&PreparedWorkspace, &Workspaces, bool),
     outputs: Option<Box<PendingOutputs>>,
-    state: &std::path::Path,
+    (state, copies): (&std::path::Path, Option<(&Mounted, &WorkspaceMounts)>),
     authority: (&crate::checkpoints::Transfers, &Attempt, &str),
     cancel: &CancellationToken,
 ) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
@@ -137,9 +156,18 @@ pub(crate) async fn capture(
         .capture(&directory, cancel)
         .await
         .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    let attempt_id = &authority.1.attempt_id;
+    let mut excluded = vec![];
     if has_inputs {
+        excluded.push(input_root(attempt_id));
+    }
+    if copies.is_some() {
+        excluded.push(supertag_protocol::workspace_mounts::remote_copy_root(
+            attempt_id,
+        ));
+    }
+    for root in excluded {
         let archive = tree.clone();
-        let root = input_root(&authority.1.attempt_id);
         let cancel = cancel.clone();
         tokio::task::spawn_blocking(move || {
             supertag_workspaces::verify_return_excludes(&archive, &root, &cancel)
@@ -147,6 +175,33 @@ pub(crate) async fn capture(
         .await
         .map_err(|_| Status::internal(CAPTURE_FAILED))?
         .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    }
+    if let Some((mounted, mounts)) = copies {
+        // Read-write copies come back into their host copies, which the
+        // journaled write-back then writes to their Volumes.
+        for copy in mounted.copies().iter().filter(|copy| copy.read_write) {
+            let listing = provider
+                .capture_copy(
+                    copy,
+                    attempt_id,
+                    |listing| {
+                        listing
+                            .writable(copy.max_bytes)
+                            .then(|| remote_writer(mounts, state, attempt_id, copy.index))
+                            .transpose()
+                    },
+                    cancel,
+                )
+                .await
+                .map_err(|error| {
+                    supertag_protocol::terminal_text::warn(&format!(
+                        "Remote Workspace Volume copy capture failed: {error:#}"
+                    ));
+                    Status::failed_precondition(COPY_CAPTURE_FAILED)
+                })?;
+            record_remote(state, attempt_id, copy.index, &listing)
+                .map_err(|_| Status::failed_precondition(COPY_CAPTURE_FAILED))?;
+        }
     }
     let outputs = if let Some(outputs) = outputs {
         Some(Box::new(

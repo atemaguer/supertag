@@ -20,6 +20,11 @@ import {
 const HOST = "127.0.0.1";
 const MAX_BOOTSTRAP_BYTES = 4096;
 const MAX_STREAM_MESSAGES = 65_536;
+/**
+ * A Workspace copy stream carries up to 20 GiB in 256 KiB chunks, with a record for each of up
+ * to 20,000 files.
+ */
+const COPY_STREAM = { bytes: 20 * 1024 ** 3, messages: 20 * 4096 + 2 * 20_000 + 16 };
 const MAXIMUM = {
   messageBytes: 1024 * 1024,
   chunkBytes: 256 * 1024,
@@ -125,13 +130,14 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
   source: AsyncIterable<T>,
   limits: typeof MAXIMUM,
   context: HandlerContext,
+  stream = { bytes: limits.streamBytes, messages: MAX_STREAM_MESSAGES },
 ): AsyncGenerator<T> {
   let bytes = 0;
   let messages = 0;
   try {
     for await (const part of source) {
       if (context.signal.aborted) throw cancelled();
-      if (++messages > MAX_STREAM_MESSAGES)
+      if (++messages > stream.messages)
         throw new ConnectError(
           "Workspace stream exceeds its message limit",
           Code.ResourceExhausted,
@@ -141,7 +147,7 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
         if (!(payload instanceof Uint8Array))
           throw new ConnectError("Invalid workspace payload", Code.InvalidArgument);
         bytes += payload.byteLength;
-        if (payload.byteLength > limits.chunkBytes || bytes > limits.streamBytes)
+        if (payload.byteLength > limits.chunkBytes || bytes > stream.bytes)
           throw new ConnectError("Workspace stream exceeds its byte limit", Code.ResourceExhausted);
       }
       yield part;
@@ -234,6 +240,25 @@ export async function startRemoteWorkspaceTransport(
           },
           stop: (request, context) =>
             invoke(context, () => options.provider.stop(request, context)),
+          stageCopy: (stream, context) =>
+            invoke(context, () =>
+              options.provider.stageCopy(
+                boundedParts(stream, limits, context, COPY_STREAM),
+                context,
+              ),
+            ),
+          captureCopy: async function* (request, context) {
+            try {
+              yield* boundedParts(
+                options.provider.captureCopy(request, context),
+                limits,
+                context,
+                COPY_STREAM,
+              );
+            } catch (error) {
+              throw safeError(error, context);
+            }
+          },
           runMcpServer: async function* (stream, context) {
             try {
               yield* options.provider.runMcpServer(

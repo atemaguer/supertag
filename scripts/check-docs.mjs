@@ -201,6 +201,20 @@ function checkCommand({ command }) {
 // Guides for the native services (Render, Cloudflare, Modal) document the native `supertag`
 // CLI. They carry this marker, and their commands are checked against its reference instead.
 const nativeMarker = "<!-- supertag-cli: native -->";
+// A page that otherwise documents the TypeScript CLI marks native-only passages, such as
+// Workspace Volume copies, between these lines.
+const nativeStart = "<!-- supertag-cli: native start -->";
+const nativeEnd = "<!-- supertag-cli: native end -->";
+function nativeLines(text) {
+  const lines = new Set();
+  let inside = false;
+  text.split("\n").forEach((content, index) => {
+    if (content.trim() === nativeStart) inside = true;
+    else if (content.trim() === nativeEnd) inside = false;
+    else if (inside) lines.add(index + 1);
+  });
+  return lines;
+}
 const nativeCommands = new Map(); // "host enroll" -> Set of flags its help lists
 for (const section of readFileSync(join(root, "rust/docs/cli-reference.md"), "utf8")
   .split(/^## /mu)
@@ -338,9 +352,11 @@ for (const file of files) {
     });
   warnings.push(...longSections(name, text));
   const native = text.includes(nativeMarker);
+  const nativePassages = nativeLines(text);
   for (const found of commandsIn(text)) {
     commandCount++;
-    const problem = native ? checkNativeCommand(found) : checkCommand(found);
+    const problem =
+      native || nativePassages.has(found.line) ? checkNativeCommand(found) : checkCommand(found);
     if (problem) problems.push(`${name}:${found.line}: ${problem}`);
   }
 }

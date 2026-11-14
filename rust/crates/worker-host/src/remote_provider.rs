@@ -44,6 +44,13 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_ENDPOINT_BYTES: usize = 512;
+/// The slowest Workspace copy transfer a remote Workspace waits for, in bytes per second.
+const MIN_COPY_RATE: u64 = 1024 * 1024;
+
+/// A copy transfer may take the transfer timeout plus one second per MiB.
+fn copy_deadline(bytes: u64) -> Duration {
+    TRANSFER_TIMEOUT + Duration::from_secs(bytes / MIN_COPY_RATE)
+}
 
 /// Only explicit provider credentials enter the helper. Do not derive Debug:
 /// configuration errors must never print the API key.
@@ -501,6 +508,192 @@ impl RemoteProvider {
         .await
     }
 
+    /// Upload one staged Workspace copy into the sandbox beside the checkout.
+    /// Bytes stream from the host copy in bounded chunks; no credential is sent.
+    pub(crate) async fn stage_copy(
+        &self,
+        copy: &crate::workspace_mounts::RemoteCopy,
+        attempt: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let total = copy.files.iter().map(|file| file.size).sum::<u64>();
+        let deadline = copy_deadline(total);
+        let path = copy.sandbox_path(attempt);
+        let reader = copy.reader()?;
+        let files = copy.files.clone();
+        let header = RemoteWorkspaceCopyHeader {
+            path,
+            read_write: copy.read_write,
+        };
+        bounded(deadline, cancel, async {
+            let (sender, receiver) = mpsc::channel(4);
+            let request = self.request(ReceiverStream::new(receiver), deadline)?;
+            let count = files.len() as u64;
+            let producer = tokio::task::spawn_blocking(move || -> Result<()> {
+                use std::io::Read;
+                let send = |part| {
+                    sender
+                        .blocking_send(RemoteWorkspaceCopyUpload { part: Some(part) })
+                        .map_err(|_| anyhow!("provider closed the Workspace copy upload"))
+                };
+                send(remote_workspace_copy_upload::Part::Header(header))?;
+                let mut buffer = vec![0; CHECKPOINT_CHUNK_BYTES];
+                for file in files {
+                    let mut input = reader.open(&file)?;
+                    send(remote_workspace_copy_upload::Part::File(
+                        RemoteWorkspaceCopyFile {
+                            key: file.key.clone(),
+                            size: file.size,
+                            sha256: file.sha256.clone(),
+                        },
+                    ))?;
+                    let mut hash = Sha256::new();
+                    let mut length = 0_u64;
+                    loop {
+                        let size = input.read(&mut buffer)?;
+                        if size == 0 {
+                            break;
+                        }
+                        length += size as u64;
+                        ensure!(length <= file.size, "Workspace copy changed during upload");
+                        hash.update(&buffer[..size]);
+                        send(remote_workspace_copy_upload::Part::Payload(
+                            buffer[..size].to_vec(),
+                        ))?;
+                    }
+                    ensure!(
+                        length == file.size && format!("{:x}", hash.finalize()) == file.sha256,
+                        "Workspace copy changed during upload"
+                    );
+                }
+                Ok(())
+            });
+            let staged = self.client().stage_copy(request).await;
+            let produced = producer
+                .await
+                .map_err(|_| anyhow!("Workspace copy upload failed"))?;
+            let staged = staged?.into_inner();
+            produced?;
+            ensure!(
+                staged.files == count,
+                "Workspace copy staging receipt differs from the upload"
+            );
+            Ok(())
+        })
+        .await
+    }
+
+    /// After a successful capture, list a read-write copy in the sandbox. When
+    /// `decide` returns a writer, receive each changed file into the host copy.
+    pub(crate) async fn capture_copy(
+        &self,
+        copy: &crate::workspace_mounts::RemoteCopy,
+        attempt: &str,
+        decide: impl FnOnce(
+            &crate::workspace_mounts::RemoteListing,
+        ) -> Result<Option<crate::workspace_mounts::RemoteWriter>>,
+        cancel: &CancellationToken,
+    ) -> Result<crate::workspace_mounts::RemoteListing> {
+        use crate::workspace_mounts::{Copied, RemoteListing};
+        use supertag_protocol::workspace_mounts::{MAX_WORKSPACE_MOUNT_FILES, volume_key};
+        let deadline = copy_deadline(copy.max_bytes);
+        let path = copy.sandbox_path(attempt);
+        bounded(deadline, cancel, async {
+            let mut stream = self
+                .client()
+                .capture_copy(self.request(RemoteWorkspaceCaptureCopyRequest { path }, deadline)?)
+                .await?
+                .into_inner();
+            let mut listing = RemoteListing::default();
+            loop {
+                match stream.message().await?.and_then(|message| message.part) {
+                    Some(remote_workspace_copy_download::Part::File(file)) => {
+                        ensure!(
+                            listing.files.len() < 2 * MAX_WORKSPACE_MOUNT_FILES
+                                && volume_key(&file.key)
+                                && valid_sha256(&file.sha256)
+                                && listing.files.last().is_none_or(|last| last.key < file.key),
+                            "invalid remote Workspace copy listing"
+                        );
+                        listing.files.push(Copied {
+                            key: file.key,
+                            size: file.size,
+                            sha256: file.sha256,
+                        });
+                    }
+                    Some(remote_workspace_copy_download::Part::Listed(listed)) => {
+                        let reason_ok = listed.error_reason.len() <= 256
+                            && !listed.error_reason.chars().any(char::is_control);
+                        ensure!(
+                            reason_ok
+                                && (listed.error_key.is_empty() || volume_key(&listed.error_key))
+                                && (!listed.error_reason.is_empty() || listed.error_key.is_empty()),
+                            "invalid remote Workspace copy listing"
+                        );
+                        listing.skipped = listed.skipped;
+                        listing.refusal = (!listed.error_reason.is_empty())
+                            .then_some((listed.error_key, listed.error_reason));
+                        break;
+                    }
+                    _ => anyhow::bail!("invalid remote Workspace copy listing"),
+                }
+            }
+            let Some(writer) = decide(&listing)? else {
+                // A refused copy needs no bytes; ending the call stops the provider.
+                return Ok(listing);
+            };
+            let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(4);
+            let files = listing.files.clone();
+            let consumer = tokio::task::spawn_blocking(move || -> Result<()> {
+                for file in &files {
+                    writer.write(file, &mut receiver)?;
+                }
+                ensure!(
+                    receiver.blocking_recv().is_none(),
+                    "remote Workspace copy differs from its listing"
+                );
+                Ok(())
+            });
+            let receive = async {
+                for file in &listing.files {
+                    let mut remaining = file.size;
+                    while remaining > 0 {
+                        let Some(remote_workspace_copy_download::Part::Payload(bytes)) =
+                            stream.message().await?.and_then(|message| message.part)
+                        else {
+                            anyhow::bail!("remote Workspace copy ended early");
+                        };
+                        ensure!(
+                            !bytes.is_empty()
+                                && bytes.len() <= CHECKPOINT_CHUNK_BYTES
+                                && bytes.len() as u64 <= remaining,
+                            "remote Workspace copy differs from its listing"
+                        );
+                        remaining -= bytes.len() as u64;
+                        sender
+                            .send(bytes)
+                            .await
+                            .map_err(|_| anyhow!("Workspace copy capture stopped"))?;
+                    }
+                }
+                ensure!(
+                    stream.message().await?.is_none(),
+                    "remote Workspace copy differs from its listing"
+                );
+                drop(sender);
+                Ok(())
+            };
+            let received = receive.await;
+            let written = consumer
+                .await
+                .map_err(|_| anyhow!("Workspace copy capture failed"))?;
+            received?;
+            written?;
+            Ok(listing)
+        })
+        .await
+    }
+
     pub async fn stop(
         &self,
         owner: &RemoteWorkspaceOwner,
@@ -884,6 +1077,20 @@ mod tests {
             assert_eq!(format!("{:x}", Sha256::digest(&bytes)), reference.sha256);
             *self.staged.lock().unwrap() = bytes;
             Ok(Response::new(RemoteWorkspaceStageResponse::default()))
+        }
+        // The copy transfer is covered through the E2B and Modal provider fixtures.
+        async fn stage_copy(
+            &self,
+            _: Request<Streaming<RemoteWorkspaceCopyUpload>>,
+        ) -> Result<Response<RemoteWorkspaceCopyStaged>, Status> {
+            Err(Status::unimplemented("fixture"))
+        }
+        type CaptureCopyStream = ReceiverStream<Result<RemoteWorkspaceCopyDownload, Status>>;
+        async fn capture_copy(
+            &self,
+            _: Request<RemoteWorkspaceCaptureCopyRequest>,
+        ) -> Result<Response<Self::CaptureCopyStream>, Status> {
+            Err(Status::unimplemented("fixture"))
         }
         type CaptureStream = ReceiverStream<Result<RemoteWorkspaceCaptureChunk, Status>>;
         async fn capture(

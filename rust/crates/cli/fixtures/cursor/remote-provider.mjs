@@ -79,6 +79,10 @@ let staged = false;
 let mcpStaged = false;
 const mcpServers = new Set();
 const inputPaths = [];
+// Each staged Workspace copy by checkout path: its access and the files the Host uploaded.
+const copies = new Map();
+let captured = false;
+const copyRoot = () => `volumes/${hash(allocation.owner.attemptId)}`;
 const enabled = (name) =>
   access(join(root, name)).then(
     () => true,
@@ -256,6 +260,8 @@ const implementation = {
           if (entry.name === ".git") continue;
           const path = prefix + entry.name;
           if (inputPaths.includes(path) && !(await enabled("return-private-input"))) continue;
+          // Workspace copies never return in the tree.
+          if (copies.size && path === copyRoot()) continue;
           const physical = join(folder, entry.name);
           if (entry.isDirectory()) await files(physical, `${path}/`);
           else {
@@ -286,10 +292,96 @@ const implementation = {
         paths: entries.map(({ path }) => path),
         sha256: hash(tree),
       });
+      captured = true;
       yield {
         part: { case: "tree", value: { sha256: hash(tree), byteLength: BigInt(tree.length) } },
       };
       yield { part: { case: "payload", value: tree } };
+    },
+    async stageCopy(stream) {
+      assert.ok(staged && !allocation.stopped && !captured);
+      let header;
+      let current;
+      const files = new Map();
+      const contents = new Map();
+      const finish = () => {
+        if (!current) return;
+        const bytes = Buffer.concat(current.chunks);
+        assert.equal(BigInt(bytes.length), current.size);
+        assert.equal(hash(bytes), current.sha256);
+        contents.set(current.key, bytes);
+      };
+      for await (const { part } of stream) {
+        if (!header) {
+          assert.equal(part.case, "header");
+          header = part.value;
+          assert.match(header.path, new RegExp(`^${copyRoot()}/[a-z-]+$`, "u"));
+          assert.ok(!copies.has(header.path));
+        } else if (part.case === "file") {
+          finish();
+          current = { ...part.value, chunks: [] };
+          files.set(part.value.key, { size: part.value.size, sha256: part.value.sha256 });
+        } else {
+          assert.equal(part.case, "payload");
+          assert.ok(current && part.value.length <= 256 * 1024);
+          current.chunks.push(part.value);
+        }
+      }
+      finish();
+      const base = join(directory, "checkout", header.path);
+      for (const [key, bytes] of contents) {
+        await mkdir(dirname(join(base, key)), { recursive: true, mode: 0o700 });
+        await writeFile(join(base, key), bytes, { mode: header.readWrite ? 0o600 : 0o400 });
+      }
+      copies.set(header.path, { readWrite: header.readWrite, files });
+      await trace({
+        type: "stage-copy",
+        path: header.path,
+        readWrite: header.readWrite,
+        keys: [...files.keys()].sort(),
+      });
+      return { files: BigInt(files.size) };
+    },
+    async *captureCopy({ path }) {
+      assert.ok(captured && !allocation.stopped);
+      const copy = copies.get(path);
+      assert.ok(copy?.readWrite, "only read-write copies are captured");
+      const found = [];
+      async function walk(folder, prefix = "") {
+        for (const entry of await readdir(folder, { withFileTypes: true })) {
+          const key = prefix + entry.name;
+          if (entry.isDirectory()) await walk(join(folder, entry.name), `${key}/`);
+          else if (entry.isFile())
+            found.push({ key, data: await readFile(join(folder, entry.name)) });
+        }
+      }
+      await walk(join(directory, "checkout", path));
+      let skipped = 0n;
+      const changed = [];
+      for (const { key, data } of found) {
+        const staged = copy.files.get(key);
+        if (staged && staged.size === BigInt(data.length) && staged.sha256 === hash(data))
+          skipped++;
+        else changed.push({ key, data });
+      }
+      changed.sort((a, b) => Buffer.compare(Buffer.from(a.key), Buffer.from(b.key)));
+      await trace({
+        type: "capture-copy",
+        path,
+        keys: changed.map(({ key }) => key),
+        skipped: String(skipped),
+      });
+      for (const { key, data } of changed)
+        yield {
+          part: {
+            case: "file",
+            value: { key, size: BigInt(data.length), sha256: hash(data) },
+          },
+        };
+      yield { part: { case: "listed", value: { skipped, errorKey: "", errorReason: "" } } };
+      for (const { data } of changed)
+        for (let offset = 0; offset < data.length; offset += 256 * 1024)
+          yield { part: { case: "payload", value: data.subarray(offset, offset + 256 * 1024) } };
     },
     async *runMcpServer(stream, context) {
       assert.ok(staged && mcpStaged && !allocation.stopped);
@@ -359,9 +451,12 @@ const implementation = {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
       const requested = operation.value?.path ?? "";
+      // Like the provider's file tools, a read-only copy may only be read.
+      const copy = [...copies].find(([path]) => requested.startsWith(`${path}/`));
       if (
         !["workspace.txt", "marker.txt", "mcp-server.js", ".mcp.json"].includes(requested) &&
         !inputPaths.includes(requested) &&
+        !copy &&
         !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
           requested,
         )
@@ -376,7 +471,8 @@ const implementation = {
       if (
         operation.case === "write" &&
         actions.includes("files:write") &&
-        !inputPaths.includes(requested)
+        !inputPaths.includes(requested) &&
+        (!copy || copy[1].readWrite)
       ) {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await writeFile(path, operation.value.content);
@@ -388,7 +484,7 @@ const implementation = {
   },
 };
 for (const [service, names] of [
-  [implementation.provider, ["allocate", "stage", "stop"]],
+  [implementation.provider, ["allocate", "stage", "stageCopy", "stop"]],
   [implementation.workspace, ["execute"]],
 ]) {
   for (const name of names) {

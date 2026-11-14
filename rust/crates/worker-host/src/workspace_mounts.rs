@@ -29,19 +29,27 @@ use std::{
 use supertag_protocol::{
     v2::{WorkspaceCopyMount, WorkspaceMountCapability, WorkspaceMountPreflight},
     volumes::file_volume_path,
-    workspace_mounts::{absolute_path, normalize_capabilities, overlaps, volume_key},
+    workspace_mounts::{
+        MAX_WORKSPACE_MOUNT_BYTES, MAX_WORKSPACE_MOUNT_ENTRIES, MAX_WORKSPACE_MOUNT_FILES,
+        absolute_path, normalize_capabilities, overlaps, volume_key,
+    },
 };
 use supertag_workspaces::packages::{directory_names, open_directory, read_regular_at};
 use tokio_util::sync::CancellationToken;
 
-const MAX_ENTRIES: usize = 4096;
+/// Names read from one directory at a time while removing a copy.
+const REMOVE_BATCH: usize = 4096;
 const MAX_DEPTH: usize = 32;
 const MARKER: &str = ".supertag-workspace-mount-owner";
 const STAGING_PREFIX: &str = ".supertag-stage-";
 const STATE: &str = "workspace-mounts";
+/// The most names one Attempt's mount journal holds.
+const JOURNAL_NAMES: usize = 8 * supertag_protocol::workspace_mounts::MAX_WORKSPACE_MOUNTS;
 
+mod remote;
 mod s3;
 mod writes;
+pub(crate) use remote::{RemoteCopy, RemoteListing, RemoteWriter, record_remote, remote_writer};
 pub(crate) use writes::write_back;
 
 type Identity = (u64, u64);
@@ -227,9 +235,9 @@ impl WorkspaceMounts {
         for path in workspaces.iter().copied().chain(artifact_storage) {
             protected.push(canonical_allow_missing(path)?);
         }
-        let home = std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).canonicalize())
-            .transpose()?;
+        // A missing home holds no configuration to protect.
+        let home =
+            std::env::var_os("HOME").and_then(|home| PathBuf::from(home).canonicalize().ok());
         if let Some(home) = &home {
             protected.push(home.join(".ssh"));
             protected.push(home.join(".supertag"));
@@ -359,6 +367,9 @@ impl WorkspaceMounts {
         }
         let mut paths = vec![];
         let mut writable = vec![];
+        let mut copies = vec![];
+        // One Attempt copies at most 20 GiB across all of its copies, as in TypeScript.
+        let mut attempt_bytes = MAX_WORKSPACE_MOUNT_BYTES;
         for (index, mount) in mounts.iter().enumerate() {
             ensure!(!cancel.is_cancelled(), "Workspace copy cancelled");
             let mapping = self.mapping(mount)?;
@@ -402,9 +413,11 @@ impl WorkspaceMounts {
             marker.write_all(entry.token.as_bytes())?;
             marker.sync_all()?;
             staging.sync_all()?;
+            let limit = mount.max_bytes.min(attempt_bytes);
             let mut budget = CopyBudget {
-                bytes: mount.max_bytes,
-                entries: MAX_ENTRIES,
+                bytes: limit,
+                entries: MAX_WORKSPACE_MOUNT_ENTRIES,
+                files: MAX_WORKSPACE_MOUNT_FILES,
                 device: 0,
                 protected: &protected,
                 cancel,
@@ -419,10 +432,12 @@ impl WorkspaceMounts {
                 }
                 Source::S3(source) => budget.download(source, &staging)?,
             }
+            attempt_bytes -= limit - budget.bytes;
             ensure!(!cancel.is_cancelled(), "Workspace copy cancelled");
             if mount.read_write {
                 save_copied(&receipts, index, &budget.copied)?;
             }
+            let tree = identity(&staging)?;
             rename_new(&root, &entry.staging, name)?;
             root.sync_all()?;
             // Prove the published path is the staged tree in the configured root.
@@ -431,13 +446,26 @@ impl WorkspaceMounts {
                     && identity(&open_directory(&mapping.destination_root)?)? == mapping.root,
                 "Workspace mount root changed while staging"
             );
+            copies.push(RemoteCopy {
+                index,
+                name: name.to_owned(),
+                destination: destination.clone(),
+                tree,
+                read_write: mount.read_write,
+                max_bytes: mount.max_bytes,
+                files: std::mem::take(&mut budget.copied),
+            });
             if mount.read_write {
                 writable.push(destination);
             } else {
                 paths.push(destination);
             }
         }
-        Ok(Mounted { paths, writable })
+        Ok(Mounted {
+            paths,
+            writable,
+            copies,
+        })
     }
 }
 
@@ -456,25 +484,57 @@ impl Mapping {
 pub(crate) struct Mounted {
     paths: Vec<PathBuf>,
     writable: Vec<PathBuf>,
+    /// Every staged copy with the files it holds, for a remote Workspace's upload.
+    copies: Vec<RemoteCopy>,
 }
 
 impl Mounted {
+    /// Instructions naming each local copy by its absolute path.
     pub(crate) fn instructions(&self) -> Result<String> {
-        let mut text = String::new();
-        if !self.paths.is_empty() {
-            text.push_str(&format!(
-                "\n\nRead-only Workspace data is available at these paths: {}.",
-                serde_json::to_string(&self.paths)?
-            ));
-        }
-        if !self.writable.is_empty() {
-            text.push_str(&format!(
-                "\n\nRead-write Workspace data is available at these paths: {}. Files you change or create there are written back to their Volume when the Task succeeds; deletions and links are not.",
-                serde_json::to_string(&self.writable)?
-            ));
-        }
-        Ok(text)
+        copy_instructions(&self.paths, &self.writable, "")
     }
+
+    /// The copies a remote Workspace receives, each at `volumes/<attempt digest>/<name>`.
+    pub(crate) fn copies(&self) -> &[RemoteCopy] {
+        &self.copies
+    }
+
+    /// Instructions naming each copy by its path in a remote Workspace.
+    pub(crate) fn remote_instructions(&self, attempt: &str) -> Result<String> {
+        let path = |read_write: bool| -> Vec<String> {
+            self.copies
+                .iter()
+                .filter(|copy| copy.read_write == read_write)
+                .map(|copy| copy.sandbox_path(attempt))
+                .collect()
+        };
+        copy_instructions(
+            &path(false),
+            &path(true),
+            ", relative to the remote Workspace",
+        )
+    }
+}
+
+fn copy_instructions(
+    read_only: &[impl Serialize],
+    writable: &[impl Serialize],
+    relative: &str,
+) -> Result<String> {
+    let mut text = String::new();
+    if !read_only.is_empty() {
+        text.push_str(&format!(
+            "\n\nRead-only Workspace data is available at these paths{relative}: {}.",
+            serde_json::to_string(read_only)?
+        ));
+    }
+    if !writable.is_empty() {
+        text.push_str(&format!(
+            "\n\nRead-write Workspace data is available at these paths{relative}: {}. Files you change or create there are written back to their Volume when the Task succeeds; deletions and links are not.",
+            serde_json::to_string(writable)?
+        ));
+    }
+    Ok(text)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -494,10 +554,10 @@ struct Receipt {
 /// One staged file of a read-write copy: its Volume-relative key, size and
 /// lowercase hex SHA-256.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
-struct Copied {
-    key: String,
-    size: u64,
-    sha256: String,
+pub(crate) struct Copied {
+    pub(crate) key: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
 }
 
 fn tree_name(receipt: &str) -> Option<String> {
@@ -592,7 +652,8 @@ pub(crate) fn cleanup(state: &Path, attempt: &str) -> Result<()> {
         Err(error) => return Err(error),
     };
     private(&directory)?;
-    for name in directory_names(&directory, 16)? {
+    // Each copy journals at most five files; an interrupted write leaves one temporary file.
+    for name in directory_names(&directory, JOURNAL_NAMES)? {
         if name.ends_with(".json") {
             clear_receipt(&directory, &name)?;
         } else {
@@ -688,7 +749,7 @@ fn remove_tree_at(parent: &File, name: &CStr, depth: usize) -> Result<()> {
     let directory = open_dir_at_c(parent, name)?;
     directory.set_permissions(fs::Permissions::from_mode(0o700))?;
     loop {
-        let children = raw_names(&directory, MAX_ENTRIES)?;
+        let children = raw_names(&directory, REMOVE_BATCH)?;
         if children.is_empty() {
             break;
         }
@@ -892,13 +953,18 @@ fn rename_new(parent: &File, source: &str, target: &str) -> Result<()> {
 }
 
 struct CopyBudget<'a> {
+    /// Bytes left under the copy's limit and the Attempt's.
     bytes: u64,
+    /// Directory entries a `file://` walk may still visit.
     entries: usize,
+    /// Files the copy may still hold.
+    files: usize,
     device: u64,
     protected: &'a [Identity],
     cancel: &'a CancellationToken,
-    /// Read-write copies stay owner-writable and record what they staged.
+    /// Read-write copies stay owner-writable; their file names must be Volume keys.
     writable: bool,
+    /// Every file staged, for write-back and a remote Workspace's upload.
     copied: Vec<Copied>,
 }
 
@@ -914,12 +980,13 @@ impl CopyBudget<'_> {
     /// Download every listed object under the S3 prefix into `target`.
     fn download(&mut self, source: &s3::S3Source, target: &File) -> Result<()> {
         let runtime = tokio::runtime::Handle::current();
-        let listed = runtime.block_on(source.list(self.entries))?;
+        let listed = runtime.block_on(source.list(self.files))?;
         let total = listed.iter().map(|object| object.size).sum::<u64>();
         ensure!(
             total <= self.bytes,
             "Workspace Volume exceeds its byte limit"
         );
+        self.bytes -= total;
         let mut directories: Vec<String> = Vec::new();
         for object in listed {
             ensure!(!self.cancel.is_cancelled(), "Workspace copy cancelled");
@@ -945,14 +1012,12 @@ impl CopyBudget<'_> {
                 &mut output,
                 self.cancel,
             ))?;
-            output.sync_all()?;
-            if self.writable {
-                self.copied.push(Copied {
-                    key: object.key,
-                    size: object.size,
-                    sha256,
-                });
-            }
+            flush(&output)?;
+            self.copied.push(Copied {
+                key: object.key,
+                size: object.size,
+                sha256,
+            });
         }
         // Seal directories deepest first, so a read-only copy cannot gain entries.
         directories.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
@@ -962,10 +1027,10 @@ impl CopyBudget<'_> {
                 directory = open_dir_at(&directory, part)?;
             }
             directory.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
-            directory.sync_all()?;
+            flush(&directory)?;
         }
         target.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
-        target.sync_all()?;
+        flush(target)?;
         Ok(())
     }
 
@@ -1012,6 +1077,10 @@ impl CopyBudget<'_> {
                 let output = open_dir_at(target, &name)?;
                 self.copy(&file, &output, depth + 1, &key)?;
             } else {
+                self.files = self
+                    .files
+                    .checked_sub(1)
+                    .context("Workspace Volume exceeds its file limit")?;
                 ensure!(
                     metadata.is_file()
                         && metadata.dev() == self.device
@@ -1040,18 +1109,18 @@ impl CopyBudget<'_> {
                     "Workspace Volume file changed"
                 );
                 self.bytes -= total;
-                output.sync_all()?;
+                flush(&output)?;
                 if self.writable {
                     ensure!(
                         volume_key(&key),
                         "Workspace Volume holds an unsupported file name"
                     );
-                    self.copied.push(Copied {
-                        key,
-                        size: total,
-                        sha256: format!("{:x}", hash.finalize()),
-                    });
                 }
+                self.copied.push(Copied {
+                    key,
+                    size: total,
+                    sha256: format!("{:x}", hash.finalize()),
+                });
             }
         }
         ensure!(
@@ -1059,9 +1128,22 @@ impl CopyBudget<'_> {
             "Workspace Volume directory changed"
         );
         target.set_permissions(fs::Permissions::from_mode(self.directory_mode()))?;
-        target.sync_all()?;
+        flush(target)?;
         Ok(())
     }
+}
+
+/// Write a staged entry's data to the device. On macOS this is `fsync`, not the full
+/// cache flush `sync_all` issues: the caller's later `sync_all` of the published root flushes
+/// every entry staged before it, so a 10,000-file copy is not 10,000 cache flushes.
+fn flush(file: &File) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    #[cfg(not(target_os = "macos"))]
+    file.sync_all()?;
+    Ok(())
 }
 
 fn unchanged(before: &fs::Metadata, after: &fs::Metadata) -> bool {

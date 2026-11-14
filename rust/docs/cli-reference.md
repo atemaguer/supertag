@@ -58,7 +58,7 @@ Commands:
   artifact-publication  Publish completed artifact files for named destination Objectives, and withdraw them
   artifact-consumption  Approve and withdraw a destination Objective's use of a publication
   volume                Register Volumes and copy immutable artifact files into explicitly mapped storage
-  workspace-volume      Register a file Volume for read-only Workspace data
+  workspace-volume      Register a Volume whose files Tasks receive as Workspace copies
   artifact              Download files captured by a Task
   fetch                 Import a Task's or Session's delivered commits as its Session branch in a repository
   input                 Resolve a message whose delivery to a running Task is uncertain
@@ -2497,7 +2497,7 @@ Options:
       --workspace-base <WORKSPACE_BASE>
           Full local Git base commit. Omit for a configured GitHub source
       --workspace-mounts <WORKSPACE_MOUNTS>
-          JSON array of {volumeId,destination,maxBytes,access} for local copy mounts; access is read-only (default) or read-write
+          JSON array of {volumeId,destination,maxBytes,access} for Workspace Volume copies; maxBytes defaults to 1 GiB (at most 20 GiB); access is read-only (default) or read-write
       --workspace-mcp <WORKSPACE_MCP>
           A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read from the Task's base commit. May be repeated
       --harness <HARNESS>
@@ -3042,7 +3042,7 @@ Options:
 ## `supertag workspace-volume`
 
 ```text
-Register a file Volume for read-only Workspace data
+Register a Volume whose files Tasks receive as Workspace copies
 
 Usage: supertag workspace-volume [OPTIONS] <COMMAND>
 

@@ -996,6 +996,60 @@ service RemoteWorkspaceProvider {
   // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
   // Ending or cancelling the call stops the server process, never the sandbox.
   rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
+  // One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+  // Harness starts: the header, then for each file its record and exactly its bytes. The
+  // provider seals a read-only copy, and Capture leaves every copy out of the returned tree.
+  rpc StageCopy(stream RemoteWorkspaceCopyUpload) returns (RemoteWorkspaceCopyStaged);
+  // After a successful Capture, a read-write copy's changed and created regular files: each
+  // record, then the summary, then each recorded file's bytes in record order.
+  rpc CaptureCopy(RemoteWorkspaceCaptureCopyRequest) returns (stream RemoteWorkspaceCopyDownload);
+}
+
+// A Volume-relative file of a copy and its exact bytes' length and SHA-256.
+message RemoteWorkspaceCopyFile {
+  string key = 1;
+  uint64 size = 2;
+  string sha256 = 3;
+}
+
+message RemoteWorkspaceCopyHeader {
+  // `volumes/<SHA-256 of the Attempt ID>/<name>`, relative to the checkout.
+  string path = 1;
+  bool read_write = 2;
+}
+
+message RemoteWorkspaceCopyUpload {
+  oneof part {
+    RemoteWorkspaceCopyHeader header = 1;
+    RemoteWorkspaceCopyFile file = 2;
+    bytes payload = 3;
+  }
+}
+
+message RemoteWorkspaceCopyStaged {
+  uint64 files = 1;
+}
+
+message RemoteWorkspaceCaptureCopyRequest {
+  string path = 1;
+}
+
+// What the provider found in a read-write copy, after its changed and created file records.
+message RemoteWorkspaceCopyListed {
+  // Unchanged files, links, and other entries that are never written back.
+  uint64 skipped = 1;
+  // The first entry that refuses the copy: an unwritable name, a hard link, a directory
+  // nested too deeply, or too many entries. No bytes follow a refusal.
+  string error_key = 2;
+  string error_reason = 3;
+}
+
+message RemoteWorkspaceCopyDownload {
+  oneof part {
+    RemoteWorkspaceCopyFile file = 1;
+    RemoteWorkspaceCopyListed listed = 2;
+    bytes payload = 3;
+  }
 }
 
 message RemoteWorkspaceProviderBootstrap {

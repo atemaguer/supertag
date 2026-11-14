@@ -50,6 +50,8 @@ const WORKSPACE: &str = "cursor-project";
 mod remote_input_runtime;
 #[path = "support/remote_output_runtime.rs"]
 mod remote_output_runtime;
+#[path = "support/workspace_copy_runtime.rs"]
+mod workspace_copy_runtime;
 
 #[cfg(target_os = "linux")]
 #[path = "support/shared_command_runtime.rs"]
