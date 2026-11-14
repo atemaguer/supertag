@@ -1,7 +1,15 @@
 //! Two labelled Worker Hosts joined with one reusable Auth Key, through real
 //! Control Plane and Worker Host processes. Mirrors
 //! tests/label-placement.test.ts "places Session Tasks only on bound Worker
-//! Hosts that carry the Tag's runsOn labels".
+//! Hosts that carry the Tag's runsOn labels". Host services in supertag.yaml declare labels
+//! the same way, through the local supervisor.
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+#[macro_use]
+#[path = "support/database.rs"]
+mod database;
+#[path = "support/database_password.rs"]
+mod database_password;
 
 use std::{
     net::SocketAddr,
@@ -24,6 +32,11 @@ use uuid::Uuid;
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(20);
+
+database_tests! {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    local_host_services_carry_their_declared_labels;
+}
 
 fn binary(args: &[&str]) -> Command {
     let mut command = Command::new(BINARY);
@@ -539,4 +552,169 @@ async fn postgres_labelled_hosts_share_a_reusable_key_and_take_only_matching_wor
     admin.close().await?;
     cleanup?;
     result.context("PostgreSQL placement process test panicked")?
+}
+
+/// A supertag.yaml host service's `labels` reach the Control Plane through the local
+/// supervisor, so a Tag's `runsOn` selects that host and not its unlabelled neighbour.
+async fn local_host_services_carry_their_declared_labels(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let state = root.join("state");
+    let file = root.join("supertag.yaml");
+    let (control_plane, secrets) = if database.starts_with("postgres") {
+        let (section, secrets) = database_password::config(&database, root)?;
+        (
+            json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": section}),
+            secrets,
+        )
+    } else {
+        (
+            json!({"type": "control-plane", "ports": ["127.0.0.1:0"]}),
+            json!({}),
+        )
+    };
+    std::fs::write(
+        &file,
+        serde_json::to_vec(&json!({"version": 1, "secrets": secrets, "services": {
+            "control-plane": control_plane,
+            "trainer-box": {"type": "host", "adapter": ADAPTER, "labels": ["GPU", "team:infra"]},
+            "plain-box": {"type": "host", "adapter": ADAPTER},
+        }}))?,
+    )?;
+    let log = root.join("supervisor.log");
+    let mut supervisor = std::process::Command::new(BINARY)
+        .args(["up", "--foreground", "--state-directory"])
+        .arg(&state)
+        .arg("--file")
+        .arg(&file)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(std::fs::File::create(&log)?)
+        .spawn()?;
+    let stdout = supervisor.stdout.take().context("stdout")?;
+    let (sender, ready) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        let mut read = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = read.read_line(&mut line);
+        let _ = sender.send(line);
+        let _ = std::io::copy(&mut read, &mut std::io::sink());
+    });
+    let ready = ready.recv_timeout(Duration::from_secs(60))?;
+    let result = async {
+        ensure!(
+            !ready.trim().is_empty(),
+            "supervisor: {}",
+            std::fs::read_to_string(&log)?
+        );
+        let cli = |args: &[&str]| {
+            let mut command = binary(args);
+            command.arg("--state-directory").arg(&state);
+            command
+        };
+        // Both hosts report before any Task is placed.
+        let deadline = tokio::time::Instant::now() + WAIT;
+        let trainer = loop {
+            let listed = json(cli(&["get", "hosts"])).await?;
+            let hosts = listed["hosts"].as_array().context("missing hosts")?;
+            let ready = |id: &str| {
+                hosts
+                    .iter()
+                    .find(|host| host["host_id"] == id && host["phase"] == "ready")
+                    .cloned()
+            };
+            if let (Some(trainer), Some(_)) = (ready("trainer-box"), ready("plain-box")) {
+                break trainer;
+            }
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "hosts never became ready: {listed}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        let labels = trainer["labels"].as_array().context("missing labels")?;
+        for label in ["gpu", "team:infra"] {
+            ensure!(
+                labels.contains(&json!(label)),
+                "trainer-box lacks {label}: {trainer}"
+            );
+        }
+        let plain = json(cli(&["get", "host", "plain-box"])).await?;
+        ensure!(
+            !plain["labels"]
+                .as_array()
+                .context("missing labels")?
+                .contains(&json!("gpu")),
+            "{plain}"
+        );
+
+        for (tag, label) in [("trainer", "gpu"), ("tpu-trainer", "tpu")] {
+            json(cli(&[
+                "tag",
+                "put",
+                tag,
+                "--instructions",
+                "Train the model",
+            ]))
+            .await?;
+            json(cli(&["placement", "runs-on", tag, label])).await?;
+        }
+        let submit = |tag: &str| cli(&["task", "submit", "--tag", tag, "--session", tag, "Train"]);
+        let trained = json(submit("trainer")).await?;
+        let trained = trained["task_id"]
+            .as_str()
+            .context("missing Task")?
+            .to_owned();
+        let waiting = json(submit("tpu-trainer")).await?;
+        let waiting = waiting["task_id"]
+            .as_str()
+            .context("missing Task")?
+            .to_owned();
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let task = json(cli(&["get", "task", &trained])).await?;
+            ensure!(task["state"] != "TASK_STATE_FAILED", "{task}");
+            if task["state"] == "TASK_STATE_SUCCEEDED" {
+                break;
+            }
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "the gpu Task never ran: {task}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Only the labelled host could take the gpu Task; no host carries tpu.
+        let explained = json(cli(&["placement", "explain", &trained])).await?;
+        let hosts = explained["hosts"].as_array().context("missing hosts")?;
+        assert_eq!(
+            hosts
+                .iter()
+                .map(|host| (host["host_id"].clone(), host["missing_labels"].clone()))
+                .collect::<Vec<_>>(),
+            [
+                (json!("plain-box"), json!(["gpu"])),
+                (json!("trainer-box"), json!([])),
+            ]
+        );
+        assert_eq!(
+            json(cli(&["get", "task", &waiting])).await?["state"],
+            "TASK_STATE_QUEUED"
+        );
+        let explained = json(cli(&["placement", "explain", &waiting])).await?;
+        assert_eq!(explained["summary"], "No bound Worker Host has labels: tpu");
+        Ok(())
+    }
+    .await;
+    unsafe {
+        libc::kill(supervisor.id() as i32, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + WAIT;
+    while supervisor.try_wait()?.is_none() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let _ = supervisor.kill();
+    let _ = supervisor.wait();
+    result.with_context(|| std::fs::read_to_string(&log).unwrap_or_default())
 }

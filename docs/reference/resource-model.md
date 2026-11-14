@@ -334,7 +334,7 @@ language. A host carries three kinds of label:
 | Kind | Labels | Set by |
 | --- | --- | --- |
 | Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server a host service provides](supertag-yaml.md#host-mcp-servers) | The Worklet |
-| Declared | Any label, such as `gpu` | `supertag connect worklet --label LABEL` |
+| Declared | Any label, such as `gpu` | A [host service's `labels`](supertag-yaml.md#host-service) in supertag.yaml, or `supertag connect worklet --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
 `status.labels` on a Worker Host lists all of its labels. `status.grantedLabels` lists those its

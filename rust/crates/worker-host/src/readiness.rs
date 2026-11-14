@@ -151,7 +151,7 @@ pub(crate) struct Presence {
 /// Declared labels plus this machine's operating system and architecture.
 /// Invalid or reserved declared labels fail at startup rather than at the
 /// first report, which the Control Plane would refuse.
-pub(crate) fn host_labels(declared: &[String]) -> Result<Vec<String>> {
+pub fn host_labels(declared: &[String]) -> Result<Vec<String>> {
     let os = match std::env::consts::OS {
         "macos" => Some("macos"),
         "linux" => Some("linux"),

@@ -97,6 +97,9 @@ enum Service {
         concurrency: Option<u32>,
         #[serde(default, rename = "attempt-timeout-seconds")]
         attempt_timeout_seconds: Option<u64>,
+        /// Placement labels a Tag's `runsOn` can select, such as `gpu`.
+        #[serde(default)]
+        labels: Vec<String>,
     },
 }
 /// `logging.audit`: where audit entries also go, besides the database, as in TypeScript's
@@ -274,6 +277,8 @@ pub struct Host {
     pub concurrency: u32,
     /// Seconds each Task Attempt may run before the host stops it.
     pub attempt_timeout_seconds: u64,
+    /// Declared placement labels, as written; the Host reports them with its presence.
+    pub labels: Vec<String>,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
     /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
@@ -623,6 +628,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             depends_on,
             concurrency,
             attempt_timeout_seconds,
+            labels,
         } = service
         else {
             continue;
@@ -656,6 +662,8 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             (1..=MAX_ATTEMPT_TIMEOUT_SECONDS).contains(&attempt_timeout_seconds),
             "attempt-timeout-seconds must be a whole number from 1 through {MAX_ATTEMPT_TIMEOUT_SECONDS}"
         );
+        // Refuse invalid, reserved, or too many labels before any service starts.
+        supertag_worker_host::host_labels(&labels).with_context(|| format!("host {name}"))?;
         let target = control_plane
             .as_deref()
             .or(plane_name.as_deref())
@@ -797,6 +805,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             harnesses: selected,
             concurrency,
             attempt_timeout_seconds,
+            labels,
             skills,
             restart,
             session_branches,
@@ -1362,6 +1371,56 @@ secrets:
         assert_eq!(default.attempt_timeout_seconds, 3600);
         assert_eq!(shared.attempt_timeout_seconds, 5400);
         assert_eq!(default.harnesses.len(), 1);
+    }
+    #[test]
+    fn host_labels_are_declared_per_host_and_validated_at_load() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
+  trainer: {type: host, adapter: ./adapter, labels: [gpu, "team:infra"]}
+  plain: {type: host, adapter: ./adapter}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let labels = |name: &str| {
+            c.hosts
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .labels
+                .clone()
+        };
+        assert_eq!(labels("trainer"), ["gpu", "team:infra"]);
+        assert!(labels("plain").is_empty());
+        for (label, message) in [
+            ("-gpu", "is invalid"),
+            ("mcp:notes", "is reserved"),
+            ("artifact-volume:shared", "is reserved"),
+        ] {
+            let input = format!(
+                "services: {{control-plane: {{type: control-plane}}, trainer: {{type: host, adapter: ./adapter, labels: [\"{label}\"]}}}}"
+            );
+            let error = format!(
+                "{:#}",
+                parse(input.as_bytes(), Path::new("/trusted"), |_| None)
+                    .err()
+                    .expect("must reject")
+            );
+            assert!(
+                error.contains("host trainer") && error.contains(message),
+                "{error}"
+            );
+        }
+        let many = (0..64)
+            .map(|n| format!("l{n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let input = format!(
+            "services: {{control-plane: {{type: control-plane}}, trainer: {{type: host, adapter: ./adapter, labels: [{many}]}}}}"
+        );
+        assert!(parse(input.as_bytes(), Path::new("/trusted"), |_| None).is_err());
     }
     #[test]
     fn mapped_workspaces_deliver_session_branches_unless_patch_or_remote() {

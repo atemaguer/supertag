@@ -227,12 +227,18 @@ ranking, queue order, and what happens when no host is available.
 ### Keep a Tag's Tasks on the right hosts with labels
 
 Bindings say which hosts may run a Tag's Tasks. Labels choose among them. Suppose `researcher` is
-bound to a Linux server and a Mac with a GPU, and its Tasks need the GPU. Give the Mac a label when
-it connects:
+bound to a Linux server and a Mac with a GPU, and its Tasks need the GPU. Give the Mac's host
+service a label in its supertag.yaml and run `supertag up`:
 
-```sh
-supertag connect worklet --worklet-url http://127.0.0.1:3435 --harness codex --label gpu
+```yaml
+services:
+  mac:
+    type: host
+    harnesses: [codex]
+    labels: [gpu]
 ```
+
+A host that connects without supertag.yaml takes the same label with `--label gpu`.
 
 Then list the label in the Tag's manifest and apply it:
 

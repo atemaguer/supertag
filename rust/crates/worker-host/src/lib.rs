@@ -33,7 +33,7 @@ pub use mcp::{
     McpCatalog, McpCatalogEntry, McpLogin, McpLoginOptions, McpLoginState, McpLoginStore,
     login_command as mcp_login_command, run_mcp_login,
 };
-pub use readiness::{LaneObserver, State as LaneState};
+pub use readiness::{LaneObserver, State as LaneState, host_labels};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use shared_execution::SharedExecutionConfig;
 pub use shared_host::{HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable};
