@@ -58,6 +58,7 @@ async fn exercise(url: &str, remote: bool) {
         Err(StoreError::Conflict(_))
     ));
     let host = support::register_host(&store, tag).await;
+    support::hold_artifacts(&store, &host).await;
     let mut profile = HarnessExecutionProfile {
         remote_file_workspace: remote,
         ..Default::default()
@@ -172,6 +173,7 @@ async fn exercise(url: &str, remote: bool) {
         Err(StoreError::InvalidArgument(_))
     ));
     let mut capture = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt),
         operation_id: "output".into(),
         description: Some(ArtifactDescription {

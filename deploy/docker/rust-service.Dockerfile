@@ -17,7 +17,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/supertag"]
 FROM runtime AS control-plane
 ENV SUPERTAG_DATABASE_URL=sqlite:///var/lib/supertag/control-plane.sqlite?mode=rwc
 EXPOSE 3434/tcp
-CMD ["control-plane", "--listen", "0.0.0.0:3434", "--transfer-directory", "/var/lib/supertag/transfers"]
+CMD ["control-plane", "--listen", "0.0.0.0:3434", "--checkpoint-directory", "/var/lib/supertag/checkpoints"]
 
 # The optional surfaces-only Gateway: a client of the Control Plane with no public listener.
 # Its gRPC listener (the test notification) stays on loopback inside the container.

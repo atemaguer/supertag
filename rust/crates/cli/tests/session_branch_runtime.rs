@@ -7,6 +7,8 @@ mod prerequisites;
 mod database;
 #[path = "support/database_password.rs"]
 mod database_password;
+#[path = "support/holding_host.rs"]
+mod holding_host;
 
 use std::{
     fs,
@@ -75,18 +77,29 @@ impl Credentials {
 
     /// A Worker Host on another machine: it has its own checkout of the repository.
     fn worker(&self, public: &str, state: &Path, checkout: &Path) -> Command {
+        let mut command = self.holder(public, state, checkout);
+        command.arg("--once");
+        command
+    }
+
+    /// A Worker Host that keeps running, holding the deliveries of every host in the test: they
+    /// share one artifact directory, as the processes of one Worker Host identity.
+    fn holder(&self, public: &str, state: &Path, checkout: &Path) -> Command {
         let mut command = self.command(&[
             "worker-host",
             "--control-plane",
             public,
             "--adapter",
             ADAPTER,
-            "--once",
             "--adapter-arg=--workspace-fixture",
         ]);
         command
             .arg("--state-directory")
             .arg(state)
+            .arg("--artifact-directory")
+            .arg(holding_host::artifact_directory(
+                state.parent().expect("state parent"),
+            ))
             .args(["--workspace-id", "project", "--workspace-source"])
             .arg(checkout);
         command
@@ -129,7 +142,7 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let mut plane = credentials.command(&["control-plane"]);
     plane
         .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(&blobs);
     let (mut plane, public) = service(plane).await?;
     json(credentials.operator(
@@ -151,7 +164,11 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     .await?;
     let branch = supertag_protocol::session_branch("builder", "feature");
     let mut hosts = 0;
+    // The Control Plane stores no delivery: after each `--once` host exits, a holding host keeps
+    // its deliveries reachable for `fetch`.
+    let mut holding: Option<Child> = None;
     let mut run = async |tag: &str, prompt: &str| -> Result<Value> {
+        holding = None;
         let task = json(credentials.operator(
             &[
                 "task",
@@ -171,6 +188,14 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
             .await?;
         let task = json(credentials.operator(&["get", "task", &task_id], &public)).await?;
         ensure!(task["state"] == "TASK_STATE_SUCCEEDED", "{task}");
+        holding = Some(
+            holding_host::serve(credentials.holder(
+                &public,
+                &root.join(format!("holder-{hosts}")),
+                &checkout,
+            ))
+            .await?,
+        );
         Ok(task)
     };
     let fetch = |id: &str, extra: &[&str]| {
@@ -262,7 +287,13 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let fourth = run("builder", "fourth").await?;
     let fourth_head = field(&fourth["workspace_delivery"], "head_commit")?.to_owned();
     let digest = field(&fourth["workspace_delivery"]["bundle"], "sha256")?;
-    let stored = find(&blobs, digest)?.context("stored bundle missing")?;
+    // The holding host's copy is the only one: the Control Plane stored none.
+    ensure!(
+        !blobs.exists() || find(&blobs, digest)?.is_none(),
+        "the Control Plane stored a bundle"
+    );
+    let stored =
+        find(&holding_host::artifact_directory(root), digest)?.context("held bundle missing")?;
     let mut bytes = fs::read(&stored)?;
     let last = bytes.len() - 1;
     bytes[last] ^= 1;
@@ -270,7 +301,10 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let refused = output(fetch(field(&fourth, "task_id")?, &[])).await?;
     assert!(!refused.status.success());
     let message = String::from_utf8_lossy(&refused.stderr);
-    assert!(message.contains("receipt"), "{message}");
+    assert!(
+        message.contains("no longer holds verified bytes"),
+        "{message}"
+    );
     assert_eq!(
         branch_head(&operator_repository, &branch).await?,
         Some(second_head.clone())

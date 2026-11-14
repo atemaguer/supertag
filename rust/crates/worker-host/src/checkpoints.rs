@@ -14,11 +14,22 @@ use crate::{HostHeaders, journal::Attempt, request};
 pub(crate) struct Transfers {
     pub(crate) channel: Channel,
     pub(crate) headers: HostHeaders,
+    /// Where this host keeps the Workspace deliveries it produces.
+    pub(crate) storage: Option<crate::artifact_direct::SourceStorage>,
 }
 
 impl Transfers {
     pub fn new(channel: Channel, headers: HostHeaders) -> Self {
-        Self { channel, headers }
+        Self {
+            channel,
+            headers,
+            storage: None,
+        }
+    }
+
+    pub(crate) fn with_storage(mut self, storage: crate::artifact_direct::SourceStorage) -> Self {
+        self.storage = Some(storage);
+        self
     }
 
     pub async fn upload(

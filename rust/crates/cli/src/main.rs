@@ -358,10 +358,11 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
-        /// Private directory for files Worker Hosts transfer through the Control Plane: Session
-        /// checkpoints, workspace bundles, and GitHub publication blobs.
+        /// Private directory for Session checkpoints, the only bytes the Control Plane stores.
+        /// Artifacts and Workspace deliveries stay on the Worker Host that produced them, or on a
+        /// Volume, and the Control Plane relays them to readers without storing them.
         #[arg(long)]
-        transfer_directory: Option<PathBuf>,
+        checkpoint_directory: Option<PathBuf>,
         /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
         #[arg(long = "artifact-volume")]
         artifact_volumes: Vec<String>,
@@ -371,9 +372,10 @@ enum Command {
             long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
         )]
         artifact_s3_volumes: Option<PathBuf>,
-        /// Private scratch for GitHub source bundles, using the GitHub account in the
-        /// `SUPERTAG_GITHUB_*` variables. Requires the transfer directory.
-        #[arg(long, requires = "transfer_directory")]
+        /// Private scratch for GitHub source and publication bundles, using the GitHub account in
+        /// the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication
+        /// ends.
+        #[arg(long)]
         github_workspace_directory: Option<PathBuf>,
         /// Also write each committed audit entry as one JSON line to `stderr` or to this absolute
         /// file path, created owner-only. The database keeps every entry either way.
@@ -484,11 +486,13 @@ enum Command {
         #[arg(long)]
         workspace_mount_mappings: Option<PathBuf>,
         /// Listen for authorized artifact reads from other Worker Hosts.
-        #[arg(long, requires = "artifact_source_directory")]
+        #[arg(long)]
         artifact_transfer_listen: Option<SocketAddr>,
-        /// Dedicated owner-only absolute directory for immutable artifact copies.
-        #[arg(long, requires = "artifact_transfer_listen")]
-        artifact_source_directory: Option<PathBuf>,
+        /// Owner-only absolute directory holding the artifacts and Workspace deliveries this
+        /// host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither
+        /// and relays them from here to readers.
+        #[arg(long)]
+        artifact_directory: Option<PathBuf>,
         /// TLS certificate for the artifact transfer listener.
         #[arg(long, requires_all = ["artifact_transfer_listen", "artifact_transfer_tls_key"])]
         artifact_transfer_tls_cert: Option<PathBuf>,
@@ -1005,7 +1009,7 @@ async fn run(command: Command) -> Result<()> {
         Command::ControlPlane {
             listen,
             websocket_listen,
-            transfer_directory,
+            checkpoint_directory,
             artifact_volumes,
             artifact_s3_volumes,
             github_workspace_directory,
@@ -1015,7 +1019,7 @@ async fn run(command: Command) -> Result<()> {
                 listen,
                 websocket_listen,
                 ControlPlaneOptions {
-                    transfer_directory,
+                    checkpoint_directory,
                     artifact_volumes,
                     artifact_s3_volumes,
                     github_workspace: github_workspace_directory,
@@ -1108,7 +1112,7 @@ async fn run(command: Command) -> Result<()> {
             wait_for_recovery,
             workspace_mount_mappings,
             artifact_transfer_listen,
-            artifact_source_directory,
+            artifact_directory,
             artifact_transfer_tls_cert,
             artifact_transfer_tls_key,
             artifact_peers,
@@ -1215,27 +1219,22 @@ async fn run(command: Command) -> Result<()> {
             execution_profile.task_artifact_inputs = !workspaces.is_empty()
                 && shared_execution.is_none()
                 && supertag_protocol::task_artifact_inputs::supports_harness(harness);
-            let artifact_source = match artifact_transfer_listen.zip(artifact_source_directory) {
-                Some((listen, directory)) => {
-                    let tls = match artifact_transfer_tls_cert.zip(artifact_transfer_tls_key) {
-                        Some((cert, key)) => Some(tonic::transport::Identity::from_pem(
-                            tokio::fs::read(cert)
-                                .await
-                                .context("read artifact listener certificate")?,
-                            tokio::fs::read(key)
-                                .await
-                                .context("read artifact listener private key")?,
-                        )),
-                        None => None,
-                    };
-                    Some(supertag_worker_host::ArtifactSourceConfig {
-                        listen,
-                        directory,
-                        tls,
-                    })
-                }
+            let tls = match artifact_transfer_tls_cert.zip(artifact_transfer_tls_key) {
+                Some((cert, key)) => Some(tonic::transport::Identity::from_pem(
+                    tokio::fs::read(cert)
+                        .await
+                        .context("read artifact listener certificate")?,
+                    tokio::fs::read(key)
+                        .await
+                        .context("read artifact listener private key")?,
+                )),
                 None => None,
             };
+            let artifact_source = Some(supertag_worker_host::ArtifactSourceConfig {
+                directory: artifact_directory.unwrap_or_else(|| state_directory.join("artifacts")),
+                listen: artifact_transfer_listen,
+                tls,
+            });
             let artifact_peer_ca = match artifact_peer_ca_file {
                 Some(path) => Some(
                     tokio::fs::read(path)
@@ -1391,7 +1390,7 @@ async fn run(command: Command) -> Result<()> {
 
 /// What the Control Plane serves beyond its listeners.
 struct ControlPlaneOptions {
-    transfer_directory: Option<PathBuf>,
+    checkpoint_directory: Option<PathBuf>,
     artifact_volumes: Vec<String>,
     artifact_s3_volumes: Option<PathBuf>,
     github_workspace: Option<PathBuf>,
@@ -1471,23 +1470,25 @@ async fn control_plane(
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
         operator_principal,
     )?;
-    let mut transfers =
-        ApiTransfers::new(api.clone(), options.transfer_directory.clone())?.with_artifact_volumes(
-            volumes::mappings(options.artifact_volumes, options.artifact_s3_volumes)?,
-        )?;
+    let mut transfers = ApiTransfers::new(api.clone(), options.checkpoint_directory.clone())?
+        .with_artifact_volumes(volumes::mappings(
+            options.artifact_volumes,
+            options.artifact_s3_volumes,
+        )?)?;
     let mut source_reader = None;
     let publication = if let Some(directory) = options.github_workspace {
         let sources = github_workspace_sources(directory.clone()).await?;
         transfers =
             transfers.with_github_sources(std::sync::Arc::new(GithubSources(sources.clone())));
         source_reader = Some(sources);
-        let blobs = options
-            .transfer_directory
-            .as_ref()
-            .context("GitHub Workspace publication requires --transfer-directory")?;
         Some(
-            github_workspace_publisher(directory, blobs, channel.clone(), service_token.clone())
-                .await?,
+            github_workspace_publisher(
+                directory,
+                std::sync::Arc::new(RelayedBundles(transfers.clone())),
+                channel.clone(),
+                service_token.clone(),
+            )
+            .await?,
         )
     } else {
         None
@@ -1586,6 +1587,21 @@ async fn control_plane(
 
 /// GitHub Workspace sources, read with this Control Plane's GitHub account, for transfers.
 struct GithubSources(GithubWorkspaceSources);
+
+/// The GitHub publisher's bundles, relayed from the Worker Host holding each delivery.
+struct RelayedBundles(ApiTransfers);
+
+#[tonic::async_trait]
+impl supertag_github::publication::BundleReader for RelayedBundles {
+    async fn read(
+        &self,
+        holder: &supertag_protocol::v2::BlobHolder,
+        bundle: &supertag_protocol::v2::BlobReference,
+        destination: &std::path::Path,
+    ) -> Result<()> {
+        self.0.relay_to_file(holder, bundle, destination).await
+    }
+}
 
 #[tonic::async_trait]
 impl supertag_api::transfers::WorkspaceSources for GithubSources {
@@ -2205,14 +2221,14 @@ async fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
 }
 async fn github_workspace_publisher(
     directory: PathBuf,
-    blobs: &std::path::Path,
+    bundles: std::sync::Arc<dyn supertag_github::publication::BundleReader>,
     channel: ProtocolChannel,
     token: String,
 ) -> Result<supertag_github::publication::GithubPublisher> {
     let publisher = supertag_github::publication::GithubPublisher::new(
         github_workspace_account().await?,
         &directory,
-        blobs,
+        bundles,
         channel,
         token,
     )?;

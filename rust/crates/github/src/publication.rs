@@ -13,6 +13,18 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Code, Request, Status};
 use uuid::Uuid;
 
+/// Reads a Workspace delivery's bundle from the Worker Host that holds it. The Control Plane
+/// stores no delivery bytes; its relay writes them to `destination`, which the publisher deletes.
+#[tonic::async_trait]
+pub trait BundleReader: Send + Sync + 'static {
+    async fn read(
+        &self,
+        holder: &BlobHolder,
+        bundle: &BlobReference,
+        destination: &Path,
+    ) -> Result<()>;
+}
+
 pub struct GithubPublisher {
     provider: Provider,
     client: github_publisher_client::GithubPublisherClient<ProtocolChannel>,
@@ -23,11 +35,11 @@ impl GithubPublisher {
     pub fn new(
         config: GithubWorkspaceAccount,
         directory: &Path,
-        blobs: &Path,
+        bundles: std::sync::Arc<dyn BundleReader>,
         channel: ProtocolChannel,
         token: String,
     ) -> Result<Self> {
-        let provider = Provider::new(config, directory, blobs)?;
+        let provider = Provider::new(config, directory, bundles)?;
         let principal = format!("publisher:github/{}", provider.account);
         authenticated_request((), &token, Some(&principal))?;
         Ok(Self {
@@ -179,6 +191,7 @@ impl GithubPublisher {
         lease: &GithubPublicationLease,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        let holder = claim.holder.clone();
         let mut job = claim.publication.context("claim is empty")?;
         let target = target(&job)?;
         let discovery = async {
@@ -290,8 +303,31 @@ impl GithubPublisher {
         ) {
             return Ok(());
         }
-        let prepared = match self.provider.prepare(&job, token, cancel).await {
+        let prepared = match self
+            .provider
+            .prepare(&job, holder.as_ref(), token, cancel)
+            .await
+        {
             Ok(prepared) => prepared,
+            // The Worker Host holding the bundle is offline: the Control Plane stores no copy, so
+            // publication waits for that host instead of holding for the operator.
+            Err(error)
+                if !claim.read_only
+                    && error
+                        .downcast_ref::<Status>()
+                        .is_some_and(|status| status.code() == Code::Unavailable) =>
+            {
+                self.record(
+                    lease,
+                    job.phase(),
+                    GithubPublicationState::Queued,
+                    None,
+                    None,
+                    "the Worker Host holding the Workspace bundle is not connected; no provider write was dispatched",
+                )
+                .await?;
+                return Ok(());
+            }
             Err(_) => {
                 self.record(
                     lease,

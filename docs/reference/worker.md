@@ -112,13 +112,18 @@ harness sandbox, with a 10-minute limit, and receives no provider credentials.
 
 After the harness finishes, the host commits the Task's changes and verifies them. It records the
 result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. It
-never writes your repository. Your machine imports the delivery as the branch
+keeps both in its artifact storage and registers only their digests; the Control Plane relays them
+from the host to whoever imports the delivery, including the next Task of the Session on another
+host. It never writes your repository. Your machine imports the delivery as the branch
 `supertag/session/SESSION`, one branch per Session that each later Task advances:
 
 - `supertag up` imports deliveries for every Workspace its `supertag.yaml` maps, unless the
   Workspace sets `delivery: patch`.
 - `supertag fetch TASK_OR_SESSION_ID --repository PATH` imports one into any clone.
 - `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file.
+
+Each of these reads fails while the host that produced the delivery is offline, with an error
+naming that host.
 
 A Task with no commits delivers nothing. For GitHub Workspaces, `github-publication` commands
 follow and stop publication of verified results.
@@ -169,10 +174,12 @@ Control Plane or a sandbox.
 
 ## Artifacts
 
-A Task captures files as artifacts. The host uploads their bytes to the Control Plane's transfer
-directory, and the Control Plane records the catalog. A host run with
-`--artifact-source-directory` and `--artifact-transfer-listen` also keeps its own copy and serves
-other hosts directly; they pin it with `--artifact-peer HOST_ID=ORIGIN`. See
+A Task captures files as artifacts. The host keeps their bytes in its artifact storage
+(`STATE_DIRECTORY/artifacts`, or `--artifact-directory`), and the Control Plane records only the
+catalog. The host does the same with each Workspace delivery's patch and bundle. It keeps a relay
+stream open to the Control Plane, which asks it for exact bytes when an authorized reader needs
+them and relays them without storing them. A host run with `--artifact-transfer-listen` also
+serves other hosts directly; they pin it with `--artifact-peer HOST_ID=ORIGIN`. See
 [Artifacts](artifacts.md).
 
 ## Next

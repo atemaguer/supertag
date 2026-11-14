@@ -5,10 +5,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES,
-    artifacts::{
-        ARTIFACT_SOURCE_UNAVAILABLE, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES,
-        materialized_artifact_directory,
-    },
+    artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES, materialized_artifact_directory},
     authenticated_request,
     task_artifact_inputs::OPERATION_PREFIX,
     v2::*,
@@ -274,23 +271,21 @@ impl AcquisitionClient<'_> {
             acquisition_id: acquisition.acquisition_id.clone(),
             path: file.path.clone(),
         };
+        // A configured peer serves the bytes directly, keeping them off the Control Plane's
+        // relay; otherwise, or when the peer cannot, the Control Plane relays them from the
+        // holding Worker Host or a Volume.
+        if !self.coordination.artifact_peers.is_empty()
+            && let Ok(bytes) = self.read_peer(acquisition, input.clone(), file).await
+        {
+            return Ok(bytes);
+        }
         let response = self
             .coordination
             .artifacts
             .clone()
-            .download_acquired_file(authenticated_request(input.clone(), self.host_token, None)?)
-            .await;
-        match response {
-            Ok(response) => verified_file(file, response.into_inner()).await,
-            Err(error)
-                if error.code() == tonic::Code::DataLoss
-                    && error.message() == ARTIFACT_SOURCE_UNAVAILABLE
-                    && !self.coordination.artifact_peers.is_empty() =>
-            {
-                self.read_peer(acquisition, input, file).await
-            }
-            Err(error) => Err(error),
-        }
+            .download_acquired_file(authenticated_request(input, self.host_token, None)?)
+            .await?;
+        verified_file(file, response.into_inner()).await
     }
 
     async fn read_peer(

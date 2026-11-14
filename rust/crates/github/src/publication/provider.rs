@@ -1,3 +1,4 @@
+use super::BundleReader;
 use super::plan::{PullRequest, Target};
 use crate::{
     auth::{AccessToken, Authentication},
@@ -11,6 +12,7 @@ use serde_json::{Value, json};
 use std::{
     os::unix::fs::MetadataExt as _,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 use supertag_protocol::{v2::*, validate_workspace_delivery};
@@ -27,7 +29,7 @@ pub(super) struct Provider {
     api: Url,
     git: Url,
     directory: PathBuf,
-    blobs: PathBuf,
+    bundles: Arc<dyn BundleReader>,
 }
 pub(super) struct Prepared {
     pub repository: PathBuf,
@@ -86,7 +88,11 @@ pub(super) fn receipt(job: &GithubPublication, value: &PullRequest) -> GithubPul
     }
 }
 impl Provider {
-    pub fn new(config: GithubWorkspaceAccount, directory: &Path, blobs: &Path) -> Result<Self> {
+    pub fn new(
+        config: GithubWorkspaceAccount,
+        directory: &Path,
+        bundles: Arc<dyn BundleReader>,
+    ) -> Result<Self> {
         ensure!(
             valid_id(config.repository_id) && valid_repository(&config.repository),
             "invalid GitHub publication repository"
@@ -95,15 +101,11 @@ impl Provider {
             !config.account_id.is_empty() && config.account_id.len() <= 256,
             "GitHub publication account required"
         );
-        for directory in [directory, blobs] {
-            let meta = directory.symlink_metadata()?;
-            ensure!(
-                meta.is_dir()
-                    && meta.uid() == unsafe { libc::geteuid() }
-                    && meta.mode() & 0o077 == 0,
-                "publication storage must be private"
-            );
-        }
+        let meta = directory.symlink_metadata()?;
+        ensure!(
+            meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0,
+            "publication storage must be private"
+        );
         let repository = config.repository.to_ascii_lowercase();
         Ok(Self {
             account: config.account_id,
@@ -124,7 +126,7 @@ impl Provider {
             api: "https://api.github.com/".parse()?,
             git: "https://github.com/".parse()?,
             directory: directory.canonicalize()?,
-            blobs: blobs.canonicalize()?,
+            bundles,
         })
     }
     #[cfg(any(test, feature = "test-fixtures"))]
@@ -164,20 +166,26 @@ impl Provider {
             .access_token(&self.http, &self.api)
             .await
     }
+    /// Reads the delivery's bundle from the Worker Host holding it into private scratch that is
+    /// deleted with the returned value, and verifies its commit.
     pub async fn prepare(
         &self,
         job: &GithubPublication,
+        holder: Option<&BlobHolder>,
         token: AccessToken,
         cancel: &CancellationToken,
     ) -> Result<Prepared> {
         self.scope(job)?;
         let delivery = job.delivery.as_ref().context("delivery required")?;
         let bundle = delivery.bundle.as_ref().context("bundle required")?;
+        let holder = holder.context("delivery has no holding Worker Host")?;
         let directory = TempDir::new_in(&self.directory)?;
+        let relayed = directory.path().join("bundle");
+        self.bundles.read(holder, bundle, &relayed).await?;
         let repository = source::materialize(
             &directory.path().join("verified"),
             &TransferArtifact {
-                path: self.blobs.join(&bundle.sha256),
+                path: relayed,
                 sha256: bundle.sha256.clone(),
                 byte_length: bundle.byte_length,
             },

@@ -168,7 +168,7 @@ def fresh_runtime(cli, fixture, root, env, old, pg=None):
             name = pg.create()
             operator_token = str(uuid.uuid4())
             host_token = 'stcr_' + uuid.uuid4().hex + uuid.uuid4().hex
-            control = stack.enter_context(Service([cli, 'control-plane', '--transfer-directory', root / 'transfers'], {**fresh_env, 'SUPERTAG_DATABASE_URL': pg.binding(name), 'SUPERTAG_OPERATOR_TOKEN': operator_token, 'SUPERTAG_BOOTSTRAP_HOST_TOKEN': host_token}, root / 'control.log'))
+            control = stack.enter_context(Service([cli, 'control-plane', '--checkpoint-directory', root / 'checkpoints'], {**fresh_env, 'SUPERTAG_DATABASE_URL': pg.binding(name), 'SUPERTAG_OPERATOR_TOKEN': operator_token, 'SUPERTAG_BOOTSTRAP_HOST_TOKEN': host_token}, root / 'control.log'))
             public = endpoint(control.ready)
             host = stack.enter_context(Service([cli, 'worker-host', '--control-plane', public, '--state-directory', state, '--adapter', fixture], {**fresh_env, 'SUPERTAG_HOST_TOKEN': host_token}, root / 'host.log'))
             require(host.ready == 'ready', 'fresh Worker Host did not report readiness')

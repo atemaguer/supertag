@@ -8,8 +8,8 @@ A few terms first:
 - A **Worker** is the code on a Worker Host that completes a Task. A **harness** connects it to an
   agent system such as Codex, Claude Code, or Cursor.
 - The **Control Plane** is the service that records Tasks and their results and keeps the catalog
-  of artifacts, the files Tasks produce. It keeps their bytes in a transfer directory, never in its
-  database.
+  of artifacts, the files Tasks produce. It never stores their bytes: the Worker Host that produced
+  them keeps them.
 - A **Volume** is named storage that outlives any one machine, such as an S3 bucket.
 
 SuperTag storage works like Docker storage. A container's filesystem disappears with the
@@ -65,20 +65,21 @@ offered: a write through one would bypass the Worker Host's bounded, recorded wr
 ## Where artifacts are kept
 
 The Control Plane keeps the artifact catalog: what each artifact is, who made it, who may use it,
-and where each copy lives. Each capture also stores the files in the Control Plane's transfer
-directory, a private directory beside its database. Redeploying a hosted Control Plane keeps them
-only when that directory sits on a persistent volume.
+and where each copy lives. It never stores the files. The Worker Host whose Task captured them
+keeps them in its own artifact storage. When another Task or an operator reads a file, the Control
+Plane fetches it from that Worker Host and passes it along without writing it down.
 
-Two other copies can outlive the transfer directory. A Worker Host set up for direct transfer
-keeps its own copy and serves it to other hosts; that copy lasts as long as the host's disk. An
-operator can also copy a file to an artifact Volume, such as a bucket prefix; that copy outlives
-both. For details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
+So an artifact is readable only while its Worker Host is running and connected, unless it also has
+a Volume copy. For example, a laptop's artifacts are unreachable while the laptop sleeps, and the
+error names the laptop's Worker Host. An operator can copy a file to an artifact Volume, such as a
+bucket prefix; that copy stays readable while the Worker Host is offline and outlives it. For
+details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
 [Artifacts](../reference/artifacts.md).
 
 ## Credentials and local access
 
 Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
-operating-system account can read. In particular, `~/.supertag/checkpoints`, `file://` artifact
+operating-system account can read. In particular, a Worker Host's artifact storage under `~/.supertag`, `file://` artifact
 Volumes, and Volume credential files are readable by Codex read-only and workspace-write sandboxes
 and by Claude Code with `allow-unsandboxed-commands` when running under that account. Those Tasks can read local copies
 without catalog grants, and credentials may give access to other artifacts on a shared Volume.

@@ -54,7 +54,7 @@ impl Services {
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host)
             .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(directory.join("transfers"));
         let (plane, public) = service(plane).await?;
         Ok(Self {

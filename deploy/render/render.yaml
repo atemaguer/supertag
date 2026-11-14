@@ -30,7 +30,7 @@ services:
     plan: starter
     region: oregon
     numInstances: 1
-    dockerCommand: /usr/local/bin/supertag-hosted-entrypoint control-plane --listen 127.0.0.1:3434 --websocket-listen 0.0.0.0:8080 --transfer-directory /var/lib/supertag/transfers
+    dockerCommand: /usr/local/bin/supertag-hosted-entrypoint control-plane --listen 127.0.0.1:3434 --websocket-listen 0.0.0.0:8080 --checkpoint-directory /var/lib/supertag/checkpoints
     # Plain HTTP on the tunnel listener; it answers 200 only to this exact path.
     healthCheckPath: /healthz
     disk:

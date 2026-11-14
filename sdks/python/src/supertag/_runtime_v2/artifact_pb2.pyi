@@ -334,22 +334,6 @@ class ListCapturedArtifactsResponse(_message.Message):
     next_before_order: int
     def __init__(self, artifacts: _Optional[_Iterable[_Union[ArtifactSummary, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
 
-class ArtifactUpload(_message.Message):
-    __slots__ = ("begin", "chunk")
-    BEGIN_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_FIELD_NUMBER: _ClassVar[int]
-    begin: CommitArtifactCaptureRequest
-    chunk: ArtifactChunk
-    def __init__(self, begin: _Optional[_Union[CommitArtifactCaptureRequest, _Mapping]] = ..., chunk: _Optional[_Union[ArtifactChunk, _Mapping]] = ...) -> None: ...
-
-class ArtifactChunk(_message.Message):
-    __slots__ = ("file_index", "data")
-    FILE_INDEX_FIELD_NUMBER: _ClassVar[int]
-    DATA_FIELD_NUMBER: _ClassVar[int]
-    file_index: int
-    data: bytes
-    def __init__(self, file_index: _Optional[int] = ..., data: _Optional[bytes] = ...) -> None: ...
-
 class DownloadArtifactFileRequest(_message.Message):
     __slots__ = ("artifact_id", "path")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -496,7 +480,7 @@ class ListArtifactVolumeCopiesResponse(_message.Message):
     next_before_order: int
     def __init__(self, copies: _Optional[_Iterable[_Union[ArtifactVolumeCopy, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
 
-class LocateArtifactVolumeCopiesRequest(_message.Message):
+class LocateArtifactCopiesRequest(_message.Message):
     __slots__ = ("operator", "attempt", "volume_ids")
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
@@ -514,11 +498,13 @@ class ArtifactVolumeLocation(_message.Message):
     storage_key: str
     def __init__(self, volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., storage_key: _Optional[str] = ...) -> None: ...
 
-class LocateArtifactVolumeCopiesResponse(_message.Message):
-    __slots__ = ("locations",)
+class LocateArtifactCopiesResponse(_message.Message):
+    __slots__ = ("locations", "holder")
     LOCATIONS_FIELD_NUMBER: _ClassVar[int]
+    HOLDER_FIELD_NUMBER: _ClassVar[int]
     locations: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeLocation]
-    def __init__(self, locations: _Optional[_Iterable[_Union[ArtifactVolumeLocation, _Mapping]]] = ...) -> None: ...
+    holder: _runtime_pb2.BlobHolder
+    def __init__(self, locations: _Optional[_Iterable[_Union[ArtifactVolumeLocation, _Mapping]]] = ..., holder: _Optional[_Union[_runtime_pb2.BlobHolder, _Mapping]] = ...) -> None: ...
 
 class RegisterArtifactSourceRequest(_message.Message):
     __slots__ = ("storage_id",)

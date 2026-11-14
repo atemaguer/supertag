@@ -4868,9 +4868,9 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
                 _registered_method=True)
-        self.UploadWorkspace = channel.stream_unary(
-                '/supertag.runtime.v2.Transfers/UploadWorkspace',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.SerializeToString,
+        self.CommitWorkspace = channel.unary_unary(
+                '/supertag.runtime.v2.Transfers/CommitWorkspace',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
                 _registered_method=True)
         self.DownloadWorkspace = channel.unary_stream(
@@ -4916,8 +4916,9 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def UploadWorkspace(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+    def CommitWorkspace(self, request, context):
+        """Records a delivery whose patch and bundle the calling Worker Host already holds.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -4965,9 +4966,9 @@ def add_TransfersServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.SerializeToString,
             ),
-            'UploadWorkspace': grpc.stream_unary_rpc_method_handler(
-                    servicer.UploadWorkspace,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.FromString,
+            'CommitWorkspace': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitWorkspace,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
             ),
             'DownloadWorkspace': grpc.unary_stream_rpc_method_handler(
@@ -5062,7 +5063,7 @@ class Transfers:
             _registered_method=True)
 
     @staticmethod
-    def UploadWorkspace(request_iterator,
+    def CommitWorkspace(request,
             target,
             options=(),
             channel_credentials=None,
@@ -5072,11 +5073,11 @@ class Transfers:
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_unary(
-            request_iterator,
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            '/supertag.runtime.v2.Transfers/UploadWorkspace',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.SerializeToString,
+            '/supertag.runtime.v2.Transfers/CommitWorkspace',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
             options,
             channel_credentials,
@@ -5418,12 +5419,12 @@ class WorkspaceDirectoryStub:
         self.GetArtifact = channel.unary_unary(
                 '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
                 _registered_method=True)
         self.GetReviewArtifact = channel.unary_unary(
                 '/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
                 _registered_method=True)
 
 
@@ -5493,12 +5494,12 @@ def add_WorkspaceDirectoryServicer_to_server(servicer, server):
             'GetArtifact': grpc.unary_unary_rpc_method_handler(
                     servicer.GetArtifact,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.SerializeToString,
             ),
             'GetReviewArtifact': grpc.unary_unary_rpc_method_handler(
                     servicer.GetReviewArtifact,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -5636,7 +5637,7 @@ class WorkspaceDirectory:
             target,
             '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
             options,
             channel_credentials,
             insecure,
@@ -5663,7 +5664,134 @@ class WorkspaceDirectory:
             target,
             '/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HostRelayStub:
+    """Worker Hosts hold artifact and Workspace delivery bytes; the Control Plane stores none.
+    Each Worker Host keeps one Await stream open. To serve an authorized reader, the Control
+    Plane asks the holding host for one exact blob, and the host streams it back with one
+    Deliver call. The Control Plane relays the bytes in flight and verifies their digest.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Await = channel.unary_stream(
+                '/supertag.runtime.v2.HostRelay/Await',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AwaitRelayRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayRequest.FromString,
+                _registered_method=True)
+        self.Deliver = channel.stream_unary(
+                '/supertag.runtime.v2.HostRelay/Deliver',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayFrame.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayDelivered.FromString,
+                _registered_method=True)
+
+
+class HostRelayServicer:
+    """Worker Hosts hold artifact and Workspace delivery bytes; the Control Plane stores none.
+    Each Worker Host keeps one Await stream open. To serve an authorized reader, the Control
+    Plane asks the holding host for one exact blob, and the host streams it back with one
+    Deliver call. The Control Plane relays the bytes in flight and verifies their digest.
+    """
+
+    def Await(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Deliver(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HostRelayServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Await': grpc.unary_stream_rpc_method_handler(
+                    servicer.Await,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AwaitRelayRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayRequest.SerializeToString,
+            ),
+            'Deliver': grpc.stream_unary_rpc_method_handler(
+                    servicer.Deliver,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayFrame.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayDelivered.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HostRelay', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HostRelay', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HostRelay:
+    """Worker Hosts hold artifact and Workspace delivery bytes; the Control Plane stores none.
+    Each Worker Host keeps one Await stream open. To serve an authorized reader, the Control
+    Plane asks the holding host for one exact blob, and the host streams it back with one
+    Deliver call. The Control Plane relays the bytes in flight and verifies their digest.
+    """
+
+    @staticmethod
+    def Await(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.HostRelay/Await',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AwaitRelayRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayRequest.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Deliver(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.HostRelay/Deliver',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayFrame.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RelayDelivered.FromString,
             options,
             channel_credentials,
             insecure,

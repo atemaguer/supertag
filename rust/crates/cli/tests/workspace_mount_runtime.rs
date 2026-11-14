@@ -190,7 +190,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let mut plane = credentials.command(&["control-plane"]);
     plane.env("SUPERTAG_DATABASE_URL", database);
     plane
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(directory.join("transfers"));
     let (mut plane, public) = service(plane).await?;
 

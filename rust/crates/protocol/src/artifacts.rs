@@ -13,7 +13,18 @@ use crate::{
 };
 
 pub const MAX_ARTIFACT_FILES: usize = 100;
-pub const ARTIFACT_SOURCE_UNAVAILABLE: &str = "artifact bytes are absent from Control Plane transfer storage and no usable verified Volume copy was found";
+/// The start of the error a reader gets when no copy of an artifact file is reachable: the Control
+/// Plane stores no artifact bytes, its holding Worker Host is not connected, and no verified Volume
+/// copy is readable.
+pub const ARTIFACT_SOURCE_UNAVAILABLE: &str = "no reachable copy of these artifact bytes: their Worker Host is not connected to the Control Plane and no verified Volume copy is readable";
+
+/// The error for an artifact file with no reachable copy, naming the Worker Host that holds it.
+pub fn artifact_source_unavailable(holder: Option<&str>) -> Status {
+    Status::unavailable(match holder {
+        Some(host) => format!("{ARTIFACT_SOURCE_UNAVAILABLE} (held by Worker Host {host})"),
+        None => ARTIFACT_SOURCE_UNAVAILABLE.to_owned(),
+    })
+}
 
 pub const MAX_ARTIFACT_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;

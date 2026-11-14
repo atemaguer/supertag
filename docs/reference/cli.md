@@ -1900,8 +1900,8 @@ Options:
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
 
-      --transfer-directory <TRANSFER_DIRECTORY>
-          Private directory for files Worker Hosts transfer through the Control Plane: Session checkpoints, workspace bundles, and GitHub publication blobs
+      --checkpoint-directory <CHECKPOINT_DIRECTORY>
+          Private directory for Session checkpoints, the only bytes the Control Plane stores. Artifacts and Workspace deliveries stay on the Worker Host that produced them, or on a Volume, and the Control Plane relays them to readers without storing them
 
       --artifact-volume <ARTIFACT_VOLUMES>
           Explicit storage-host consent: VOLUME_ID=/absolute/private/directory
@@ -1910,7 +1910,7 @@ Options:
           Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
 
       --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
-          Private scratch for GitHub source bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Requires the transfer directory
+          Private scratch for GitHub source and publication bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication ends
 
       --audit-log <stderr|PATH>
           Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
@@ -2200,8 +2200,8 @@ Options:
       --artifact-transfer-listen <ARTIFACT_TRANSFER_LISTEN>
           Listen for authorized artifact reads from other Worker Hosts
 
-      --artifact-source-directory <ARTIFACT_SOURCE_DIRECTORY>
-          Dedicated owner-only absolute directory for immutable artifact copies
+      --artifact-directory <ARTIFACT_DIRECTORY>
+          Owner-only absolute directory holding the artifacts and Workspace deliveries this host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither and relays them from here to readers
 
       --artifact-transfer-tls-cert <ARTIFACT_TRANSFER_TLS_CERT>
           TLS certificate for the artifact transfer listener
@@ -2963,7 +2963,7 @@ Usage: supertag volume [OPTIONS] <COMMAND>
 Commands:
   put       Register a file or S3-compatible Volume. Existing metadata requires its exact revision
   copy      Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
-  download  Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost
+  download  Download and re-verify one recorded copy, even when the Worker Host that produced it is offline
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -3029,7 +3029,7 @@ Options:
 ## `supertag volume download`
 
 ```text
-Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost
+Download and re-verify one recorded copy, even when the Worker Host that produced it is offline
 
 Usage: supertag volume download [OPTIONS] --output <OUTPUT> <COPY_ID>
 

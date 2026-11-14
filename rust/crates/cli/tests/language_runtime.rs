@@ -260,7 +260,7 @@ impl LanguageServices {
         let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut control = command(&["control-plane"]);
         control
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(directory.join("blobs"))
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)

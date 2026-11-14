@@ -10,9 +10,9 @@ service ArtifactCatalog {
   rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
 }
 
-// Internal to the Control Plane. Only its API tier serves bytes; the state
-// owner verifies authority and records provenance and metadata after the API
-// tier verifies durable storage.
+// Internal to the Control Plane. The state owner verifies authority and records
+// provenance, metadata, and which Worker Host holds each capture's bytes. Its API
+// tier relays bytes from that host or a Volume and stores none.
 service ArtifactDirectory {
   rpc ReserveCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
   rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
@@ -23,7 +23,7 @@ service ArtifactDirectory {
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
   rpc GetAcquiredFile(GetAcquiredArtifactFileRequest) returns (ArtifactFile);
-  rpc LocateVolumeCopies(LocateArtifactVolumeCopiesRequest) returns (LocateArtifactVolumeCopiesResponse);
+  rpc LocateCopies(LocateArtifactCopiesRequest) returns (LocateArtifactCopiesResponse);
   rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
   rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
@@ -31,6 +31,8 @@ service ArtifactDirectory {
 
 // Public Worker Host API. Identity and generation come from the authenticated Worker Host.
 service AttemptArtifacts {
+  // Records a capture whose bytes the calling Worker Host already holds.
+  rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
   rpc Find(FindAttemptArtifactsRequest) returns (ListCapturedArtifactsResponse);
   rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
@@ -40,8 +42,8 @@ service AttemptArtifacts {
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
 }
 
+// Downloads relayed from a Volume copy or the holding Worker Host.
 service ArtifactTransfers {
-  rpc UploadCapture(stream ArtifactUpload) returns (CapturedArtifact);
   rpc DownloadFile(DownloadArtifactFileRequest) returns (stream ArtifactDownload);
   rpc DownloadAcquiredFile(GetAcquiredArtifactFileRequest) returns (stream ArtifactDownload);
 }
@@ -210,6 +212,7 @@ message CommitArtifactCaptureRequest {
   bool managed_task_output = 6;
   // Collection under the immutable output policy accepted with the Task.
   bool declared_task_output = 7;
+  // The calling Worker Host's registered artifact storage, which holds the bytes.
   optional string source_storage_id = 8;
 }
 
@@ -226,20 +229,6 @@ message ListCapturedArtifactsRequest {
 message ListCapturedArtifactsResponse {
   repeated ArtifactSummary artifacts = 1;
   uint64 next_before_order = 2;
-}
-
-message ArtifactUpload {
-  oneof part {
-    CommitArtifactCaptureRequest begin = 1;
-    ArtifactChunk chunk = 2;
-  }
-}
-
-// Chunks for each file are consecutive, in the order of the opening manifest.
-// Empty files have no chunks. The reference defines the exact terminal length.
-message ArtifactChunk {
-  uint32 file_index = 1;
-  bytes data = 2;
 }
 
 message DownloadArtifactFileRequest {
@@ -326,7 +315,7 @@ message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2
 message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
 
 // Internal API tier lookup. The target carries the original download authority.
-message LocateArtifactVolumeCopiesRequest {
+message LocateArtifactCopiesRequest {
   oneof target {
     DownloadArtifactFileRequest operator = 1;
     GetAcquiredArtifactFileRequest attempt = 2;
@@ -337,8 +326,10 @@ message ArtifactVolumeLocation {
   ArtifactVolume volume = 1;
   string storage_key = 2;
 }
-message LocateArtifactVolumeCopiesResponse {
+message LocateArtifactCopiesResponse {
   repeated ArtifactVolumeLocation locations = 1;
+  // The Worker Host holding the producing Attempt's bytes.
+  BlobHolder holder = 2;
 }
 
 // Private peer listener. A bearer grant from the Control Plane authorizes this read.

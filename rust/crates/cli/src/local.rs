@@ -359,7 +359,7 @@ impl Children {
         plane
             .envs(self.proxy.iter().cloned())
             .args(["--listen", &listen.to_string()])
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(directory.join("checkpoints"))
             .env(
                 "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
@@ -1218,6 +1218,10 @@ impl ManagedHost {
         host.envs(proxy_environment(&self.environment))
             .args(["--control-plane", &self.endpoint, "--state-directory"])
             .arg(&lane.directory)
+            // Every lane keeps the Host's artifacts and Workspace deliveries in one storage
+            // directory, so any lane can relay what another produced.
+            .arg("--artifact-directory")
+            .arg(self.directory.join("artifacts"))
             .arg("--wait-for-recovery")
             .args(["--supervised-lane", incarnation])
             .arg("--attempt-timeout-seconds")

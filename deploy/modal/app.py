@@ -50,13 +50,13 @@ CONTROL_PLANE_COMMAND = [
     "127.0.0.1:3434",
     "--websocket-listen",
     "0.0.0.0:8080",
-    "--transfer-directory",
-    "/var/lib/supertag/transfers",
+    "--checkpoint-directory",
+    "/var/lib/supertag/checkpoints",
 ]
 # The Control Plane and a Gateway in this one container; the Gateway dials it on loopback and
 # gets SUPERTAG_MODAL_GATEWAY_FLAGS appended.
 PAIR_COMMAND = [ENTRYPOINT, "pair", "0.0.0.0:8080"]
-# Holds the Control Plane's transfer files and the Gateway's connector state.
+# Holds the Control Plane's Session checkpoints and the Gateway's connector state.
 STATE_DIRECTORY = "/var/lib/supertag"
 # How long a stopping service gets before it is killed.
 STOP_SECONDS = 25

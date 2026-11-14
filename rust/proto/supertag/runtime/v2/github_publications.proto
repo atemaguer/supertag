@@ -94,6 +94,8 @@ message ClaimGithubPublicationResponse {
   uint64 valid_for_ms = 3;
   // Recovery claims may observe and settle proven results, but cannot write.
   bool read_only = 4;
+  // The Worker Host holding the delivery's bundle, which the publisher reads through the relay.
+  BlobHolder holder = 5;
 }
 message PlanGithubPublicationRequest {
   GithubPublicationLease lease = 1;

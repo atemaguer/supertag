@@ -45,6 +45,8 @@ async fn download(
     path: &str,
 ) -> Result<Vec<u8>> {
     let destination = fixture.root.join(format!("artifact-{}", Uuid::new_v4()));
+    // The producing host exited; a holding host relays its artifacts.
+    let _holding = holding_host::serve(runtime.holder(fixture)).await?;
     let output = timeout(
         WAIT,
         runtime

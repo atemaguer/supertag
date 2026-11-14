@@ -1,7 +1,7 @@
 //! Several Control Plane replicas on one PostgreSQL database.
 //!
 //! Three shipped `supertag control-plane` processes start together on one empty PostgreSQL
-//! database and share one transfer directory, each with its own Gateway delivering operator
+//! database and share one checkpoint directory, each with its own Gateway delivering operator
 //! notifications. Operators submit Tasks and create Objectives through every replica, a Worker
 //! Host executes through one of them, every Gateway delivers operator notifications from the
 //! shared outbox, and a Watch stream follows each replica. Replicas are
@@ -219,9 +219,14 @@ fn control_plane(
     listen: &str,
 ) -> Result<Process> {
     let mut command = credentials.command();
-    // Replicas share one transfer directory, as they would share a volume.
+    // Replicas share one checkpoint directory, as they would share a volume.
     command
-        .args(["control-plane", "--listen", listen, "--transfer-directory"])
+        .args([
+            "control-plane",
+            "--listen",
+            listen,
+            "--checkpoint-directory",
+        ])
         .arg(directory.join("transfers"))
         .env("SUPERTAG_DATABASE_URL", database);
     Process::spawn(command, directory, "control-plane", true)

@@ -43,6 +43,10 @@ impl Store {
             validate_capture_manifest(input).map_err(|error| invalid(error.message()))?;
         let mut canonical = input.clone();
         let attempt = canonical.attempt.take().expect("validated Attempt");
+        // The capturing host holds the bytes; the Control Plane records only where they are.
+        let storage = canonical.source_storage_id.clone().ok_or_else(|| {
+            invalid("artifact capture requires the Worker Host's registered artifact storage")
+        })?;
         canonical
             .files
             .sort_unstable_by(|left, right| left.path.cmp(&right.path));
@@ -88,10 +92,8 @@ impl Store {
                     .execute(&mut *tx)
                     .await?;
                     let capture = capture_row(&prior)?;
-                    if let Some(storage) = &canonical.source_storage_id {
-                        crate::artifact_direct::commit_copy_in(&mut tx, host, &capture, storage)
-                            .await?;
-                    }
+                    crate::artifact_direct::commit_copy_in(&mut tx, host, &capture, &storage)
+                        .await?;
                     tx.commit().await?;
                     return Ok(capture);
                 }
@@ -105,9 +107,7 @@ impl Store {
             ));
         }
         running(&row, now)?;
-        if let Some(storage) = &canonical.source_storage_id {
-            crate::artifact_direct::check_source_in(&mut tx, host, storage).await?;
-        }
+        crate::artifact_direct::check_source_in(&mut tx, host, &storage).await?;
         let task = task_row(&row)?;
         let output_environment = task.workspace.is_some()
             && task.attempt_execution.as_ref().is_some_and(|execution| {
@@ -523,15 +523,16 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         ControlPlane::authorize_artifact_transfer(self, request).await
     }
 
-    async fn locate_volume_copies(
+    async fn locate_copies(
         &self,
-        request: Request<LocateArtifactVolumeCopiesRequest>,
-    ) -> std::result::Result<Response<LocateArtifactVolumeCopiesResponse>, Status> {
+        request: Request<LocateArtifactCopiesRequest>,
+    ) -> std::result::Result<Response<LocateArtifactCopiesResponse>, Status> {
         let input = request.get_ref();
-        use locate_artifact_volume_copies_request::Target;
+        use locate_artifact_copies_request::Target;
         let result = match input.target.as_ref() {
             Some(Target::Operator(file)) => {
-                let principal = self.principal(&request, "operator:")?;
+                // Operators and clients that may download the file may learn where it is held.
+                let principal = self.actor(&request)?;
                 crate::artifact_volumes::operator_locations(
                     &self.store,
                     &principal,

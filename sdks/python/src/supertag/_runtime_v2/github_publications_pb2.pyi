@@ -159,16 +159,18 @@ class GithubPublicationLease(_message.Message):
     def __init__(self, publication_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
 
 class ClaimGithubPublicationResponse(_message.Message):
-    __slots__ = ("publication", "lease_token", "valid_for_ms", "read_only")
+    __slots__ = ("publication", "lease_token", "valid_for_ms", "read_only", "holder")
     PUBLICATION_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
     READ_ONLY_FIELD_NUMBER: _ClassVar[int]
+    HOLDER_FIELD_NUMBER: _ClassVar[int]
     publication: GithubPublication
     lease_token: str
     valid_for_ms: int
     read_only: bool
-    def __init__(self, publication: _Optional[_Union[GithubPublication, _Mapping]] = ..., lease_token: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., read_only: _Optional[bool] = ...) -> None: ...
+    holder: _runtime_pb2.BlobHolder
+    def __init__(self, publication: _Optional[_Union[GithubPublication, _Mapping]] = ..., lease_token: _Optional[str] = ..., valid_for_ms: _Optional[int] = ..., read_only: _Optional[bool] = ..., holder: _Optional[_Union[_runtime_pb2.BlobHolder, _Mapping]] = ...) -> None: ...
 
 class PlanGithubPublicationRequest(_message.Message):
     __slots__ = ("lease", "operation_id", "existing", "pushed_commit")

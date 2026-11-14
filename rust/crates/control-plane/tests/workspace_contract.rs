@@ -182,6 +182,11 @@ async fn exercise(url: &str) {
             .unwrap(),
         reference
     );
+    // Readers find the holding host only once the delivery is committed.
+    assert!(matches!(
+        store.workspace_delivery_holder(&reference).await,
+        Err(StoreError::NotFound(_))
+    ));
     assert!(matches!(
         store
             .reserve_workspace_delivery(&owner, &delivery(&attempt, BASE, BASE))
@@ -220,6 +225,14 @@ async fn exercise(url: &str) {
             .await
             .unwrap(),
         None
+    );
+    // The Control Plane stores no delivery bytes: it records which Worker Host holds them.
+    assert_eq!(
+        store.workspace_delivery_holder(&reference).await.unwrap(),
+        BlobHolder {
+            host_id: "primary".into(),
+            attempt_id: attempt.attempt_id.clone(),
+        }
     );
     let completed = store.finish_task(&owner, &first_finish).await.unwrap();
     assert_eq!(completed.workspace_delivery.as_ref(), Some(&reference));

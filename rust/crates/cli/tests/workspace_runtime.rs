@@ -1,4 +1,6 @@
 //! Independent CLI processes exercise repository routing, delivery, and continuation.
+#[path = "support/holding_host.rs"]
+mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -66,18 +68,36 @@ impl Credentials {
         source: Option<&Path>,
         mode: &str,
     ) -> Command {
+        let mut command = self.host(public, state, source, mode);
+        command.arg("--once");
+        command
+    }
+
+    /// A Worker Host that keeps running with no Workspace mapping, so it claims no Workspace
+    /// Task: it holds the test's deliveries and artifacts for readers after `--once` hosts exit.
+    fn holder(&self, public: &str, state: &Path) -> Command {
+        self.host(public, state, None, "--workspace-fixture")
+    }
+
+    fn host(&self, public: &str, state: &Path, source: Option<&Path>, mode: &str) -> Command {
         let mut command = self.command(&[
             "worker-host",
             "--control-plane",
             public,
             "--adapter",
             ADAPTER,
-            "--once",
         ]);
+        // Every host process of a test presents the same credential, so, like the lanes of one
+        // Worker Host, they share one artifact directory: the Control Plane stores no
+        // delivery or artifact bytes and relays them from whichever process is connected.
         command
             .arg(format!("--adapter-arg={mode}"))
             .arg("--state-directory")
-            .arg(state);
+            .arg(state)
+            .arg("--artifact-directory")
+            .arg(holding_host::artifact_directory(
+                state.parent().expect("state parent"),
+            ));
         if let Some(source) = source {
             command
                 .args(["--workspace-id", "project", "--workspace-source"])
@@ -114,7 +134,7 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
         let mut plane = credentials.command(&["control-plane", "--listen", listen]);
         plane
             .env("SUPERTAG_DATABASE_URL", &database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(root.join("transfers"));
         plane
     };
@@ -341,7 +361,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         let mut command = credentials.command(&["control-plane"]);
         command
             .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(&artifact_store);
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
@@ -415,6 +435,22 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(restored_public, public);
     let patch = directory.join("review.patch");
     let bundle = directory.join("review.bundle");
+    // The Control Plane stores no delivery: with no host holding it connected, a download names
+    // the holding Worker Host and writes nothing.
+    let mut offline =
+        credentials.operator(&["task", "download", first_id, "--kind", "patch"], &public);
+    offline.arg("--output").arg(&patch);
+    let offline = output(offline).await?;
+    assert!(!offline.status.success());
+    let message = String::from_utf8_lossy(&offline.stderr);
+    assert!(message.contains("held by Worker Host local"), "{message}");
+    assert!(!patch.exists());
+    ensure!(
+        !artifact_store.exists() || std::fs::read_dir(&artifact_store)?.next().is_none(),
+        "the Control Plane stored delivery bytes"
+    );
+    let holding =
+        holding_host::serve(credentials.holder(&public, &directory.join("holder"))).await?;
     for (kind, path) in [("patch", &patch), ("bundle", &bundle)] {
         let mut download =
             credentials.operator(&["task", "download", first_id, "--kind", kind], &public);
@@ -477,6 +513,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         .arg(&source)
         .args(["cat-file", "-e", &first_head]);
     assert!(!output(absent).await?.status.success());
+    drop(holding);
 
     let second = json(submit("second")).await?;
     let second_id = field(&second, "task_id")?;
@@ -588,7 +625,7 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
         let mut command = credentials.command(&["control-plane"]);
         command
             .env("SUPERTAG_DATABASE_URL", &database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(root.join("artifacts"));
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
@@ -682,6 +719,9 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
                 metadata["inputs"][0]["paths"],
                 serde_json::json!(["evidence.txt"])
             );
+            // The consumer exited; a holding host relays its delivery.
+            let holding =
+                holding_host::serve(credentials.holder(&public, &root.join("holder"))).await?;
             let mut command = credentials.operator(
                 &[
                     "task",
@@ -695,6 +735,7 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
             let patch = root.join("patch.diff");
             command.arg("--output").arg(&patch);
             success(command).await?;
+            drop(holding);
             let patch = std::fs::read_to_string(patch)?;
             assert!(patch.contains("derived.txt"));
             assert!(!patch.contains("inputs/") && !patch.contains("artifact-"));

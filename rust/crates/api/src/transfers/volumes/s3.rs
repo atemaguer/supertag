@@ -238,7 +238,6 @@ impl S3Mapping {
 
     pub(super) async fn read(
         &self,
-        directory: &Path,
         key: &str,
         blob: &BlobReference,
     ) -> Result<Option<tokio::fs::File>> {
@@ -263,7 +262,7 @@ impl S3Mapping {
                     .is_none_or(|length| length == blob.byte_length),
             "S3 Volume read did not return the exact object"
         );
-        let mut staged = StagedBlob::new(directory, blob.clone())?;
+        let mut staged = StagedBlob::transient(blob.clone())?;
         while let Some(bytes) = response
             .chunk()
             .await
@@ -276,29 +275,30 @@ impl S3Mapping {
         Ok(Some(verified_file(staged).await?))
     }
 
-    pub(super) async fn persist(&self, directory: &Path, copy: &ArtifactVolumeCopy) -> Result<()> {
+    /// Writes relayed `bytes` unless the exact object is already there. Without `bytes`, only an
+    /// existing object succeeds.
+    pub(super) async fn persist(
+        &self,
+        bytes: Option<Vec<u8>>,
+        copy: &ArtifactVolumeCopy,
+    ) -> Result<()> {
         let blob = copy
             .file
             .as_ref()
             .and_then(|file| file.blob.as_ref())
             .context("copy has no blob")?;
         let key = &copy.storage_key;
-        if self.read(directory, key, blob).await?.is_some() {
+        if self.read(key, blob).await?.is_some() {
             return Ok(());
         }
         ensure!(
             copy.state() == ArtifactVolumeCopyState::Reserved,
             "verified artifact Volume copy is missing"
         );
-        let mut source = open_blob(&directory.join(&blob.sha256)).await?;
-        let mut staged = StagedBlob::new(directory, blob.clone())?;
-        let mut buffer = vec![0; CHECKPOINT_CHUNK_BYTES];
-        loop {
-            let count = source.read(&mut buffer).await?;
-            if count == 0 {
-                break;
-            }
-            staged.append(&buffer[..count]).await?;
+        let bytes = bytes.ok_or(super::SourceUnavailable)?;
+        let mut staged = StagedBlob::transient(blob.clone())?;
+        for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
+            staged.append(chunk).await?;
         }
         let file = verified_file(staged).await?;
         let body = if blob.byte_length == 0 {
@@ -324,7 +324,7 @@ impl S3Mapping {
         }
         // A lost or contested write is successful only if independent readback proves exact bytes.
         ensure!(
-            self.read(directory, key, blob).await?.is_some(),
+            self.read(key, blob).await?.is_some(),
             "S3 Volume object is missing after the conditional write"
         );
         Ok(())

@@ -38,7 +38,7 @@ pub const TUNNEL_PORT: u16 = 8080;
 /// The Gateway's test notification listener, reachable only inside its container.
 #[cfg(test)]
 const GATEWAY_LISTEN: &str = "127.0.0.1:3436";
-/// Each service's persistent state mount: the Control Plane's transfer directory, and the
+/// Each service's persistent state mount: the Control Plane's Session checkpoints, and the
 /// Gateway's file credential vault and connector state.
 pub const STATE_DIRECTORY: &str = "/var/lib/supertag";
 /// Where each container finds its TLS files, mounted (Compose) or written from secrets by
@@ -548,7 +548,7 @@ pub fn validate(platform: Platform, files: &Files) -> Result<()> {
     }
     if control("SUPERTAG_STATE_DIR") != Some(STATE_DIRECTORY) {
         issues.push(format!(
-            "{CONTROL_PLANE_FILE}: the transfer directory requires the persistent mount at SUPERTAG_STATE_DIR={STATE_DIRECTORY}"
+            "{CONTROL_PLANE_FILE}: Session checkpoints require the persistent mount at SUPERTAG_STATE_DIR={STATE_DIRECTORY}"
         ));
     }
     match gateway("SUPERTAG_CREDENTIAL_VAULT") {
@@ -1701,7 +1701,7 @@ mod tests {
         let dockerfile = read("docker/rust-service.Dockerfile");
 
         let listen_control = format!(
-            "control-plane --listen [::]:{CONTROL_PLANE_PORT} --transfer-directory {STATE_DIRECTORY}/transfers"
+            "control-plane --listen [::]:{CONTROL_PLANE_PORT} --checkpoint-directory {STATE_DIRECTORY}/checkpoints"
         );
         let listen_gateway = format!("gateway --listen {GATEWAY_LISTEN}");
         for (platform, control, gateway) in [
@@ -1748,7 +1748,7 @@ mod tests {
             (
                 "AS control-plane",
                 format!(
-                    "[\"control-plane\", \"--listen\", \"0.0.0.0:{CONTROL_PLANE_PORT}\", \"--transfer-directory\", \"{STATE_DIRECTORY}/transfers\"]"
+                    "[\"control-plane\", \"--listen\", \"0.0.0.0:{CONTROL_PLANE_PORT}\", \"--checkpoint-directory\", \"{STATE_DIRECTORY}/checkpoints\"]"
                 ),
             ),
             (
@@ -1779,7 +1779,7 @@ mod tests {
         assert!(!compose.contains("ports:"));
         assert!(compose.contains("profiles: [gateway]"));
         assert!(compose.contains(&format!(
-            "\"--transfer-directory\", \"{STATE_DIRECTORY}/transfers\""
+            "\"--checkpoint-directory\", \"{STATE_DIRECTORY}/checkpoints\""
         )));
         // PostgreSQL is healthy only once it accepts TCP connections, not while its first-start
         // init server listens on the Unix socket alone; every service restarts after a failure.
@@ -1827,12 +1827,12 @@ mod tests {
         let hosted = "/usr/local/bin/supertag-hosted-entrypoint";
         // Native gRPC only on loopback; the platform reaches the tunnel listener alone.
         let control_plane = format!(
-            "{hosted} control-plane --listen 127.0.0.1:{CONTROL_PLANE_PORT} --websocket-listen 0.0.0.0:{TUNNEL_PORT} --transfer-directory {STATE_DIRECTORY}/transfers"
+            "{hosted} control-plane --listen 127.0.0.1:{CONTROL_PLANE_PORT} --websocket-listen 0.0.0.0:{TUNNEL_PORT} --checkpoint-directory {STATE_DIRECTORY}/checkpoints"
         );
         let pair_command = format!("{hosted} pair 0.0.0.0:{TUNNEL_PORT}");
 
         // Render: a web service on the tunnel port with the health route, PostgreSQL from the
-        // Blueprint, a disk for transfers, and a Gateway worker dialing the public wss:// URL.
+        // Blueprint, a disk for Session checkpoints, and a Gateway worker dialing the public wss:// URL.
         let commands: Vec<&str> = render
             .lines()
             .filter_map(|line| line.trim().strip_prefix("dockerCommand: "))
@@ -1977,7 +1977,9 @@ mod tests {
         assert!(pair.contains(&format!(
             "control-plane --listen 127.0.0.1:{CONTROL_PLANE_PORT} --websocket-listen \"$tunnel\""
         )));
-        assert!(pair.contains(&format!("--transfer-directory {STATE_DIRECTORY}/transfers")));
+        assert!(pair.contains(&format!(
+            "--checkpoint-directory {STATE_DIRECTORY}/checkpoints"
+        )));
         for platform in [Platform::Cloudflare, Platform::Modal] {
             assert!(pair.contains(&format!(
                 "gateway --listen {GATEWAY_LISTEN} --control-plane {} \\\n    \"$@\" &",

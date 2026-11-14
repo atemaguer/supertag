@@ -261,12 +261,13 @@ supertag.yaml          the services file
 .env                   optional; loaded by the env_file default
 runtime.sqlite3        the local Control Plane's SQLite database
 credentials.json       the file credential vault: the local operator credential and surface secrets
-checkpoints/           the transfer directory: Session checkpoints, bundles, artifact files
+checkpoints/           the Control Plane's Session checkpoints
 logs/                  supervisor, control-plane, gateway, and hosts/ logs
 ```
 
-Each host service keeps its credential, execution journal, captured artifacts, and checkouts in
-its own state directory beneath this one. See [Credential storage](credential-storage.md).
+Each host service keeps its credential, execution journal, checkouts, and the artifacts and
+Workspace deliveries its Tasks produce in its own state directory beneath this one. The Control
+Plane stores none of those bytes. See [Credential storage](credential-storage.md).
 
 ## Credentials
 

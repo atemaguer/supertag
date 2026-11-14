@@ -884,7 +884,8 @@ service Connector {
 service Transfers {
   rpc UploadCheckpoint(stream CheckpointUpload) returns (CheckpointReference);
   rpc DownloadCheckpoint(InspectAttemptRequest) returns (stream CheckpointDownload);
-  rpc UploadWorkspace(stream WorkspaceUpload) returns (WorkspaceDeliveryReference);
+  // Records a delivery whose patch and bundle the calling Worker Host already holds.
+  rpc CommitWorkspace(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
@@ -905,8 +906,49 @@ service WorkspaceDirectory {
   rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
   rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
-  rpc GetArtifact(GetWorkspaceArtifactRequest) returns (WorkspaceDeliveryReference);
-  rpc GetReviewArtifact(GetReviewArtifactRequest) returns (WorkspaceDeliveryReference);
+  rpc GetArtifact(GetWorkspaceArtifactRequest) returns (HeldWorkspaceDelivery);
+  rpc GetReviewArtifact(GetReviewArtifactRequest) returns (HeldWorkspaceDelivery);
+}
+
+// Worker Hosts hold artifact and Workspace delivery bytes; the Control Plane stores none.
+// Each Worker Host keeps one Await stream open. To serve an authorized reader, the Control
+// Plane asks the holding host for one exact blob, and the host streams it back with one
+// Deliver call. The Control Plane relays the bytes in flight and verifies their digest.
+service HostRelay {
+  rpc Await(AwaitRelayRequest) returns (stream RelayRequest);
+  rpc Deliver(stream RelayFrame) returns (RelayDelivered);
+}
+
+// The Worker Host holding a blob, and the Attempt whose bytes it holds.
+message BlobHolder {
+  string host_id = 1;
+  string attempt_id = 2;
+}
+
+message AwaitRelayRequest {}
+
+message RelayRequest {
+  string relay_id = 1;
+  // The Attempt that produced the blob; the host keeps its bytes under this Attempt.
+  string attempt_id = 2;
+  BlobReference blob = 3;
+}
+
+message RelayFrame {
+  oneof part {
+    // The first frame names the request being answered.
+    string relay_id = 1;
+    bytes chunk = 2;
+    // The host cannot serve the blob; the reason is shown to the reader.
+    string failure = 3;
+  }
+}
+
+message RelayDelivered {}
+
+message HeldWorkspaceDelivery {
+  WorkspaceDeliveryReference delivery = 1;
+  BlobHolder holder = 2;
 }
 
 // An adapter connects only to its supervising Worker Host. The launch pipe
@@ -2268,14 +2310,7 @@ message WorkspaceDeliveryRequest {
 
 message WorkspaceContinuation {
   WorkspaceDeliveryReference delivery = 1;
-}
-
-message WorkspaceUpload {
-  oneof part {
-    WorkspaceDeliveryRequest begin = 1;
-    bytes patch_chunk = 2;
-    bytes bundle_chunk = 3;
-  }
+  BlobHolder holder = 2;
 }
 
 message WorkspaceDownload {

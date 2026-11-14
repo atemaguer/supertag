@@ -24,8 +24,8 @@ export const CONTROL_PLANE_COMMAND = [
   "127.0.0.1:3434",
   "--websocket-listen",
   "0.0.0.0:8080",
-  "--transfer-directory",
-  "/var/lib/supertag/transfers",
+  "--checkpoint-directory",
+  "/var/lib/supertag/checkpoints",
 ];
 /**
  * The Control Plane and a Gateway in this one container (Cloudflare gives containers no network

@@ -2,11 +2,13 @@
 //!
 //! This tier holds no durable state. It authenticates every caller (operators, Worker Hosts,
 //! Gateways and clients) in one authorization layer ([`authorize`]), serves Watch fan-out and
-//! transfers (checkpoints, workspace bundles, artifacts), and forwards every call to the state
-//! owner over a [`ProtocolChannel`]. The state owner and its controllers live in
-//! `supertag-control-plane`. One process serves both, over an in-process channel ([`in_process`]).
-//! This tier keeps nothing but transfer files, so it could later run as replicas in front of one
-//! state owner that share the transfer directory; no process runs it alone yet.
+//! transfers, and forwards every call to the state owner over a [`ProtocolChannel`]. The state
+//! owner and its controllers live in `supertag-control-plane`. One process serves both, over an
+//! in-process channel ([`in_process`]). Transfers store Session checkpoints only: artifact and
+//! Workspace delivery bytes stay on the Worker Host that produced them or on a Volume, and this
+//! tier relays them to authorized readers without writing them ([`transfers`]). It could later run
+//! as replicas in front of one state owner that share the checkpoint directory; no process runs it
+//! alone yet.
 //!
 //! [`Api::routes`] lists every public service. The process serving them puts the protocol fence
 //! and then [`Api::authorize`] in front of all of them at once.
@@ -176,6 +178,7 @@ impl Api {
             })*};
         }
         let internal = self.credentials.internal.clone();
+        transfers.close_relays_on(shutdown.clone());
         add!(
             self.negotiation_service(),
             self.operator_service(),
@@ -191,6 +194,7 @@ impl Api {
             self.attempt_workspace_mounts_service(),
             transfers.attempt_artifacts_service(),
             transfers.artifact_transfer_service(),
+            transfers.host_relay_service(),
             transfers.service(),
             self.objectives_service(),
             self.live_inputs_service(),

@@ -60,10 +60,10 @@ async fn peer_certificate(root: &Path) -> Result<(std::path::PathBuf, std::path:
 
 database_tests! {
     #[tokio::test]
-    enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_producer_restart;
+    enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer_restart;
 }
 
-async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_producer_restart(
+async fn enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer_restart(
     database: String,
 ) -> Result<()> {
     let temporary = tempfile::tempdir()?;
@@ -80,7 +80,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
     let mut control = credentials.command(&["control-plane"]);
     control
         .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(&cas);
     let (mut control, public) = service(control).await?;
     json(credentials.operator(
@@ -132,7 +132,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
             .args([
                 "--artifact-transfer-listen",
                 &listen,
-                "--artifact-source-directory",
+                "--artifact-directory",
             ])
             .arg(&storage)
             .arg("--artifact-transfer-tls-cert")
@@ -174,10 +174,9 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
         .join(&digest);
     assert_eq!(std::fs::read(&direct_copy)?, bytes);
     let storage_id = std::fs::read_to_string(storage.join("storage-id"))?;
-    let removed = cas.join(&digest);
-    std::fs::remove_file(&removed)?;
+    // The Control Plane holds no artifact bytes: its checkpoint directory never receives them.
     let private_digest = format!("{:x}", Sha256::digest(b"separate private file\n"));
-    std::fs::remove_file(cas.join(private_digest))?;
+    assert!(!cas.join(&digest).exists() && !cas.join(&private_digest).exists());
 
     json(credentials.command(&[
         "host",
@@ -251,7 +250,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_after_cas_loss_and_produ
         metadata["inputs"],
         serde_json::json!([{"artifact_id":artifact,"paths":["evidence.txt"]}])
     );
-    assert!(!removed.exists());
+    assert!(!cas.join(&digest).exists());
     assert_eq!(std::fs::read(&direct_copy)?, bytes);
     producer.kill().await?;
     control.kill().await?;

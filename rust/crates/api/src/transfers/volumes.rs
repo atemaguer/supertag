@@ -267,7 +267,9 @@ impl Drop for Staged {
         unsafe { libc::unlinkat(self.parent.as_raw_fd(), self.name.as_ptr(), 0) };
     }
 }
-fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Result<()> {
+/// Writes `bytes` (relayed from the holding Worker Host) to the Volume, unless the exact object is
+/// already there. Without `bytes`, only an existing verified object succeeds.
+fn persist(mapping: Mapping, bytes: Option<Vec<u8>>, copy: ArtifactVolumeCopy) -> Result<()> {
     let blob = copy
         .file
         .as_ref()
@@ -295,19 +297,7 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
             copy.state() != ArtifactVolumeCopyState::Verified,
             "verified artifact Volume copy is missing"
         );
-        let mut file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(source.join(&blob.sha256))?;
-        let metadata = file.metadata()?;
-        ensure!(
-            metadata.is_file() && metadata.len() == blob.byte_length,
-            "artifact source bytes are unavailable"
-        );
-        let mut bytes = Vec::new();
-        (&mut file)
-            .take(blob.byte_length + 1)
-            .read_to_end(&mut bytes)?;
+        let bytes = bytes.ok_or(SourceUnavailable)?;
         verify_bytes(&bytes, blob)?;
         let staged_parent = destination.try_clone()?;
         let name = CString::new(format!(".copy-{}", uuid::Uuid::new_v4().simple()))?;
@@ -351,22 +341,28 @@ fn persist(mapping: Mapping, source: PathBuf, copy: ArtifactVolumeCopy) -> Resul
     current(&mapping)?;
     Ok(())
 }
+/// The artifact's bytes could not be relayed and the Volume does not already hold them.
+#[derive(Debug)]
+struct SourceUnavailable;
+impl std::fmt::Display for SourceUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("artifact source bytes are unavailable")
+    }
+}
+impl std::error::Error for SourceUnavailable {}
+
 impl Storage {
-    async fn read(
-        self,
-        scratch: &Path,
-        key: &str,
-        blob: &BlobReference,
-    ) -> Result<tokio::fs::File, Status> {
+    /// A verified snapshot of one Volume object, in an unnamed temporary file that disappears
+    /// when the download ends.
+    async fn read(self, key: &str, blob: &BlobReference) -> Result<tokio::fs::File, Status> {
         match self {
             Self::File(mapping) => {
-                let scratch = scratch.to_owned();
                 let key = key.to_owned();
                 let blob = blob.clone();
                 tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                     current(&mapping)?;
                     let directory = parent(&mapping, &key, &blob, false)?;
-                    let mut snapshot = tempfile::tempfile_in(scratch)?;
+                    let mut snapshot = tempfile::tempfile()?;
                     verify_at(&directory, &blob, &mut snapshot)?;
                     current(&mapping)?;
                     snapshot.rewind()?;
@@ -377,7 +373,7 @@ impl Storage {
                 .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))
             }
             Self::S3(mapping) => mapping
-                .read(scratch, key, blob)
+                .read(key, blob)
                 .await
                 .map_err(|_| Status::data_loss("artifact Volume copy could not be verified"))?
                 .ok_or_else(|| Status::data_loss("verified artifact Volume copy is missing")),
@@ -386,6 +382,64 @@ impl Storage {
 }
 
 impl ApiTransfers {
+    /// The exact bytes of a reserved copy's file, relayed into memory from the Worker Host that
+    /// holds them. Files are at most 32 MiB.
+    async fn relayed_copy_source(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        copy: &ArtifactVolumeCopy,
+    ) -> Result<Vec<u8>, Status> {
+        let file = copy
+            .file
+            .as_ref()
+            .ok_or_else(|| Status::data_loss("copy has no file"))?;
+        let blob = file
+            .blob
+            .clone()
+            .filter(|b| {
+                supertag_protocol::valid_sha256(&b.sha256)
+                    && b.byte_length <= MAX_ARTIFACT_FILE_BYTES
+            })
+            .ok_or_else(|| Status::data_loss("copy has invalid bytes"))?;
+        let located = self
+            .locate_copies(
+                metadata.clone(),
+                locate_artifact_copies_request::Target::Operator(DownloadArtifactFileRequest {
+                    artifact_id: copy.artifact_id.clone(),
+                    path: file.path.clone(),
+                }),
+                &[],
+            )
+            .await?;
+        let holder = located
+            .holder
+            .ok_or_else(|| supertag_protocol::artifacts::artifact_source_unavailable(None))?;
+        let mut incoming = match self.relay.open(&holder, &blob).await {
+            Ok(incoming) => incoming,
+            Err(RelayError::Offline) => {
+                return Err(supertag_protocol::artifacts::artifact_source_unavailable(
+                    Some(&holder.host_id),
+                ));
+            }
+            Err(RelayError::Failed(status)) => return Err(status),
+        };
+        let mut bytes = Vec::with_capacity(blob.byte_length as usize);
+        timeout(Duration::from_secs(60), async {
+            while let Some(chunk) = incoming.next().await? {
+                if bytes.len() as u64 + chunk.len() as u64 > blob.byte_length {
+                    return Err(Status::data_loss("relayed artifact exceeds its receipt"));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("artifact relay timed out"))??;
+        verify_bytes(&bytes, &blob)
+            .map_err(|_| Status::data_loss("relayed artifact bytes differ from their receipt"))?;
+        Ok(bytes)
+    }
+
     pub(super) async fn read_volume_location(
         &self,
         location: &ArtifactVolumeLocation,
@@ -397,13 +451,13 @@ impl ApiTransfers {
             .ok_or_else(|| Status::data_loss("copy has no Volume"))?;
         self.volumes
             .resolve(volume)?
-            .read(self.directory()?, &location.storage_key, blob)
+            .read(&location.storage_key, blob)
             .await
     }
 
     pub fn with_artifact_volumes(mut self, mappings: ArtifactVolumeMappings) -> Result<Self> {
-        if !mappings.files.is_empty() || !mappings.objects.is_empty() {
-            let directory = self.directory()?.canonicalize()?;
+        if let Some(directory) = &self.checkpoints {
+            let directory = directory.canonicalize()?;
             for mapping in mappings.files.values() {
                 ensure!(
                     !mapping.root.starts_with(&directory) && !directory.starts_with(&mapping.root),
@@ -461,9 +515,7 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
             })
             .ok_or_else(|| Status::data_loss("copy has invalid bytes"))?;
         let permit = self.acquire()?;
-        let reader = mapping
-            .read(self.directory()?, &copy.storage_key, &blob)
-            .await?;
+        let reader = Source::File(mapping.read(&copy.storage_key, &blob).await?);
         let api = self.clone();
         let authorize = move || {
             let mut request = Request::new(input.clone());
@@ -519,24 +571,30 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
             return Err(Status::data_loss("copy reservation has a different Volume"));
         }
         let permit = self.acquire()?;
-        let source = self.directory()?.to_path_buf();
+        // The Control Plane holds no artifact bytes: relay them from the holding Worker Host.
+        let (bytes, unavailable) = match self.relayed_copy_source(&metadata, &reserved).await {
+            Ok(bytes) => (Some(bytes), None),
+            Err(status) => (None, Some(status)),
+        };
         let persisted = match mapping {
             Storage::File(mapping) => {
                 let snapshot = reserved.clone();
                 tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    persist(mapping, source, snapshot)
+                    persist(mapping, bytes, snapshot)
                 })
                 .await
                 .map_err(|_| Status::internal("artifact Volume copy worker failed"))?
             }
             Storage::S3(mapping) => {
                 let _permit = permit;
-                mapping.persist(&source, &reserved).await
+                mapping.persist(bytes, &reserved).await
             }
         };
-        persisted
-            .map_err(|_| Status::data_loss("artifact Volume copy could not be durably verified"))?;
+        persisted.map_err(|error| match unavailable {
+            Some(status) if error.is::<SourceUnavailable>() => status,
+            _ => Status::data_loss("artifact Volume copy could not be durably verified"),
+        })?;
         let mut commit = Request::new(CommitArtifactVolumeCopyRequest {
             copy_id: reserved.copy_id,
             verified_blob: reserved.file.and_then(|f| f.blob),
@@ -614,7 +672,11 @@ impl artifact_volumes_server::ArtifactVolumes for ApiTransfers {
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
-    fn fixture() -> (tempfile::TempDir, Mapping, PathBuf, ArtifactVolumeCopy) {
+    const BYTES: &[u8] = b"verified evidence";
+    fn relayed() -> Option<Vec<u8>> {
+        Some(BYTES.to_vec())
+    }
+    fn fixture() -> (tempfile::TempDir, Mapping, ArtifactVolumeCopy) {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().canonicalize().unwrap();
         let path = root.join("volume");
@@ -622,14 +684,10 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let maps = ArtifactVolumeMappings::new(vec![("volume".into(), path)]).unwrap();
         let mapping = maps.files["volume"].clone();
-        let source = root.join("cas");
-        std::fs::create_dir(&source).unwrap();
-        let bytes = b"verified evidence";
         let blob = BlobReference {
-            sha256: format!("{:x}", Sha256::digest(bytes)),
-            byte_length: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(BYTES)),
+            byte_length: BYTES.len() as u64,
         };
-        std::fs::write(source.join(&blob.sha256), bytes).unwrap();
         let copy = ArtifactVolumeCopy {
             file: Some(ArtifactFile {
                 path: "report.txt".into(),
@@ -640,52 +698,57 @@ mod tests {
             state: ArtifactVolumeCopyState::Reserved as i32,
             ..Default::default()
         };
-        (temporary, mapping, source, copy)
+        (temporary, mapping, copy)
     }
     #[test]
     fn copy_reopens_before_receipt_and_reconciles_lost_response_without_source() {
-        let (_temporary, mapping, source, mut copy) = fixture();
-        persist(mapping.clone(), source.clone(), copy.clone()).unwrap();
+        let (_temporary, mapping, mut copy) = fixture();
+        persist(mapping.clone(), relayed(), copy.clone()).unwrap();
         let destination = mapping.root.join(&copy.storage_key);
         let bytes = std::fs::read(&destination).unwrap();
-        std::fs::remove_dir_all(&source).unwrap();
         let reopened = ArtifactVolumeMappings::new(vec![("volume".into(), mapping.root.clone())])
             .unwrap()
             .files
             .remove("volume")
             .unwrap();
-        persist(reopened.clone(), source.clone(), copy.clone()).unwrap();
+        // The holding host is offline: the exact object already on the Volume still succeeds.
+        persist(reopened.clone(), None, copy.clone()).unwrap();
         assert_eq!(std::fs::read(&destination).unwrap(), bytes);
         copy.state = ArtifactVolumeCopyState::Verified as i32;
-        persist(reopened.clone(), source.clone(), copy.clone()).unwrap();
+        persist(reopened.clone(), None, copy.clone()).unwrap();
         std::fs::write(&destination, b"wrong").unwrap();
-        assert!(persist(reopened.clone(), source.clone(), copy.clone()).is_err());
+        assert!(persist(reopened.clone(), relayed(), copy.clone()).is_err());
         assert_eq!(std::fs::read(&destination).unwrap(), b"wrong");
         std::fs::remove_file(destination).unwrap();
-        assert!(persist(reopened, source, copy).is_err());
+        assert!(persist(reopened, relayed(), copy).is_err());
+    }
+    #[test]
+    fn an_unreachable_holder_writes_nothing() {
+        let (_temporary, mapping, copy) = fixture();
+        let error = persist(mapping.clone(), None, copy.clone()).unwrap_err();
+        assert!(error.is::<SourceUnavailable>());
+        assert!(!mapping.root.join(&copy.storage_key).exists());
     }
     #[test]
     fn links_or_replaced_roots_never_receive_copy_bytes() {
-        let (_temporary, mapping, source, copy) = fixture();
-        let outside = source.parent().unwrap().join("outside");
+        let (temporary, mapping, copy) = fixture();
+        let outside = temporary.path().canonicalize().unwrap().join("outside");
         std::fs::create_dir(&outside).unwrap();
         symlink(&outside, mapping.root.join("attempts")).unwrap();
-        assert!(persist(mapping.clone(), source.clone(), copy.clone()).is_err());
+        assert!(persist(mapping.clone(), relayed(), copy.clone()).is_err());
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
         std::fs::remove_file(mapping.root.join("attempts")).unwrap();
         let moved = mapping.root.with_file_name("moved");
         std::fs::rename(&mapping.root, moved).unwrap();
         std::fs::create_dir(&mapping.root).unwrap();
         std::fs::set_permissions(&mapping.root, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(persist(mapping.clone(), source, copy).is_err());
+        assert!(persist(mapping.clone(), relayed(), copy).is_err());
         assert_eq!(std::fs::read_dir(&mapping.root).unwrap().count(), 0);
     }
     #[test]
     fn corrupt_source_and_overlapping_or_unprivate_mappings_are_refused() {
-        let (_temporary, mapping, source, copy) = fixture();
-        let blob = copy.file.as_ref().unwrap().blob.as_ref().unwrap();
-        std::fs::write(source.join(&blob.sha256), b"wrong").unwrap();
-        assert!(persist(mapping.clone(), source, copy.clone()).is_err());
+        let (_temporary, mapping, copy) = fixture();
+        assert!(persist(mapping.clone(), Some(b"wrong".to_vec()), copy.clone()).is_err());
         assert!(!mapping.root.join(&copy.storage_key).exists());
         assert!(
             ArtifactVolumeMappings::new(vec![

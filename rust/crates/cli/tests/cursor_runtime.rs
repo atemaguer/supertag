@@ -1,4 +1,6 @@
 //! Cursor's private adapter and runner through real split services and disposable Workspaces.
+#[path = "support/holding_host.rs"]
+mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -251,7 +253,7 @@ impl<'a> Runtime<'a> {
         let mut control = credentials.command(&["control-plane"]);
         control
             .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--transfer-directory")
+            .arg("--checkpoint-directory")
             .arg(root.join("blobs"));
         let (control, endpoint) = service(control).await?;
         let channel = protocol::negotiated(
@@ -447,11 +449,22 @@ impl<'a> Runtime<'a> {
     }
 
     fn worker_command(&self, fixture: &Fixture, label: &str) -> Command {
+        let mut command = self.host_command(fixture, label);
+        command.arg("--once");
+        command
+    }
+
+    /// A Worker Host with no Workspace mapping, so it claims no Cursor Task. It keeps running and
+    /// relays the test's artifacts and deliveries after the `--once` hosts exit.
+    fn holder(&self, fixture: &Fixture) -> Command {
+        self.host_command(fixture, &format!("holder-{}", Uuid::new_v4()))
+    }
+
+    fn host_command(&self, fixture: &Fixture, label: &str) -> Command {
         let mut command = self.credentials.command(&[
             "worker-host",
             "--control-plane",
             &self.endpoint,
-            "--once",
             "--harness",
             "cursor",
             "--harness-model",
@@ -464,6 +477,11 @@ impl<'a> Runtime<'a> {
             .arg(&fixture.adapter)
             .arg("--state-directory")
             .arg(fixture.root.join(format!("host-{label}")))
+            // Every host process presents the same credential, so they share one artifact
+            // directory, as the lanes of one Worker Host do: the Control Plane relays deliveries
+            // and artifacts from it and stores none.
+            .arg("--artifact-directory")
+            .arg(fixture.root.join("host-artifacts"))
             .env("HOME", fixture.root.join("operator-home"))
             .env("CURSOR_API_KEY", PROVIDER_KEY)
             .env("OPENAI_API_KEY", "unrelated-provider-key")

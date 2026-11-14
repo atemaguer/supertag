@@ -63,6 +63,7 @@ async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptReq
 }
 fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCaptureRequest {
     CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
@@ -110,7 +111,9 @@ async fn session_contract(url: &str) {
         .await
         .unwrap();
     let host = support::register_host(&store, "artifact-consumer").await;
+    support::hold_artifacts(&store, &host).await;
     let intruder = support::register_host(&store, "artifact-intruder").await;
+    support::hold_artifacts(&store, &intruder).await;
     let source = message(&store, OP, "same-session", "source").await;
     let producing = claim(&store, &host, "source").await;
     assert_eq!(source.task_id, producing.task_id);
@@ -344,6 +347,7 @@ async fn objective_contract(url: &str) {
             .unwrap();
     }
     let host = support::register_host(&store, "objective-artifacts").await;
+    support::hold_artifacts(&store, &host).await;
     let team = store
         .create_team(
             OP,

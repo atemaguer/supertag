@@ -1,4 +1,6 @@
 //! Operator publication and consumption approvals through real split services.
+#[path = "support/held_artifacts.rs"]
+mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -14,7 +16,6 @@ database_tests! {
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::{
     net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,
 };
@@ -88,7 +89,7 @@ async fn stop(child: &mut Child) -> Result<()> {
 fn plane(credentials: &Credentials, root: &Path, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
     c.env("SUPERTAG_DATABASE_URL", database)
-        .arg("--transfer-directory")
+        .arg("--checkpoint-directory")
         .arg(root.join("cas"))
         .arg("--artifact-volume")
         .arg(format!("published={}", root.join("volume").display()));
@@ -226,10 +227,13 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     let bytes = b"exact durable artifact evidence\n".to_vec();
-    let blob = BlobReference {
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
-        byte_length: bytes.len() as u64,
-    };
+    let mut held = held_artifacts::HeldArtifacts::register(
+        channel.clone(),
+        &credentials.host,
+        registered.generation,
+    )
+    .await?;
+    let blob = held.hold(&attempt.attempt_id, &bytes);
     let capture = CommitArtifactCaptureRequest {
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
@@ -245,24 +249,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         }],
         ..Default::default()
     };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
-    let artifact = transfers
-        .upload_capture(credentials.host(
-            tokio_stream::iter(vec![
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Begin(capture)),
-                },
-                ArtifactUpload {
-                    part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
-                        file_index: 0,
-                        data: bytes.clone(),
-                    })),
-                },
-            ]),
-            registered.generation,
-        ))
-        .await?
-        .into_inner();
+    let artifact = held.commit(capture).await?;
     let artifact_id = artifact.summary.unwrap().artifact_id;
     host.finish_task(credentials.host(
         FinishTaskRequest {
@@ -368,7 +355,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ]))
     .await?;
     stop(&mut control).await?;
-    std::fs::remove_file(root.join("cas").join(&blob.sha256))?;
+    // The producing Worker Host goes offline; the consumer reads the Volume copy.
+    held.disconnect();
     let (mut control, public) =
         service(plane(&credentials, &root, &database, "127.0.0.1:0")).await?;
     let replay = json(publication(

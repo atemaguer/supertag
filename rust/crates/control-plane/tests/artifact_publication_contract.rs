@@ -64,6 +64,7 @@ async fn exercise(url: &str) {
         );
     }
     let host = support::register_host(&store, "publisher").await;
+    support::hold_artifacts(&store, &host).await;
     let assignment = store.claim_task(&host, "claim").await.unwrap().unwrap();
     let task = assignment.task.unwrap();
     assert_eq!(task.task_id, objectives[0].starting_task_id);
@@ -84,6 +85,7 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {

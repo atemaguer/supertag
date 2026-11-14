@@ -92,6 +92,7 @@ async fn capture(
         .await
         .unwrap();
     let request = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: operation.into(),
         description: Some(ArtifactDescription {
@@ -221,6 +222,7 @@ async fn exercise(url: &str) {
             .unwrap();
     }
     let host = support::register_host(&store, "host").await;
+    support::hold_artifacts(&store, &host).await;
     let mut artifacts = Vec::new();
     for (alias, team, channel, tag) in [
         ("source", "T123", "C123", "engineer"),
@@ -728,6 +730,7 @@ async fn github_resource(url: &str) {
         .task
         .unwrap();
     let host = support::register_host(&store, "source-host").await;
+    support::hold_artifacts(&store, &host).await;
     let claim = store
         .claim_task_with_sources(
             &host,
@@ -758,6 +761,7 @@ async fn github_resource(url: &str) {
         .await
         .unwrap();
     let request = CommitArtifactCaptureRequest {
+        source_storage_id: Some(support::ARTIFACT_STORAGE.into()),
         attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
