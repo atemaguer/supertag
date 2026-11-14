@@ -62,9 +62,6 @@ type Caller struct {
 
 // WhoAmI asks the Control Plane whose credential this client presents.
 func (c *Client) WhoAmI(ctx context.Context) (Caller, error) {
-	if !c.RuntimeV2() {
-		return Caller{Principal: "operator"}, nil
-	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.runtime.enrollments.WhoAmI(ctx, connect.NewRequest(&v2.WhoAmIRequest{}))
@@ -95,7 +92,7 @@ func Enroll(ctx context.Context, target Target, version, name string) (Target, s
 	if _, err := rand.Read(operation); err != nil {
 		return target, "", err
 	}
-	c, err := NewRuntimeV2(target, version)
+	c, err := New(target, version)
 	if err != nil {
 		return target, "", err
 	}

@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 import type { query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { LocalHarnessExecutionControl } from "@supertag/worker-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { ClaudeProcessTree } from "./src/process-tree.js";
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "./src/query.js";
@@ -570,47 +569,6 @@ describe("live input", () => {
     })) {
     }
     expect(closedWithinBound).toBe(true);
-  });
-
-  it("never hands over input withdrawn when Harness control closes", async () => {
-    const live = new ClaudeLiveInput();
-    const control = new LocalHarnessExecutionControl({
-      taskId: "task",
-      attemptId: "attempt",
-      capabilities: { version: 1, inputMode: "queue", operations: ["input"] },
-      dispatch: async (command, signal) => ({
-        status: await live.send(command.type === "input" ? command.text : "", signal),
-      }),
-    });
-    let delivered = false;
-    let receipt: Promise<{ status: string }> | undefined;
-    const run = (({ prompt }) =>
-      (async function* () {
-        const input = promptOf(prompt);
-        await input.next();
-        yield working;
-        // The SDK is not reading input while control is revoked.
-        receipt = control.send({
-          id: "one",
-          taskId: "task",
-          attemptId: "attempt",
-          type: "input",
-          text: "revoked",
-        });
-        await delay(5);
-        await control.close();
-        await receipt;
-        const next = input.next();
-        // The turn ends; input closes once nothing is left to read.
-        yield turnEnded;
-        delivered = (await next).done !== true;
-      })()) as typeof query;
-    for await (const _ of claudeQuery(run, "test", {}, new AbortController().signal, {
-      input: live,
-    })) {
-    }
-    expect((await receipt)?.status).toBe("unknown");
-    expect(delivered).toBe(false);
   });
 
   it("confirms input only once the Claude Code process has produced output", async () => {

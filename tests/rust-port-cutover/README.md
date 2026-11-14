@@ -6,7 +6,9 @@ state directory. It does not migrate history, retire the TypeScript runtime, swi
 or contact a model or work-tool provider.
 
 The legacy fixture runs the real TypeScript Control Plane, store, and durable Worklet from an exact
-archived source commit. It completes one Task, closes all writers, and preserves its Session,
+archived source commit. This checkout no longer contains the TypeScript runtime: pass a legacy
+commit at or before `6c934be8`, the last commit that contained it. `legacy.ts` is copied into that
+source snapshot and runs there; its imports do not resolve in this checkout. It completes one Task, closes all writers, and preserves its Session,
 permission snapshot, journal, a synthetic opaque native Session checkpoint, and a Git workspace
 with committed and uncommitted files. SQLite is copied after closure. PostgreSQL is dumped after
 closure with `pg_dump`, then restored into another uniquely named test database. Every test database

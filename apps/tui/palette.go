@@ -68,20 +68,14 @@ func (a *app) commands() []paletteCommand {
 			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
 			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
-	if len(a.contexts) > 1 || a.manageControlPlanes() {
-		title := "Switch Control Plane"
-		if a.manageControlPlanes() {
-			title = "Control Planes · add or switch"
-		}
-		about := "Add a Control Plane"
-		if a.hasTarget {
-			about = contextLabel(a.contexts[a.current])
-		}
-		out = append(out, paletteCommand{commandSwitchControlPlane, title, about + " · " + switchKey})
+	about := "Add a Control Plane"
+	if a.hasTarget {
+		about = contextLabel(a.contexts[a.current])
 	}
-	if a.inner.client.RuntimeV2() {
-		out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})
-	}
+	out = append(out, paletteCommand{commandSwitchControlPlane, "Control Planes · add or switch", about + " · " + switchKey})
+
+	out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})
+
 	waiting := fmt.Sprintf("%d waiting", len(a.inner.inbox.Items))
 	if a.inner.inbox.Truncated {
 		waiting = fmt.Sprintf("%d+ waiting", len(a.inner.inbox.Items))

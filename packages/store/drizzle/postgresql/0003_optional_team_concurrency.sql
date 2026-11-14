@@ -1,2 +1,0 @@
-ALTER TABLE "Team" ALTER COLUMN "maxConcurrency" DROP NOT NULL;--> statement-breakpoint
-UPDATE "Team" SET "maxConcurrency" = NULL WHERE "parentTeamId" IS NULL AND "id" = "objectiveId" || ':leadership';

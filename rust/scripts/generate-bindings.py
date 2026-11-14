@@ -31,7 +31,7 @@ ADAPTER_PROTO = (
     / "supertag/runtime/v2"
 )
 GO_MODULE = "github.com/atemaguer/supertag/rust/bindings/go"
-GO_TOOLS = REPO / "packages" / "operator-api" / "go"
+GO_TOOLS = BINDINGS / "go"
 OUTPUTS = (
     (Path("go/runtimev2"), (".pb.go", ".connect.go")),
     (Path("typescript/supertag/runtime/v2"), ("_pb.ts",)),

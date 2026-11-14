@@ -14,7 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	"github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -34,11 +34,11 @@ type runtimeClient struct {
 	enrollments   runtimev2connect.EnrollmentsClient
 }
 
-// NewRuntimeV2 connects to the public Control Plane over binary gRPC and HTTP/2, natively for an
+// New connects to the public Control Plane over binary gRPC and HTTP/2, natively for an
 // `https://` or loopback `http://` URL, or through a WebSocket tunnel for a `wss://` or loopback
 // `ws://` URL. The first call negotiates the SuperTag protocol version, which every call then
 // names.
-func NewRuntimeV2(target Target, version string) (*Client, error) {
+func New(target Target, version string) (*Client, error) {
 	base, err := url.Parse(strings.TrimSpace(target.URL))
 	tunnel := err == nil && (base.Scheme == "ws" || base.Scheme == "wss")
 	if err != nil || base.Hostname() == "" || base.User != nil ||
@@ -160,10 +160,10 @@ func unavailable(feature string) error {
 	return &APIError{Code: connect.CodeUnimplemented, Message: feature + " is unavailable on this Control Plane."}
 }
 
-func (c *runtimeClient) listTags(ctx context.Context) ([]*operatorv1.Tag, error) {
+func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	var tags []*operatorv1.Tag
+	var tags []*views.Tag
 	cursor := ""
 	for range maxTagPages {
 		res, err := c.operator.ListTags(ctx, connect.NewRequest(&v2.ListTagsRequest{Limit: 100, Cursor: cursor}))
@@ -175,9 +175,9 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*operatorv1.Tag, error)
 			if name == "" {
 				name = tag.GetTagId()
 			}
-			tags = append(tags, &operatorv1.Tag{
-				Metadata: &operatorv1.Metadata{Id: tag.GetTagId(), Name: name},
-				Status:   &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
+			tags = append(tags, &views.Tag{
+				Metadata: &views.Metadata{Id: tag.GetTagId(), Name: name},
+				Status:   &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE},
 			})
 		}
 		cursor = res.Msg.GetNextCursor()
@@ -188,13 +188,13 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*operatorv1.Tag, error)
 	return tags, nil
 }
 
-func (c *runtimeClient) sendMessage(ctx context.Context, tag, conversation, text string) (*operatorv1.Message, error) {
+func (c *runtimeClient) sendMessage(ctx context.Context, tag, conversation, text string) (*views.Message, error) {
 	key, err := idempotencyKey()
 	if err != nil {
 		return nil, err
 	}
 	body := &v2.SendMessageRequest{TagId: tag, Conversation: conversation, Text: text, OperationId: key}
-	return retrying(ctx, func(ctx context.Context) (*operatorv1.Message, error) {
+	return retrying(ctx, func(ctx context.Context) (*views.Message, error) {
 		res, err := c.conversations.SendMessage(ctx, connect.NewRequest(body))
 		if err != nil {
 			return nil, err
@@ -219,7 +219,7 @@ func (c *runtimeClient) getMessage(ctx context.Context, tag, id string) (*v2.Con
 	return res.Msg, nil
 }
 
-func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation string, size int32, cursor string) ([]*operatorv1.Message, string, error) {
+func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation string, size int32, cursor string) ([]*views.Message, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.conversations.ListMessages(ctx, connect.NewRequest(&v2.ListMessagesRequest{
@@ -228,7 +228,7 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 	if err != nil {
 		return nil, "", apiError(err)
 	}
-	items := make([]*operatorv1.Message, 0, len(res.Msg.GetMessages()))
+	items := make([]*views.Message, 0, len(res.Msg.GetMessages()))
 	for _, message := range res.Msg.GetMessages() {
 		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" || message.GetConversation() != conversation {
 			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
@@ -242,10 +242,10 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 	return items, res.Msg.GetNextCursor(), nil
 }
 
-func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*operatorv1.Conversation, error) {
+func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*views.Conversation, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	var conversations []*operatorv1.Conversation
+	var conversations []*views.Conversation
 	cursor := ""
 	for range maxConversationPages {
 		res, err := c.conversations.ListConversations(ctx, connect.NewRequest(&v2.ListConversationsRequest{
@@ -256,7 +256,7 @@ func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*o
 		}
 		for _, conv := range res.Msg.GetConversations() {
 			task := conv.GetLatestTask()
-			preview, author := task.GetPrompt(), operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR
+			preview, author := task.GetPrompt(), views.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR
 			if task.GetTaskId() != "" {
 				message, err := c.getMessage(ctx, tag, task.GetTaskId())
 				if err != nil {
@@ -266,17 +266,17 @@ func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*o
 					return nil, workSessionDataLoss("Control Plane returned a different conversation preview.")
 				}
 				if message.GetWorkSessionReportId() != "" {
-					preview, author = "Work Session report pending.", operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG
+					preview, author = "Work Session report pending.", views.ConversationAuthor_CONVERSATION_AUTHOR_TAG
 					if reply := runtimeReply(message.GetTask()); reply != nil {
 						preview = reply.GetText()
 					}
 				}
 			}
 			if task.GetState() == v2.TaskState_TASK_STATE_SUCCEEDED && task.GetAttemptId() != "" && task.GetResult() != "" {
-				preview, author = task.GetResult(), operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG
+				preview, author = task.GetResult(), views.ConversationAuthor_CONVERSATION_AUTHOR_TAG
 			}
 			runes := []rune(preview)
-			conversations = append(conversations, &operatorv1.Conversation{
+			conversations = append(conversations, &views.Conversation{
 				Tag: conv.GetTagId(), Name: conv.GetName(), SessionId: conv.GetSessionId(),
 				LastMessageText: string(runes[:min(len(runes), 200)]), LastMessageAuthor: author,
 			})
@@ -289,14 +289,14 @@ func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*o
 	return conversations, nil
 }
 
-func runtimeMessage(message *v2.ConversationMessage) *operatorv1.Message {
+func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	if message == nil {
 		return nil
 	}
 	task := message.GetTask()
-	out := &operatorv1.Message{
+	out := &views.Message{
 		TaskId: task.GetTaskId(), Tag: task.GetTagId(), Conversation: message.GetConversation(),
-		SessionId: task.GetSessionId(), Text: task.GetPrompt(), Status: operatorv1.ReplyStatus_REPLY_STATUS_WAITING,
+		SessionId: task.GetSessionId(), Text: task.GetPrompt(), Status: views.ReplyStatus_REPLY_STATUS_WAITING,
 	}
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not
@@ -321,7 +321,7 @@ func runtimeMessage(message *v2.ConversationMessage) *operatorv1.Message {
 	}
 	out.Reply = runtimeReply(task)
 	if out.Reply != nil {
-		out.Status = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+		out.Status = views.ReplyStatus_REPLY_STATUS_REPLIED
 	} else {
 		switch task.GetState() {
 		case v2.TaskState_TASK_STATE_QUEUED:
@@ -333,11 +333,11 @@ func runtimeMessage(message *v2.ConversationMessage) *operatorv1.Message {
 	return out
 }
 
-func runtimeReply(task *v2.Task) *operatorv1.Reply {
+func runtimeReply(task *v2.Task) *views.Reply {
 	text := task.GetResult()
 	switch task.GetState() {
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
-		return &operatorv1.Reply{Presentation: operatorv1.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text + taskFilesNotice(task)}
+		return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text + taskFilesNotice(task)}
 	case v2.TaskState_TASK_STATE_FAILED:
 		if text == "" {
 			text = "Task failed."
@@ -349,5 +349,5 @@ func runtimeReply(task *v2.Task) *operatorv1.Reply {
 	default:
 		return nil
 	}
-	return &operatorv1.Reply{Presentation: operatorv1.ReplyPresentation_REPLY_PRESENTATION_ERROR, Text: text}
+	return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_ERROR, Text: text}
 }

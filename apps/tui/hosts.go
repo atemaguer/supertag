@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // hostRefresh is how often the status bar rereads the Worker Hosts. The watch stream carries no
@@ -17,7 +17,7 @@ var hostRefresh = 15 * time.Second
 
 type (
 	hostsMsg struct {
-		hosts       []*operatorv1.WorkerHost
+		hosts       []*views.WorkerHost
 		err         error
 		phaseLabels map[string]string
 	}
@@ -27,14 +27,14 @@ type (
 // hostPhases are the phases the status bar counts, in the order it shows them. Revoked hosts
 // never connect again, so they are left out.
 var hostPhases = []struct {
-	phase operatorv1.WorkerHostPhase
+	phase views.WorkerHostPhase
 	label string
 }{
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY, "ready"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED, "connected"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, "draining"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE, "unreachable"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED, "unknown"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_READY, "ready"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED, "connected"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, "draining"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE, "unreachable"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED, "unknown"},
 }
 
 func (m model) hostsAfter() tea.Cmd {
@@ -51,12 +51,8 @@ func (m model) reloadHosts() tea.Cmd {
 
 func (m model) hostsCmd() tea.Cmd {
 	return func() tea.Msg {
-		if m.client.RuntimeV2() {
-			hosts, labels, err := m.client.ListWorkerHostReadiness(m.ctx)
-			return hostsMsg{hosts: hosts, phaseLabels: labels, err: err}
-		}
-		hosts, err := m.client.ListWorkerHosts(m.ctx)
-		return hostsMsg{hosts: hosts, err: err}
+		hosts, labels, err := m.client.ListWorkerHostReadiness(m.ctx)
+		return hostsMsg{hosts: hosts, phaseLabels: labels, err: err}
 	}
 }
 
@@ -86,17 +82,17 @@ func (m model) hostSummary() string {
 	if m.hostPhaseLabels != nil {
 		return runtimeHostSummary(m.hosts, m.hostPhaseLabels)
 	}
-	counts := map[operatorv1.WorkerHostPhase]int{}
+	counts := map[views.WorkerHostPhase]int{}
 	total := 0
 	for _, host := range m.hosts {
 		phase := host.GetPhase()
 		switch phase {
-		case operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED:
+		case views.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED:
 			continue
-		case operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY, operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED,
-			operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE:
+		case views.WorkerHostPhase_WORKER_HOST_PHASE_READY, views.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED,
+			views.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, views.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE:
 		default:
-			phase = operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED
+			phase = views.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED
 		}
 		counts[phase]++
 		total++
@@ -113,7 +109,7 @@ func (m model) hostSummary() string {
 	return "Worker Hosts: " + strings.Join(parts, ", ")
 }
 
-func runtimeHostSummary(hosts []*operatorv1.WorkerHost, labels map[string]string) string {
+func runtimeHostSummary(hosts []*views.WorkerHost, labels map[string]string) string {
 	counts := map[string]int{}
 	for _, host := range hosts {
 		label := labels[host.GetMetadata().GetId()]

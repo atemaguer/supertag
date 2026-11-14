@@ -8,9 +8,9 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	connectrpc.com/connect v1.21.1
-	github.com/atemaguer/supertag/packages/operator-api/go v0.0.0
 	github.com/atemaguer/supertag/rust/bindings/go v0.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
+	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.12
 )
 
@@ -38,10 +38,7 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )
-
-replace github.com/atemaguer/supertag/packages/operator-api/go => ../../packages/operator-api/go
 
 replace github.com/atemaguer/supertag/rust/bindings/go => ../../rust/bindings/go

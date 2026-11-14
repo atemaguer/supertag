@@ -11,7 +11,7 @@ import { Code, createControlPlaneClient } from "supertag-ai/control-plane-client
 import { openHarness, TaskState } from "supertag-ai/harness";
 
 const token = "fixture-operator-token";
-const hostToken = "fixture-worker-host-credential-12345";
+const hostToken = `stcr_${"0123456789abcdef".repeat(4)}`;
 const execute = promisify(execFile);
 const loopback = "http://127.0.0.1:3434";
 for (const url of [

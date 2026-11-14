@@ -115,7 +115,7 @@ Install the newer archive the same way. Then restart this machine's services wit
 `supertag up`, which waits for running Task Attempts before replacing a service. For a hosted
 deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 
-## Match the CLI and the Control Plane
+## Check the CLI and the local services
 
 Your CLI, the terminal UI, the desktop app, and Worker Hosts negotiate a protocol version with
 the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs.

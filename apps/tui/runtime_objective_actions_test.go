@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 func TestRuntimeObjectiveShowsItsAllowedActionsAndExplicitEmpty(t *testing.T) {
-	view := &operatorv1.ObjectiveOverview{Objective: &operatorv1.Objective{Id: "release", OwnerTag: "owner", RuntimeActions: []string{"files:read", "commands:execute"}}, Budget: &operatorv1.ObjectiveBudgetUse{}}
+	view := &views.ObjectiveOverview{Objective: &views.Objective{Id: "release", OwnerTag: "owner", RuntimeActions: []string{"files:read", "commands:execute"}}, Budget: &views.ObjectiveBudgetUse{}}
 	if text := describeRuntimeObjective(view, ""); !strings.Contains(text, "Allowed actions: files:read, commands:execute") {
 		t.Fatalf("Objective action ceiling missing:\n%s", text)
 	}
@@ -19,9 +19,9 @@ func TestRuntimeObjectiveShowsItsAllowedActionsAndExplicitEmpty(t *testing.T) {
 }
 
 func TestRuntimeObjectiveShowsPendingAndRecordedCommitReviews(t *testing.T) {
-	view := &operatorv1.ObjectiveOverview{
-		Objective: &operatorv1.Objective{Id: "release", OwnerTag: "owner"}, Budget: &operatorv1.ObjectiveBudgetUse{},
-		CommitReviews: []*operatorv1.ObjectiveCommitReview{
+	view := &views.ObjectiveOverview{
+		Objective: &views.Objective{Id: "release", OwnerTag: "owner"}, Budget: &views.ObjectiveBudgetUse{},
+		CommitReviews: []*views.ObjectiveCommitReview{
 			{Commit: "first", ReviewerTagId: "reviewer"},
 			{Commit: "second", ReviewerTagId: "reviewer", Verdict: "changes_requested", Summary: "Add a regression test"},
 		},

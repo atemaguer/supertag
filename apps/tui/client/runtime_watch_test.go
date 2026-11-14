@@ -10,7 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -62,9 +62,9 @@ func TestRuntimeWatchResumesAndMapsTypedChanges(t *testing.T) {
 	))
 	c := testRuntime(t, mux, false)
 	w := NewWatcher(c,
-		operatorv1.WatchKind_WATCH_KIND_TAG, operatorv1.WatchKind_WATCH_KIND_TASK, operatorv1.WatchKind_WATCH_KIND_SESSION,
-		operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, operatorv1.WatchKind_WATCH_KIND_OBJECTIVE,
-		operatorv1.WatchKind_WATCH_KIND_TEAM, operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST)
+		views.WatchKind_WATCH_KIND_TAG, views.WatchKind_WATCH_KIND_TASK, views.WatchKind_WATCH_KIND_SESSION,
+		views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, views.WatchKind_WATCH_KIND_OBJECTIVE,
+		views.WatchKind_WATCH_KIND_TEAM, views.WatchKind_WATCH_KIND_WORKSTREAM_POST)
 	w.Interval, w.IdleTimeout = time.Millisecond, time.Second
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -82,12 +82,12 @@ func TestRuntimeWatchResumesAndMapsTypedChanges(t *testing.T) {
 		}
 	}
 	first, last := got[1].Change, got[4].Change
-	if first.GetKind() != operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE || first.GetTag() != "lead" ||
+	if first.GetKind() != views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE || first.GetTag() != "lead" ||
 		first.GetId() != "message-1" || first.GetSessionId() != "session-1" || first.GetConversation() != "planning" ||
 		first.GetChangedAt().AsTime().UnixMilli() != 123456 || first.GetReason() != "created" {
 		t.Fatalf("conversation notice = %v", first)
 	}
-	if last.GetKind() != operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST || last.GetTeamId() != "release" || last.GetId() != "post-1" {
+	if last.GetKind() != views.WatchKind_WATCH_KIND_WORKSTREAM_POST || last.GetTeamId() != "release" || last.GetId() != "post-1" {
 		t.Fatalf("Workstream notice = %v", last)
 	}
 	if a, b := <-requests, <-requests; a.GetResumeToken() != "" || b.GetResumeToken() != "message" {

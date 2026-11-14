@@ -43,13 +43,11 @@ Follow this order on your first visit:
 | Choose how to direct your Tags | [The interaction model](concepts/interaction-model.md) |
 | Ask a Tag a question from your terminal | [Talk to a Tag from your terminal](guides/talk-to-a-tag.md) |
 | Give several Tags a shared outcome | [Define and complete an Objective](guides/objectives.md) |
-| See delivery and review across two Teams | [Live Objective walkthrough](../examples/objective-walkthrough/README.md#live-walkthrough-with-two-teams) |
 | Keep a Tag responsible as conditions change | [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md) |
 | Understand progress, blockers, and results | [Check an Objective's progress](guides/objective-overview.md) |
 | Answer a question, decide an approval, or review a result | [Respond to an Objective](guides/objective-decisions.md) |
 | Get alerts for inbox decisions | [Set up operator notifications](guides/notifications.md) |
 | Start from a ready-made team definition | [Example organizations](../examples/organizations/README.md) |
-| Run Claude and Codex against one shared workspace | [Two managers, one shared workspace](../examples/shared-organization/README.md) |
 | Connect Slack, GitHub, Lark/Feishu, Linear, or Teams | [Connection guides](surfaces/README.md) |
 | Run Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents | [Run Worker Hosts](guides/workers.md) |
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |

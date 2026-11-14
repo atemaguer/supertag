@@ -1,1 +1,0 @@
-ALTER TABLE "TagMessage" ADD COLUMN "directTeamId" text;

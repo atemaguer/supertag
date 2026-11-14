@@ -49,7 +49,7 @@ how it handles future reports.
 That’s what proactive means in SuperTag. A Tag can act when it receives a message, report, or another
 configured event. You choose which tools send those events and what the Tag can do in response.
 
-[Set up an ongoing responsibility](docs/guides/ongoing-responsibilities.md) · [Run a walkthrough with Codex](examples/objective-walkthrough/README.md#live-walkthrough-with-two-teams)
+[Set up an ongoing responsibility](docs/guides/ongoing-responsibilities.md)
 
 ## How Tags work together
 

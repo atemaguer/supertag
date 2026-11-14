@@ -12,7 +12,6 @@ from supertag import (
     WorkerHostDescriptor,
     WorkerOptions,
     Worklet,
-    WorkletConnection,
     create_worker,
 )
 
@@ -26,7 +25,6 @@ def test_public_execution_layers_separate_worklets_from_worker_hosts() -> None:
     assert WorkerOptions is not None
     assert WorkerHostDescriptor is not None
     assert Worklet is not None
-    assert WorkletConnection is not None
     assert callable(create_worker)
 
     removed_names = {
@@ -37,8 +35,14 @@ def test_public_execution_layers_separate_worklets_from_worker_hosts() -> None:
         "WorkerRuntimeOptions",
         "PROTOCOL_VERSION",
         "RuntimeInputPipeline",
+        "WorkletConnection",
+        "DurableLocalWorklet",
+        "FileAttemptJournal",
+        "WORKLET_PROTOCOL_VERSION",
     }
     assert removed_names.isdisjoint(supertag.__all__)
     assert all(not hasattr(supertag, name) for name in removed_names)
     assert find_spec("supertag.codex_worklet") is None
-    assert supertag.WORKLET_PROTOCOL_VERSION == 18
+    assert find_spec("supertag.transport") is None
+    assert find_spec("supertag.durable") is None
+    assert find_spec("supertag.operator") is None

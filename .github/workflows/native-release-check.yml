@@ -1,7 +1,7 @@
 name: Verify unpublished native releases
 
-# Verification only. This does not change release-cli.yml, publish.yml, the
-# installer channel, or registry packages. No archive or receipt is uploaded.
+# Verification only. Nothing is published to a registry or release, and no
+# archive or receipt is uploaded.
 on:
   # Adding the release-check label to a pull request runs the full package mode on its head.
   pull_request:

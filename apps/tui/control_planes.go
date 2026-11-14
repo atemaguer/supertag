@@ -38,8 +38,6 @@ type enrolledMsg struct {
 	err       error
 }
 
-func (a *app) manageControlPlanes() bool { return !a.hasTarget || a.inner.client.RuntimeV2() }
-
 func (a *app) closeControlPlaneDialog() {
 	if a.controlPlaneDialog != nil {
 		if a.controlPlaneDialog.cancel != nil {

@@ -35,6 +35,23 @@ require changes at any time.
 | Workspace Volumes (`workspace-volume put`, `get workspace-volume`), Tag `--workspace-mounts` copies, and Worker Host `--workspace-mount-mappings` | Experimental | `file://` and `s3://` sources; an `s3://` Volume holds a credential label, never a value, and each Worker Host pins its endpoint, region, and key variables. Copies only; read-only provider-native Modal Volume mounts are on the backlog |
 | `deploy/` definitions and the `hosted` image's environment | Beta | The role contract in [Configure a deployment](../guides/deployment-setup.md) |
 
+## Package entry points
+
+`supertag-ai` is the TypeScript SDK on npm. Each import path has its own stability level:
+
+| Import | Level | Main exports |
+| --- | --- | --- |
+| `supertag-ai/control-plane-client` | Experimental | `createControlPlaneClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
+| `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), and execution-scoped `supertag.runtime.v2` clients |
+
+The Python SDK (`supertag` on PyPI) has two Experimental modules, both installed with the
+`runtime` extra. `supertag.control_plane_client` provides `ControlPlaneClient` and
+`ControlPlaneClientSync`, which connect to a Control Plane over gRPC and expose its operator
+services. `supertag.harness_adapter` provides `open_harness`, which opens a Worker Host's
+execution-scoped services for a custom harness adapter from its standard input. The OpenAI Agents
+harness adapter, `python -m supertag.openai_agents_adapter`, is Experimental. Other Python
+modules are internal.
+
 ## Release policy
 
 SuperTag uses semantic version numbers, with these pre-1.0 rules:

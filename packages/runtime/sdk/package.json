@@ -9,11 +9,6 @@
       "development": "./src/redaction.ts",
       "default": "./dist/redaction.js"
     },
-    "./installed-cli": {
-      "types": "./dist/installed-cli.d.ts",
-      "development": "./src/installed-cli.ts",
-      "default": "./dist/installed-cli.js"
-    },
     "./internal/process-inventory": {
       "types": "./dist/process-inventory.d.ts",
       "development": "./src/process-inventory.ts",
@@ -43,16 +38,11 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1131.0",
     "@bufbuild/protobuf": "2.15.0",
     "@connectrpc/connect": "2.2.0",
     "@connectrpc/connect-node": "2.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@supertag/core": "workspace:*",
-    "better-sqlite3": "12.11.1",
     "zod": "4.4.3"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "7.6.13"
   }
 }

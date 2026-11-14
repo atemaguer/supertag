@@ -14,7 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -144,7 +144,7 @@ func TestRuntimeWorkSessionHistoryUsesExactChildTurnAfterContinuation(t *testing
 	if page[3].WorkSessions[0].TaskId != "child" || page[1].WorkSessions[0].TaskId != "child-second" {
 		t.Fatal("a continuation replaced the original child projection")
 	}
-	if page[2].WorkSessions[0].Question != "Which region?" || page[2].WorkSessions[0].Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
+	if page[2].WorkSessions[0].Question != "Which region?" || page[2].WorkSessions[0].Status != views.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
 		t.Fatalf("question state = %v", page[2].WorkSessions[0])
 	}
 	var events []FollowEvent
@@ -164,21 +164,21 @@ func TestRuntimeWorkSessionQuestionAppearsOnlyAfterPublicationAndClearsWaitingAf
 	work := runtimeWorkSession()
 	work.LatestTaskState = v2.TaskState_TASK_STATE_SUCCEEDED
 	work.Question = &v2.WorkSessionQuestion{WorkSessionId: work.WorkSessionId, TaskId: work.LatestTaskId, Text: "Which region?", AskedAtMs: 10}
-	if view := runtimeWork(work); view.Question != "" || view.Status == operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
+	if view := runtimeWork(work); view.Question != "" || view.Status == views.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
 		t.Fatalf("unpublished question became operator wait: %v", view)
 	}
 	work.Question.PublishedAtMs = proto.Int64(11)
-	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
+	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != views.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
 		t.Fatalf("published question = %v", view)
 	}
 	waiting := runtimeWork(work)
-	waiting.ReportStatus, waiting.Report = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED, &operatorv1.Reply{Text: "Which region?"}
-	history := History("lead", []*operatorv1.Message{{TaskId: "root", Tag: "lead", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED, Reply: &operatorv1.Reply{Text: "Started"}, WorkSessions: []*operatorv1.WorkSession{waiting}}})
+	waiting.ReportStatus, waiting.Report = views.ReplyStatus_REPLY_STATUS_REPLIED, &views.Reply{Text: "Which region?"}
+	history := History("lead", []*views.Message{{TaskId: "root", Tag: "lead", Status: views.ReplyStatus_REPLY_STATUS_REPLIED, Reply: &views.Reply{Text: "Started"}, WorkSessions: []*views.WorkSession{waiting}}})
 	if history[0].Follow || !strings.Contains(describe(history[0].Events), "(waiting on you) Which region?") {
 		t.Fatalf("reported question should wait for the operator: %s", describe(history[0].Events))
 	}
 	work.Question.AnswerTaskId = proto.String("child-answer")
-	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
+	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != views.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
 		t.Fatalf("answered question still blocks work: %v", view)
 	}
 }
@@ -399,7 +399,7 @@ func TestRuntimeWorkSessionDetailAndRecordedActivity(t *testing.T) {
 	})
 	c := testRuntime(t, mux, false)
 	detail, err := c.GetSession(t.Context(), "work/one")
-	if err != nil || detail.GetParentSessionId() != "parent" || detail.GetLatestTaskId() != "child" || detail.GetLatestTaskStatus() != operatorv1.TaskStatus_TASK_STATUS_PENDING {
+	if err != nil || detail.GetParentSessionId() != "parent" || detail.GetLatestTaskId() != "child" || detail.GetLatestTaskStatus() != views.TaskStatus_TASK_STATUS_PENDING {
 		t.Fatalf("detail = %v, %v", detail, err)
 	}
 	activity, after, err := c.TaskActivity(t.Context(), "child", 7)
@@ -409,7 +409,7 @@ func TestRuntimeWorkSessionDetailAndRecordedActivity(t *testing.T) {
 	if _, err := c.GetSession(t.Context(), "ordinary-root"); err == nil {
 		t.Fatal("ordinary Session detail should remain unsupported")
 	}
-	if runtimeWork(work).GetStatus() != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_PENDING {
+	if runtimeWork(work).GetStatus() != views.WorkSessionStatus_WORK_SESSION_STATUS_PENDING {
 		t.Fatal("queued child must project as pending")
 	}
 }
@@ -430,7 +430,7 @@ func TestRuntimeWorkSessionQueuedReportPreviewIsNotOperatorText(t *testing.T) {
 	})
 	c := testRuntime(t, mux, false)
 	conversations, err := c.ListConversations(t.Context(), "lead")
-	if err != nil || len(conversations) != 1 || conversations[0].GetLastMessageText() != "Work Session report pending." || conversations[0].GetLastMessageAuthor() != operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG {
+	if err != nil || len(conversations) != 1 || conversations[0].GetLastMessageText() != "Work Session report pending." || conversations[0].GetLastMessageAuthor() != views.ConversationAuthor_CONVERSATION_AUTHOR_TAG {
 		t.Fatalf("preview: %v, %v", conversations, err)
 	}
 }
@@ -453,7 +453,7 @@ func TestRuntimeFailedRootKeepsFollowingUncertainChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	history := History("lead", []*operatorv1.Message{view})
+	history := History("lead", []*views.Message{view})
 	if !history[0].Follow {
 		t.Fatal("root failure cannot settle an uncertain child")
 	}

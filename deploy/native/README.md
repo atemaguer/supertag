@@ -2,8 +2,7 @@
 
 Definitions for the native SuperTag services: Docker Compose, Fly.io, and Railway here, and
 Render, Cloudflare, and Modal in [`../render/`](../render/README.md),
-[`../cloudflare/`](../cloudflare/README.md), and [`../modal/`](../modal/README.md). The TypeScript
-Control Plane definitions in the parent directory (Compose, Fly.io, Railway) stay until the cutover.
+[`../cloudflare/`](../cloudflare/README.md), and [`../modal/`](../modal/README.md).
 
 A deployment runs these roles:
 

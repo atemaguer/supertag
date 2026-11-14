@@ -6,8 +6,7 @@ execution capacity, runs a synthetic adapter to complete one Task, or turn of wo
 It uses disposable certificates, credentials, state volumes, and an internal Docker
 network. It publishes no host ports and calls no model or external work provider.
 
-The native Compose entry point is `deploy/compose.native.yaml`. The existing
-`deploy/compose.yaml` still selects the TypeScript runtime. This rehearsal does not
+The native Compose entry point is `deploy/compose.native.yaml`. This rehearsal does not
 change an installation, import old state, publish images, or perform a production cutover.
 
 ## Build and verify

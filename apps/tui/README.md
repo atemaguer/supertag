@@ -119,39 +119,32 @@ and enter opens the row. Esc quits when there is nothing to go back from, and Ct
 Every text from the server, an agent or a diff is filtered for the terminal, so an escape sequence
 shows as text.
 
-It talks to the Control Plane through the operator API's generated Go client in
-`packages/operator-api/go`, using the Connect protocol over HTTP/1.1. `ConversationService` sends
-messages, lists your conversations and their history, and follows each reply, resuming a dropped
-stream where it left off. `ObjectiveService` lists the open Objectives, describes the selected
-one, and creates Objectives. `InboxService` lists the inbox, answers
-questions and decides approval requests. `WorkService.GetSession` reads a work Session's delivery, and `ListTaskEvents` its latest Task's
-commands and tool calls. `TeamService` lists and reads the Teams, and
-`MailboxService.ListWorkstreamPosts` reads the shown Team's Workstream. `EventService.Watch` keeps
-the rail, the Objective view, the Team view and expanded work Sessions current, including how many
-work Sessions of each shown conversation are still open. While that stream is down, the TUI
-rereads what it shows every five seconds. `HostService.ListWorkerHosts` feeds the status bar,
-reread every 15 seconds; when the Control Plane refuses it, the status bar leaves the Worker Hosts
-out. `ResourceService.ListResources` lists the active Tags. See
+It talks to the Control Plane through the generated runtime v2 Go client in
+`rust/bindings/go`. `Conversations` sends messages, lists your conversations and their history,
+and pages each reply's Task events. `Objectives` lists the open Objectives, describes the selected
+one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
+requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the
+Teams and the shown Team's Workstream. `OperatorEvents.Watch` keeps the rail, the Objective view,
+the Team view and expanded work Sessions current. While that stream is down, the TUI rereads what
+it shows every five seconds. `Operator.ListHosts` feeds the status bar, reread every 15 seconds;
+when the Control Plane refuses it, the status bar leaves the Worker Hosts out. `Operator.ListTags`
+lists the Tags. The replies are projected into the TUI's own presentation types in `views/`. See
 `contributing/tui-design.md`.
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
 amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
 `rust/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
 different version.
-Run the tests with `go test ./...`. The Node launcher end-to-end test uses tmux and a temporary
-git checkout. Build the binary with the version in the npm package manifest before running it.
-
-```sh
-SUPERTAG_TUI_VERSION="$(node -p 'require("../../packages/supertag-ai/package.json").version')" ./build.sh
-SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
-```
+Run the tests with `go test ./...`. The Rust CLI's `operator_runtime.rs` tests drive a built
+binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
 Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
 Control Plane as every other command does, and the others it can switch to, starts the binary with
 an extra pipe as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON line to it:
-`{"contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`, where `current` is the
-index of the selected Control Plane and `name` is left out for this machine's. When
+`{"protocol": "runtime.v2", "contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`,
+where `current` is the index of the selected Control Plane and `name` is left out for this
+machine's. The TUI refuses a handover that names another protocol or none. When
 `SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane
 it selects, so the list holds that one alone. A saved connection whose credential cannot be read is
-left out. The legacy Node handover continues to supply its own connections. The binary takes no
-token from its arguments or environment; the runtime v2 saved-connection flow is described above.
+left out. The binary takes no token from its arguments or environment; the saved-connection flow
+is described above.

@@ -11,7 +11,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 )
 
@@ -46,22 +46,22 @@ func (c *runtimeClient) listInbox(ctx context.Context) (Inbox, error) {
 	return inbox, nil
 }
 
-func runtimeInboxItem(item *v2.InboxItem) *operatorv1.InboxItem {
-	kind := map[v2.InboxItemKind]operatorv1.InboxItemKind{
-		v2.InboxItemKind_INBOX_ITEM_KIND_QUESTION:         operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION,
-		v2.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET: operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET,
-		v2.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:  operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT,
-		v2.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:   operatorv1.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION,
-		v2.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:         operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL,
-		v2.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:        operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN,
+func runtimeInboxItem(item *v2.InboxItem) *views.InboxItem {
+	kind := map[v2.InboxItemKind]views.InboxItemKind{
+		v2.InboxItemKind_INBOX_ITEM_KIND_QUESTION:         views.InboxItemKind_INBOX_ITEM_KIND_QUESTION,
+		v2.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET: views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET,
+		v2.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:  views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT,
+		v2.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:   views.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION,
+		v2.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:         views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL,
+		v2.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:        views.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN,
 	}[item.GetKind()]
-	out := &operatorv1.InboxItem{
+	out := &views.InboxItem{
 		Key: item.GetKey(), Occurrence: item.GetOccurrence(), Kind: kind,
 		ObjectiveId: item.GetObjectiveId(), OperatorEligible: item.GetOperatorEligible(),
 		Reason: item.GetReason(), ActionableSince: inboxTime(item.GetActionableSinceMs()),
 	}
 	if question := item.GetQuestion(); question != nil {
-		out.Question = &operatorv1.InboxQuestion{
+		out.Question = &views.InboxQuestion{
 			Text: question.GetText(), AskedAt: inboxTime(question.GetAskedAtMs()), Truncated: question.GetTruncated(),
 		}
 	}
@@ -73,19 +73,19 @@ func runtimeInboxItem(item *v2.InboxItem) *operatorv1.InboxItem {
 		if description := approval.GetSummary(); description != "" && description != summary {
 			summary += " · " + description
 		}
-		out.Approval = &operatorv1.InboxApproval{
-			RequestId: approval.GetApprovalId(), Kind: operatorv1.ApprovalKind_APPROVAL_KIND_SURFACE_ACTION,
+		out.Approval = &views.InboxApproval{
+			RequestId: approval.GetApprovalId(), Kind: views.ApprovalKind_APPROVAL_KIND_SURFACE_ACTION,
 			Summary: summary, RequestingTagId: approval.GetTagId(), RequestingTag: approval.GetTagId(),
 			TaskId: item.GetTaskId(),
 		}
 	}
 	if taskID := item.GetTaskId(); taskID != "" {
-		out.Evidence = append(out.Evidence, &operatorv1.InboxEvidence{Record: &operatorv1.InboxEvidence_Task{
-			Task: &operatorv1.TaskEvidence{Id: taskID},
+		out.Evidence = append(out.Evidence, &views.InboxEvidence{Record: &views.InboxEvidence_Task{
+			Task: &views.TaskEvidence{Id: taskID},
 		}})
 	}
 	if attemptID := item.GetAttemptId(); attemptID != "" && item.GetKind() == v2.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION {
-		out.UncertainAttempt = &operatorv1.UncertainAttempt{AttemptId: attemptID}
+		out.UncertainAttempt = &views.UncertainAttempt{AttemptId: attemptID}
 	}
 	return out
 }
@@ -98,9 +98,6 @@ type ApprovalDetails struct {
 
 // ReadApproval retrieves the full requested effect from a Runtime v2 Control Plane.
 func (c *Client) ReadApproval(ctx context.Context, id string) (ApprovalDetails, error) {
-	if !c.RuntimeV2() {
-		return ApprovalDetails{}, unavailable("Approval details")
-	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	response, err := c.runtime.inbox.GetApproval(ctx, connect.NewRequest(&v2.GetApprovalRequest{ApprovalId: id}))
@@ -118,22 +115,22 @@ func (c *Client) ReadApproval(ctx context.Context, id string) (ApprovalDetails, 
 		Arguments: arguments.String(), Pending: pending}, nil
 }
 
-func (c *runtimeClient) decideApproval(ctx context.Context, id, reason string, approve bool) (*operatorv1.Approval, error) {
+func (c *runtimeClient) decideApproval(ctx context.Context, id, reason string, approve bool) (*views.Approval, error) {
 	operation, err := idempotencyKey()
 	if err != nil {
 		return nil, err
 	}
 	request := &v2.DecideApprovalRequest{ApprovalId: id, OperationId: operation, Approve: approve, Reason: reason}
 	state := v2.ApprovalState_APPROVAL_STATE_DENIED
-	status := operatorv1.ApprovalStatus_APPROVAL_STATUS_DENIED
-	scope := operatorv1.ApprovalScope_APPROVAL_SCOPE_UNSPECIFIED
+	status := views.ApprovalStatus_APPROVAL_STATUS_DENIED
+	scope := views.ApprovalScope_APPROVAL_SCOPE_UNSPECIFIED
 	if approve {
 		request.Scope = v2.ApprovalScope_APPROVAL_SCOPE_ONCE
 		state = v2.ApprovalState_APPROVAL_STATE_APPROVED
-		status = operatorv1.ApprovalStatus_APPROVAL_STATUS_APPROVED
-		scope = operatorv1.ApprovalScope_APPROVAL_SCOPE_ONCE
+		status = views.ApprovalStatus_APPROVAL_STATUS_APPROVED
+		scope = views.ApprovalScope_APPROVAL_SCOPE_ONCE
 	}
-	return retrying(ctx, func(ctx context.Context) (*operatorv1.Approval, error) {
+	return retrying(ctx, func(ctx context.Context) (*views.Approval, error) {
 		response, err := c.inbox.DecideApproval(ctx, connect.NewRequest(request))
 		if err != nil {
 			return nil, err
@@ -142,7 +139,7 @@ func (c *runtimeClient) decideApproval(ctx context.Context, id, reason string, a
 		if approval.GetApprovalId() != id || approval.GetState() != state || approval.GetScope() != request.GetScope() {
 			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Control Plane returned an invalid approval receipt."))
 		}
-		return &operatorv1.Approval{
+		return &views.Approval{
 			Id: id, ObjectiveId: approval.GetObjectiveId(), TaskId: approval.GetTaskId(),
 			AttemptId: approval.GetAttemptId(), RequestingTagId: approval.GetTagId(),
 			Status: status, Scope: scope, Reason: approval.GetReason(),
@@ -166,7 +163,7 @@ func runtimeQuestionID(key string) (string, error) {
 	return id, nil
 }
 
-func (c *runtimeClient) answerQuestion(ctx context.Context, key, text string) (*operatorv1.MessageObjectiveResponse, error) {
+func (c *runtimeClient) answerQuestion(ctx context.Context, key, text string) (*views.MessageObjectiveResponse, error) {
 	taskID, err := runtimeQuestionID(key)
 	if err != nil {
 		return nil, err
@@ -176,7 +173,7 @@ func (c *runtimeClient) answerQuestion(ctx context.Context, key, text string) (*
 		return nil, err
 	}
 	request := &v2.AnswerQuestionRequest{TaskId: taskID, OperationId: operation, Text: text}
-	return retrying(ctx, func(ctx context.Context) (*operatorv1.MessageObjectiveResponse, error) {
+	return retrying(ctx, func(ctx context.Context) (*views.MessageObjectiveResponse, error) {
 		response, err := c.inbox.AnswerQuestion(ctx, connect.NewRequest(request))
 		if err != nil {
 			return nil, err
@@ -185,15 +182,12 @@ func (c *runtimeClient) answerQuestion(ctx context.Context, key, text string) (*
 		if task.GetTaskId() == "" || task.GetTagId() == "" {
 			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Control Plane returned an invalid answer receipt."))
 		}
-		return &operatorv1.MessageObjectiveResponse{TaskId: task.GetTaskId(), Tag: task.GetTagId()}, nil
+		return &views.MessageObjectiveResponse{TaskId: task.GetTaskId(), Tag: task.GetTagId()}, nil
 	})
 }
 
 // ReadObjectiveQuestion returns the full question for an open Runtime v2 Inbox item.
 func (c *Client) ReadObjectiveQuestion(ctx context.Context, key string) (string, error) {
-	if !c.RuntimeV2() {
-		return "", unavailable("Reading an Objective question")
-	}
 	id, err := runtimeQuestionID(key)
 	if err != nil {
 		return "", err

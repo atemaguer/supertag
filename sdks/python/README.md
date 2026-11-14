@@ -1,34 +1,38 @@
 # SuperTag Python SDK
 
-Write harness adapters and Control Plane clients for SuperTag in Python. A **harness adapter**
-connects an agent system to a SuperTag **Worker Host**, the machine or sandbox that runs a Tag's
-work. A **Tag** is a persistent AI actor with its own responsibilities and permissions. The
-package includes:
+The Python SDK has three parts:
 
-- `supertag.harness_adapter`, which connects an adapter to the Worker Host that launched it;
-- an OpenAI Agents harness adapter, `python -m supertag.openai_agents_adapter`, powered by the
-  official `openai-agents` SDK; and
-- `supertag.control_plane_client`, a gRPC client for the Control Plane API that the CLI uses.
+- `supertag.harness_adapter`: write a harness adapter that a SuperTag Worker Host starts to run one
+  Task Attempt.
+- `supertag.openai_agents_adapter`: the OpenAI Agents harness adapter that a Worker Host starts for
+  a Tag whose harness is `openai-agents`.
+- `supertag.control_plane_client`: call a SuperTag Control Plane from Python.
+
+It also contains the Worker composition interfaces (`create_worker`, harnesses, execution
+environments, Runtime Inputs, and Session continuity) that the OpenAI Agents adapter is built on.
 
 For the SuperTag CLI and Control Plane, see [Requirements](../../docs/operations/requirements.md).
-The SDK's dependencies are declared in [pyproject.toml](pyproject.toml).
+Python dependencies are declared in [pyproject.toml](pyproject.toml).
 
 Install the published SDK from PyPI. Pin this prerelease explicitly:
 
 ```sh
 python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag[runtime]==0.2.0a9'
 ```
 
-Harness adapters and the Control Plane client need the `runtime` extra; the OpenAI Agents
-adapter also needs `agents`:
+The `runtime` extra installs gRPC and protobuf for the adapter and Control Plane clients. Add the
+harness integrations you use:
 
 ```sh
-python -m pip install 'supertag[runtime,agents]==0.2.0a9'
+python -m pip install 'supertag[codex]==0.2.0a9'
+python -m pip install 'supertag[agents]==0.2.0a9'
+python -m pip install 'supertag[codex,agents]==0.2.0a9'
 ```
 
-For source development, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
+`agents` installs the OpenAI Agents SDK and `codex` the `openai-codex` SDK. For source development, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
-## Run a Python harness adapter
+## Run a Python harness adapter with a Worker Host
 
 A Worker Host is the machine or sandbox that provides execution. It launches a harness
 adapter to run one Task Attempt, which is a single try at completing a unit of work. Install
@@ -59,18 +63,13 @@ The Worker Host supplies a private execution connection on standard input. It re
 outcome after the adapter exits successfully. Reuse the same sequence number and request
 body when retrying an event.
 
-[Write a harness adapter](../../docs/guides/harness-adapters.md) describes the adapter
-protocol and how a Worker Host launches an adapter.
+The OpenAI Agents adapter runs as `python -m supertag.openai_agents_adapter`; the Worker Host starts
+it for a Tag whose harness is `openai-agents`. It needs `OPENAI_API_KEY` and the `agents` extra.
 
-## Call the Control Plane API
+## Call the Control Plane
 
-The Control Plane API is how the CLI and other tools manage a Control Plane: list Tags, read the
-inbox, or apply resources. The Control Plane serves it as gRPC services defined in protobuf, in
-the package `supertag.runtime.v2`; see the
-[Control Plane API](../../docs/reference/control-plane-api.md).
-
-Use `supertag.control_plane_client`. The `runtime` extra installs gRPC and protobuf.
-This example lists Tags, the persistent AI actors in your organization.
+Use `supertag.control_plane_client`. The `runtime` extra installs gRPC and protobuf. This example
+lists Tags, the persistent AI actors in your organization.
 
 ```python
 import os
@@ -93,3 +92,27 @@ cleartext. Pass a PEM `ca` for private TLS and a PEM certificate chain and key a
 `identity=(cert, key)` if the Control Plane requires mutual TLS. The first call negotiates the
 SuperTag protocol version with the Control Plane and raises `ControlPlaneProtocolError` when the
 Control Plane runs an incompatible release.
+
+## Compose a Worker in process
+
+`create_worker(WorkerOptions(...))` composes Worker Profiles, harnesses, execution environment
+providers, and optional `RuntimeInputProvider` values into the `Worker` contract, and
+`LocalWorklet` runs Workers in the same process. The OpenAI Agents adapter uses them to run one
+Task Attempt; they do not connect to a Control Plane by themselves.
+
+Each `HarnessPlan` separates private `runtime` staging from workspace `execution` staging. A
+harness receives both accesses. `ContextResolver`, `WorkspaceResolver`, and `ToolProvider` are
+focused convenience interfaces built on Runtime Inputs. A `ToolAdapter` turns an allowed
+`ToolInput` into the configuration expected by a particular harness. Pass an
+`InMemorySessionStateStore` or a `FileSessionStateStore` for Session continuity.
+
+The built-in local environment provider is attempt-scoped and gives child processes only common
+process-launch plumbing variables plus values explicitly projected by the provider or process
+specification. It supports `supertag.process-output-streaming` version 1: pass
+`ProcessSpec(stream_output=True)` and consume `async for chunk in process.output()`. POSIX
+processes run in owned process groups; cancellation and timeouts escalate from termination to kill
+before cleanup. An environment must raise `ExecutionCleanupError` when it cannot confirm cleanup.
+
+Custom harnesses can emit `TaskProgress(...).event()` to provide a bounded progress summary and
+checklist. Progress is a complete latest-wins snapshot, not a reasoning trace: never include
+prompts, commands, tool arguments, credentials, or runtime identifiers.

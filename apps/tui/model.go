@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // defaultConversation is the conversation a Tag opens before an operator chooses one.
@@ -28,16 +28,16 @@ const historyPage = 50
 var tagRefresh = 5 * time.Second
 
 // watchKinds are the changes the rail and the Objective view follow.
-var watchKinds = []operatorv1.WatchKind{
-	operatorv1.WatchKind_WATCH_KIND_TAG,
-	operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE,
-	operatorv1.WatchKind_WATCH_KIND_OBJECTIVE,
-	operatorv1.WatchKind_WATCH_KIND_TASK,
-	operatorv1.WatchKind_WATCH_KIND_SESSION,
-	operatorv1.WatchKind_WATCH_KIND_INBOX_ITEM,
-	operatorv1.WatchKind_WATCH_KIND_APPROVAL,
-	operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST,
-	operatorv1.WatchKind_WATCH_KIND_TEAM,
+var watchKinds = []views.WatchKind{
+	views.WatchKind_WATCH_KIND_TAG,
+	views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE,
+	views.WatchKind_WATCH_KIND_OBJECTIVE,
+	views.WatchKind_WATCH_KIND_TASK,
+	views.WatchKind_WATCH_KIND_SESSION,
+	views.WatchKind_WATCH_KIND_INBOX_ITEM,
+	views.WatchKind_WATCH_KIND_APPROVAL,
+	views.WatchKind_WATCH_KIND_WORKSTREAM_POST,
+	views.WatchKind_WATCH_KIND_TEAM,
 }
 
 type focus int
@@ -144,11 +144,11 @@ func convKey(tag, name string) string { return tag + "\x00" + name }
 
 type (
 	tagsMsg struct {
-		tags []*operatorv1.Tag
+		tags []*views.Tag
 		err  error
 	}
 	conversationsMsg struct {
-		conversations []*operatorv1.Conversation
+		conversations []*views.Conversation
 		err           error
 	}
 	pollMsg    struct{}
@@ -160,7 +160,7 @@ type (
 	}
 	sentMsg struct {
 		tag, conversation string
-		message           *operatorv1.Message
+		message           *views.Message
 		err               error
 	}
 	followMsg struct {
@@ -174,7 +174,7 @@ type (
 		updates <-chan client.WatchUpdate
 	}
 	objectivesMsg struct {
-		objectives []*operatorv1.Objective
+		objectives []*views.Objective
 		err        error
 	}
 	inboxMsg struct {
@@ -183,7 +183,7 @@ type (
 	}
 	overviewMsg struct {
 		id       string
-		overview *operatorv1.ObjectiveOverview
+		overview *views.ObjectiveOverview
 		err      error
 	}
 	decidedMsg struct {
@@ -195,7 +195,7 @@ type (
 	answeredMsg struct {
 		occurrence string
 		text       string
-		response   *operatorv1.MessageObjectiveResponse
+		response   *views.MessageObjectiveResponse
 		err        error
 	}
 )
@@ -230,7 +230,7 @@ type model struct {
 	follower         *client.Follower
 	watcher          *client.Watcher
 
-	tags        []*operatorv1.Tag
+	tags        []*views.Tag
 	tagsChecked bool
 	tagsErr     error
 	// selected is the Tag whose conversation the conversation pane shows.
@@ -257,7 +257,7 @@ type model struct {
 
 	// teams are the organization's Teams; teamID the one the Team pane shows, and teamViews what
 	// was last read of each Team shown.
-	teams      []*operatorv1.Team
+	teams      []*views.Team
 	teamsErr   string
 	teamID     string
 	teamViews  map[string]client.TeamView
@@ -275,7 +275,7 @@ type model struct {
 
 	// objectives are the open Objectives; inbox is what waits on the operator. Each error is why
 	// its section could not be read, filtered for the terminal.
-	objectives    []*operatorv1.Objective
+	objectives    []*views.Objective
 	objectivesErr string
 	inbox         client.Inbox
 	inboxErr      string
@@ -286,13 +286,13 @@ type model struct {
 	// objectiveID is the Objective the Objective pane shows, and overviews what was last read of
 	// each Objective shown.
 	objectiveID       string
-	overviews         map[string]*operatorv1.ObjectiveOverview
+	overviews         map[string]*views.ObjectiveOverview
 	overviewErrs      map[string]string
 	objectiveCompose  bool
 	objectiveMessages map[string]*objectiveMessage
 	// item is the inbox item the inbox pane shows, kept after it leaves the inbox; itemNote is
 	// what came of acting on it.
-	item            *operatorv1.InboxItem
+	item            *views.InboxItem
 	itemNote        note
 	fullQuestion    string
 	approvalDetails inboxApprovalMsg
@@ -313,7 +313,7 @@ type model struct {
 
 	// hosts are the Worker Hosts as last read; hostsKnown is false until a read succeeds and
 	// after one fails.
-	hosts           []*operatorv1.WorkerHost
+	hosts           []*views.WorkerHost
 	hostPhaseLabels map[string]string
 	hostsKnown      bool
 	hostReload      *reload
@@ -348,7 +348,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		git:               runGit,
 		cwd:               cwd,
 		openURL:           openURL,
-		overviews:         map[string]*operatorv1.ObjectiveOverview{},
+		overviews:         map[string]*views.ObjectiveOverview{},
 		overviewErrs:      map[string]string{},
 		objectiveMessages: map[string]*objectiveMessage{},
 		drafts:            map[string]string{},
@@ -423,13 +423,7 @@ func (m model) reloadAll() tea.Cmd {
 }
 
 func (m model) loadHistory(tag, name string) tea.Cmd {
-	if m.client.RuntimeV2() {
-		return m.loadRuntimeHistory(tag, name)
-	}
-	return func() tea.Msg {
-		page, _, err := m.client.ListMessages(m.ctx, tag, name, historyPage, "")
-		return historyMsg{tag: tag, conversation: name, items: client.History(tag, page), err: err}
-	}
+	return m.loadRuntimeHistory(tag, name)
 }
 
 func (m model) send(tag, name, text string) tea.Cmd {
@@ -470,12 +464,11 @@ func (m model) selectedTag() string {
 	return m.tagReference(m.tags[m.selected])
 }
 
-func (m model) tagReference(tag *operatorv1.Tag) string {
-	if m.client.RuntimeV2() {
-		if id := tag.GetMetadata().GetId(); id != "" {
-			return id
-		}
+func (m model) tagReference(tag *views.Tag) string {
+	if id := tag.GetMetadata().GetId(); id != "" {
+		return id
 	}
+
 	return tagName(tag)
 }
 
@@ -525,15 +518,8 @@ func (m *model) selectTag() tea.Cmd {
 		return nil
 	}
 	name := m.currentConversation(tag)
-	if m.client.RuntimeV2() {
-		return m.reloadHistory(tag, name)
-	}
-	c := m.conversation(tag, name)
-	if c.loaded || c.historyReload.running {
-		return nil
-	}
-	c.historyReload.start()
-	return m.loadHistory(tag, name)
+
+	return m.reloadHistory(tag, name)
 }
 
 func (m *model) fail(err error) {
@@ -691,13 +677,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollMsg:
 		if m.live {
-			if m.client.RuntimeV2() {
-				// The selected Objective also shows spend, which can advance
-				// between Task status notices.
-				return m, tea.Batch(m.reloadOverview(), m.reloadInbox(), m.retryRuntimeHistory(), m.pollAfter())
-			}
-			m.polling = false
-			return m, nil
+			// The selected Objective also shows spend, which can advance
+			// between Task status notices.
+			return m, tea.Batch(m.reloadOverview(), m.reloadInbox(), m.retryRuntimeHistory(), m.pollAfter())
 		}
 		return m, tea.Batch(m.reloadAll(), m.pollAfter())
 
@@ -715,9 +697,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.polling = true
 				return m, tea.Batch(next, m.reloadAll(), m.pollAfter())
 			}
-			if m.client.RuntimeV2() {
-				return m, tea.Batch(next, m.reloadAll())
-			}
+
+			return m, tea.Batch(next, m.reloadAll())
 		}
 		return m, next
 
@@ -725,16 +706,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.showHistory(msg)
 
 	case sentMsg:
-		if m.client.RuntimeV2() {
-			return m, m.runtimeSent(msg)
-		}
-		if msg.err != nil {
-			m.fail(msg.err)
-			m.addEntry(msg.tag, msg.conversation, entryError, msg.err.Error())
-			return m, nil
-		}
-		m.connected, m.status = true, "connected"
-		return m, waitFor(msg.tag, msg.conversation, m.follower.Follow(m.ctx, msg.tag, msg.message, nil))
+		return m, m.runtimeSent(msg)
 
 	case followMsg:
 		if msg.taskID != "" {
@@ -793,7 +765,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // changed rereads what one change touches.
-func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
+func (m model) changed(change *views.WatchChange) tea.Cmd {
 	shown := func(objective string) tea.Cmd {
 		if objective != "" && objective == m.objectiveID {
 			return m.reloadOverview()
@@ -801,33 +773,33 @@ func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
 		return nil
 	}
 	switch change.GetKind() {
-	case operatorv1.WatchKind_WATCH_KIND_TAG:
+	case views.WatchKind_WATCH_KIND_TAG:
 		// A Tag's name or deletion shows in the member list of the shown Team.
 		var team tea.Cmd
 		if m.pane == paneTeam && m.shownTeamHasMember(change.GetId()) {
 			team = m.reloadTeam()
 		}
 		return tea.Batch(m.reloadTags(), team)
-	case operatorv1.WatchKind_WATCH_KIND_TEAM:
+	case views.WatchKind_WATCH_KIND_TEAM:
 		return m.teamChanged(change)
-	case operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE:
+	case views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE:
 		var picker tea.Cmd
 		if m.pane == paneConversations && m.picker != nil && m.picker.tag == change.GetTag() {
 			picker = m.reloadPicker()
 		}
 		var history tea.Cmd
-		if m.client.RuntimeV2() && m.showsConversation(change.GetTag(), change.GetConversation()) {
+		if m.showsConversation(change.GetTag(), change.GetConversation()) {
 			history = m.reloadShownHistory()
 		}
 		return tea.Batch(m.reloadConversations(), picker, history)
-	case operatorv1.WatchKind_WATCH_KIND_OBJECTIVE:
+	case views.WatchKind_WATCH_KIND_OBJECTIVE:
 		return tea.Batch(m.reloadObjectives(), shown(change.GetId()))
-	case operatorv1.WatchKind_WATCH_KIND_SESSION:
+	case views.WatchKind_WATCH_KIND_SESSION:
 		if _, known := m.work[change.GetId()]; known {
 			return m.reloadWork(change.GetId())
 		}
 		return nil
-	case operatorv1.WatchKind_WATCH_KIND_TASK:
+	case views.WatchKind_WATCH_KIND_TASK:
 		var work tea.Cmd
 		if id := change.GetSessionId(); m.expanded[id] {
 			work = m.reloadWork(id)
@@ -837,9 +809,9 @@ func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
 			return work
 		}
 		return tea.Batch(work, m.reloadObjectives(), shown(change.GetObjectiveId()))
-	case operatorv1.WatchKind_WATCH_KIND_INBOX_ITEM, operatorv1.WatchKind_WATCH_KIND_APPROVAL:
+	case views.WatchKind_WATCH_KIND_INBOX_ITEM, views.WatchKind_WATCH_KIND_APPROVAL:
 		return tea.Batch(m.reloadInbox(), shown(change.GetObjectiveId()))
-	case operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST:
+	case views.WatchKind_WATCH_KIND_WORKSTREAM_POST:
 		team := change.GetTeamId()
 		if team == "" {
 			return nil
@@ -902,30 +874,7 @@ func (m model) overviewCmd(id string) tea.Cmd {
 // showHistory adds a conversation's past messages, oldest first, and follows those that still
 // have a reply or work to show.
 func (m *model) showHistory(msg historyMsg) tea.Cmd {
-	if m.client.RuntimeV2() {
-		return m.showRuntimeHistory(msg)
-	}
-	c := m.conversation(msg.tag, msg.conversation)
-	c.historyReload.done()
-	c.loaded = true
-	if msg.err != nil {
-		m.addEntry(msg.tag, msg.conversation, entryError, "Could not load the conversation history: "+msg.err.Error())
-		return nil
-	}
-	var cmds []tea.Cmd
-	for _, item := range msg.items {
-		c.add(entryYou, item.Message.GetText())
-		for _, event := range item.Events {
-			cmds = append(cmds, m.apply(msg.tag, msg.conversation, event))
-		}
-		if item.Follow {
-			cmds = append(cmds, waitFor(msg.tag, msg.conversation, m.follower.Follow(m.ctx, msg.tag, item.Message, item.Shown)))
-		}
-	}
-	if m.showsConversation(msg.tag, msg.conversation) {
-		m.refresh()
-	}
-	return tea.Batch(cmds...)
+	return m.showRuntimeHistory(msg)
 }
 
 func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1062,12 +1011,10 @@ func (m *model) submit() tea.Cmd {
 			return nil
 		}
 		m.input.Reset()
-		if m.client.RuntimeV2() {
-			m.conversation(tag, name).runtime.sending++
-			m.refresh()
-		} else {
-			m.addEntry(tag, name, entryYou, text)
-		}
+
+		m.conversation(tag, name).runtime.sending++
+		m.refresh()
+
 		return m.send(tag, name, text)
 	case paneObjective:
 		return m.sendObjectiveMessage(text)
@@ -1151,17 +1098,10 @@ func (m *model) decided(msg decidedMsg) tea.Cmd {
 			m.input.SetValue(msg.reason)
 		}
 	case msg.approved:
-		if m.client.RuntimeV2() {
-			m.itemNote = note{text: "Approved once."}
-		} else {
-			m.itemNote = note{text: "Approved once. The waiting Session continues."}
-		}
+		m.itemNote = note{text: "Approved once."}
+
 	default:
-		if m.client.RuntimeV2() {
-			m.itemNote = note{text: "Denied. Your reason was recorded."}
-		} else {
-			m.itemNote = note{text: "Denied. The Session that asked continues with your reason."}
-		}
+		m.itemNote = note{text: "Denied. Your reason was recorded."}
 	}
 	cmd := m.syncInput()
 	m.refresh()
@@ -1234,7 +1174,7 @@ func (m model) inputShown() bool {
 		if m.decision == decisionReason {
 			return true
 		}
-		return m.decision == decisionNone && m.item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION &&
+		return m.decision == decisionNone && m.item.GetKind() == views.InboxItemKind_INBOX_ITEM_KIND_QUESTION &&
 			m.inboxItem(m.item.GetOccurrence()) != nil
 	}
 	return false
@@ -1242,14 +1182,14 @@ func (m model) inputShown() bool {
 
 // approvalShown says whether the pane shows an approval request that still waits.
 func (m model) approvalShown() bool {
-	return m.pane == paneInbox && m.item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL &&
+	return m.pane == paneInbox && m.item.GetKind() == views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL &&
 		m.item.GetOperatorEligible() && m.item.GetApproval().GetRequestId() != "" &&
 		m.inboxItem(m.item.GetOccurrence()) != nil &&
-		(!m.client.RuntimeV2() || (m.approvalDetails.occurrence == m.item.GetOccurrence() && m.approvalDetails.details.Pending))
+		(m.approvalDetails.occurrence == m.item.GetOccurrence() && m.approvalDetails.details.Pending)
 }
 
 // inboxItem is the waiting item with this occurrence, or nil once it left the inbox.
-func (m model) inboxItem(occurrence string) *operatorv1.InboxItem {
+func (m model) inboxItem(occurrence string) *views.InboxItem {
 	for _, item := range m.inbox.Items {
 		if item.GetOccurrence() == occurrence {
 			return item

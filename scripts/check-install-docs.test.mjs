@@ -26,6 +26,6 @@ test("the install guide builds and installs a native release archive", () => {
 });
 
 test("the user install guide keeps source-development scripts in CONTRIBUTING.md", () => {
-  assert.doesNotMatch(read("docs/operations/install.md"), /\bpnpm\s/u);
-  assert.match(read("CONTRIBUTING.md"), /pnpm install:cli/u);
+  assert.doesNotMatch(read("docs/operations/install.md"), /^\s*pnpm\s/mu);
+  assert.match(read("CONTRIBUTING.md"), /pnpm supertag/u);
 });

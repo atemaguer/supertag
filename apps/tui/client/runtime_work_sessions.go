@@ -8,7 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 )
 
@@ -111,30 +111,30 @@ func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.Con
 	return nil, workSessionDataLoss("Control Plane exceeded the Work Session page limit.")
 }
 
-func runtimeWork(work *v2.WorkSession) *operatorv1.WorkSession {
-	out := &operatorv1.WorkSession{Id: work.GetWorkSessionId(), Title: work.GetTitle(), TaskId: work.GetLatestTaskId(), ReportTaskId: work.GetReportTaskId(), ReportStatus: operatorv1.ReplyStatus_REPLY_STATUS_WAITING, Status: operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING}
+func runtimeWork(work *v2.WorkSession) *views.WorkSession {
+	out := &views.WorkSession{Id: work.GetWorkSessionId(), Title: work.GetTitle(), TaskId: work.GetLatestTaskId(), ReportTaskId: work.GetReportTaskId(), ReportStatus: views.ReplyStatus_REPLY_STATUS_WAITING, Status: views.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING}
 	switch work.GetLatestTaskState() {
 	case v2.TaskState_TASK_STATE_QUEUED, v2.TaskState_TASK_STATE_CLAIMED:
-		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_PENDING
+		out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_PENDING
 	case v2.TaskState_TASK_STATE_UNCERTAIN:
-		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING
+		out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_WAITING
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
-		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED
+		out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED
 	case v2.TaskState_TASK_STATE_FAILED:
-		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_FAILED
+		out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_FAILED
 	case v2.TaskState_TASK_STATE_CANCELLED:
-		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_CANCELLED
+		out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_CANCELLED
 	}
 	if question := work.GetQuestion(); question != nil && question.PublishedAtMs != nil {
 		out.Question = question.GetText()
 		if question.GetAnswerTaskId() == "" && work.GetLatestTaskState() == v2.TaskState_TASK_STATE_SUCCEEDED {
-			out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING
+			out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_WAITING
 		}
 	}
 	return out
 }
 
-func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, report *v2.Task) (*operatorv1.WorkSession, error) {
+func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, report *v2.Task) (*views.WorkSession, error) {
 	out := runtimeWork(work)
 	if work.GetReportTaskId() == "" {
 		return out, nil
@@ -151,17 +151,17 @@ func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, r
 	}
 	out.Report = runtimeReply(report)
 	if out.Report != nil {
-		out.ReportStatus = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+		out.ReportStatus = views.ReplyStatus_REPLY_STATUS_REPLIED
 		if report.GetState() == v2.TaskState_TASK_STATE_FAILED {
-			out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_FAILED
+			out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_FAILED
 		} else if report.GetState() == v2.TaskState_TASK_STATE_CANCELLED {
-			out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_CANCELLED
+			out.Status = views.WorkSessionStatus_WORK_SESSION_STATUS_CANCELLED
 		}
 	}
 	return out, nil
 }
 
-func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.ConversationMessage) (*operatorv1.Message, error) {
+func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.ConversationMessage) (*views.Message, error) {
 	out := runtimeMessage(message)
 	works, err := c.messageWorkSessions(ctx, message)
 	if err != nil {
@@ -181,7 +181,7 @@ func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.Conversa
 }
 
 // isWorkReport uses the authoritative report Task link, never prompt text.
-func isWorkReport(message *operatorv1.Message) bool {
+func isWorkReport(message *views.Message) bool {
 	for _, work := range message.GetWorkSessions() {
 		if work.GetReportTaskId() != "" && work.GetReportTaskId() == message.GetTaskId() {
 			return true
@@ -190,7 +190,7 @@ func isWorkReport(message *operatorv1.Message) bool {
 	return false
 }
 
-func (c *runtimeClient) getWorkSessionDetail(ctx context.Context, id string) (*operatorv1.Session, error) {
+func (c *runtimeClient) getWorkSessionDetail(ctx context.Context, id string) (*views.Session, error) {
 	if !strings.HasPrefix(id, "work/") {
 		return nil, unavailable("Root Session details")
 	}
@@ -206,20 +206,20 @@ func (c *runtimeClient) getWorkSessionDetail(ctx context.Context, id string) (*o
 	if task.GetSessionId() != id {
 		return nil, workSessionDataLoss("Control Plane returned a Task outside this Work Session.")
 	}
-	status := operatorv1.TaskStatus_TASK_STATUS_RUNNING
+	status := views.TaskStatus_TASK_STATUS_RUNNING
 	switch task.GetState() {
 	case v2.TaskState_TASK_STATE_QUEUED, v2.TaskState_TASK_STATE_CLAIMED:
-		status = operatorv1.TaskStatus_TASK_STATUS_PENDING
+		status = views.TaskStatus_TASK_STATUS_PENDING
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
-		status = operatorv1.TaskStatus_TASK_STATUS_COMPLETED
+		status = views.TaskStatus_TASK_STATUS_COMPLETED
 	case v2.TaskState_TASK_STATE_FAILED:
-		status = operatorv1.TaskStatus_TASK_STATUS_FAILED
+		status = views.TaskStatus_TASK_STATUS_FAILED
 	case v2.TaskState_TASK_STATE_CANCELLED:
-		status = operatorv1.TaskStatus_TASK_STATUS_CANCELLED
+		status = views.TaskStatus_TASK_STATUS_CANCELLED
 	case v2.TaskState_TASK_STATE_UNCERTAIN:
-		status = operatorv1.TaskStatus_TASK_STATUS_UNSPECIFIED
+		status = views.TaskStatus_TASK_STATUS_UNSPECIFIED
 	}
-	return &operatorv1.Session{Id: id, TagId: work.GetTagId(), Tag: work.GetTagId(), Title: work.GetTitle(), ParentSessionId: work.GetParentSessionId(), ObjectiveId: work.GetObjectiveId(), LatestTaskId: task.GetTaskId(), LatestTaskStatus: status}, nil
+	return &views.Session{Id: id, TagId: work.GetTagId(), Tag: work.GetTagId(), Title: work.GetTitle(), ParentSessionId: work.GetParentSessionId(), ObjectiveId: work.GetObjectiveId(), LatestTaskId: task.GetTaskId(), LatestTaskStatus: status}, nil
 }
 
 func (c *runtimeClient) taskActivity(ctx context.Context, task string, after int64) ([]Activity, int64, error) {

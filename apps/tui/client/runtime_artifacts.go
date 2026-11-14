@@ -76,9 +76,6 @@ func validArtifactBlob(blob *v2.BlobReference) bool {
 // TaskFiles reads result selections through the operator API. Other files in a
 // capture are not offered simply because the Task selected one of its files.
 func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, error) {
-	if !c.RuntimeV2() {
-		return nil, unavailable("Task file downloads")
-	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.runtime.operator.GetTask(ctx, connect.NewRequest(&v2.GetTaskRequest{TaskId: taskID}))
@@ -132,9 +129,6 @@ func (c *Client) TaskFiles(ctx context.Context, taskID string) ([]TaskFile, erro
 // DownloadTaskFile reauthorizes through the selected Control Plane, verifies the exact
 // chosen receipt, and publishes with an exclusive link so no existing file is replaced.
 func (c *Client) DownloadTaskFile(ctx context.Context, selected TaskFile, output string) (string, error) {
-	if !c.RuntimeV2() {
-		return "", unavailable("Task file downloads")
-	}
 	if selected.ArtifactID == "" || !validArtifactPath(selected.Path) || !validArtifactBlob(&v2.BlobReference{Sha256: selected.SHA256, ByteLength: selected.Bytes}) || strings.TrimSpace(output) == "" {
 		return "", errors.New("Choose a Task file and a local destination.")
 	}
