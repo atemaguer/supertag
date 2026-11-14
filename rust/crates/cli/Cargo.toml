@@ -119,6 +119,11 @@ path = "tests/slack_threads.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "slack_socket_runtime"
+path = "tests/slack_socket_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "github_runtime"
 path = "tests/github_runtime.rs"
 required-features = ["test-fixtures"]

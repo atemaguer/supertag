@@ -70,7 +70,7 @@ use supertag_gateway::{
     lark::{Lark, LarkConfig},
     linear::{Linear, LinearConfig},
     microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
-    slack::{Slack, SlackConfig},
+    slack::{Slack, SlackConfig, SlackEvents},
 };
 use supertag_github::{
     GithubAppConfig, GithubAuthentication,
@@ -396,11 +396,20 @@ enum Command {
         /// the Gateway reads SUPERTAG_GATEWAY_CREDENTIAL.
         #[arg(long)]
         state_directory: Option<PathBuf>,
-        /// Address for Slack webhooks. Requires the Slack state directory.
-        #[arg(long, requires = "slack_state_directory")]
+        /// Address for Slack HTTP event webhooks. Requires the Slack state directory.
+        #[arg(
+            long,
+            requires = "slack_state_directory",
+            conflicts_with = "slack_socket_mode"
+        )]
         slack_listen: Option<SocketAddr>,
-        /// Private directory for Slack connector state and reply receipts.
-        #[arg(long, requires = "slack_listen")]
+        /// Receive Slack events over an outbound Socket Mode connection instead of webhooks.
+        /// Requires the Slack state directory and SUPERTAG_SLACK_APP_TOKEN or a vault appToken.
+        #[arg(long, requires = "slack_state_directory")]
+        slack_socket_mode: bool,
+        /// Private directory for Slack connector state and reply receipts. Requires
+        /// --slack-listen or --slack-socket-mode.
+        #[arg(long)]
         slack_state_directory: Option<PathBuf>,
         /// Address for GitHub webhooks. Requires the GitHub state directory.
         #[arg(long, requires = "github_state_directory")]
@@ -1020,6 +1029,7 @@ async fn run(command: Command) -> Result<()> {
             control_plane,
             state_directory,
             slack_listen,
+            slack_socket_mode,
             slack_state_directory,
             github_listen,
             github_state_directory,
@@ -1036,7 +1046,16 @@ async fn run(command: Command) -> Result<()> {
                 control_plane.context("pass --control-plane URL")?,
                 state_directory,
                 GatewayConnectors {
-                    slack: slack_listen.zip(slack_state_directory),
+                    slack: match (slack_listen, slack_socket_mode, slack_state_directory) {
+                        (Some(address), false, Some(directory)) => {
+                            Some((SlackIngress::Http(address), directory))
+                        }
+                        (None, true, Some(directory)) => Some((SlackIngress::Socket, directory)),
+                        (None, false, None) => None,
+                        _ => anyhow::bail!(
+                            "--slack-state-directory requires --slack-listen or --slack-socket-mode"
+                        ),
+                    },
                     github: github_listen.zip(github_state_directory),
                     linear: linear_listen.zip(linear_state_directory),
                     lark: lark_state_directory,
@@ -1707,8 +1726,14 @@ async fn bind_websocket(address: Option<SocketAddr>) -> Result<Option<TcpListene
     Ok(Some(listener))
 }
 
+/// How the Gateway's Slack connector receives events.
+enum SlackIngress {
+    Http(SocketAddr),
+    Socket,
+}
+
 struct GatewayConnectors {
-    slack: Option<(SocketAddr, PathBuf)>,
+    slack: Option<(SlackIngress, PathBuf)>,
     github: Option<(SocketAddr, PathBuf)>,
     linear: Option<(SocketAddr, PathBuf)>,
     lark: Option<PathBuf>,
@@ -1736,14 +1761,25 @@ async fn gateway(
     let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
     let gateway_token = gateway_credential(&control_plane_target, credential_directory)?;
     let slack = match connectors.slack {
-        Some((address, state_directory)) => {
-            ensure!(
-                address.ip().is_loopback(),
-                "Slack webhook listener must use loopback"
-            );
-            let connector =
-                slack_connector(channel.clone(), gateway_token.clone(), state_directory).await?;
-            Some((connector, TcpListener::bind(address).await?))
+        Some((ingress, state_directory)) => {
+            if let SlackIngress::Http(address) = &ingress {
+                ensure!(
+                    address.ip().is_loopback(),
+                    "Slack webhook listener must use loopback"
+                );
+            }
+            let connector = slack_connector(
+                channel.clone(),
+                gateway_token.clone(),
+                state_directory,
+                matches!(ingress, SlackIngress::Socket),
+            )
+            .await?;
+            let listener = match ingress {
+                SlackIngress::Http(address) => Some(TcpListener::bind(address).await?),
+                SlackIngress::Socket => None,
+            };
+            Some((connector, listener))
         }
         None => None,
     };
@@ -1808,7 +1844,7 @@ async fn gateway(
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
-    if let Some((_, listener)) = &slack {
+    if let Some((_, Some(listener))) = &slack {
         outln!("{}", listener.local_addr()?);
     }
     if let Some((_, listener)) = &github {
@@ -1837,7 +1873,10 @@ async fn gateway(
     };
     let webhook = async {
         if let Some((slack, listener)) = slack {
-            let result = slack.serve(listener, shutdown.clone()).await;
+            let result = match listener {
+                Some(listener) => slack.serve(listener, shutdown.clone()).await,
+                None => slack.connect(shutdown.clone()).await,
+            };
             shutdown.cancel();
             result
         } else {
@@ -2079,24 +2118,37 @@ fn nonempty_env(name: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-/// The Slack signing secret and bot token come from the environment when both are set, and
-/// otherwise from the credential vault.
-async fn slack_secrets(account_id: &str) -> Result<(String, String)> {
+/// The Slack event secret (the signing secret for HTTP events, the app-level token for Socket
+/// Mode) and bot token come from the environment when both are set, and otherwise from the
+/// credential vault.
+async fn slack_secrets(account_id: &str, socket_mode: bool) -> Result<(SlackEvents, String)> {
+    let (variable, field) = if socket_mode {
+        ("SUPERTAG_SLACK_APP_TOKEN", "appToken")
+    } else {
+        ("SUPERTAG_SLACK_SIGNING_SECRET", "signingSecret")
+    };
+    let events = |secret: String| {
+        if socket_mode {
+            SlackEvents::Socket { app_token: secret }
+        } else {
+            SlackEvents::Http {
+                signing_secret: secret,
+            }
+        }
+    };
     match (
-        nonempty_env("SUPERTAG_SLACK_SIGNING_SECRET"),
+        nonempty_env(variable),
         nonempty_env("SUPERTAG_SLACK_BOT_TOKEN"),
     ) {
-        (Some(signing), Some(bot)) => return Ok((signing, bot)),
+        (Some(secret), Some(bot)) => return Ok((events(secret), bot)),
         (None, None) => {}
         _ => anyhow::bail!(
-            "set both SUPERTAG_SLACK_SIGNING_SECRET and SUPERTAG_SLACK_BOT_TOKEN, or neither to use the credential vault"
+            "set both {variable} and SUPERTAG_SLACK_BOT_TOKEN, or neither to use the credential vault"
         ),
     }
     let mut secrets = SurfaceSecrets::new("Slack", "SUPERTAG_SLACK", "slack", account_id);
     Ok((
-        secrets
-            .get("SUPERTAG_SLACK_SIGNING_SECRET", "signingSecret")
-            .await?,
+        events(secrets.get(variable, field).await?),
         secrets.get("SUPERTAG_SLACK_BOT_TOKEN", "botToken").await?,
     ))
 }
@@ -2105,9 +2157,10 @@ async fn slack_connector(
     channel: ProtocolChannel,
     gateway_token: String,
     state_directory: PathBuf,
+    socket_mode: bool,
 ) -> Result<Slack> {
     let account_id = required_env("SUPERTAG_SLACK_ACCOUNT_ID")?;
-    let (signing_secret, bot_token) = slack_secrets(&account_id).await?;
+    let (events, bot_token) = slack_secrets(&account_id, socket_mode).await?;
     let connector = Slack::new(
         SlackConfig {
             account_id,
@@ -2118,7 +2171,7 @@ async fn slack_connector(
                 .split(',')
                 .map(|user| user.trim().to_owned())
                 .collect(),
-            signing_secret,
+            events,
             bot_token,
             state_directory,
         },

@@ -70,10 +70,14 @@ export const CONTAINER_KEYS = [
 
 /**
  * Settings of the Gateway's outbound connectors, the only ones this deployment can serve: the
- * Lark or Feishu connection and webhook notification secrets. The pair gives them to the Gateway
- * alone.
+ * Lark or Feishu connection, Slack Socket Mode, and webhook notification secrets. The pair gives
+ * them to the Gateway alone.
  */
-export const CONTAINER_KEY_PREFIXES = ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"] as const;
+export const CONTAINER_KEY_PREFIXES = [
+  "SUPERTAG_LARK_",
+  "SUPERTAG_SLACK_",
+  "SUPERTAG_NOTIFY_SECRET_",
+] as const;
 
 /**
  * The container's environment: {@link CONTAINER_KEYS} and names starting with

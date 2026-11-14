@@ -35,10 +35,6 @@ impl Provider {
             Self::Teams => "teams",
         }
     }
-    /// Lark keeps a long connection; the others receive webhooks on a loopback listener.
-    fn webhook(self) -> bool {
-        self != Self::Lark
-    }
 }
 
 /// Gateway flags and environment variables for one connector.
@@ -52,7 +48,10 @@ pub struct Surface {
     pub account: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// Loopback webhook listener of a Slack, GitHub, Linear, or Teams connector.
+    /// Slack: `socket` (Socket Mode, default) or `http` (signed webhooks on `listen`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+    /// Loopback webhook listener of a Slack HTTP, GitHub, Linear, or Teams connector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen: Option<String>,
     /// GitHub: `token` (default) or `app`.
@@ -144,6 +143,16 @@ impl Location {
 }
 
 impl Surface {
+    /// Lark and Slack Socket Mode keep an outbound connection; the others, and Slack HTTP
+    /// events, receive webhooks on a loopback listener.
+    fn webhook(&self) -> bool {
+        match self.provider {
+            Provider::Lark => false,
+            Provider::Slack => self.transport.as_deref() == Some("http"),
+            _ => true,
+        }
+    }
+
     /// The credential vault ID that holds this account's secrets.
     pub fn credential_id(&self, name: &str) -> String {
         format!("surface/{}/{name}", self.provider.name())
@@ -159,10 +168,12 @@ impl Surface {
             ("bot-open-id", self.bot_open_id.is_some()),
             ("bot-id", self.bot_id.is_some()),
             ("bot-user-id", self.bot_user_id.is_some()),
+            ("transport", self.transport.is_some()),
             ("listen", self.listen.is_some()),
         ];
         let allowed: &[&str] = match self.provider {
-            Provider::Slack => &["bot-id", "bot-user-id", "listen"],
+            Provider::Slack if self.webhook() => &["bot-id", "bot-user-id", "transport", "listen"],
+            Provider::Slack => &["bot-id", "bot-user-id", "transport"],
             Provider::Github => &["auth", "app-id", "installation-id", "listen"],
             Provider::Linear => &["listen"],
             Provider::Lark => &["domain", "tenant-key", "bot-open-id"],
@@ -180,6 +191,10 @@ impl Surface {
         ensure!(
             !self.account.trim().is_empty() && self.account.len() <= 256,
             "surface {name} requires its verified account"
+        );
+        ensure!(
+            self.provider != Provider::Slack || self.webhook() || self.listen.is_none(),
+            "surface {name}: Slack Socket Mode does not use listen; set transport: http for webhooks"
         );
         if let Some(key) = self.unused().first() {
             bail!("surface {name}: {provider} does not use {key}");
@@ -208,7 +223,11 @@ impl Surface {
                 self.app_id.is_some(),
                 "surface {name}: teams requires app-id"
             ),
-            Provider::Slack | Provider::Linear => {}
+            Provider::Slack => ensure!(
+                matches!(self.transport.as_deref(), None | Some("socket" | "http")),
+                "surface {name}: transport must be socket or http"
+            ),
+            Provider::Linear => {}
         }
         if let Some(listen) = &self.listen {
             let address: SocketAddr = listen
@@ -258,7 +277,7 @@ impl Surface {
             }
             location.scope_key(self.provider)?;
             ensure!(
-                !self.provider.webhook() || self.listen.is_some(),
+                !self.webhook() || self.listen.is_some(),
                 "surface {name}: a {provider} location requires listen"
             );
         }
@@ -303,8 +322,10 @@ impl Surface {
             Provider::Teams => ("microsoft-teams", "SUPERTAG_MICROSOFT_TEAMS"),
         };
         let mut args = Vec::new();
-        if self.provider.webhook() {
+        if self.webhook() {
             args.extend([format!("--{flag}-listen").into(), listen.into()]);
+        } else if self.provider == Provider::Slack {
+            args.push("--slack-socket-mode".into());
         }
         args.extend([
             format!("--{flag}-state-directory").into(),
@@ -506,12 +527,82 @@ mod tests {
         );
         // A Slack location runs the connector, which posts the notifications itself.
         let located = surfaces(serde_json::json!({
-            "ops": {"provider": "slack", "account": "T0OPS", "listen": "127.0.0.1:0",
+            "ops": {"provider": "slack", "account": "T0OPS",
                 "location": {"tag": "eng", "allowed-users": ["U0ME"], "channel-id": "C0WORK"}},
         }));
         assert_eq!(
             notify_slack_account(&located, &notify(&["slack:C0ALERTS"])).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn slack_runs_socket_mode_by_default_and_a_webhook_listener_over_http() {
+        let location = serde_json::json!({"tag": "eng", "allowed-users": ["U0ME"],
+            "channel-id": "C0WORK"});
+        let socket = surfaces(serde_json::json!({
+            "ops": {"provider": "slack", "account": "T0OPS", "location": location},
+        }));
+        validate(&socket).unwrap();
+        let (args, environment) = socket["ops"]
+            .gateway("ops", Path::new("/state"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            args,
+            [
+                "--slack-socket-mode",
+                "--slack-state-directory",
+                "/state/surfaces/ops"
+            ]
+            .map(OsString::from)
+        );
+        assert!(environment.contains(&("SUPERTAG_SLACK_TEAM_ID".into(), "T0OPS".into())));
+
+        let http = surfaces(serde_json::json!({
+            "ops": {"provider": "slack", "account": "T0OPS", "transport": "http",
+                "listen": "127.0.0.1:3480", "location": location},
+        }));
+        validate(&http).unwrap();
+        let (args, _) = http["ops"]
+            .gateway("ops", Path::new("/state"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            args,
+            [
+                "--slack-listen",
+                "127.0.0.1:3480",
+                "--slack-state-directory",
+                "/state/surfaces/ops"
+            ]
+            .map(OsString::from)
+        );
+
+        for (entry, error) in [
+            (
+                serde_json::json!({"provider": "slack", "account": "T0OPS", "transport": "http",
+                    "location": location}),
+                "a slack location requires listen",
+            ),
+            (
+                serde_json::json!({"provider": "slack", "account": "T0OPS",
+                    "listen": "127.0.0.1:3480"}),
+                "Slack Socket Mode does not use listen",
+            ),
+            (
+                serde_json::json!({"provider": "slack", "account": "T0OPS", "transport": "events"}),
+                "transport must be socket or http",
+            ),
+            (
+                serde_json::json!({"provider": "linear", "account": "W1", "transport": "socket"}),
+                "linear does not use transport",
+            ),
+        ] {
+            let message = validate(&surfaces(serde_json::json!({ "ops": entry })))
+                .unwrap_err()
+                .to_string();
+            assert!(message.contains(error), "{message}");
+        }
     }
 }

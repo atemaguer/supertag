@@ -95,22 +95,25 @@ pub struct Listen {
 
 #[derive(Subcommand)]
 pub enum ProviderSetup {
-    /// Enroll a Slack app for HTTP events: its bot token and signing secret.
+    /// Enroll a Slack app: its bot token, and its app-level token for Socket Mode (default) or
+    /// its signing secret for HTTP events.
     #[command(
         after_help = "Guide: docs/surfaces/slack.md (app manifest: docs/surfaces/slack-app-manifest.yaml)
 
 Optional environment variables:
   SLACK_BOT_TOKEN
-  SLACK_SIGNING_SECRET"
+  SLACK_APP_TOKEN (socket)
+  SLACK_SIGNING_SECRET (http)"
     )]
     Slack {
         #[command(flatten)]
         common: Common,
-        #[command(flatten)]
-        listen: Listen,
-        /// Event transport. The Gateway receives Slack events over HTTP.
-        #[arg(long, default_value = "http")]
-        transport: String,
+        /// Loopback address of the Slack webhook listener on the local Gateway (http only).
+        #[arg(long)]
+        listen: Option<SocketAddr>,
+        /// Event transport: an outbound Socket Mode connection, or signed webhooks over HTTP.
+        #[arg(long, value_enum, default_value_t = SlackTransport::Socket)]
+        transport: SlackTransport,
     },
     /// Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App.
     #[command(
@@ -187,6 +190,12 @@ Optional environment variables:
 pub enum GithubAuth {
     Token,
     App,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SlackTransport {
+    Socket,
+    Http,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -723,6 +732,7 @@ fn read_private_key(path: &str) -> Result<String> {
 
 fn default_listen(provider: Provider) -> Option<&'static str> {
     match provider {
+        // Slack Socket Mode needs no listener; HTTP events default to this one.
         Provider::Slack => Some("127.0.0.1:3480"),
         Provider::Github => Some("127.0.0.1:3481"),
         Provider::Linear => Some("127.0.0.1:3482"),
@@ -771,12 +781,13 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
             common,
             listen,
             transport,
-        } => (
-            common,
-            listen.listen,
-            Provider::Slack,
-            Kind::Slack { transport },
-        ),
+        } => {
+            ensure!(
+                transport == SlackTransport::Http || listen.is_none(),
+                "--listen applies only to --transport http; Socket Mode needs no listener"
+            );
+            (common, listen, Provider::Slack, Kind::Slack { transport })
+        }
         ProviderSetup::Github {
             common,
             listen,
@@ -846,7 +857,7 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
 
 /// The verification arguments of each provider.
 enum Kind {
-    Slack { transport: String },
+    Slack { transport: SlackTransport },
     Github { auth: GithubAuth, webhook: bool },
     Linear,
     Lark { feishu: bool },
@@ -856,17 +867,19 @@ enum Kind {
 async fn verify(kind: &Kind, prompter: &Prompter, endpoints: &Endpoints) -> Result<Verified> {
     match kind {
         Kind::Slack { transport } => {
-            ensure!(
-                transport == "http",
-                "--transport must be http: the Gateway receives Slack events over HTTP"
-            );
             outln!(
                 "Slack requires an installed app. Guide: docs/surfaces/slack.md\nSlack app manifest: docs/surfaces/slack-app-manifest.yaml"
             );
             let bot_token = prompter.value("SLACK_BOT_TOKEN", "Slack bot token (xoxb-…)", true)?;
-            let signing_secret =
-                prompter.value("SLACK_SIGNING_SECRET", "Slack signing secret", true)?;
-            surface_setup::verify_slack(endpoints, &bot_token, &signing_secret).await
+            let events = match transport {
+                SlackTransport::Socket => surface_setup::SlackEventSecret::AppToken(
+                    prompter.value("SLACK_APP_TOKEN", "Slack app-level token (xapp-…)", true)?,
+                ),
+                SlackTransport::Http => surface_setup::SlackEventSecret::SigningSecret(
+                    prompter.value("SLACK_SIGNING_SECRET", "Slack signing secret", true)?,
+                ),
+            };
+            surface_setup::verify_slack(endpoints, &bot_token, events).await
         }
         Kind::Github { auth, webhook } => match auth {
             GithubAuth::Token => {
@@ -970,14 +983,21 @@ async fn finish(
 ) -> Result<()> {
     let identity = identity(&verified)?;
     let setting = |key: &str| verified.configuration.get(key).cloned();
+    let transport = setting("transport");
+    let webhook = transport.as_deref() != Some("socket");
     let entry = Surface {
         provider,
         account: verified.external_account_id.clone(),
         display_name: Some(verified.display_name.clone()),
-        listen: listen
-            .map(|listen| listen.to_string())
-            .or_else(|| prior.as_ref().and_then(|prior| prior.listen.clone()))
-            .or_else(|| default_listen(provider).map(str::to_owned)),
+        listen: webhook
+            .then(|| {
+                listen
+                    .map(|listen| listen.to_string())
+                    .or_else(|| prior.as_ref().and_then(|prior| prior.listen.clone()))
+                    .or_else(|| default_listen(provider).map(str::to_owned))
+            })
+            .flatten(),
+        transport,
         auth: setting("auth"),
         app_id: setting("app-id"),
         installation_id: setting("installation-id"),
@@ -1331,6 +1351,7 @@ mod tests {
             provider: Provider::Slack,
             account: account.into(),
             display_name: Some("Cost $5 ${HOME}".into()),
+            transport: Some("http".into()),
             listen: Some("127.0.0.1:3480".into()),
             auth: None,
             app_id: None,

@@ -12,7 +12,9 @@ pub(super) fn config(directory: &Path) -> SlackConfig {
         channel_id: "CCHANNEL1".into(),
         tag_id: "builder".into(),
         allowed_users: vec!["UALICE1".into()],
-        signing_secret: "fixture-signing-key".into(),
+        events: SlackEvents::Http {
+            signing_secret: "fixture-signing-key".into(),
+        },
         bot_token: "fixture-bot-token".into(),
         state_directory: directory.into(),
     }

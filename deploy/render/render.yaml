@@ -15,7 +15,8 @@
 # surface or notification. It is a background worker with no inbound traffic that reaches the
 # Control Plane through the same public wss:// URL as any client, so it can run only outbound
 # connectors: append their flags to its dockerCommand, such as
-# `--lark-state-directory /var/lib/supertag/lark` or `--notify webhook:HTTPS_URL#NAME`. Render
+# `--lark-state-directory /var/lib/supertag/lark`, `--slack-socket-mode --slack-state-directory
+# /var/lib/supertag/slack`, or `--notify webhook:HTTPS_URL#NAME`. Render
 # subdomains are global: if the Control Plane gets another hostname, change --control-plane.
 #
 # dockerCommand names the image entrypoint, which starts as root to prepare the disk and write

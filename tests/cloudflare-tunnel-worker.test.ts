@@ -64,7 +64,8 @@ describe("Cloudflare tunnel Worker", () => {
       SUPERTAG_LARK_APP_ID: "cli_app",
       SUPERTAG_NOTIFY_SECRET_OPS: "hook-secret",
       SUPERTAG_LARK_: "no name",
-      SUPERTAG_SLACK_SIGNING_SECRET: "no Slack ingress here",
+      SUPERTAG_SLACK_APP_TOKEN: "xapp-socket-mode",
+      SUPERTAG_LINEAR_WEBHOOK_SECRET: "no Linear ingress here",
       SUPERTAG_GATEWAY: "on",
       SUPERTAG_GATEWAY_FLAGS: "--lark-state-directory /x",
       SUPERTAG: { binding: true },
@@ -75,6 +76,7 @@ describe("Cloudflare tunnel Worker", () => {
       SUPERTAG_DATABASE_URL: "postgresql://user:secret@db.example.com/supertag",
       SUPERTAG_TLS_CERT_PEM: "-----BEGIN CERTIFICATE-----",
       SUPERTAG_LARK_APP_ID: "cli_app",
+      SUPERTAG_SLACK_APP_TOKEN: "xapp-socket-mode",
       SUPERTAG_NOTIFY_SECRET_OPS: "hook-secret",
     });
     expect(CONTAINER_KEYS).not.toContain("SUPERTAG_TLS_CERT_FILE");

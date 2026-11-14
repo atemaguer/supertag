@@ -50,6 +50,7 @@ const WAIT: Duration = Duration::from_secs(25);
 const SLACK_TEAM: &str = "T0SETUP1";
 const SLACK_BOT: &str = "xoxb-synthetic-setup-bot";
 const SLACK_SIGNING: &str = "synthetic-setup-signing-secret";
+const SLACK_APP: &str = "xapp-synthetic-setup-app-token";
 const SLACK_CHANNEL: &str = "C0SETUP1";
 const SLACK_USER: &str = "U0ALICE1";
 const GITHUB_TOKEN: &str = "github_pat_synthetic_setup";
@@ -106,6 +107,26 @@ async fn slack_auth(
         json!({"ok": true, "team": "Acme", "team_id": team, "user_id": "U0BOT", "bot_id": "B0BOT"}),
     )
     .into_response()
+}
+
+/// Socket Mode: the app-level token opens a connection. The URL names this fixture, which
+/// serves no WebSocket, so a Gateway keeps retrying without admitting anything.
+async fn slack_connections_open(
+    State(provider): State<Provider>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    provider.record("/apps.connections.open", &headers, &body);
+    if headers.get("authorization").and_then(|v| v.to_str().ok())
+        != Some(&format!("Bearer {SLACK_APP}"))
+    {
+        return Json(json!({"ok": false, "error": "invalid_auth"})).into_response();
+    }
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    Json(json!({"ok": true, "url": format!("ws://{host}/link/?ticket=fixture")})).into_response()
 }
 
 async fn slack_post(
@@ -195,6 +216,7 @@ async fn provider_fixture() -> Result<(Provider, String)> {
     let app = Router::new()
         .route("/auth.test", post(slack_auth))
         .route("/chat.postMessage", post(slack_post))
+        .route("/apps.connections.open", post(slack_connections_open))
         .route("/user", get(github_user))
         .route("/app/installations/{id}", get(github_installation))
         .route("/graphql", post(linear))
@@ -607,6 +629,7 @@ fn no_secrets(text: &str) -> Result<()> {
     for secret in [
         SLACK_BOT,
         SLACK_SIGNING,
+        SLACK_APP,
         GITHUB_TOKEN,
         GITHUB_WEBHOOK,
         LINEAR_KEY,
@@ -656,14 +679,23 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     let original = std::fs::read(services.state.join("supertag.yaml"))?;
 
     // A missing value at the end of input names its variable and saves nothing.
-    let stderr = services.fail(&["setup", "surface", "slack", "--name", "acme"], &[], "")?;
+    let http = [
+        "setup",
+        "surface",
+        "slack",
+        "--name",
+        "acme",
+        "--transport",
+        "http",
+    ];
+    let stderr = services.fail(&http, &[], "")?;
     ensure!(
         stderr.contains("Slack bot token (xoxb-…) is required: set SLACK_BOT_TOKEN"),
         "{stderr}"
     );
     // Rejected credentials save nothing.
     let stderr = services.fail(
-        &["setup", "surface", "slack", "--name", "acme"],
+        &http,
         &[("SLACK_BOT_TOKEN", "xoxb-rejected")],
         &format!("{SLACK_SIGNING}\n"),
     )?;
@@ -671,23 +703,36 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         stderr.contains("Slack auth.test failed: invalid_auth"),
         "{stderr}"
     );
+    // Socket Mode (the default) needs no listener, and its app-level token must open a
+    // connection.
     let stderr = services.fail(
-        &["setup", "surface", "slack", "--transport", "socket"],
+        &["setup", "surface", "slack", "--listen", "127.0.0.1:3480"],
         &[],
         "",
     )?;
-    ensure!(stderr.contains("--transport must be http"), "{stderr}");
+    ensure!(
+        stderr.contains("--listen applies only to --transport http"),
+        "{stderr}"
+    );
+    let stderr = services.fail(
+        &["setup", "surface", "slack", "--name", "acme"],
+        &[
+            ("SLACK_BOT_TOKEN", SLACK_BOT),
+            ("SLACK_APP_TOKEN", "xapp-rejected"),
+        ],
+        "",
+    )?;
+    ensure!(
+        stderr.contains("Slack apps.connections.open failed: invalid_auth"),
+        "{stderr}"
+    );
     ensure!(std::fs::read(services.state.join("supertag.yaml"))? == original);
     ensure!(!services.state.join("gateway-credentials.json").exists());
     let accounts = services.json(&["get", "surface-accounts"])?;
     ensure!(accounts["accounts"] == json!([]), "{accounts}");
 
     // Interactive setup: each prompt reads a line of standard input.
-    let stdout = services.succeed(
-        &["setup", "surface", "slack", "--name", "acme"],
-        &[],
-        &format!("{SLACK_BOT}\n{SLACK_SIGNING}\n"),
-    )?;
+    let stdout = services.succeed(&http, &[], &format!("{SLACK_BOT}\n{SLACK_SIGNING}\n"))?;
     ensure!(
         stdout.contains(&format!("Connected slack account Acme ({SLACK_TEAM}).")),
         "{stdout}"
@@ -715,13 +760,14 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     ensure!(
         entry
             == json!({"provider": "slack", "account": SLACK_TEAM, "display-name": "Acme",
-                "listen": "127.0.0.1:3480", "bot-id": "B0BOT", "bot-user-id": "U0BOT"}),
+                "transport": "http", "listen": "127.0.0.1:3480", "bot-id": "B0BOT",
+                "bot-user-id": "U0BOT"}),
         "{entry}"
     );
 
     // Another workspace cannot take over an existing account name.
     let stderr = services.fail(
-        &["setup", "surface", "slack", "--name", "acme"],
+        &http,
         &[
             ("SLACK_BOT_TOKEN", "xoxb-other-workspace"),
             ("SLACK_SIGNING_SECRET", "other-signing-secret"),
@@ -778,9 +824,7 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
     );
     // Rerunning setup keeps the location and refreshes the credential.
     services.succeed(
-        &[
-            "setup", "surface", "slack", "--name", "acme", "--listen", &listen,
-        ],
+        &[&http[..], &["--listen", &listen]].concat(),
         &[
             ("SLACK_BOT_TOKEN", SLACK_BOT),
             ("SLACK_SIGNING_SECRET", SLACK_SIGNING),
@@ -991,6 +1035,71 @@ async fn slack_setup_binds_policy_and_admits_through_the_vault(database: String)
         stderr.contains("builder is not configured on slack"),
         "{stderr}"
     );
+
+    // Rerunning setup in Socket Mode replaces the signing secret with the app-level token and
+    // drops the webhook listener.
+    services.succeed(
+        &["setup", "surface", "slack", "--name", "acme"],
+        &[
+            ("SLACK_BOT_TOKEN", SLACK_BOT),
+            ("SLACK_APP_TOKEN", SLACK_APP),
+        ],
+        "",
+    )?;
+    ensure!(services.provider.saw("/apps.connections.open", SLACK_APP));
+    ensure!(
+        services.credential("surface/slack/acme").await?
+            == BTreeMap::from([
+                ("appToken".to_owned(), SLACK_APP.to_owned()),
+                ("botToken".to_owned(), SLACK_BOT.to_owned()),
+            ])
+    );
+    let entry = services.surfaces()?["acme"].clone();
+    ensure!(
+        entry
+            == json!({"provider": "slack", "account": SLACK_TEAM, "display-name": "Acme",
+                "transport": "socket", "bot-id": "B0BOT", "bot-user-id": "U0BOT"}),
+        "{entry}"
+    );
+    // A Socket Mode connector reads the app-level token from the vault and opens its
+    // connection with it.
+    let opened = |provider: &Provider| {
+        provider
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(path, auth, _)| {
+                path == "/apps.connections.open" && auth == &format!("Bearer {SLACK_APP}")
+            })
+            .count()
+    };
+    let before = opened(&services.provider);
+    let mut gateway = services.connector(
+        &[
+            "--slack-socket-mode",
+            "--slack-state-directory",
+            &services.scratch("slack-socket"),
+        ],
+        &[
+            ("SUPERTAG_SLACK_ACCOUNT_ID", &location_id),
+            ("SUPERTAG_SLACK_CREDENTIAL_ID", "surface/slack/acme"),
+            ("SUPERTAG_SLACK_TEAM_ID", SLACK_TEAM),
+            ("SUPERTAG_SLACK_CHANNEL_ID", SLACK_CHANNEL),
+            ("SUPERTAG_SLACK_TAG_ID", "builder"),
+            ("SUPERTAG_SLACK_ALLOWED_USERS", SLACK_USER),
+        ],
+    )?;
+    ensure!(gateway.endpoints(1).await?.len() == 1);
+    let deadline = Instant::now() + WAIT;
+    while opened(&services.provider) == before {
+        ensure!(
+            Instant::now() < deadline,
+            "no Socket Mode connection was opened"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    drop(gateway);
     Ok(())
 }
 
@@ -1402,10 +1511,11 @@ async fn setup_without_a_local_control_plane_requires_a_shared_vault(
     let (vault, address) = fake_vault().await?;
     let remote = services.directory.path().join("remote");
     std::fs::create_dir(&remote)?;
+    // Default Socket Mode: the bot token and the app-level token.
     let args = ["setup", "surface", "slack", "--name", "remote"];
     let tokens = [
         ("SLACK_BOT_TOKEN", SLACK_BOT),
-        ("SLACK_SIGNING_SECRET", SLACK_SIGNING),
+        ("SLACK_APP_TOKEN", SLACK_APP),
     ];
     let output = services.cli_in(&remote, &args, &tokens, "")?;
     let stderr = String::from_utf8(output.stderr)?;
@@ -1445,7 +1555,7 @@ async fn setup_without_a_local_control_plane_requires_a_shared_vault(
     );
     ensure!(
         vault.get("secret/supertag/surface/slack/remote")
-            == Some(json!({"botToken": SLACK_BOT, "signingSecret": SLACK_SIGNING}))
+            == Some(json!({"botToken": SLACK_BOT, "appToken": SLACK_APP}))
     );
     ensure!(
         !remote.join("gateway-credentials.json").exists()
@@ -1579,7 +1689,15 @@ async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
         no_secrets(&text)?;
         Ok(text)
     };
-    cli(&["setup", "surface", "slack", "--listen", &listen])?;
+    cli(&[
+        "setup",
+        "surface",
+        "slack",
+        "--transport",
+        "http",
+        "--listen",
+        &listen,
+    ])?;
     cli(&[
         "tag",
         "update",

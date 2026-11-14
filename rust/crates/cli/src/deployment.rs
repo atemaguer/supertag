@@ -1932,11 +1932,16 @@ mod tests {
             assert!(entrypoint.contains(&format!("\"{name} ")), "{key}");
         }
         // Plus the outbound connectors' settings, which the pair gives the Gateway alone.
+        let prefixes = [
+            "SUPERTAG_LARK_",
+            "SUPERTAG_SLACK_",
+            "SUPERTAG_NOTIFY_SECRET_",
+        ];
         assert_eq!(
             command_literal(&routing, "CONTAINER_KEY_PREFIXES"),
-            ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"]
+            prefixes
         );
-        for prefix in ["SUPERTAG_LARK_", "SUPERTAG_NOTIFY_SECRET_"] {
+        for prefix in prefixes {
             assert!(
                 pair.contains(&format!("^\\({prefix}[A-Z0-9_]*\\)=")),
                 "{prefix}"

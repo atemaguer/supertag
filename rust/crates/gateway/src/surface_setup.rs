@@ -99,35 +99,41 @@ fn text(value: &Value, pointer: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Slack HTTP events: a bot token and signing secret (`verifySlackAccount`, transport `http`).
+/// The secret that authenticates Slack event delivery for the chosen transport.
+pub enum SlackEventSecret {
+    /// Socket Mode: an app-level token with `connections:write`.
+    AppToken(String),
+    /// HTTP events: the app's signing secret.
+    SigningSecret(String),
+}
+
+/// A Slack app: a bot token, checked with `auth.test`, and the event secret of its transport;
+/// Socket Mode also opens a connection with the app-level token (`verifySlackAccount`).
 pub async fn verify_slack(
     endpoints: &Endpoints,
     bot_token: &str,
-    signing_secret: &str,
+    events: SlackEventSecret,
 ) -> Result<Verified> {
     let bot_token = required(bot_token, "A Slack bot token")?;
-    let signing_secret = required(signing_secret, "A Slack signing secret")?;
-    let response = client()?
-        .post(endpoints.slack.join("auth.test")?)
-        .bearer_auth(&bot_token)
-        .send()
-        .await
-        .map_err(|_| anyhow!("Slack auth.test is unavailable"))?;
-    ensure!(
-        response.status().is_success(),
-        "Slack auth.test failed with HTTP {}",
-        response.status().as_u16()
-    );
-    let body = bounded_json(response, "Slack").await?;
-    if body["ok"].as_bool() != Some(true) {
-        let error = body["error"]
-            .as_str()
-            .filter(|e| e.len() <= 64 && e.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
-            .unwrap_or("unknown_error");
-        bail!("Slack auth.test failed: {error}");
-    }
+    let (transport, field, secret) = match events {
+        SlackEventSecret::AppToken(token) => (
+            "socket",
+            "appToken",
+            required(&token, "A Slack app-level token")?,
+        ),
+        SlackEventSecret::SigningSecret(secret) => (
+            "http",
+            "signingSecret",
+            required(&secret, "A Slack signing secret")?,
+        ),
+    };
+    let client = client()?;
+    let body = slack_call(&client, endpoints, "auth.test", &bot_token).await?;
     let team_id = text(&body, "/team_id").context("Slack auth.test returned no team_id")?;
-    let mut configuration = BTreeMap::new();
+    if transport == "socket" {
+        slack_call(&client, endpoints, "apps.connections.open", &secret).await?;
+    }
+    let mut configuration = BTreeMap::from([("transport".to_owned(), transport.to_owned())]);
     for (key, pointer) in [("bot-id", "/bot_id"), ("bot-user-id", "/user_id")] {
         if let Some(value) = text(&body, pointer) {
             configuration.insert(key.to_owned(), value);
@@ -137,13 +143,46 @@ pub async fn verify_slack(
         provider: "slack",
         display_name: text(&body, "/team").unwrap_or_else(|| team_id.clone()),
         external_account_id: team_id,
-        auth_method: "slack-http",
+        auth_method: if transport == "socket" {
+            "slack-socket-mode"
+        } else {
+            "slack-http"
+        },
         configuration,
         secrets: BTreeMap::from([
             ("botToken".to_owned(), bot_token),
-            ("signingSecret".to_owned(), signing_secret),
+            (field.to_owned(), secret),
         ]),
     })
+}
+
+/// One Slack Web API call that must answer `ok: true`.
+async fn slack_call(
+    client: &Client,
+    endpoints: &Endpoints,
+    method: &str,
+    token: &str,
+) -> Result<Value> {
+    let response = client
+        .post(endpoints.slack.join(method)?)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| anyhow!("Slack {method} is unavailable"))?;
+    ensure!(
+        response.status().is_success(),
+        "Slack {method} failed with HTTP {}",
+        response.status().as_u16()
+    );
+    let body = bounded_json(response, "Slack").await?;
+    if body["ok"].as_bool() != Some(true) {
+        let error = body["error"]
+            .as_str()
+            .filter(|e| e.len() <= 64 && e.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+            .unwrap_or("unknown_error");
+        bail!("Slack {method} failed: {error}");
+    }
+    Ok(body)
 }
 
 fn github_request(client: &Client, url: Url, authorization: &str) -> reqwest::RequestBuilder {
