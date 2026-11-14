@@ -362,6 +362,36 @@ it("refuses writes through a workspace symlink into a nested read-only root", as
   await bridge.dispose();
 });
 
+it("reaches canonical copy roots outside the workspace from the filesystem root", async () => {
+  const { workspace, environment } = await fixture();
+  const { mkdir, realpath } = await import("node:fs/promises");
+  const base = await realpath(join(workspace, ".."));
+  const readOnly = join(base, "copies", "ro");
+  const writable = join(base, "copies", "rw");
+  await mkdir(readOnly, { recursive: true });
+  await mkdir(writable, { recursive: true });
+  await writeFile(join(readOnly, "rows.csv"), "1,2\n");
+  const bridge = createSplitExecutionBridge({
+    environment: { ...environment, rootDirectory: "/", resolvePath: (path) => resolve(base, path) },
+    workspaceRoot: join(base, "workspace"),
+    readOnlyRoots: [readOnly],
+    writableRoots: [writable],
+    permissions: { filesWrite: true, commandsExecute: false },
+  });
+  expect((await bridge.call("read", { file_path: join(readOnly, "rows.csv") })).text).toContain(
+    "1,2",
+  );
+  await expect(
+    bridge.call("write", { file_path: join(readOnly, "x.txt"), content: "no" }),
+  ).rejects.toThrow("read-only");
+  await bridge.call("write", { file_path: join(writable, "out.txt"), content: "yes" });
+  expect(await readFile(join(writable, "out.txt"), "utf8")).toBe("yes");
+  await expect(bridge.call("read", { file_path: join(base, "other.txt") })).rejects.toThrow(
+    "escapes",
+  );
+  await bridge.dispose();
+});
+
 it("checks permissions on each call and strips provider credentials", async () => {
   const { workspace, environment, specs } = await fixture();
   const permissions = { filesWrite: false, commandsExecute: false };

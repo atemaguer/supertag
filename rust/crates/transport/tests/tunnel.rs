@@ -15,9 +15,10 @@ use anyhow::{Context, Result, ensure};
 use supertag_protocol::v2::{
     ArtifactInputFile, RemoteMcpServerInput, RemoteMcpServerOutput, RemoteMcpServerStart,
     RemoteWorkspaceAllocateRequest, RemoteWorkspaceAllocation, RemoteWorkspaceCaptureChunk,
-    RemoteWorkspaceCaptureRequest, RemoteWorkspaceOwner, RemoteWorkspaceStageChunk,
-    RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest, RemoteWorkspaceStopResponse,
-    remote_mcp_server_input, remote_workspace_capture_chunk,
+    RemoteWorkspaceCaptureCopyRequest, RemoteWorkspaceCaptureRequest, RemoteWorkspaceCopyDownload,
+    RemoteWorkspaceCopyStaged, RemoteWorkspaceCopyUpload, RemoteWorkspaceOwner,
+    RemoteWorkspaceStageChunk, RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest,
+    RemoteWorkspaceStopResponse, remote_mcp_server_input, remote_workspace_capture_chunk,
     remote_workspace_provider_client::RemoteWorkspaceProviderClient,
     remote_workspace_provider_server::{RemoteWorkspaceProvider, RemoteWorkspaceProviderServer},
     remote_workspace_stage_chunk,
@@ -108,6 +109,22 @@ impl RemoteWorkspaceProvider for Provider {
         _: Request<RemoteWorkspaceStopRequest>,
     ) -> Result<Response<RemoteWorkspaceStopResponse>, Status> {
         Ok(Response::new(RemoteWorkspaceStopResponse::default()))
+    }
+
+    async fn stage_copy(
+        &self,
+        _: Request<Streaming<RemoteWorkspaceCopyUpload>>,
+    ) -> Result<Response<RemoteWorkspaceCopyStaged>, Status> {
+        Err(Status::unimplemented("not part of the tunnel fixture"))
+    }
+
+    type CaptureCopyStream = Boxed<RemoteWorkspaceCopyDownload>;
+
+    async fn capture_copy(
+        &self,
+        _: Request<RemoteWorkspaceCaptureCopyRequest>,
+    ) -> Result<Response<Self::CaptureCopyStream>, Status> {
+        Err(Status::unimplemented("not part of the tunnel fixture"))
     }
 
     type RunMcpServerStream = Boxed<RemoteMcpServerOutput>;

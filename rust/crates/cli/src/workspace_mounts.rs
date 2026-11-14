@@ -80,9 +80,13 @@ pub fn read_declarations(
     struct Mount {
         volume_id: String,
         destination: String,
+        #[serde(default = "default_max_bytes")]
         max_bytes: u64,
         #[serde(default)]
         access: Access,
+    }
+    fn default_max_bytes() -> u64 {
+        supertag_protocol::workspace_mounts::DEFAULT_WORKSPACE_MOUNT_BYTES
     }
     #[derive(serde::Deserialize, Default, PartialEq)]
     #[serde(rename_all = "kebab-case")]

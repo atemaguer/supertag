@@ -1,6 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import type { ExecutionEnvironment, ProcessHandle } from "../index.js";
+import {
+  type CopyDownloadPart,
+  type CopyUploadPart,
+  cleanCommand,
+  createWorkspaceCopies,
+  digest,
+  readTransfer,
+  type WorkspaceCopies,
+} from "./copies.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 
@@ -86,10 +95,6 @@ export interface SandboxWorkspaceProvider {
     environment?: SandboxEnvironment,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
-}
-
-function cleanCommand(...args: string[]): string[] {
-  return ["/usr/bin/env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", ...args];
 }
 
 interface StageHeader {
@@ -219,10 +224,6 @@ interface CapturedTree {
   readonly bytes: Uint8Array;
 }
 
-function digest(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function exactOwner(left: SandboxOwner, right: SandboxOwner): boolean {
   return (
     left.hostId === right.hostId &&
@@ -231,40 +232,6 @@ function exactOwner(left: SandboxOwner, right: SandboxOwner): boolean {
     left.attemptId === right.attemptId &&
     left.allocationId === right.allocationId
   );
-}
-
-async function readTransfer(
-  sandbox: SandboxWorkspace,
-  path: string,
-  byteLength: number,
-  signal: AbortSignal,
-): Promise<Uint8Array> {
-  const stream = await sandbox.readTransfer(path, signal);
-  const reader = stream.getReader();
-  const abort = () => {
-    void reader.cancel().catch(() => undefined);
-  };
-  signal.addEventListener("abort", abort, { once: true });
-  const bytes = new Uint8Array(byteLength);
-  try {
-    let offset = 0;
-    while (true) {
-      signal.throwIfAborted();
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value.byteLength > byteLength - offset)
-        throw new Error("Workspace tree exceeds its receipt");
-      bytes.set(value, offset);
-      offset += value.byteLength;
-    }
-    signal.throwIfAborted();
-    if (offset !== byteLength) throw new Error("Workspace tree is shorter than its receipt");
-    return bytes;
-  } finally {
-    signal.removeEventListener("abort", abort);
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
 }
 
 function observedEnvironment(
@@ -330,6 +297,8 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
   let mcpStaged = false;
+  /** This Attempt's Workspace copies, once the first is staged. */
+  let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
   const mcpStops = new WeakMap<ProcessHandle, Promise<boolean>>();
   let uncertain = false;
@@ -415,7 +384,55 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
     return result;
   }
 
+  /** The file tools: staged inputs and read-only copies may only be read. */
+  function createTools() {
+    if (!sandbox || !root) throw workspaceError("allocation is unavailable");
+    return createWorkspaceOperations({
+      environment: observedEnvironment(
+        sandbox.environment(root),
+        () => {
+          uncertain = true;
+        },
+        provider.label,
+      ),
+      workspaceRoot: "checkout",
+      readOnlyRoots: [
+        ...(stagedInputRoot ? [`checkout/${stagedInputRoot}`] : []),
+        ...(copies?.readOnly() ?? []).map((path) => `checkout/${path}`),
+      ],
+      allowedActions,
+    });
+  }
+
   return {
+    /** Stages one Workspace copy the Worker Host uploads, beside the checkout. */
+    async stageCopy(
+      header: { path: string; readWrite: boolean },
+      parts: AsyncIterable<CopyUploadPart>,
+      caller?: AbortSignal,
+    ): Promise<{ files: bigint }> {
+      if (phase !== "staged" || !sandbox || !root || !owner)
+        throw workspaceError("must be staged before a copy");
+      copies ??= createWorkspaceCopies({
+        sandbox,
+        root,
+        attemptId: owner.attemptId,
+        label: provider.label,
+        lifetime: lifetime.signal,
+      });
+      const staged = await copies.stage(header, parts, caller);
+      tools = createTools();
+      return staged;
+    },
+    /** After capture, a read-write copy's changed and created files. */
+    async *captureCopy(
+      request: { path: string; maxBytes: bigint },
+      caller?: AbortSignal,
+    ): AsyncGenerator<CopyDownloadPart> {
+      if (phase !== "captured" || !copies)
+        throw workspaceError("must be captured before its copies");
+      yield* copies.capture(request, caller);
+    },
     async allocate(
       request: {
         owner: SandboxOwner;
@@ -572,19 +589,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         }
         stagedInputRoot = expectedRoot;
         mcpStaged = header.mcpCommit !== undefined;
-        const environment = sandbox.environment(root);
-        tools = createWorkspaceOperations({
-          environment: observedEnvironment(
-            environment,
-            () => {
-              uncertain = true;
-            },
-            provider.label,
-          ),
-          workspaceRoot: "checkout",
-          readOnlyRoots: stagedInputRoot ? [`checkout/${stagedInputRoot}`] : [],
-          allowedActions,
-        });
+        tools = createTools();
         phase = "staged";
       } catch {
         throw workspaceError("bundle could not be staged");
@@ -681,7 +686,12 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         await tools.dispose();
         if (uncertain) throw workspaceError("was modified by an unsettled operation");
         signal.throwIfAborted();
-        const result = await runTransfer("capture", [stagedInputRoot], signal);
+        // Staged inputs and Workspace copies never return in the tree.
+        const result = await runTransfer(
+          "capture",
+          [stagedInputRoot, ...(copies?.root() ? [copies.root() as string] : [])],
+          signal,
+        );
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
         if (result.exitCode !== 0 || !receipt?.[1] || !receipt[2])
           throw workspaceError("capture did not produce a receipt");
@@ -919,7 +929,8 @@ def stage_inputs(input_root):
     os.unlink(manifest_path)
     os.unlink(body_path)
 
-def capture(input_root):
+def capture(*excluded):
+    excluded = {root for root in excluded if root}
     entries = []
     directories = []
     body_length = 0
@@ -933,7 +944,7 @@ def capture(input_root):
         with os.scandir(directory_fd) as children:
             for child in children:
                 path = "/".join((*prefix, child.name))
-                if input_root and path == input_root:
+                if path in excluded:
                     continue
                 parts = components(path)
                 info = child.stat(follow_symlinks=False)

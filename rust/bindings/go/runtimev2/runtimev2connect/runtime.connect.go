@@ -414,6 +414,12 @@ const (
 	// RemoteWorkspaceProviderRunMcpServerProcedure is the fully-qualified name of the
 	// RemoteWorkspaceProvider's RunMcpServer RPC.
 	RemoteWorkspaceProviderRunMcpServerProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer"
+	// RemoteWorkspaceProviderStageCopyProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's StageCopy RPC.
+	RemoteWorkspaceProviderStageCopyProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy"
+	// RemoteWorkspaceProviderCaptureCopyProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's CaptureCopy RPC.
+	RemoteWorkspaceProviderCaptureCopyProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/CaptureCopy"
 	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
 	// AskQuestion RPC.
 	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
@@ -4609,6 +4615,14 @@ type RemoteWorkspaceProviderClient interface {
 	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
+	StageCopy(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
+	// After a successful Capture, a read-write copy's changed and created regular files: each
+	// record, then the summary, then each recorded file's bytes in record order.
+	CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCopyDownload], error)
 }
 
 // NewRemoteWorkspaceProviderClient constructs a client for the
@@ -4653,6 +4667,18 @@ func NewRemoteWorkspaceProviderClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
 			connect.WithClientOptions(opts...),
 		),
+		stageCopy: connect.NewClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderStageCopyProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("StageCopy")),
+			connect.WithClientOptions(opts...),
+		),
+		captureCopy: connect.NewClient[runtimev2.RemoteWorkspaceCaptureCopyRequest, runtimev2.RemoteWorkspaceCopyDownload](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderCaptureCopyProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("CaptureCopy")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -4663,6 +4689,8 @@ type remoteWorkspaceProviderClient struct {
 	capture      *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
 	stop         *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
 	runMcpServer *connect.Client[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	stageCopy    *connect.Client[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
+	captureCopy  *connect.Client[runtimev2.RemoteWorkspaceCaptureCopyRequest, runtimev2.RemoteWorkspaceCopyDownload]
 }
 
 // Allocate calls supertag.runtime.v2.RemoteWorkspaceProvider.Allocate.
@@ -4690,6 +4718,16 @@ func (c *remoteWorkspaceProviderClient) RunMcpServer(ctx context.Context) *conne
 	return c.runMcpServer.CallBidiStream(ctx)
 }
 
+// StageCopy calls supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy.
+func (c *remoteWorkspaceProviderClient) StageCopy(ctx context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged] {
+	return c.stageCopy.CallClientStream(ctx)
+}
+
+// CaptureCopy calls supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy.
+func (c *remoteWorkspaceProviderClient) CaptureCopy(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCopyDownload], error) {
+	return c.captureCopy.CallServerStream(ctx, req)
+}
+
 // RemoteWorkspaceProviderHandler is an implementation of the
 // supertag.runtime.v2.RemoteWorkspaceProvider service.
 type RemoteWorkspaceProviderHandler interface {
@@ -4701,6 +4739,14 @@ type RemoteWorkspaceProviderHandler interface {
 	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error
+	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
+	StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error)
+	// After a successful Capture, a read-write copy's changed and created regular files: each
+	// record, then the summary, then each recorded file's bytes in record order.
+	CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCopyDownload]) error
 }
 
 // NewRemoteWorkspaceProviderHandler builds an HTTP handler from the service implementation. It
@@ -4740,6 +4786,18 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remoteWorkspaceProviderStageCopyHandler := connect.NewClientStreamHandler(
+		RemoteWorkspaceProviderStageCopyProcedure,
+		svc.StageCopy,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("StageCopy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderCaptureCopyHandler := connect.NewServerStreamHandler(
+		RemoteWorkspaceProviderCaptureCopyProcedure,
+		svc.CaptureCopy,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("CaptureCopy")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.RemoteWorkspaceProvider/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemoteWorkspaceProviderAllocateProcedure:
@@ -4752,6 +4810,10 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 			remoteWorkspaceProviderStopHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderRunMcpServerProcedure:
 			remoteWorkspaceProviderRunMcpServerHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderStageCopyProcedure:
+			remoteWorkspaceProviderStageCopyHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderCaptureCopyProcedure:
+			remoteWorkspaceProviderCaptureCopyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -4779,6 +4841,14 @@ func (UnimplementedRemoteWorkspaceProviderHandler) Stop(context.Context, *connec
 
 func (UnimplementedRemoteWorkspaceProviderHandler) RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCopyDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy is not implemented"))
 }
 
 // HarnessQuestionsClient is a client for the supertag.runtime.v2.HarnessQuestions service.

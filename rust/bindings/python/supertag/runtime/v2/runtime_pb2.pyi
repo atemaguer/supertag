@@ -1461,6 +1461,70 @@ class HarnessWorkspaceResult(_message.Message):
     is_error: bool
     def __init__(self, text: _Optional[str] = ..., is_error: _Optional[bool] = ...) -> None: ...
 
+class RemoteWorkspaceCopyFile(_message.Message):
+    __slots__ = ("key", "size", "sha256")
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    SIZE_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    key: str
+    size: int
+    sha256: str
+    def __init__(self, key: _Optional[str] = ..., size: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceCopyHeader(_message.Message):
+    __slots__ = ("path", "read_write")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    READ_WRITE_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    read_write: bool
+    def __init__(self, path: _Optional[str] = ..., read_write: _Optional[bool] = ...) -> None: ...
+
+class RemoteWorkspaceCopyUpload(_message.Message):
+    __slots__ = ("header", "file", "payload", "directory")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    FILE_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    DIRECTORY_FIELD_NUMBER: _ClassVar[int]
+    header: RemoteWorkspaceCopyHeader
+    file: RemoteWorkspaceCopyFile
+    payload: bytes
+    directory: str
+    def __init__(self, header: _Optional[_Union[RemoteWorkspaceCopyHeader, _Mapping]] = ..., file: _Optional[_Union[RemoteWorkspaceCopyFile, _Mapping]] = ..., payload: _Optional[bytes] = ..., directory: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceCopyStaged(_message.Message):
+    __slots__ = ("files",)
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    files: int
+    def __init__(self, files: _Optional[int] = ...) -> None: ...
+
+class RemoteWorkspaceCaptureCopyRequest(_message.Message):
+    __slots__ = ("path", "max_bytes")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    MAX_BYTES_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    max_bytes: int
+    def __init__(self, path: _Optional[str] = ..., max_bytes: _Optional[int] = ...) -> None: ...
+
+class RemoteWorkspaceCopyListed(_message.Message):
+    __slots__ = ("skipped", "error_key", "error_reason")
+    SKIPPED_FIELD_NUMBER: _ClassVar[int]
+    ERROR_KEY_FIELD_NUMBER: _ClassVar[int]
+    ERROR_REASON_FIELD_NUMBER: _ClassVar[int]
+    skipped: int
+    error_key: str
+    error_reason: str
+    def __init__(self, skipped: _Optional[int] = ..., error_key: _Optional[str] = ..., error_reason: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceCopyDownload(_message.Message):
+    __slots__ = ("file", "listed", "payload")
+    FILE_FIELD_NUMBER: _ClassVar[int]
+    LISTED_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    file: RemoteWorkspaceCopyFile
+    listed: RemoteWorkspaceCopyListed
+    payload: bytes
+    def __init__(self, file: _Optional[_Union[RemoteWorkspaceCopyFile, _Mapping]] = ..., listed: _Optional[_Union[RemoteWorkspaceCopyListed, _Mapping]] = ..., payload: _Optional[bytes] = ...) -> None: ...
+
 class RemoteWorkspaceProviderBootstrap(_message.Message):
     __slots__ = ("token",)
     TOKEN_FIELD_NUMBER: _ClassVar[int]

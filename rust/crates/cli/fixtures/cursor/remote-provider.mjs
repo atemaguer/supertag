@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   access,
   appendFile,
@@ -12,6 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -39,6 +41,11 @@ process.on("uncaughtException", async (error) => {
 });
 const { providerTransport } = JSON.parse(await readFile(join(root, "modules.json"), "utf8"));
 const { runRemoteWorkspaceTransport } = await import(pathToFileURL(providerTransport).href);
+// Copies run the provider SDK's own staging and listing code, with its sandbox
+// program executed here as the sandbox would.
+const { createWorkspaceCopies } = await import(
+  new URL("./copies.js", pathToFileURL(providerTransport)).href
+);
 const expected =
   provider === "modal"
     ? {
@@ -79,6 +86,25 @@ let staged = false;
 let mcpStaged = false;
 const mcpServers = new Set();
 const inputPaths = [];
+// Each staged Workspace copy by checkout path and its access, for the fixture's file tools.
+const copies = new Map();
+let workspaceCopies;
+const sandbox = {
+  async run(argv, timeoutMs, signal) {
+    return new Promise((resolve) => {
+      execFile(
+        argv[0],
+        argv.slice(1),
+        { timeout: timeoutMs, signal, maxBuffer: 1024 * 1024 },
+        (error, stdout) => resolve({ exitCode: error ? (error.code ?? 1) : 0, stdout }),
+      );
+    });
+  },
+  writeTransfer: (path, bytes) => writeFile(path, bytes, { flag: "wx", mode: 0o600 }),
+  readTransfer: async (path) => Readable.toWeb(createReadStream(path)),
+};
+let captured = false;
+const copyRoot = () => `volumes/${hash(allocation.owner.attemptId)}`;
 const enabled = (name) =>
   access(join(root, name)).then(
     () => true,
@@ -256,6 +282,8 @@ const implementation = {
           if (entry.name === ".git") continue;
           const path = prefix + entry.name;
           if (inputPaths.includes(path) && !(await enabled("return-private-input"))) continue;
+          // Workspace copies never return in the tree, unless a fault returns them.
+          if (copies.size && path === copyRoot() && !(await enabled("return-copy"))) continue;
           const physical = join(folder, entry.name);
           if (entry.isDirectory()) await files(physical, `${path}/`);
           else {
@@ -286,10 +314,70 @@ const implementation = {
         paths: entries.map(({ path }) => path),
         sha256: hash(tree),
       });
+      captured = true;
       yield {
         part: { case: "tree", value: { sha256: hash(tree), byteLength: BigInt(tree.length) } },
       };
       yield { part: { case: "payload", value: tree } };
+    },
+    async stageCopy(stream, context) {
+      assert.ok(staged && !allocation.stopped && !captured);
+      const inputs = stream[Symbol.asyncIterator]();
+      const first = await inputs.next();
+      assert.equal(first.value?.part.case, "header");
+      const header = first.value.part.value;
+      const keys = [];
+      const directories = [];
+      async function* parts() {
+        for (;;) {
+          const next = await inputs.next();
+          if (next.done) return;
+          const { part } = next.value;
+          assert.ok(["file", "payload", "directory"].includes(part.case));
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "directory") directories.push(part.value);
+          yield part;
+        }
+      }
+      workspaceCopies ??= createWorkspaceCopies({
+        sandbox,
+        root: directory,
+        attemptId: allocation.owner.attemptId,
+        label: "Fixture",
+        lifetime: new AbortController().signal,
+      });
+      const result = await workspaceCopies.stage(header, parts(), context.signal);
+      copies.set(header.path, { readWrite: header.readWrite });
+      await trace({
+        type: "stage-copy",
+        path: header.path,
+        readWrite: header.readWrite,
+        keys: keys.sort(),
+        directories: directories.sort(),
+      });
+      return result;
+    },
+    async *captureCopy(request, context) {
+      assert.ok(captured && !allocation.stopped);
+      const keys = [];
+      try {
+        for await (const part of workspaceCopies.capture(request, context.signal)) {
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "listed")
+            await trace({
+              type: "capture-copy",
+              path: request.path,
+              maxBytes: String(request.maxBytes),
+              keys,
+              skipped: String(part.value.skipped),
+              refusal: part.value.errorReason,
+            });
+          yield { part };
+        }
+      } catch (error) {
+        await trace({ type: "fixture-error", operation: "captureCopy", message: error.message });
+        throw error;
+      }
     },
     async *runMcpServer(stream, context) {
       assert.ok(staged && mcpStaged && !allocation.stopped);
@@ -359,9 +447,12 @@ const implementation = {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
       const requested = operation.value?.path ?? "";
+      // Like the provider's file tools, a read-only copy may only be read.
+      const copy = [...copies].find(([path]) => requested.startsWith(`${path}/`));
       if (
         !["workspace.txt", "marker.txt", "mcp-server.js", ".mcp.json"].includes(requested) &&
         !inputPaths.includes(requested) &&
+        !copy &&
         !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
           requested,
         )
@@ -376,7 +467,8 @@ const implementation = {
       if (
         operation.case === "write" &&
         actions.includes("files:write") &&
-        !inputPaths.includes(requested)
+        !inputPaths.includes(requested) &&
+        (!copy || copy[1].readWrite)
       ) {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await writeFile(path, operation.value.content);
@@ -388,7 +480,7 @@ const implementation = {
   },
 };
 for (const [service, names] of [
-  [implementation.provider, ["allocate", "stage", "stop"]],
+  [implementation.provider, ["allocate", "stage", "stageCopy", "stop"]],
   [implementation.workspace, ["execute"]],
 ]) {
   for (const name of names) {

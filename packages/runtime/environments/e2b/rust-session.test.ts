@@ -1,6 +1,17 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
@@ -9,6 +20,7 @@ import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-no
 import {
   HarnessWorkspace,
   RemoteMcpServerInputSchema,
+  RemoteWorkspaceCopyUploadSchema,
   RemoteWorkspaceProvider,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -920,3 +932,305 @@ it("refuses an inconsistent devcontainer environment before any provider call", 
     expect(factory.create).not.toHaveBeenCalled();
   }
 });
+
+type CopyPart =
+  | { case: "file"; value: { key: string; size: bigint; sha256: string } }
+  | { case: "payload"; value: Uint8Array }
+  | { case: "directory"; value: string };
+
+const GiB = 1024n ** 3n;
+
+function copyParts(
+  files: Record<string, Buffer>,
+  corrupt?: string,
+  directories: string[] = [],
+): AsyncIterable<CopyPart> {
+  return (async function* () {
+    for (const directory of directories) yield { case: "directory", value: directory };
+    for (const [key, body] of Object.entries(files)) {
+      const sha256 = createHash("sha256")
+        .update(key === corrupt ? "other" : body)
+        .digest("hex");
+      yield { case: "file", value: { key, size: BigInt(body.length), sha256 } };
+      for (let offset = 0; offset < body.length; offset += 256 * 1024)
+        yield { case: "payload", value: body.subarray(offset, offset + 256 * 1024) };
+    }
+  })();
+}
+
+it("stages Workspace copies beside the checkout, seals read-only ones, and returns only changed files", async () => {
+  const { session, writeTransfer, client } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  // A file larger than one transfer part spans several parts.
+  const large = Buffer.alloc(9 * 1024 * 1024 + 3, 7);
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({ "rows.csv": Buffer.from("a,b\n1,2\n") }, "rows.csv"),
+    ),
+  ).rejects.toThrow(/copy transfer failed/i);
+  await expect(
+    session.stageCopy({ path: "volumes/other/ro", readWrite: false }, copyParts({})),
+  ).rejects.toThrow(/copy path is invalid/i);
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({
+        "rows.csv": Buffer.from("a,b\n1,2\n"),
+        "nested/notes.txt": Buffer.from("notes\n"),
+      }),
+    ),
+  ).resolves.toEqual({ files: 2n });
+  await expect(
+    session.stageCopy(
+      { path: `${root}/rw`, readWrite: true },
+      copyParts({
+        "rows.csv": Buffer.from("x\n"),
+        "empty.txt": Buffer.alloc(0),
+        "large.bin": large,
+      }),
+    ),
+  ).resolves.toEqual({ files: 3n });
+  await expect(
+    session.execute({ kind: "read", path: `${root}/ro/nested/notes.txt` }),
+  ).resolves.toMatchObject({ text: expect.stringContaining("notes") });
+  await expect(
+    session.execute({ kind: "write", path: `${root}/ro/denied.txt`, content: "no" }),
+  ).rejects.toThrow(/read-only/i);
+  await session.execute({ kind: "write", path: `${root}/rw/rows.csv`, content: "x\ny\n" });
+  await session.execute({ kind: "write", path: `${root}/rw/new/created.txt`, content: "new\n" });
+  const sandboxRoot = dirname(writeTransfer.mock.calls[0]?.[0] as string);
+  await symlink("/etc/hosts", join(sandboxRoot, "checkout", root, "rw", "link"));
+  // Copies are never part of the returned tree.
+  expect(
+    unpack((await session.capture()).bytes).some(({ path }) => path.startsWith("volumes/")),
+  ).toBe(false);
+  await expect(async () => {
+    for await (const _ of session.captureCopy({ path: `${root}/ro`, maxBytes: GiB })) break;
+  }).rejects.toThrow(/not a staged read-write copy/i);
+  const parts = [];
+  for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes: 20n * GiB }))
+    parts.push(part);
+  // The listing may hash the staged bytes and the copy's limit: one second per MiB of both.
+  const scan = vi.mocked(client.commands.run).mock.calls.find(([command]) =>
+    // The program text names every mode; the mode argument follows it.
+    command.slice(command.lastIndexOf("sys.exit(1)")).includes("copy-scan"),
+  );
+  expect(scan?.[1]?.timeoutMs).toBe(120_000 + 2 * 20 * 1024 * 1000);
+  expect(parts.filter((part) => part.case !== "payload")).toEqual([
+    {
+      case: "file",
+      value: {
+        key: "new/created.txt",
+        size: 4n,
+        sha256: createHash("sha256").update("new\n").digest("hex"),
+      },
+    },
+    {
+      case: "file",
+      value: {
+        key: "rows.csv",
+        size: 4n,
+        sha256: createHash("sha256").update("x\ny\n").digest("hex"),
+      },
+    },
+    // Two unchanged files and the link.
+    { case: "listed", value: { skipped: 3n, errorKey: "", errorReason: "" } },
+  ]);
+  expect(
+    Buffer.concat(
+      parts.flatMap((part) => (part.case === "payload" ? [Buffer.from(part.value)] : [])),
+    ).toString(),
+  ).toBe("new\nx\ny\n");
+  await session.stop({ owner });
+  // A sealed read-only copy keeps its owner from removing entries; reopen it for cleanup.
+  for (const directory of ["ro", "ro/nested"])
+    await chmod(join(sandboxRoot, "checkout", root, directory), 0o700);
+}, 30_000);
+
+it("refuses a read-write copy holding a hard link or an unwritable name without sending bytes", async () => {
+  const { session, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  await session.stageCopy(
+    { path: `${root}/rw`, readWrite: true },
+    copyParts({ "a.txt": Buffer.from("a\n") }),
+  );
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "rw");
+  await writeFile(join(copy, "b.txt"), "b\n");
+  await link(join(copy, "b.txt"), join(copy, "c.txt"));
+  await session.capture();
+  const parts = [];
+  for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes: GiB }))
+    parts.push(part);
+  expect(parts.at(-1)).toEqual({
+    case: "listed",
+    value: { skipped: 1n, errorKey: "b.txt", errorReason: "a file has another link or changed" },
+  });
+  expect(parts.some((part) => part.case === "payload")).toBe(false);
+  await session.stop({ owner });
+}, 30_000);
+
+it("stages any name and empty directory a local read-only copy holds", async () => {
+  const { session, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  // Names a Volume key refuses are still files a `file://` Volume can hold.
+  const odd = "back\\slash\tand tab.txt";
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({ [odd]: Buffer.from("odd\n") }, undefined, ["empty", "nested/hollow"]),
+    ),
+  ).resolves.toEqual({ files: 1n });
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "ro");
+  expect(await readFile(join(copy, odd), "utf8")).toBe("odd\n");
+  for (const directory of ["empty", "nested/hollow"])
+    expect((await stat(join(copy, directory))).isDirectory()).toBe(true);
+  // A read-write copy's names must be Volume keys, so they can be written back.
+  await expect(
+    session.stageCopy(
+      { path: `${root}/rw`, readWrite: true },
+      copyParts({ [odd]: Buffer.from("odd\n") }),
+    ),
+  ).rejects.toThrow(/copy file record is invalid/u);
+  await session.stop({ owner });
+  for (const directory of ["ro", "ro/nested", "ro/nested/hollow", "ro/empty"])
+    await chmod(join(copy, "..", directory), 0o700);
+}, 30_000);
+
+it("refuses a change over the copy's limits without reading it", async () => {
+  const { session, writeTransfer, readTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  await session.stageCopy(
+    { path: `${root}/rw`, readWrite: true },
+    copyParts({ "kept.bin": Buffer.alloc(600, 1) }),
+  );
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "rw");
+  await session.capture();
+  const listed = async (maxBytes: bigint) => {
+    const parts = [];
+    for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes }))
+      parts.push(part);
+    const summary = parts.find((part) => part.case === "listed");
+    if (summary?.value.errorReason)
+      expect(parts.some((part) => part.case === "payload")).toBe(false);
+    return summary;
+  };
+  // A sparse file far over the limit is refused by its size alone.
+  const sparse = await open(join(copy, "huge.bin"), "w");
+  await sparse.truncate(64 * 1024 ** 3);
+  await sparse.close();
+  const reads = readTransfer.mock.calls.length;
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: {
+      skipped: 0n,
+      errorKey: "huge.bin",
+      errorReason: "a file exceeds the copy byte limit or 5 GiB",
+    },
+  });
+  // Only the listing itself came back.
+  expect(readTransfer.mock.calls.length).toBe(reads + 1);
+  await rm(join(copy, "huge.bin"));
+  // A staged file counts only once it changes; new files may not exceed the limit together.
+  await writeFile(join(copy, "a.bin"), Buffer.alloc(300, 2));
+  await writeFile(join(copy, "b.bin"), Buffer.alloc(300, 3));
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: { skipped: 1n, errorKey: "", errorReason: "" },
+  });
+  await writeFile(join(copy, "kept.bin"), Buffer.alloc(600, 4));
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: {
+      skipped: 0n,
+      errorKey: "kept.bin",
+      errorReason: "change set exceeds the copy byte limit",
+    },
+  });
+  await session.stop({ owner });
+}, 30_000);
+
+it("wires Workspace copy staging and capture through generated gRPC and production handlers", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  const token = "workspace-provider-fixture-token";
+  const auth = { headers: { authorization: `Bearer ${token}` } };
+  const server = await startRemoteWorkspaceTransport({
+    ...createWorkspaceHandlers(session),
+    token,
+  });
+  const sessionManager = new Http2SessionManager(server.endpoint);
+  const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager });
+  const provider = createClient(RemoteWorkspaceProvider, transport);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  try {
+    await provider.allocate(
+      { owner, timeoutMs: 60_000, allowedActions: ["files:read", "files:write"] },
+      auth,
+    );
+    await provider.stage(
+      (async function* () {
+        yield create(RemoteWorkspaceStageChunkSchema, { part: { case: "header", value: header } });
+        yield create(RemoteWorkspaceStageChunkSchema, { part: { case: "payload", value: bytes } });
+      })(),
+      auth,
+    );
+    const upload = (path: string, files: Record<string, Buffer>) =>
+      (async function* () {
+        yield create(RemoteWorkspaceCopyUploadSchema, {
+          part: { case: "header", value: { path, readWrite: true } },
+        });
+        for await (const part of copyParts(files))
+          yield create(RemoteWorkspaceCopyUploadSchema, { part });
+      })();
+    // A stream must open with its header.
+    await expect(
+      provider.stageCopy(
+        (async function* () {
+          yield create(RemoteWorkspaceCopyUploadSchema, {
+            part: { case: "payload", value: Buffer.from("x") },
+          });
+        })(),
+        auth,
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    await expect(
+      provider.stageCopy(upload(`${root}/rw`, { "rows.csv": Buffer.from("x\n") }), auth),
+    ).resolves.toMatchObject({ files: 1n });
+    await session.execute({ kind: "write", path: `${root}/rw/rows.csv`, content: "x\ny\n" });
+    for await (const _ of provider.capture({}, auth));
+    const parts = [];
+    for await (const { part } of provider.captureCopy({ path: `${root}/rw`, maxBytes: GiB }, auth))
+      parts.push(part);
+    expect(parts.map((part) => part.case)).toEqual(["file", "listed", "payload"]);
+    expect(Buffer.from(parts[2]?.value as Uint8Array).toString()).toBe("x\ny\n");
+    await provider.stop({ owner, sandboxId: "sandbox-one" }, auth);
+  } finally {
+    sessionManager.abort();
+    await server.close();
+  }
+}, 15_000);

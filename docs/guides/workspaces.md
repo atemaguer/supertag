@@ -88,120 +88,135 @@ make up an **autonomous organization**: Teams may pursue different Objectives bu
 Control Plane, its rules, and its record of the work. A Workspace can live in the same input as
 the rest of your organization; `supertag apply -f` applies Workspaces first.
 
+<!-- supertag-cli: native start -->
+
 ### Attach data outside the repository
 
-A workspace mount places a Volume's files at an absolute path outside the Task's git checkout.
-For example, an analysis Task can read a dataset at `/mnt/datasets` without committing it to git.
-Declare the Volume separately, then add this to the workspace's `spec`:
+A Workspace Volume copy places a Volume's files at an absolute path outside the Task's git
+checkout. For example, an analysis Task can read a dataset at `/srv/supertag-mounts/datasets`
+without committing it to git. Three parties agree on each copy:
 
-```yaml
-source: https://github.com/acme/app.git
-mounts:
-  - volume: datasets
-    path: /mnt/datasets
-    access: read-only
-    strategy: copy
-    maxBytes: 1073741824
-```
+1. The operator registers the Volume with the Control Plane. A source is a canonical
+   `file:///ABSOLUTE/PATH` or an `s3://BUCKET/PREFIX` with a credential name. The name is a label,
+   never a secret:
 
-`source` remains a git repository. Each mount names a Volume and a normalized absolute path.
-`access` defaults to `read-only`, and `strategy` defaults to `copy`. `maxBytes` is an optional
-positive integer byte limit, capped at 20 GiB. The path must stay outside the checkout and staged Task files;
-mount paths cannot overlap each other. Set `access: read-write` to save changes to the Volume source. `strategy: mount` uses a provider-native mount where supported; unsupported combinations are refused with a reason. Tasks cannot add or change workspace mounts.
-Use `supertag describe workspace app` to inspect the declared mounts.
+   ```bash
+   supertag workspace-volume put datasets --source file:///srv/data/datasets
+   supertag workspace-volume put reports --source s3://acme-data/reports --credential team-data
+   ```
 
-### What a copy mount does
+2. Each Worker Host owner maps the Volume with `supertag worker-host --workspace-mount-mappings FILE`.
+   The mapping names the same source, the private directory copies land in, and, for `s3://`, the
+   endpoint, region, and the environment variables that hold the keys. Only the host owner chooses
+   the endpoint, so a host's keys never sign a request to a server someone else picked:
 
-Each Task Attempt gets its own fresh copy. The Worker Host makes it when the Task Attempt starts,
-after `setup` and the checkout. So `setup` never sees the data, and no prepared environment, such
-as a Modal image or an E2B template, contains it.
+   ```json
+   [
+     { "volumeId": "datasets", "source": "file:///srv/data/datasets",
+       "destinationRoot": "/srv/supertag-mounts" },
+     { "volumeId": "reports", "source": "s3://acme-data/reports", "credential": "team-data",
+       "endpoint": "https://s3.eu-west-2.amazonaws.com", "region": "eu-west-2",
+       "credentialEnvPrefix": "REPORTS", "destinationRoot": "/srv/supertag-mounts" }
+   ]
+   ```
 
-Before it clones, prepares, or creates a sandbox, the Worker Host checks each mount. It refuses the
-Task Attempt, naming the Volume, when the Volume was deleted or its credential has no readable
-[`volume-credentials`](../reference/supertag-yaml.md#host-service) mapping on this host. A `file://` Volume needs a `{ path: DIR }` mapping that contains its source after links resolve. It also
-refuses a `file://` Volume in or containing SuperTag's own state or secret files.
-Sources cannot contain the host user's home directory. A source under a hidden directory directly
-inside home, or under `Library`, needs explicit path consent within that directory. SuperTag
-rechecks these rules while listing and copying, after resolving symbolic links.
+   The host reads `REPORTS_ACCESS_KEY_ID`, `REPORTS_SECRET_ACCESS_KEY`, and optionally
+   `REPORTS_SESSION_TOKEN` from its own environment. `destinationRoot` must be an existing,
+   owner-only directory.
 
-1. The Worker Host lists the Volume's files first. It stops and refuses the Task Attempt as soon
-   as the listing passes the mount's `maxBytes` (at most 20 GiB), or 1 GiB without one, or 10,000 files. The
-   combined files across all mounts must fit in 20 GiB per Task Attempt, including each copy of a
-   repeated Volume. Their manifests must also fit in 2 MiB, so very long keys allow fewer files.
-   Nothing is downloaded before all listings fit.
-2. It downloads each file with the Volume's credential, which stays on the Worker Host. The
-   Task, the harness, and a sandbox provider such as Modal or E2B receive file contents only.
-3. It writes the files under the mount path. A read-only copy has write permission removed; a read-write copy allows changes.
-4. It records a manifest on the Task Attempt: each file's key, size, and ETag (or a SHA-256 for
-   a `file://` Volume), plus a digest of the whole manifest.
+3. The Tag declares its copies with `supertag tag put TAG --workspace-mounts FILE`:
 
-SuperTag refuses the copy, naming the Volume, when a key would land outside the mount path.
-Examples are a key containing `..`, a key starting with `/`, or one file that is also a
-directory of another. Symbolic links in a `file://` Volume are skipped, never followed. Files with
-more than one hard link are refused: another path could expose a file outside the allowed source.
-SuperTag checks the opened file’s identity, link count, and change times against the listing.
-Sources in temporary directories or declared checkouts are refused because Tasks can write there.
-This also prevents planting a hard link whose original path was later replaced. If a file
-changes while it is being copied, the Task Attempt fails instead of mixing versions. A refused
-copy fails the Task Attempt as a Workspace setup failure before the harness starts.
+   ```json
+   [
+     { "volumeId": "datasets", "destination": "/srv/supertag-mounts/datasets" },
+     { "volumeId": "reports", "destination": "/srv/supertag-mounts/reports",
+       "maxBytes": 5368709120, "access": "read-write" }
+   ]
+   ```
 
-Where the copy lands depends on the Worker Host:
+Each destination sits directly in a mapped `destinationRoot`. `maxBytes` defaults to 1 GiB and may
+be at most 20 GiB. `access` defaults to `read-only`. A `read-write` copy requires the Tag's
+`files:write` action. Copies require `files:read`, and a Tag with copies may not run commands or
+fetch from the web, so its harness reaches only the checkout and its copies. Codex, Claude Code,
+Cursor, and OpenCode Tasks take copies. The Control Plane freezes each Volume's revision when it
+accepts the Task, and only a Worker Host that maps that exact Volume and credential name claims it.
+`supertag get workspace-volume datasets` shows the registered source and revision.
 
-| Worker Host | Copy location | When it is removed |
-| --- | --- | --- |
-| Local | `path` on the host. It must not exist, must not be in a temporary directory such as `/tmp` or `TMPDIR`, and the Worker user must be able to create it | When the Task Attempt ends |
-| Remote sandbox (Modal, E2B) | `path` inside the Task Attempt's sandbox. It must not exist in the prepared environment | With the sandbox |
+### What a copy does
 
-Remote copy mounts require `python3` in the sandbox image to receive and write the copied files.
-Install it in the image before starting a Workspace that uses mounts.
+Each Task Attempt gets its own fresh copy. The Worker Host makes it after it prepares the checkout,
+so `setup` never sees the data, and no prepared environment, such as a Modal image or an E2B
+template, contains it.
+
+1. The Worker Host stages the copy under a random name in `destinationRoot`, with the Volume's
+   credential, which never leaves the Worker Host process. The Task and its harness receive file
+   contents only.
+2. It stops and refuses the Task Attempt when a copy passes its `maxBytes`, when one Task Attempt's
+   copies together pass 20 GiB, or when a copy holds more than 10,000 files or 40,000 entries. An
+   `s3://` listing is checked before any download.
+3. It refuses symbolic links, files with another hard link, files on another filesystem, and the
+   names `.git` and `.supertag-*`. A file that changes while it is copied fails the Task Attempt.
+4. It renames the finished copy to its destination without replacing anything there. A read-only
+   copy has write permission removed; a read-write copy stays writable.
+
+Files stream through fixed-size buffers, so a 20 GiB copy needs no more memory than a small one.
+The Worker Host journals each copy, so a restarted host removes what an interrupted Task Attempt
+left. Copies are removed when the Task Attempt ends.
+
+### Copies in a remote Workspace
+
+A Cursor Worker Host with an E2B or Modal Workspace stages each copy on the host first, exactly as
+above. It then uploads only the copy's files into the sandbox, at
+`volumes/<digest>/<name>` inside the checkout, with its empty directories, and tells the Task
+those paths. The Volume credential and the Volume's location never reach the sandbox or the
+provider. A read-only copy is sealed in the sandbox, and the file tools refuse writes there.
+Copies never return in the Workspace delivery. After a successful Task Attempt, the Worker Host
+lists each read-write copy in the sandbox and brings back only changed and created files, which it
+then writes back as below. The listing refuses a change it could not write back before reading it,
+so it reads at most what the copy staged plus its `maxBytes`.
+
+Remote copies need `python3` in the sandbox image. Each upload, listing, and capture step waits
+one second per MiB beyond its base timeout. A sandbox lives at most one hour, so the Worker Host
+keeps part of it after the Task for capturing read-write copies: about 96 seconds for a 1 GiB copy
+and 32 minutes for a 20 GiB copy, taken from the Task's time when the hour runs out.
+
+Read-only provider-native Modal Volume mounts are on the backlog. Today every Volume reaches a
+Task as a copy.
 
 ### Save changes to a Volume
 
-Set `access: read-write` on a mount when a Task must save generated files beside its input data. For example, a Task can read `/mnt/datasets/rows.csv` and write `/mnt/datasets/results.csv`. The default remains `read-only`. A `copy` mount uploads files the Task created or changed at finalize to its `s3://`, `r2://`, or `file://` source. It does not propagate deletions or follow symbolic links. The Worker uploads sequentially without retries.
+Set `"access": "read-write"` when a Task must save generated files beside its input data. For
+example, a Task can read `/srv/supertag-mounts/reports/rows.csv` and write `results.csv` next to it.
+After a successful Task Attempt, the Worker Host writes each changed and created regular file
+directly to the Volume: a `file://` file is written without following links and renamed into
+place, and an `s3://` object is streamed with a signed `PUT`. Deletions and links are not written.
+A failed or cancelled Task Attempt writes nothing.
 
-Before any upload, SuperTag checks the entire output set. Each mount allows at most 1,000 files per Task Attempt. One file may be at most 5 GiB, and all changed files together must fit the mount's `maxBytes`. If a bound is exceeded, the upload is refused and nothing is uploaded. An upload failure after earlier files landed fails the Task Attempt with a reason naming the mount and key. Its partial output manifest identifies what landed, while the git result is still delivered. The owner decides whether to rerun; a rerun uploads those files again.
+Before any write, SuperTag checks the whole change set. Each copy writes at most 1,000 files, one
+file may be at most 5 GiB, and all changed files together must fit the copy's `maxBytes`. A change
+set over a bound, or a copy holding a name the Volume cannot hold, is `refused` and nothing is
+written. Writing stops at the first failure and is `partial`. Either fails the Task. The Worker
+Host journals each summary before reporting it, so a restarted host never writes twice.
 
-`strategy: mount` writes directly to the source through Modal CloudBucketMount or Modal Volumes. e2b refuses native mounts that would need keys inside the sandbox. Parallel Tasks writing one key use last-write-wins. An interrupted Task Attempt may leave partial writes. Writes land before review. Object stores are not POSIX filesystems: tools needing rename, append, or locks should not use native mount paths.
-
-`supertag describe task ID` shows a **Writes** section for each Task Attempt. Each mount's output manifest lists its Volume, source, path, status (`complete`, `partial`, or `refused`), upload time, uploaded objects (key, size, SHA-256), skipped files, any error (key and reason), and files not attempted. The Objective overview summarizes these writes.
+`supertag describe task ID` shows the summary for each Task Attempt: the Volume, status
+(`complete`, `partial`, or `refused`), the written files (key, size, SHA-256), skipped files, any
+error, and files not attempted.
 
 ### Keep artifact storage separate
 
-A mount must also stay outside every Worker Host's artifact Volume, where saved outputs live.
-For example, a symlink to another host's artifact directory cannot expose those outputs as a
-dataset. The Control Plane checks locations before dispatch. The consuming host checks every
-cataloged file artifact location again by real path, including locations used only by other hosts.
-This protects against filesystem aliases that exist only on the consuming host. Use
+A Workspace Volume must stay outside artifact storage, where saved outputs live. The Control Plane
+refuses a Workspace Volume at, inside, or around an artifact Volume, by path and by S3 bucket and
+prefix. The Worker Host checks its mappings again against its own state, its Workspaces, and the
+artifact paths the Control Plane discloses for the Task Attempt, including filesystem aliases. Use
 [artifact inputs](../reference/artifacts.md) to give a Task access to selected saved outputs.
 
 ### Local copies
 
-A local copy is still a copy, even of a `file://` Volume on the same disk. A local harness that
-runs without a sandbox can read any file the host user can, so treat read-only as protection
-against accidents, not a security boundary. Locally, two running Task Attempts can't share a mount
-path; the second one is refused.
+A local copy is still a copy, even of a `file://` Volume on the same disk. Read-only is protection
+against accidents, not a security boundary, for a harness that runs without a sandbox. Two Task
+Attempts never share a destination: the second is refused while the first copy exists.
 
-A sandboxed local harness can usually write temporary directories. There it could swap a
-directory above the mount path for a symbolic link, so SuperTag refuses local mount paths in
-temporary directories. Choose a path under the host’s configured
-[`local-mount-root`](../reference/supertag-yaml.md#local-mount-root), such as
-`/srv/supertag-mounts/datasets`. Dot directories below that root are refused. SuperTag records each directory it creates for a copy and removes a copy only when
-every directory above it is still the one it recorded. If anything changed, SuperTag stops and
-leaves the path in place, and a later Task Attempt refuses it until you remove it.
-SuperTag rechecks home and system destination restrictions when creating the local copy, so a
-path redirected into a home configuration directory after the initial check is refused.
-
-### Inspect copies
-
-`supertag describe task` shows each Task Attempt's manifest, with up to 20 files per mount. When
-a retry copied different content, the line says so:
-
-```text
-Mounts (Task Attempt 2):
-  datasets  /mnt/datasets  copy read-only  2 objects, 1.2 KiB  sha256:4f1c0e2a1b2c (changed since Task Attempt 1)
-    notes/readme.txt  210 B  etag "d41d8cd98f00b204e9800998ecf8427e"
-    rows.csv  1.0 KiB  etag "9b2cf535f27731c974343645a3985328"
-```
+<!-- supertag-cli: native end -->
 
 ### Prepare each worktree with setup
 

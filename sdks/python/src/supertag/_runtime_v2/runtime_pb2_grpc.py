@@ -6034,6 +6034,16 @@ class RemoteWorkspaceProviderStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
                 _registered_method=True)
+        self.StageCopy = channel.stream_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyUpload.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyStaged.FromString,
+                _registered_method=True)
+        self.CaptureCopy = channel.unary_stream(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/CaptureCopy',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.FromString,
+                _registered_method=True)
 
 
 class RemoteWorkspaceProviderServicer:
@@ -6074,6 +6084,24 @@ class RemoteWorkspaceProviderServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StageCopy(self, request_iterator, context):
+        """One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+        Harness starts: the header, then for each file its record and exactly its bytes, and each
+        empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+        the returned tree.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CaptureCopy(self, request, context):
+        """After a successful Capture, a read-write copy's changed and created regular files: each
+        record, then the summary, then each recorded file's bytes in record order.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -6101,6 +6129,16 @@ def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
                     servicer.RunMcpServer,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.SerializeToString,
+            ),
+            'StageCopy': grpc.stream_unary_rpc_method_handler(
+                    servicer.StageCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyUpload.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyStaged.SerializeToString,
+            ),
+            'CaptureCopy': grpc.unary_stream_rpc_method_handler(
+                    servicer.CaptureCopy,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -6240,6 +6278,60 @@ class RemoteWorkspaceProvider:
             '/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerInput.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteMcpServerOutput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StageCopy(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyUpload.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyStaged.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CaptureCopy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/CaptureCopy',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.FromString,
             options,
             channel_credentials,
             insecure,

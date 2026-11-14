@@ -13,11 +13,24 @@ use aws_sigv4::{
 };
 use reqwest::{Client, Method, RequestBuilder, StatusCode, Url, header};
 use sha2::{Digest, Sha256};
-use std::{io::Write, time::Duration, time::SystemTime};
+use std::{
+    io::{Read, Write},
+    time::Duration,
+    time::SystemTime,
+};
 use supertag_protocol::volumes::s3_volume_source;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_LIST_BYTES: usize = 4 * 1024 * 1024;
+/// The slowest object transfer a copy or write-back waits for, in bytes per second.
+const MIN_TRANSFER_RATE: u64 = 1024 * 1024;
+const BODY_CHUNK: usize = 256 * 1024;
+
+/// A request carrying `size` body bytes may take the fixed timeout plus one second per MiB,
+/// so a 20 GiB copy is not cut off while a stalled store still is.
+fn transfer_timeout(size: u64) -> Duration {
+    HTTP_TIMEOUT + Duration::from_secs(size / MIN_TRANSFER_RATE)
+}
 
 #[derive(Clone)]
 pub(super) struct S3Source {
@@ -249,6 +262,7 @@ impl S3Source {
     ) -> Result<String> {
         let mut response = self
             .request(Method::GET, self.object_url(key)?, None)?
+            .timeout(transfer_timeout(size))
             .send()
             .await
             .map_err(|_| anyhow::anyhow!("S3 Workspace Volume read failed"))?;
@@ -282,20 +296,67 @@ impl S3Source {
         Ok(format!("{:x}", hash.finalize()))
     }
 
-    /// Replace one object with `bytes`, whose SHA-256 the caller computed.
-    pub(super) async fn write(&self, key: &str, bytes: Vec<u8>, sha256: &str) -> Result<()> {
-        let length = bytes.len() as u64;
-        let response = self
-            .request(Method::PUT, self.object_url(key)?, Some((sha256, length)))?
-            .body(bytes)
+    /// Replace one object with the `size` bytes of `input`, streamed in bounded chunks and
+    /// signed with `sha256`, which the caller recorded. A file whose bytes no longer match fails
+    /// here, and the store refuses its body.
+    pub(super) async fn write(
+        &self,
+        key: &str,
+        mut input: std::fs::File,
+        size: u64,
+        sha256: &str,
+    ) -> Result<()> {
+        let expected = sha256.to_owned();
+        let (sender, receiver) = tokio::sync::mpsc::channel::<std::io::Result<Vec<u8>>>(4);
+        let reader = tokio::task::spawn_blocking(move || -> Result<()> {
+            let changed = || std::io::Error::other("copied file changed during write-back");
+            let mut hash = Sha256::new();
+            let mut total = 0u64;
+            let mut buffer = vec![0u8; BODY_CHUNK];
+            loop {
+                let count = match input.read(&mut buffer) {
+                    Ok(count) => count,
+                    Err(error) => {
+                        let _ = sender.blocking_send(Err(changed()));
+                        return Err(error.into());
+                    }
+                };
+                if count == 0 {
+                    break;
+                }
+                total += count as u64;
+                if total > size {
+                    let _ = sender.blocking_send(Err(changed()));
+                    bail!("copied file changed during write-back");
+                }
+                hash.update(&buffer[..count]);
+                if sender.blocking_send(Ok(buffer[..count].to_vec())).is_err() {
+                    bail!("S3 Workspace Volume write ended early");
+                }
+            }
+            if total != size || format!("{:x}", hash.finalize()) != expected {
+                let _ = sender.blocking_send(Err(changed()));
+                bail!("copied file changed during write-back");
+            }
+            Ok(())
+        });
+        let body =
+            reqwest::Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(receiver));
+        let sent = self
+            .request(Method::PUT, self.object_url(key)?, Some((sha256, size)))?
+            .timeout(transfer_timeout(size))
+            .body(body)
             .send()
+            .await;
+        let read = reader
             .await
             .map_err(|_| anyhow::anyhow!("S3 Workspace Volume write failed"))?;
+        let response = sent.map_err(|_| anyhow::anyhow!("S3 Workspace Volume write failed"))?;
         ensure!(
             response.status() == StatusCode::OK,
             "S3 Workspace Volume write was refused"
         );
-        Ok(())
+        read
     }
 }
 
@@ -324,7 +385,7 @@ fn endpoint_url(value: &str) -> Result<Url> {
     let invalid =
         || anyhow::anyhow!("S3 Workspace Volume endpoint must be a canonical HTTPS origin");
     let parsed = Url::parse(value).map_err(|_| invalid())?;
-    let loopback_http = cfg!(test)
+    let loopback_http = cfg!(any(test, feature = "test-fixtures"))
         && parsed.scheme() == "http"
         && parsed.host_str().is_some_and(|host| {
             host.trim_matches(['[', ']'])
@@ -530,6 +591,7 @@ pub(super) mod fake {
         let app = Router::new()
             .route("/bucket-a", get(list))
             .fallback(object)
+            .layer(axum::extract::DefaultBodyLimit::disable())
             .with_state(store);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

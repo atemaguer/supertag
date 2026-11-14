@@ -632,7 +632,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: volumes::VolumeCommand,
     },
-    /// Register a file Volume for read-only Workspace data.
+    /// Register a Volume whose files Tasks receive as Workspace copies.
     WorkspaceVolume {
         #[command(flatten)]
         connection: Connection,
