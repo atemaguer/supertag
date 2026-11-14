@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
 import { checkLinks, checkOrphans } from "./docs-links.mjs";
-import { versionProblems } from "./docs-versions.mjs";
+import { versionProblems, workspaceVersion } from "./docs-versions.mjs";
 import { checkDocumentationVocabulary } from "./docs-vocabulary.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,7 +23,7 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
-const release = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+const release = workspaceVersion(readFileSync(join(root, "rust/Cargo.toml"), "utf8"));
 // Keep the Objective-writing entry point available from the documentation index.
 const objectiveGuide = "guides/write-an-objective.md";
 if (!existsSync(join(root, "docs", objectiveGuide)))
@@ -144,7 +144,9 @@ function commandsIn(text) {
         command = `${command.trimEnd().slice(0, -1)} ${lines[++end].trim()}`;
       // Allow leading environment assignments: FOO=bar supertag ...
       const match = command.match(/^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*supertag(\s.*)?$/u);
-      if (match) found.push({ line: index + 1, command: `supertag${match[1] ?? ""}` });
+      // `supertag 0.3.0-alpha.1` is version output, not a command; docs-versions checks it.
+      const output = /^\s*supertag\s+\d+\.\d+\.\d+\S*\s*$/u.test(command);
+      if (match && !output) found.push({ line: index + 1, command: `supertag${match[1] ?? ""}` });
       index = end;
     } else if (!fence) {
       for (const span of line.matchAll(/`(supertag\s[^`]+)`/gu))

@@ -496,14 +496,24 @@ Record user-facing changes in `CHANGELOG.md` under `## [Unreleased]`, in the `Ad
 Task or feature branch, so parallel branches don't conflict on the file. Keep each entry to one
 concise bullet.
 
-At release time, rename `[Unreleased]` to the version and date, add an empty `[Unreleased]` above
-it, set the version in `rust/Cargo.toml` and the package versions, and run the version checks in
-the same release commit:
+`workspace.package.version` in `rust/Cargo.toml` is the single source of truth for the release
+version. At release time, rename `[Unreleased]` to the version and date, add an empty
+`[Unreleased]` above it, set the version in `rust/Cargo.toml`, and in the same release commit
+rewrite every other manifest from it, refresh the lockfiles, and run the version checks:
 
 ```sh
-pnpm exec vitest run tests/release-version.test.ts
+python3 rust/scripts/release_version.py --sync
+(cd rust && cargo metadata --format-version 1 > /dev/null)
+(cd apps/desktop/src-tauri && cargo metadata --format-version 1 > /dev/null)
+(cd sdks/python && uv lock)
 python3 rust/scripts/release_version.py vVERSION
+pnpm exec vitest run tests/release-version.test.ts
 ```
+
+`--sync` rewrites every `package.json`, the Python SDK, the desktop app, and the version the
+bundled TypeScript CLI reports. CI runs `release_version.py --check` through the `rust/scripts`
+tests on every pull request, so any file that drifts from `rust/Cargo.toml` fails the build. The
+documentation check reads the same version: docs may name only the current release.
 
 ## Test an installable release
 
@@ -532,7 +542,8 @@ installer, checksums, the PyPI package, and documentation. Release tooling in th
 does not mean a release has been published.
 
 The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
-`sdks/python/pyproject.toml` and `packages/supertag-ai/package.json` must carry the same version.
+every manifest and lockfile must carry the same version. The release and SDK publish workflows run
+`release_version.py` on the tag before they build or publish anything.
 A release takes three steps, so the README's `releases/latest` installer URL never points at a
 release without its archives:
 

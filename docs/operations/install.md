@@ -48,11 +48,11 @@ another way, for example with `npm uninstall -g supertag-ai`, before you run it.
 Python applications need Python 3.10 or newer. Install the matching SDK:
 
 ```sh
-python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag==0.3.0a1'
 ```
 
 The explicit version selects this prerelease; pip otherwise selects an older stable release.
-Python spells `0.2.0-alpha.9` as `0.2.0a9`. The SDK is a library; use the CLI above to
+Python spells `0.3.0-alpha.1` as `0.3.0a1`. The SDK is a library; use the CLI above to
 manage the Control Plane and built-in Workers. See [Build a Python Worker](../guides/python-workers.md)
 for optional Codex and OpenAI Agents integrations.
 
@@ -96,8 +96,8 @@ supertag version
 ```
 
 ```text
-supertag 0.3.0
-Local services: 0.3.0 (process 41872)
+supertag 0.3.0-alpha.1
+Local services: 0.3.0-alpha.1 (process 41872)
 ```
 
 When the local services run a different version, it says so; restart them with `supertag down`

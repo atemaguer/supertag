@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { pythonVersion } from "./docs-versions.mjs";
+import { pythonVersion, workspaceVersion } from "./docs-versions.mjs";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const files = [
@@ -36,7 +36,7 @@ test("application guides install the published TypeScript SDK", () => {
 });
 
 test("Python installation pins the matching PyPI prerelease", () => {
-  const version = pythonVersion(JSON.parse(read("package.json")).version);
+  const version = pythonVersion(workspaceVersion(read("rust/Cargo.toml")));
   for (const file of [
     "README.md",
     "docs/operations/install.md",

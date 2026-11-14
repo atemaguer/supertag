@@ -4,7 +4,8 @@
 set -euo pipefail
 
 release_tag=$1
-version=${release_tag#v}
+# The archive names carry rust/Cargo.toml's version; refuse a tag that names another one.
+version=$(python3 "$(dirname "$0")/../rust/scripts/release_version.py" "$release_tag")
 assets=$(gh release view "$release_tag" --repo "${GITHUB_REPOSITORY:-atemaguer/supertag}" \
   --json isDraft,assets --jq 'if .isDraft then "draft" else .assets[].name end')
 if [[ $assets == draft ]]; then

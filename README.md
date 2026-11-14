@@ -171,7 +171,7 @@ npm install supertag-ai
 For Python applications, install the SDK version that matches your Control Plane:
 
 ```sh
-python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag==0.3.0a1'
 ```
 
 [Build a custom Worker or harness](docs/guides/custom-workers.md) · [Use the Python SDK](docs/guides/python-workers.md) · [Check API stability](docs/reference/api-stability.md)

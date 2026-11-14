@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pythonVersion, versionProblems } from "./docs-versions.mjs";
+import { pythonVersion, versionProblems, workspaceVersion } from "./docs-versions.mjs";
 
 const current = "0.2.0-alpha.2";
 
@@ -42,4 +42,14 @@ test("flags an old release and an archive inside a file name", () => {
     "docs/guides/x.md:2: names 0.2.0a1; the release is 0.2.0-alpha.2",
     "docs/guides/x.md:2: names a package archive; link docs/operations/install.md",
   ]);
+});
+
+test("the release version is rust/Cargo.toml's workspace version", () => {
+  assert.equal(
+    workspaceVersion(
+      '[package]\nversion = "9.9.9"\n\n[workspace.package]\nedition = "2024"\nversion = "0.3.0-alpha.1"\n',
+    ),
+    "0.3.0-alpha.1",
+  );
+  assert.throws(() => workspaceVersion('[package]\nversion = "9.9.9"\n'), /no workspace version/u);
 });

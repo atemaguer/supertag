@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.0-alpha.1]
+
 ### Changed
 
 - The installer script installs the native SuperTag release from GitHub Releases: a

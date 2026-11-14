@@ -762,7 +762,7 @@ pub(crate) async fn execute(
 ) -> Result<(String, String)> {
     let mut transport = Transport::new(input, output);
     let mut buffered = Vec::new();
-    transport.call("initialize",json!({"clientInfo":{"name":"supertag","version":"0.1.0"},"capabilities":{"experimentalApi":questions.enabled()}}),&mut buffered).await?;
+    transport.call("initialize",json!({"clientInfo":{"name":"supertag","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":questions.enabled()}}),&mut buffered).await?;
     transport
         .write(json!({"method":"initialized","params":{}}))
         .await?;

@@ -49,13 +49,13 @@ service.
 
 ## 1. Install the Python SDK
 
-The SDK's Python distribution is named `supertag`. This guide documents version `0.2.0a9`,
-Python's spelling of `0.2.0-alpha.9`.
+The SDK's Python distribution is named `supertag`. This guide documents version `0.3.0a1`,
+Python's spelling of `0.3.0-alpha.1`.
 
 Install it from PyPI. Pin this prerelease explicitly so pip selects the SDK that matches the CLI:
 
 ```sh
-python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag==0.3.0a1'
 ```
 
 Confirm the installed version:
@@ -64,7 +64,7 @@ Confirm the installed version:
 python -c "from importlib.metadata import version; print(version('supertag'))"
 ```
 
-It reports the matching release; installed metadata may spell it `0.2.0-alpha.9`.
+It reports the matching release; installed metadata may spell it `0.3.0-alpha.1`.
 
 ## 2. Write the Worker
 
@@ -248,9 +248,9 @@ The SDK provides two optional OpenAI integrations. Install the one your Worker u
 both while comparing them:
 
 ```sh
-python -m pip install 'supertag[codex]==0.2.0a9'
-python -m pip install 'supertag[agents]==0.2.0a9'
-python -m pip install 'supertag[codex,agents]==0.2.0a9'
+python -m pip install 'supertag[codex]==0.3.0a1'
+python -m pip install 'supertag[agents]==0.3.0a1'
+python -m pip install 'supertag[codex,agents]==0.3.0a1'
 ```
 
 ### 2. Run the Codex or Agents SDK Worker
@@ -383,7 +383,7 @@ A Python application can also manage the Control Plane through the operator API.
 a Tag a message, read the inbox, or watch events. Install the client with the `operator` extra.
 
 ```sh
-python -m pip install 'supertag[operator]==0.2.0a9'
+python -m pip install 'supertag[operator]==0.3.0a1'
 ```
 
 Then call an RPC with the admin token or an
@@ -412,7 +412,7 @@ RPC.
   that owns the credential; see [Connection rules](#connection-rules).
 - **The connection URL is rejected.** Remote hosts must use HTTPS or WSS, without credentials,
   query parameters, or a fragment; see [Connection rules](#connection-rules).
-- **`pip` installs an older SDK.** Pin `supertag==0.2.0a9` as in
+- **`pip` installs an older SDK.** Pin `supertag==0.3.0a1` as in
   [step 1](#1-install-the-python-sdk). pip does not select this prerelease by default.
 - **The Worklet keeps reconnecting.** See
   [A remote Worklet keeps disconnecting](troubleshooting.md#a-remote-worklet-keeps-disconnecting).

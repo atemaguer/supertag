@@ -26,15 +26,15 @@ Python Worker dependencies are declared separately in [pyproject.toml](pyproject
 Install the published SDK from PyPI. Pin this prerelease explicitly:
 
 ```sh
-python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag==0.3.0a1'
 ```
 
 Install either harness integration, or both:
 
 ```sh
-python -m pip install 'supertag[codex]==0.2.0a9'
-python -m pip install 'supertag[agents]==0.2.0a9'
-python -m pip install 'supertag[codex,agents]==0.2.0a9'
+python -m pip install 'supertag[codex]==0.3.0a1'
+python -m pip install 'supertag[agents]==0.3.0a1'
+python -m pip install 'supertag[codex,agents]==0.3.0a1'
 ```
 
 The distribution and import namespace both use the product name:
@@ -156,7 +156,7 @@ The `operator` extra installs the Connect client and its dependencies, `connect-
 `protobuf`.
 
 ```sh
-python -m pip install 'supertag[operator]==0.2.0a9'
+python -m pip install 'supertag[operator]==0.3.0a1'
 ```
 
 `OperatorClient` calls the services asynchronously, and `OperatorClientSync` calls them

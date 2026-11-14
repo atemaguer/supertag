@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(refused.code(), Code::FailedPrecondition);
         assert!(
             refused.message().starts_with(
-                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Worker Host (SuperTag 0.1.0[31m) offered [1]"
+                &format!("incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [2], but the connecting Worker Host (SuperTag 0.1.0[31m) offered [1]", build_version())
             ),
             "{}",
             refused.message()
@@ -500,7 +500,7 @@ mod tests {
         let old = fence.refusal(operator, &headers(Some("1"))).unwrap();
         assert!(
             old.message().starts_with(
-                "incompatible SuperTag protocol: this Gateway (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+                &format!("incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [2], but the call names protocol 1", build_version())
             ),
             "{}",
             old.message()

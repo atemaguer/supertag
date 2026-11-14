@@ -213,7 +213,7 @@ To find bundled collaboration surface guides and manifests, run `supertag setup 
 The matching Python SDK is published separately as `supertag` on PyPI:
 
 ```sh
-python -m pip install 'supertag==0.2.0a9'
+python -m pip install 'supertag==0.3.0a1'
 ```
 
 Pin the prerelease explicitly so pip selects the matching SDK. Python applications can compose
