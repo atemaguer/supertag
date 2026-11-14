@@ -19,8 +19,8 @@ A conversation with a Tag is a Session of its own. It can happen in the SuperTag
 in a Slack thread, or on a GitHub issue. A quick question gets an answer. For longer work the Tag
 starts a work Session, tells you, and reports the result back in the same conversation. When the
 work needs you, the question or approval appears there too, and your next message continues the
-conversation. The Tag sees its open Objectives in every conversation, so you can ask how one is
-going from anywhere. See [Talk to a Tag](../guides/talk-to-a-tag.md).
+conversation. An Objective's progress is in its own conversation and in `supertag describe
+objective`. See [Talk to a Tag](../guides/talk-to-a-tag.md).
 
 ## Declare an outcome, then steer the work
 
@@ -37,16 +37,16 @@ requirements change. You do not need to supply every next step.
 
 Completion records an assessment and its evidence. SuperTag does not independently prove that
 the assessment is true. Request a separate reviewer and human approval in the outcome when
-those checks matter. The owner normally completes the Objective; when the statement requires
-a person's review, it submits the result for that decision. An Objective that asks you a question
+those checks matter. The owner reports its assessment, and a person completes the Objective, or
+approves the assessment when the owner submitted it for review. An Objective that asks you a question
 waits for your answer: its turn ends, and the answer starts the next one. The question appears in
 the operator inbox and in the Objective overview.
 
 Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
 Objectives but share one Control Plane, its rules, and its record of the work.
 The **Control Plane** stores the organization and schedules work. A **Worker Host** is a machine
-or sandbox supplying execution capacity. A **Worker** completes a Task there, using an execution
-system such as a coding harness. Work can span hosts and harness sessions while the Objective
+or sandbox supplying execution capacity. It runs each Task through a **harness**, an agent system
+such as Codex or Claude Code. Work can span hosts and harness sessions while the Objective
 and its results remain recorded. See [Define and complete an Objective](../guides/objectives.md).
 
 ## Or use an operator thread
@@ -100,5 +100,5 @@ engineering work, with recorded ownership, work, and limits across sessions and 
 environments.
 
 For details, see [multiplayer continuity](multiplayer.md),
-[Worker Hosts and Workers](workers.md), and
+[Worker Hosts and harnesses](workers.md), and
 [monetary budgets](../reference/coordination.md#monetary-budgets).

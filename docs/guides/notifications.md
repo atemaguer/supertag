@@ -3,7 +3,7 @@
 An operator notification alerts you when an item needs attention in the SuperTag inbox. For
 example, a **Task**, one assignment accepted for an AI agent, can wait for approval and alert the
 computer running `supertag up`. Use
-notifications when you do not want to keep checking `supertag list inbox`.
+notifications when you do not want to keep checking `supertag get inbox-item`.
 
 ## Choose destinations
 
@@ -35,8 +35,8 @@ configured destination with `supertag test notification`. Add `--objective ID` t
 specific **Objective**, an outcome owned by a [Tag](../reference/glossary.md#tag), in its link
 back. The command reports `delivered`, `unavailable`,
 `not configured`, or `failed` for each destination. It sends immediately without creating an
-inbox item. Use `supertag list inbox` to inspect a notification's delivery status. A notification points to
-`supertag describe objective ID` for one item or `supertag list inbox --objective ID` for a
+inbox item. Use `supertag get inbox-item` to inspect a notification's delivery status. A notification points to
+`supertag describe objective ID` for one item or `supertag get inbox-item --objective ID` for a
 digest.
 
 SuperTag sends one alert per operator inbox item: approval requests, an Objective's questions,

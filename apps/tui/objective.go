@@ -10,31 +10,34 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // postsShown is how many of the newest Workstream posts the Objective view shows.
 const postsShown = 5
 
 // objectiveName is how the rail names an Objective: the first line of its outcome.
-func objectiveName(objective *operatorv1.Objective) string {
+func objectiveName(objective *views.Objective) string {
 	return terminalText(firstLine(objective.GetOutcome()))
 }
 
 // objectiveState is what the rail shows beside an open Objective: why it is held, else its spend
 // against a budget in a currency, else that it is working.
-func objectiveState(objective *operatorv1.Objective) string {
+func objectiveState(objective *views.Objective) string {
 	switch {
 	case objective.GetPausedAt() != nil:
 		return "paused"
-	case objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_BLOCKED:
+	case objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_BLOCKED:
 		return "blocked"
-	case objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_LIMITED:
+	case objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_LIMITED:
 		return "limited"
-	case objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW:
+	case objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW:
 		return "review"
 	}
 	if budget := objective.GetBudget(); budget != nil && budget.GetCurrency() != "" {
+		if objective.GetSpend() == nil {
+			return statusWords(objective.GetStatus())
+		}
 		spent := objective.GetSpend().GetAmountMinor()
 		return shortMoney(spent, budget.GetCurrency()) + "/" + shortMoney(budget.GetLimitMinor(), budget.GetCurrency())
 	}
@@ -42,7 +45,7 @@ func objectiveState(objective *operatorv1.Objective) string {
 }
 
 // openObjective is the open Objective with this ID, or nil.
-func (m model) openObjective(id string) *operatorv1.Objective {
+func (m model) openObjective(id string) *views.Objective {
 	for _, objective := range m.objectives {
 		if objective.GetId() == id {
 			return objective
@@ -65,17 +68,87 @@ func (m model) renderObjective() string {
 		sections = append(sections, errorStyle.Render(wrap.Render("Could not read the Objective: "+err)))
 	}
 	if overview != nil {
-		sections = append(sections, wrap.Render(describeObjective(overview, m.inbox.Items)))
+		team := m.listedTeam(overview.GetObjective().GetTeamId())
+		sections = append(sections, wrap.Render(describeRuntimeObjective(overview, team.GetName())))
+
 	} else if err == "" {
 		sections = append(sections, faint.Render(wrap.Render("Reading the Objective…")))
 	}
 	return strings.Join(sections, "\n\n")
 }
 
+func describeRuntimeObjective(view *views.ObjectiveOverview, teamName string) string {
+	objective := view.GetObjective()
+	state := statusWords(objective.GetStatus())
+	if objective.GetPausedAt() != nil {
+		state += " · paused"
+	}
+	lines := []string{
+		fmt.Sprintf("Objective %s · %s", objective.GetId(), state),
+		"Outcome: " + objective.GetOutcome(),
+		"Owner: " + objective.GetOwnerTag(),
+	}
+	actions := strings.Join(objective.GetRuntimeActions(), ", ")
+	if actions == "" {
+		actions = "none"
+	}
+	lines = append(lines, "Allowed actions: "+actions)
+	if id := objective.GetTeamId(); id != "" {
+		if teamName == "" {
+			teamName = id
+		}
+		lines = append(lines, "Team: "+teamName)
+	}
+	if sessions := view.GetSessions(); len(sessions) > 0 {
+		lines = append(lines, "Owner Session: "+sessions[0].GetId())
+	}
+	use := view.GetBudget()
+	if use != nil && use.LimitMinor != nil && use.SpentMinor == nil {
+		amount := fmt.Sprintf("%d units", use.GetLimitMinor())
+		if use.GetCurrency() != "" {
+			amount = money(use.GetLimitMinor(), use.GetCurrency())
+		}
+		lines = append(lines, "Budget: "+amount+" · spend unavailable")
+	} else {
+		lines = append(lines, budgetLine(use))
+	}
+	if deadline := objective.GetDeadline(); deadline != nil {
+		lines = append(lines, "Deadline: "+timestamp(deadline))
+	}
+	lines = append(lines, commitReviewLines(view.GetCommitReviews(), func(id string) string { return id })...)
+	if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
+		lines = append(lines, "Review with supertag objective review "+shellWord(objective.GetId())+" approve")
+	}
+	lines = append(lines, "", fmt.Sprintf("Revision: %d", objective.GetRevision()), "Session history and delivery details are unavailable.")
+	for i, line := range lines {
+		lines[i] = terminalLines(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func commitReviewLines(reviews []*views.ObjectiveCommitReview, tag func(string) string) []string {
+	if len(reviews) == 0 {
+		return nil
+	}
+	lines := []string{"Commit reviews:"}
+	for _, review := range reviews {
+		verdict := strings.ReplaceAll(review.GetVerdict(), "_", " ")
+		if verdict == "" {
+			verdict = "pending"
+		}
+		line := fmt.Sprintf("  %s · %s · %s", review.GetCommit(), tag(review.GetReviewerTagId()), verdict)
+		if summary := review.GetSummary(); summary != "" {
+			line += " · " + summary
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
 // describeObjective renders an Objective's overview as `supertag describe objective` does: what a
 // person decides on first, then the work, then the details. inbox is what waits on the operator;
 // the items of this Objective show under "Needs you". Every line is filtered for the terminal.
-func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.InboxItem) string {
+func describeObjective(view *views.ObjectiveOverview, inbox []*views.InboxItem) string {
 	objective := view.GetObjective()
 	tag := func(id string) string {
 		if name, ok := view.GetTagNames()[id]; ok {
@@ -92,7 +165,7 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 		"Outcome: "+objective.GetOutcome())
 	if summary := objective.GetCompletionSummary(); summary != "" {
 		label := "Result"
-		if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
+		if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
 			label = "Owner's assessment"
 		}
 		add(label + ": " + summary)
@@ -110,20 +183,7 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 			add(line)
 		}
 	}
-	if reviews := view.GetCommitReviews(); len(reviews) > 0 {
-		add("Commit reviews:")
-		for _, review := range reviews {
-			verdict := strings.ReplaceAll(review.GetVerdict(), "_", " ")
-			if verdict == "" {
-				verdict = "pending"
-			}
-			line := fmt.Sprintf("  %s · %s · %s", review.GetCommit(), tag(review.GetReviewerTagId()), verdict)
-			if summary := review.GetSummary(); summary != "" {
-				line += " · " + summary
-			}
-			add(line)
-		}
-	}
+	add(commitReviewLines(view.GetCommitReviews(), tag)...)
 	add("Owner: " + tag(objective.GetOwnerTagId()))
 	if team := view.GetTeam(); team != nil {
 		members := make([]string, 0, len(team.GetMemberTagIds()))
@@ -167,17 +227,17 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 	}
 
 	var needs []string
-	if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_LIMITED {
+	if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_LIMITED {
 		needs = append(needs,
 			"  The Objective reached its budget or deadline limit. Review the limit summary, then raise the budget or move the deadline to resume it.",
-			"    supertag update objective "+id+" --budget-minor AMOUNT",
-			"    supertag update objective "+id+" --deadline ISO_TIME")
+			"    supertag objective set-limits "+id+" --budget-minor AMOUNT",
+			"    supertag objective set-limits "+id+" --deadline ISO_TIME")
 	}
 	for _, item := range inbox {
 		if item.GetObjectiveId() != objective.GetId() || !item.GetOperatorEligible() {
 			continue
 		}
-		if item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION {
+		if item.GetKind() == views.InboxItemKind_INBOX_ITEM_KIND_QUESTION {
 			if text := item.GetQuestion().GetText(); text != "" {
 				needs = append(needs, asks(tag(objective.GetOwnerTagId()), text)...)
 			} else {
@@ -193,11 +253,11 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 	}
 	for _, item := range view.GetAttention() {
 		switch item.GetKind() {
-		case operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW:
+		case views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW:
 			needs = append(needs, "  The owner submitted the Objective for review.",
 				"    Approve: supertag approve objective "+id,
 				"    Press m to ask for changes.")
-		case operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED, operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_PAUSED:
+		case views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED, views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_PAUSED:
 			needs = append(needs, "  "+item.GetMessage(), "    "+item.GetNextAction())
 		}
 	}
@@ -238,10 +298,10 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 		if task == nil {
 			continue
 		}
-		open := task.GetStatus() == operatorv1.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_PENDING ||
-			task.GetStatus() == operatorv1.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_RUNNING
+		open := task.GetStatus() == views.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_PENDING ||
+			task.GetStatus() == views.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_RUNNING
 		for _, reason := range task.GetExplanations() {
-			if (!closed && open) || reason.GetKind() == operatorv1.TaskExplanationKind_TASK_EXPLANATION_KIND_EXECUTION_FAILED {
+			if (!closed && open) || reason.GetKind() == views.TaskExplanationKind_TASK_EXPLANATION_KIND_EXECUTION_FAILED {
 				add("    " + reason.GetMessage())
 			}
 		}
@@ -272,7 +332,7 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 	if workspaces := objective.GetWorkspaces(); len(workspaces) > 0 {
 		add("  Workspaces: " + strings.Join(workspaces, ", "))
 	}
-	if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_CANCELLED {
+	if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_CANCELLED {
 		cancelled := "time not recorded"
 		if at := objective.GetCancelledAt(); at != nil {
 			cancelled = timestamp(at)
@@ -281,8 +341,8 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 	}
 	for _, item := range view.GetAttention() {
 		switch item.GetKind() {
-		case operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW, operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED,
-			operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_APPROVALS_PENDING:
+		case views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW, views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED,
+			views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_APPROVALS_PENDING:
 			continue
 		}
 		add("  "+item.GetMessage(), "    Next: "+item.GetNextAction())
@@ -329,7 +389,7 @@ func asks(owner, question string) []string {
 }
 
 // budgetLine is the budget in plain words: unlimited, or how much of it was spent.
-func budgetLine(use *operatorv1.ObjectiveBudgetUse) string {
+func budgetLine(use *views.ObjectiveBudgetUse) string {
 	currency := use.GetCurrency()
 	amount := func(minor int64) string {
 		if currency == "" {
@@ -363,7 +423,7 @@ func budgetLine(use *operatorv1.ObjectiveBudgetUse) string {
 	return line + unpriced
 }
 
-func hasDelivery(delivery *operatorv1.TaskDelivery) bool {
+func hasDelivery(delivery *views.TaskDelivery) bool {
 	if delivery == nil {
 		return false
 	}
@@ -372,7 +432,7 @@ func hasDelivery(delivery *operatorv1.TaskDelivery) bool {
 }
 
 // deliveryLines describes what a Task delivered, as the CLI's describe views do.
-func deliveryLines(delivery *operatorv1.TaskDelivery, indent string) []string {
+func deliveryLines(delivery *views.TaskDelivery, indent string) []string {
 	var lines []string
 	if workspace := delivery.GetWorkspace(); workspace.GetHead() != "" {
 		files := ""
@@ -388,9 +448,9 @@ func deliveryLines(delivery *operatorv1.TaskDelivery, indent string) []string {
 	if pr := delivery.GetPullRequest(); pr != nil {
 		state := "draft"
 		switch pr.GetState() {
-		case operatorv1.PullRequestState_PULL_REQUEST_STATE_READY:
+		case views.PullRequestState_PULL_REQUEST_STATE_READY:
 			state = "ready for review"
-		case operatorv1.PullRequestState_PULL_REQUEST_STATE_CLOSED:
+		case views.PullRequestState_PULL_REQUEST_STATE_CLOSED:
 			state = "closed"
 		}
 		lines = append(lines, fmt.Sprintf("%sPull request %s (%s)", indent, pr.GetUrl(), state))
@@ -416,7 +476,7 @@ func deliveryLines(delivery *operatorv1.TaskDelivery, indent string) []string {
 }
 
 // sessionLabel names a Session: the Objective's conversation, or a work Session by its title.
-func sessionLabel(session *operatorv1.ObjectiveSession) string {
+func sessionLabel(session *views.ObjectiveSession) string {
 	if session.GetOwner() {
 		return "Objective conversation"
 	}
@@ -427,7 +487,7 @@ func sessionLabel(session *operatorv1.ObjectiveSession) string {
 }
 
 // sessionStatus is how a Session's latest Task is doing, in a word.
-func sessionStatus(session *operatorv1.ObjectiveSession) string {
+func sessionStatus(session *views.ObjectiveSession) string {
 	task := session.GetLatestTask()
 	if task == nil {
 		return "not started"
@@ -436,7 +496,7 @@ func sessionStatus(session *operatorv1.ObjectiveSession) string {
 }
 
 // statusWords is an Objective status as people read it, such as "ready for review".
-func statusWords(status operatorv1.ObjectiveStatus) string {
+func statusWords(status views.ObjectiveStatus) string {
 	return enumWords(status.String(), "OBJECTIVE_STATUS_")
 }
 
@@ -488,19 +548,19 @@ func shellWord(value string) string {
 }
 
 // itemKindName is an inbox item's kind as the pane title names it.
-func itemKindName(kind operatorv1.InboxItemKind) string {
+func itemKindName(kind views.InboxItemKind) string {
 	switch kind {
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+	case views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		return "approval"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		return "question"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET:
+	case views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET:
 		return "budget"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:
+	case views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:
 		return "limit"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:
 		return "Task"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:
+	case views.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:
 		return "MCP login"
 	}
 	return "item"

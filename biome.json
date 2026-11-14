@@ -33,13 +33,19 @@
       "allowTrailingCommas": false
     }
   },
+  "overrides": [
+    {
+      "includes": ["apps/desktop/src/shadcn.css"],
+      "css": {
+        "parser": { "tailwindDirectives": true }
+      }
+    }
+  ],
   "files": {
     "includes": [
       "**",
-      "!packages/runtime/environments/shared-execution/src/gen",
-      "!packages/runtime/transport/src/gen",
-      "!packages/operator-api/src/gen",
-      "!spec/manifests"
+      "!packages/runtime/sdk/src/rust-harness/gen",
+      "!rust/bindings/typescript/supertag/runtime/v2"
     ]
   }
 }

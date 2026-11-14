@@ -16,6 +16,8 @@ export interface SplitExecutionBridgeOptions {
   workspaceRoot: string;
   /** Staged input mounts outside the checkout. File tools may only read them. */
   readOnlyRoots?: readonly string[];
+  /** Read-write Workspace Volume copies outside the checkout, writable with files:write. */
+  writableRoots?: readonly string[];
   /** Worker-managed Task output directory, writable with files:write. */
   outputDirectory?: string;
   permissions: { filesWrite: boolean; commandsExecute: boolean };
@@ -39,7 +41,7 @@ const schema = (
   additionalProperties: false,
 });
 const string = { type: "string" };
-const definitions: readonly SplitExecutionToolDefinition[] = [
+export const workspaceToolDefinitions: readonly SplitExecutionToolDefinition[] = [
   {
     name: "read",
     description: "Read a UTF-8 workspace file.",
@@ -154,7 +156,7 @@ function integer(value: unknown, fallback: number, maximum: number, minimum = 0)
   return Math.min(value as number, maximum);
 }
 function contained(root: string, path: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
+  return path === root || path.startsWith(root === "/" ? root : `${root}/`);
 }
 function bounded(value: string, bytes: number): string {
   const buffer = Buffer.from(value);
@@ -224,8 +226,10 @@ function globMatcher(pattern: string): (path: string) => boolean {
   };
 }
 
-export function createSplitExecutionBridge(
-  options: SplitExecutionBridgeOptions,
+export function createWorkspaceToolBridge(
+  options: Omit<SplitExecutionBridgeOptions, "environment"> & {
+    environment: Pick<ExecutionEnvironment, "rootDirectory" | "resolvePath" | "read" | "spawn">;
+  },
 ): SplitExecutionBridge {
   const { environment, permissions } = options;
   const root = environment.resolvePath(options.workspaceRoot);
@@ -235,6 +239,10 @@ export function createSplitExecutionBridge(
     ...(options.outputDirectory === undefined
       ? []
       : [{ path: environment.resolvePath(options.outputDirectory), writable: true }]),
+    ...(options.writableRoots ?? []).map((path) => ({
+      path: environment.resolvePath(path),
+      writable: true,
+    })),
     ...(options.readOnlyRoots ?? []).map((path) => ({
       path: environment.resolvePath(path),
       writable: false,
@@ -258,7 +266,7 @@ export function createSplitExecutionBridge(
   const physicalRoots = new Map<string, Promise<string>>();
   let physicalEnvironmentRoot: Promise<string> | undefined;
   let disposed = false;
-  const available = definitions.filter(
+  const available = workspaceToolDefinitions.filter(
     ({ name }) =>
       ((name !== "write" && name !== "edit") || permissions.filesWrite) &&
       (name !== "command" || (permissions.filesWrite && permissions.commandsExecute)),
@@ -323,21 +331,22 @@ export function createSplitExecutionBridge(
   }
   async function realPath(path: string, signal?: AbortSignal): Promise<string> {
     // Resolve existing ancestors inside the execution environment, including symlinks.
+    // The sentinel preserves whitespace removed by shell command substitution.
     const result = await run(
       {
         command: "sh",
         args: [
           "-c",
-          `target=$1; suffix=''; while [ ! -e "$target" ] && [ ! -L "$target" ]; do suffix="/$(basename "$target")$suffix"; target=$(dirname "$target"); done; resolved=$(realpath "$target") || exit 1; printf '%s%s\\n' "$resolved" "$suffix"`,
+          `target=$1; suffix=''; while [ ! -e "$target" ] && [ ! -L "$target" ]; do suffix="/$(basename "$target")$suffix"; target=$(dirname "$target"); done; resolved=$(realpath "$target" && printf x) || exit 1; resolved=\${resolved%??}; printf '%s%s\\n' "$resolved" "$suffix"`,
           "split-path",
           path,
         ],
       },
       signal,
     );
-    if (result.exitCode !== 0 || !result.stdout.trim())
+    if (result.exitCode !== 0 || !result.stdout.startsWith("/") || !result.stdout.endsWith("\n"))
       throw new Error(`Cannot resolve execution path: ${path}`);
-    return result.stdout.trimEnd();
+    return result.stdout.slice(0, -1);
   }
   async function resolvePath(
     inputPath: string,
@@ -414,7 +423,7 @@ export function createSplitExecutionBridge(
   ): Promise<SplitExecutionToolResult> {
     if (disposed) throw new Error("Split execution bridge is disposed");
     signal?.throwIfAborted();
-    if (!definitions.some((definition) => definition.name === name))
+    if (!workspaceToolDefinitions.some((definition) => definition.name === name))
       throw new Error(`Unknown split execution tool: ${name}`);
     if ((name === "write" || name === "edit") && !permissions.filesWrite)
       throw new Error("files:write permission is required");

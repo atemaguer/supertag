@@ -1,18 +1,5 @@
 import { expect, it } from "vitest";
-import {
-  isSensitiveName,
-  redactText,
-  sensitiveEnvironmentValues,
-  sensitiveFieldValues,
-} from "./src/redaction.js";
-
-it("tolerates cyclic invalid specs", () => {
-  const spec: Record<string, unknown> = {
-    nested: { PROVIDER_API_KEY: "private-value" },
-  };
-  spec["cycle"] = spec;
-  expect(sensitiveFieldValues(spec)).toEqual(["private-value"]);
-});
+import { isSensitiveName, redactText, sensitiveEnvironmentValues } from "./src/redaction.js";
 
 it("ignores tiny, boolean and short numeric host hints", () => {
   expect(
@@ -172,72 +159,12 @@ it("precision F2 distinguishes URL passwords from ordinary host words", () => {
   );
 });
 
-it("precision F3 preserves manifest keys in events", () => {
-  const event = {
-    type: "workspace.mounts.copied",
-    objects: [{ key: "source/object.txt" }],
-    pat: "pattern-name",
-    sk: "sort-key-value",
-  };
-  const secrets = sensitiveFieldValues({ ...event, API_KEY: "long-secret", BRANCH_KEY: "main" });
-  expect(secrets).toEqual(["long-secret"]);
-  expect(redactText(JSON.stringify(event), secrets)).toBe(JSON.stringify(event));
-});
-
 it("precision F4 keeps endpoint paths and stops userinfo at whitespace", () => {
   const diagnostic = "http://localhost:8080/api failed for admin@example.com";
   expect(redactText(diagnostic, [])).toBe(diagnostic);
   expect(redactText("https://user:password@host/path admin@example.com", [])).toBe(
     "https://[REDACTED]@host/path admin@example.com",
   );
-});
-
-it("redacts short, numeric, and boolean credentials the host resolved for a server", () => {
-  const secrets = sensitiveFieldValues({
-    runtimeEnvironment: {
-      DB_PASSWORD: "hunter2",
-      PIN_TOKEN: "12345678",
-      GITHUB_APP_ID: "4242",
-      FLAG_SECRET: "true",
-    },
-  });
-  expect([...secrets].sort()).toEqual(["12345678", "hunter2", "true"]);
-  expect(redactText("login hunter2 pin 12345678 app 4242", secrets)).toBe(
-    "login [REDACTED] pin [REDACTED] app 4242",
-  );
-  // Explicit password and token names also identify short host credentials.
-  expect(
-    sensitiveEnvironmentValues({
-      DB_PASSWORD: "hunter2",
-      PIN_TOKEN: "12345678",
-    }),
-  ).toEqual(["12345678", { lowConfidence: "hunter2" }]);
-});
-
-it("redacts tiny, numeric, and boolean resolved secrets and encoded copies everywhere", () => {
-  const secrets = sensitiveFieldValues({
-    GITHUB_APP_ID: "1",
-    BRANCH_KEY: "main",
-    runtimeEnvironment: { DB_PASSWORD: "hunter2", PIN_TOKEN: "12345678", FLAG_SECRET: "true" },
-    runtimeHeaders: { authorization: "abc" },
-  });
-  expect(
-    redactText(
-      "exit code 1 main hunter2 hunter2x xhunter2 true untrue 123456789 abc abcd",
-      secrets,
-    ),
-  ).toBe(
-    "exit code 1 main [REDACTED] [REDACTED]x x[REDACTED] [REDACTED] un[REDACTED] [REDACTED]9 [REDACTED] [REDACTED]d",
-  );
-  expect(redactText("aHVudGVyMg== YWJj MTIzNDU2Nzg=", secrets)).toBe(
-    "[REDACTED] [REDACTED] [REDACTED]",
-  );
-});
-
-it("redacts diagnostic encodings of short resolved passwords", () => {
-  const secrets = sensitiveFieldValues({ runtimeEnvironment: { DB_PASSWORD: "hunter2" } });
-  const diagnostic = String.raw`h\u0075nter2 h%75nter2`;
-  expect(redactText(diagnostic, secrets)).toBe("[REDACTED] [REDACTED]");
 });
 
 it.each([
@@ -293,18 +220,9 @@ it.each(["PASSWORD_STORE_DIR", "SECRET_STORE", "TOKEN_FILE", "PASSWORD_PATH"])(
   (name) => {
     for (const value of ["/home/user/.password-store", "local", "development"]) {
       expect(sensitiveEnvironmentValues({ [name]: value })).toEqual([]);
-      expect(sensitiveFieldValues({ runtimeEnvironment: { [name]: value } })).toEqual([]);
     }
   },
 );
-
-it("preserves resolved application IDs and ordinary standalone numbers", () => {
-  const secrets = sensitiveFieldValues({
-    runtimeEnvironment: { APP_ID: "1", GITHUB_APP_ID: "4242" },
-  });
-  expect(secrets).toEqual([]);
-  expect(redactText("exit code 1 app 4242", secrets)).toBe("exit code 1 app 4242");
-});
 
 it.each([
   "pa'ssw0rd",
@@ -482,9 +400,6 @@ it.each(["NPM_AUTH_TOKENFILE", "CLIENT_SECRET_PROFILE", "secretStore", "authToke
   (name) => {
     expect(isSensitiveName(name)).toBe(true);
     expect(sensitiveEnvironmentValues({ [name]: "private-value" })).toEqual(["private-value"]);
-    expect(sensitiveFieldValues({ runtimeEnvironment: { [name]: "private-value" } })).toEqual([
-      "private-value",
-    ]);
   },
 );
 

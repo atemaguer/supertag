@@ -21,6 +21,7 @@ const (
 	commandCreateObjective
 	commandSwitchControlPlane
 	commandOpenInbox
+	commandTaskFiles
 )
 
 // paletteCommand is one row of the palette: what it does, and what it applies to.
@@ -67,9 +68,14 @@ func (a *app) commands() []paletteCommand {
 			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
 			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
-	if len(a.contexts) > 1 {
-		out = append(out, paletteCommand{commandSwitchControlPlane, "Switch Control Plane", contextLabel(a.contexts[a.current]) + " · " + switchKey})
+	about := "Add a Control Plane"
+	if a.hasTarget {
+		about = contextLabel(a.contexts[a.current])
 	}
+	out = append(out, paletteCommand{commandSwitchControlPlane, "Control Planes · add or switch", about + " · " + switchKey})
+
+	out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})
+
 	waiting := fmt.Sprintf("%d waiting", len(a.inner.inbox.Items))
 	if a.inner.inbox.Truncated {
 		waiting = fmt.Sprintf("%d+ waiting", len(a.inner.inbox.Items))
@@ -157,6 +163,8 @@ func (a *app) run(id commandID, outcome string) tea.Cmd {
 		cmd = a.inner.openPicker()
 	case commandCreateObjective:
 		cmd = a.inner.openObjectiveForm(outcome)
+	case commandTaskFiles:
+		return a.openTaskFiles()
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
 	}

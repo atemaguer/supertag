@@ -1,6 +1,6 @@
 {
   "name": "@supertag/core",
-  "version": "0.2.0-alpha.9",
+  "version": "0.3.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -16,8 +16,5 @@
   "scripts": {
     "build": "tsc --build",
     "typecheck": "tsc --build --pretty false"
-  },
-  "dependencies": {
-    "zod": "4.4.3"
   }
 }

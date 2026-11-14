@@ -1,0 +1,30 @@
+[package]
+name = "supertag-github"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = []
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+libc.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
+ring = "0.17"
+rustls-pki-types = { version = "1", features = ["std"] }
+serde_json.workspace = true
+supertag-protocol.workspace = true
+supertag-workspaces = { path = "../workspaces" }
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
+tonic.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+axum = "0.8"

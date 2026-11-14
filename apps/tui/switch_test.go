@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // testConnector builds models as testModel does, without the watch stream, and records the
@@ -65,18 +65,18 @@ func runApp(t *testing.T, a *app, cmd tea.Cmd) {
 
 func appScreen(a *app) string { return ansi.Strip(a.View().Content) }
 
-func host(id string, phase operatorv1.WorkerHostPhase) *operatorv1.WorkerHost {
-	return &operatorv1.WorkerHost{Metadata: &operatorv1.Metadata{Id: id, Name: id}, Phase: phase}
+func host(id string, phase views.WorkerHostPhase) *views.WorkerHost {
+	return &views.WorkerHost{Metadata: &views.Metadata{Id: id, Name: id}, Phase: phase}
 }
 
 func TestTheStatusBarSummarizesTheWorkerHosts(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("alpha"), hostList: func() []*operatorv1.WorkerHost {
-		return []*operatorv1.WorkerHost{
-			host("laptop", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY),
-			host("ci", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY),
-			host("old", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED),
-			host("modal", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE),
-			host("box", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING),
+	fake := &fakeControlPlane{tags: tags("alpha"), hostList: func() []*views.WorkerHost {
+		return []*views.WorkerHost{
+			host("laptop", views.WorkerHostPhase_WORKER_HOST_PHASE_READY),
+			host("ci", views.WorkerHostPhase_WORKER_HOST_PHASE_READY),
+			host("old", views.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED),
+			host("modal", views.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE),
+			host("box", views.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING),
 		}
 	}}
 	m := start(t, testModel(t, fake))
@@ -84,11 +84,11 @@ func TestTheStatusBarSummarizesTheWorkerHosts(t *testing.T) {
 		t.Fatalf("the summary shows before the hosts are read:\n%s", screen(m))
 	}
 	m = run(t, m, m.reloadHosts())
-	if !strings.Contains(screen(m), "Worker Hosts: 2 ready, 1 draining, 1 unreachable") {
+	if !strings.Contains(screen(m), "Worker Hosts: 2 ready, 1 draining, 1 offline") {
 		t.Fatalf("screen:\n%s", screen(m))
 	}
 
-	fake.hostList = func() []*operatorv1.WorkerHost { return nil }
+	fake.hostList = func() []*views.WorkerHost { return nil }
 	m = run(t, m, m.reloadHosts())
 	if !strings.Contains(screen(m), "no Worker Hosts") {
 		t.Fatalf("screen:\n%s", screen(m))
@@ -123,8 +123,8 @@ func TestTheHostTickRereadsTheWorkerHosts(t *testing.T) {
 
 func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 	tagRefresh, hostRefresh = time.Millisecond, time.Millisecond
-	alpha := &fakeControlPlane{token: "alpha-token", tags: tags("builder"), hostList: func() []*operatorv1.WorkerHost {
-		return []*operatorv1.WorkerHost{host("laptop", operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY)}
+	alpha := &fakeControlPlane{token: "alpha-token", tags: tags("builder"), hostList: func() []*views.WorkerHost {
+		return []*views.WorkerHost{host("laptop", views.WorkerHostPhase_WORKER_HOST_PHASE_READY)}
 	}}
 	beta := &fakeControlPlane{token: "beta-token", tags: tags("reviewer", "planner")}
 	alphaServer, betaServer := alpha.start(t), beta.start(t)
@@ -191,7 +191,7 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 	}
 }
 
-func TestOneControlPlaneOffersNoSwitch(t *testing.T) {
+func TestOneControlPlaneStillOpensTheListToAddAnother(t *testing.T) {
 	fake := &fakeControlPlane{tags: tags("builder")}
 	server := fake.start(t)
 	var started []context.Context
@@ -202,8 +202,8 @@ func TestOneControlPlaneOffersNoSwitch(t *testing.T) {
 	t.Cleanup(a.stop)
 	a.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	if a.choosing || strings.Contains(appScreen(a), "ctrl+p") {
-		t.Fatalf("one Control Plane must offer no switch:\n%s", appScreen(a))
+	if !a.choosing || !strings.Contains(appScreen(a), "a add") {
+		t.Fatalf("one Control Plane must still offer adding another:\n%s", appScreen(a))
 	}
 }
 
@@ -221,7 +221,7 @@ func TestAFailedSwitchKeepsTheCurrentControlPlane(t *testing.T) {
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	a.Update(key(tea.KeyDown))
 	a.Update(key(tea.KeyEnter))
-	if !a.choosing || a.current != 0 || started[0].Err() != nil || !strings.Contains(appScreen(a), "invalid Control Plane URL") {
+	if !a.choosing || a.current != 0 || started[0].Err() != nil || !strings.Contains(appScreen(a), "Control Plane URL must use http, https, ws or wss") {
 		t.Fatalf("choosing=%v current=%d screen:\n%s", a.choosing, a.current, appScreen(a))
 	}
 }

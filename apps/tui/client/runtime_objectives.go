@@ -1,0 +1,218 @@
+package client
+
+import (
+	"context"
+	"math"
+	"time"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/atemaguer/supertag/apps/tui/views"
+	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
+)
+
+func (c *runtimeClient) listOpenObjectives(ctx context.Context) ([]*views.Objective, error) {
+	const pageSize = 12
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	var open []*views.Objective
+	after := ""
+	for range maxObjectivePages {
+		res, err := c.objectives.ListObjectives(ctx, connect.NewRequest(&v2.ListObjectivesRequest{Limit: pageSize, AfterId: after}))
+		if err != nil {
+			return nil, apiError(err)
+		}
+		page := res.Msg.GetObjectives()
+		for _, objective := range page {
+			if !Closed(objectiveStatus(objective.GetStatus())) {
+				open = append(open, runtimeObjective(objective))
+			}
+		}
+		if len(page) < pageSize || page[len(page)-1].GetObjectiveId() == after {
+			break
+		}
+		after = page[len(page)-1].GetObjectiveId()
+	}
+	return open, nil
+}
+
+func (c *runtimeClient) createObjective(ctx context.Context, objective NewObjective) (*views.CreateObjectiveResponse, error) {
+	if objective.Workspace != "" {
+		return nil, &APIError{Code: connect.CodeFailedPrecondition, Message: "Configure the Workspace on the owner Tag. This Control Plane uses the Tag's Workspace for its Objective."}
+	}
+	id := objective.ID
+	if id == "" {
+		var err error
+		id, err = idempotencyKey()
+		if err != nil {
+			return nil, err
+		}
+	}
+	body := &v2.CreateObjectiveRequest{
+		OperationId: id, ObjectiveId: id, OwnerTagId: objective.Owner, Outcome: objective.Outcome,
+	}
+	if objective.Team != "" {
+		body.TeamId = proto.String(objective.Team)
+	}
+	if objective.Budget != nil {
+		if objective.Budget.GetLimitMinor() < 0 {
+			return nil, &APIError{Code: connect.CodeInvalidArgument, Message: "The budget must be nonnegative."}
+		}
+		limit := uint64(objective.Budget.GetLimitMinor())
+		body.BudgetLimitMinor = &limit
+		if currency := objective.Budget.GetCurrency(); currency != "" {
+			body.BudgetCurrency = &currency
+		}
+	}
+	return retrying(ctx, func(ctx context.Context) (*views.CreateObjectiveResponse, error) {
+		res, err := c.objectives.CreateObjective(ctx, connect.NewRequest(body))
+		if err != nil {
+			return nil, err
+		}
+		return &views.CreateObjectiveResponse{
+			Objective: runtimeObjective(res.Msg), StartedTaskId: res.Msg.GetStartingTaskId(),
+		}, nil
+	})
+}
+
+func (c *runtimeClient) getObjective(ctx context.Context, id string) (*v2.Objective, error) {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	res, err := c.objectives.GetObjective(ctx, connect.NewRequest(&v2.GetObjectiveRequest{ObjectiveId: id}))
+	if err != nil {
+		return nil, apiError(err)
+	}
+	if res.Msg.GetObjectiveId() != id {
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different Objective."}
+	}
+	return res.Msg, nil
+}
+
+func (c *runtimeClient) describeObjective(ctx context.Context, id string) (*views.ObjectiveOverview, error) {
+	objective, err := c.getObjective(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	owner := objective.GetOwnerTagId()
+	use := &views.ObjectiveBudgetUse{
+		Currency: objective.GetBudgetCurrency(), LimitMinor: minor(objective.BudgetLimitMinor),
+		SpentMinor: minor(objective.ReportedSpendMinor),
+	}
+	if use.LimitMinor != nil && use.SpentMinor != nil {
+		available := *use.LimitMinor - *use.SpentMinor
+		use.AvailableMinor = &available
+	}
+	view := &views.ObjectiveOverview{
+		Objective: runtimeObjective(objective), Budget: use,
+		TagNames: map[string]string{owner: owner},
+	}
+	if id := objective.GetSessionId(); id != "" {
+		view.Sessions = []*views.ObjectiveSession{{Id: id, TagId: owner, Tag: owner, Owner: true}}
+	}
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	const reviewLimit = 50
+	var before uint64
+	for len(view.CommitReviews) < reviewLimit {
+		remaining := reviewLimit - len(view.CommitReviews)
+		reviews, err := c.objectives.ListCommitReviews(ctx, connect.NewRequest(&v2.ListObjectiveCommitReviewsRequest{
+			ObjectiveId: id, Limit: uint32(remaining), BeforeOrder: before,
+		}))
+		if err != nil {
+			return nil, apiError(err)
+		}
+		page := reviews.Msg.GetReviews()
+		next := reviews.Msg.GetNextBeforeOrder()
+		if len(page) > remaining || next != 0 && (len(page) == 0 || before != 0 && next >= before) {
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned an invalid commit review page."}
+		}
+		for _, review := range page {
+			if review.GetObjectiveId() != id {
+				return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a commit review for a different Objective."}
+			}
+			view.CommitReviews = append(view.CommitReviews, runtimeCommitReview(review))
+		}
+		if next == 0 {
+			break
+		}
+		before = next
+	}
+	return view, nil
+}
+
+func runtimeCommitReview(review *v2.CommitReview) *views.ObjectiveCommitReview {
+	out := &views.ObjectiveCommitReview{
+		RequestId: review.GetRequestId(), Commit: review.GetCommit(), ReviewerTagId: review.GetReviewerTagId(),
+	}
+	if verdict := review.GetVerdict(); verdict != nil {
+		switch verdict.GetDecision() {
+		case v2.CommitReviewDecision_COMMIT_REVIEW_DECISION_APPROVED:
+			out.Verdict = "approved"
+		case v2.CommitReviewDecision_COMMIT_REVIEW_DECISION_CHANGES_REQUESTED:
+			out.Verdict = "changes_requested"
+		}
+		out.Summary = verdict.GetSummary()
+		out.RecordedAt = timestamppb.New(time.UnixMilli(verdict.GetRecordedAtMs()))
+	}
+	return out
+}
+
+func (c *runtimeClient) messageObjective(ctx context.Context, id, text string) (*views.MessageObjectiveResponse, error) {
+	objective, err := c.getObjective(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	key, err := idempotencyKey()
+	if err != nil {
+		return nil, err
+	}
+	body := &v2.SubmitTaskRequest{
+		TagId: objective.GetOwnerTagId(), SessionId: objective.GetSessionId(), OperationId: key, Prompt: text,
+	}
+	return retrying(ctx, func(ctx context.Context) (*views.MessageObjectiveResponse, error) {
+		res, err := c.operator.SubmitTask(ctx, connect.NewRequest(body))
+		if err != nil {
+			return nil, err
+		}
+		return &views.MessageObjectiveResponse{TaskId: res.Msg.GetTaskId(), Tag: res.Msg.GetTagId()}, nil
+	})
+}
+
+func runtimeObjective(objective *v2.Objective) *views.Objective {
+	out := &views.Objective{
+		Id: objective.GetObjectiveId(), Outcome: objective.GetOutcome(),
+		OwnerTagId: objective.GetOwnerTagId(), OwnerTag: objective.GetOwnerTagId(),
+		TeamId: objective.GetTeamId(),
+		Status: objectiveStatus(objective.GetStatus()), Revision: int64(objective.GetRevision()),
+		Ongoing:        objective.GetOngoing(),
+		RuntimeActions: append([]string(nil), objective.GetRuntimeActions().GetActions()...),
+	}
+	if objective.DeadlineMs != nil {
+		out.Deadline = timestamppb.New(time.UnixMilli(*objective.DeadlineMs))
+	}
+	if objective.PausedAtMs != nil {
+		out.PausedAt = timestamppb.New(time.UnixMilli(*objective.PausedAtMs))
+	}
+	if limit := minor(objective.BudgetLimitMinor); limit != nil {
+		out.Budget = &views.Budget{LimitMinor: *limit, Currency: objective.GetBudgetCurrency()}
+	}
+	if spent := minor(objective.ReportedSpendMinor); spent != nil {
+		out.Spend = &views.ObjectiveSpend{AmountMinor: *spent, Currency: objective.GetBudgetCurrency()}
+	}
+	return out
+}
+
+func objectiveStatus(status v2.ObjectiveStatus) views.ObjectiveStatus {
+	// These view enums share names, including the unspecified status.
+	return views.ObjectiveStatus(views.ObjectiveStatus_value[status.String()])
+}
+
+func minor(value *uint64) *int64 {
+	if value == nil || *value > math.MaxInt64 {
+		return nil
+	}
+	minor := int64(*value)
+	return &minor
+}

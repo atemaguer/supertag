@@ -21,8 +21,12 @@ data, or local state.
 
 ## Development setup
 
-Install the tools listed in [Requirements](docs/operations/requirements.md). Source development
-also needs the pnpm version pinned by `packageManager` in the root `package.json`:
+SuperTag's services and CLI are written in Rust (`rust/`). The Node.js harness bridges and
+Workspace providers that Worker Hosts start, the desktop app's frontend, and the repository checks
+are TypeScript; the terminal UI is Go. Install the tools listed in
+[Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
+`rust/rust-toolchain.toml`, Go 1.26 or later, and the pnpm version pinned by `packageManager` in the
+root `package.json`:
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
@@ -31,8 +35,8 @@ npm install -g pnpm@11.18.0
 pnpm install
 ```
 
-To use your local build as the global CLI, run `pnpm install:cli`. Keep the checkout in place
-while it is linked. Run `pnpm uninstall:cli` to remove that global command link.
+`pnpm build` compiles the TypeScript packages. Rust Worker Hosts start the built bridges from
+`packages/runtime/harnesses/*/dist` and `packages/runtime/environments/*/dist`.
 
 ## Write documentation
 
@@ -54,70 +58,82 @@ The public documentation uses the installed `supertag` command. To run your
 working-tree changes, use the local CLI instead:
 
 ```sh
-pnpm supertag start control-plane  # equivalent to: supertag start control-plane
-pnpm supertag list tag
+pnpm supertag up       # equivalent to: supertag up
+pnpm supertag get tag
 ```
 
-This runs the CLI from source through `tsx`, so it requires `pnpm install`
-first. Use it when exercising uncommitted changes.
+This builds and runs the Rust CLI from `rust/` with `cargo run`. Use it when exercising
+uncommitted changes.
 
 ### Terminal UI (experimental)
 
 `apps/tui` is a Go terminal UI built with Bubble Tea. It is a client of the Control Plane API
-only. Build it with Go 1.26 or later, then run the CLI with no arguments in a terminal:
+only. Build it with Go 1.26 or later, then open it with `supertag tui`:
 
 ```sh
 cd apps/tui && ./build.sh && cd ../..
-pnpm supertag
+pnpm supertag tui
 ```
 
-The CLI resolves the Control Plane and token as every command does and hands them to the binary
-on file descriptor 3. With output piped, or without a built binary, `supertag` prints help. The
-CLI refuses a binary whose `--version` differs from its own and says how to rebuild it.
-`SUPERTAG_TUI_BINARY` points the CLI at another binary. `go test ./...` in `apps/tui` runs its
-tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run under tmux against a fake Control Plane.
+`go test ./...` in `apps/tui` runs its tests. The Rust CLI's `operator_runtime.rs` tests drive a
+built binary under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
-The release workflow builds the four binaries at the release tag and computes their
-`SHA256SUMS` after macOS signing. The npm package and GitHub Release use the same files.
-To exercise the package layout
-before a release, run `apps/tui/build.sh` and `sh scripts/stage-cli-release.sh`, then pack
-`packages/supertag-ai` with `npm pack`. Point `SUPERTAG_PACKAGE_SOURCE` at that tarball and
-run `sh install.sh` from the checkout. `tests/install-script.test.ts` tests the same layout
-with fake binaries.
+Releases ship the terminal UI inside each platform's native archive, next to the `supertag`
+command; see [Test an installable release](#test-an-installable-release).
 
 ### Protobuf contracts
 
-The protobuf contracts live in `spec/proto`. After editing one, run `pnpm proto:generate`.
-`pnpm check` runs `buf lint` and fails when a checked-in binding is stale. Generation also writes
-the Go operator API bindings into the Go module in `packages/operator-api/go`, which pins the
-plugins as tools, so it needs Go 1.26 or later. `go test ./...` in that directory checks the
-generated Go client against the generated handler. It also writes the operator API reference in
-`docs/reference/operator-api/` from the proto comments, so edit those comments rather than the
-pages; `pnpm check` fails when a page is stale.
+The protobuf contract lives in `rust/proto`; see [binding generation](rust/bindings/README.md).
+`rust/scripts/generate-bindings.py` writes the Go, TypeScript, and Python bindings, using the
+protoc Go plugins pinned as tools in the `rust/bindings/go` module, so it needs Go 1.26 or later.
 
-The Python SDK's operator bindings in `sdks/python/src/supertag/operator/v1` are not part of
-`pnpm proto:generate`. Regenerate them with
-`sdks/python/.venv/bin/python sdks/python/scripts/generate_operator_api.py`, which uses the
-generator versions pinned in the SDK's `dev` extra; the SDK's tests fail when they are stale.
+## Rust runtime development
 
-`pnpm proto:breaking` runs `buf breaking` against the latest release tag reachable from `HEAD`, and
-CI runs it on every change. Pass a tag or commit to compare against something else. Until the first
-stable release a breaking change is allowed, but only on purpose: add each change it reports to
-`spec/proto/accepted-breaking-changes.json` in the same commit, with its `type`, its exact
-`message` and a `reason`. The accepted changes apply only while `against` names the release the
-check compares with, so a new release tag starts an empty list. The check also fails on an
-accepted change that no longer occurs, so remove one when you undo it.
+The workspace in `rust/` builds the Control Plane, Gateway, Worker Host, and native CLI.
+The `test-fixtures` Cargo feature builds a deterministic harness adapter for the process tests.
+Run the SQLite tests with the pinned Rust toolchain.
 
-Each operator RPC has a class in `OPERATOR_RPC_CLASSES` (`apps/cli/src/operator-seams.ts`):
-`read`, `data_write` (adds records such as messages, posts, progress events and artifacts) or
-`control` (changes the state of Objectives, Tasks, approvals, hosts, credentials or resources). A
-`read` RPC sets `idempotency_level = NO_SIDE_EFFECTS`, and no other class does. Service modules
-read the store through `OperatorReadStore` and `OperatorQueries`, add records through
-`OperatorDataWrites`, and make every state transition through `OperatorControl`, whose methods take
-plain data and are idempotent. They never import the
-`ControlPlane`, the full `Store` or the in-memory `ChangeNotifications`, so a stateless Gateway
-can later serve them with `OperatorControl` as a call to the Control Plane.
-`tests/operator-rpc-seams.test.ts` checks the classes and the imports.
+```sh
+cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
+```
+
+For PostgreSQL coverage, put the disposable test server URL in a private file and set
+`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
+`-- --include-ignored` to run the PostgreSQL cases. Stateful process tests run once per backend,
+as `NAME::sqlite` and `NAME::postgres`; each PostgreSQL case creates its own database and drops
+it afterwards. The process tests also use temporary state directories and a local HTTP provider
+fixture. The partition case waits for the production 30-second execution lease to expire.
+
+Ignored tests that need a local fixture report `SKIPPED` on stderr and pass when it is missing.
+Set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of the prerequisites a run must have,
+or `all`; a listed prerequisite that is missing then fails the test. The prerequisites are
+`postgres` (`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE`), `node` (`SUPERTAG_RUST_TEST_NODE`),
+`agents-python` (`SUPERTAG_RUST_TEST_AGENTS_PYTHON`), `tui` (`SUPERTAG_RUST_TEST_TUI` and tmux),
+`docker` (`SUPERTAG_RUST_TEST_DOCKER`, the `docker` executable; the WebSocket tunnel's nginx case
+pulls `nginx:1.27-alpine`), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
+container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
+`supertag-shared-execution`. The `linux-root` job in `.github/workflows/rust-port.yml` runs them.
+
+For a live read-only smoke test, use the built-in Codex adapter with an installed Codex CLI
+version 0.163.0 or newer. Start the services with a separate development state directory.
+
+```sh
+cargo run --manifest-path rust/Cargo.toml -p supertag-cli -- \
+  up --state-directory .supertag/rust-dev --harness codex
+```
+
+The adapter uses native sign-in or a configured provider key. Give the test Tag `files:read`
+and submit a short text Task. The integration suite exercises the same launch path with a
+deterministic Codex subprocess.
+
+Regenerate the Go, TypeScript, and Python runtime bindings after changing the Rust protobuf
+contract. See [binding generation and conformance checks](rust/bindings/README.md).
+The [capability ledger check](tests/rust-port-baseline/README.md) keeps the frozen port ledger's
+Rust citations current.
+The [native split-service rehearsal](tests/native-deployment/README.md) checks the
+complete-archive images, TLS, gRPC health, and restart persistence on disposable PostgreSQL.
+The [native release platform checks](tests/native-release/README.md) build and execute
+complete archives and their installed command paths without publishing them.
 
 ## Test your change
 
@@ -129,24 +145,10 @@ pnpm test
 pnpm build
 ```
 
-When changing the published `supertag-ai` package, also run:
+`pnpm test` runs the TypeScript tests. For Rust changes, also run the Cargo tests described in
+[Rust runtime development](#rust-runtime-development); for terminal UI changes, `go test ./...` in
+`apps/tui`.
 
-```sh
-pnpm --filter supertag-ai test:package
-```
-
-On a busy machine, a few tests can time out in a full run and pass alone. To tell
-those apart from real failures, run:
-
-```sh
-pnpm test:verify
-```
-
-It runs the full suite with two workers. Then it reruns each failing test file alone,
-with one worker and a 60-second test and hook timeout. It exits non-zero if a rerun
-fails, or if the full run failed for a reason no test file explains, such as an unhandled
-error outside a test. In that case it skips the reruns. Its summary lists each rerun file as passed or failed. Report a file that passed
-only on rerun when it keeps happening, and reproduce it with concurrent runs or bounded CPU load.
 Wait for the operation being asserted: final replies for completed Tasks, and consumed output
 for log followers. Bound those waits so failures still run cleanup. Test startup timeouts
 separately from log tails; a child may not print anything before a short deadline under load.
@@ -188,80 +190,11 @@ public contract changes deliberate.
 Read [API stability](docs/reference/api-stability.md) before changing an
 extension contract or a documented resource shape.
 
-The shared execution design is exercised by the Docker tests
-(`pnpm test:shared-execution:grpc:docker`, `pnpm test:organization:docker`) and the opt-in live
-organization experiment (`pnpm test:shared-organization:live`), which installs the public
-package and runs real Claude Code and Codex managers with bounded runs.
-
 ## License
 
 Contributions are accepted under the repository's [Apache License 2.0](LICENSE).
 By submitting a contribution, you confirm that you have the right to license it
 under those terms.
-
-## Objective runtime verification
-
-Run the focused coordination suite after changing Teams, internal admission, or Worker coordination:
-
-```sh
-pnpm exec vitest run tests/teams.test.ts tests/task-assignment-store.test.ts tests/objective-controller.test.ts tests/objective-execution.test.ts
-```
-
-Set `SUPERTAG_POSTGRES_URL` to the documented test database to include PostgreSQL. The test role
-must have `CREATEDB`. `pnpm test` and `pnpm test:verify` create a fresh database for each run
-and drop it when the run ends. Some suites create another temporary database within that run.
-The wrapper forwards SIGINT and SIGTERM to the test runner, then drops the run database before exiting.
-Use a dedicated test PostgreSQL instance. The wrapper accepts `localhost` and literal loopback
-addresses, including the local URL `postgresql://supertag@127.0.0.1:55432/supertag_test`.
-Both the URL host and the server-reported address must be loopback addresses. Docker PostgreSQL
-and forwarded connections require an explicit marker on the base database, even through
-`localhost`. CI sets this marker; for local Docker tests, set it before running the wrapper:
-
-```sql
-COMMENT ON DATABASE supertag_test IS 'supertag-test-server';
-```
-
-The URL must name a host and database. Query parameters may configure TLS or `application_name`;
-host, database, and other connection overrides are rejected. For IPv6 literals, the wrapper
-adds a matching unbracketed `host` query parameter for `pg`; an input parameter is accepted only
-when it exactly matches that literal. It cannot select another server. The wrapper checks the marker before
-creating or deleting any databases.
-
-Each new run reclaims abandoned wrapper databases for the same base database and PostgreSQL role.
-Exact ownership comments identify these databases; session advisory locks protect active runs.
-This recovers a run killed with SIGKILL on the next invocation. Unmarked databases, including those
-from older wrappers or a process killed during initialization before its ownership comment was
-written, remain untouched. Review those manually; a `supertag_test_` name alone does not prove ownership.
-Run the wrapper's guard, concurrency, signal, and crash-recovery tests with:
-
-```sh
-SUPERTAG_POSTGRES_URL=postgresql://supertag@127.0.0.1:55432/supertag_test node --test scripts/with-test-postgres.test.mjs
-```
-
-`pnpm db:check` also verifies that each SQLite and
-PostgreSQL migration has both a SQL file and a journal entry.
-
-Shared Workstream post coverage lives in `tests/workstream-post-store.test.ts` and
-`tests/objective-workstream-posts-execution.test.ts`. The store tests race 200 publication
-requests across 100 participants and verify idempotency, incremental ordering, and absence of
-mailbox or Task fanout in both dialects. The execution test exercises the real Control Plane, remote
-Worklet, and coordination MCP tools with a deterministic runner; it makes no model calls.
-
-`tests/objective-wait-execution.test.ts` covers a waiting assignment resuming once after
-50 posts arrive during a Control Plane restart. Mailbox tests cover concurrent overflow, idempotent
-retries at capacity, and capacity released by acknowledgement. Harness tests check that Codex native
-helper spawning stays disabled in SDK and CLI configurations. Claude Code tests check that native
-children can work locally while manager-only coordination tools remain available only to the main agent.
-
-`tests/mailbox-history-store.test.ts` verifies tied-timestamp pagination and terminal-body
-retention in both databases, including retry idempotency after pruning. The durable Worklet
-SDK tests cover bounded long-stream replay and recovery after killing
-a real child process. These storage checks do not require model credentials.
-
-The execution suite uses the real Control Plane API Server, Gateway HTTP and MCP boundaries,
-WebSocket Worklet API transport, the Codex harness, and local
-processes with a deterministic model runner. Remote harness tests use simulated environments;
-provider-backed model execution and E2B require separately configured credentials/templates.
 
 ## Documentation scope
 
@@ -354,79 +287,6 @@ The independent verifier's regression tests require no model calls:
 python3 -m unittest discover -s tests/fixtures/rust-harness-interop -p test_live_project.py -v
 ```
 
-#### Automatic artifact collection and recovery
-
-For automatic artifact collection and transfer recovery, run:
-
-```sh
-pnpm exec vitest run packages/runtime/sdk/harness-artifact-collection.test.ts packages/runtime/sdk/output-collection.test.ts packages/runtime/sdk/output-finalization.test.ts packages/runtime/sdk/file-artifact-store.test.ts tests/automatic-artifact-execution.test.ts
-SUPERTAG_S3_CONTAINER_TEST=1 pnpm exec vitest run tests/artifact-s3-container.test.ts
-```
-
-Set `SUPERTAG_POSTGRES_URL` to a disposable PostgreSQL instance to run the automatic-execution
-suite against both databases; its database account must be allowed to create temporary databases.
-The suite uses deterministic harnesses, includes 100 Attempts with concurrency bounded to 16,
-and exercises missing outputs, retained sources after staging failure, intermediate captures,
-cross-Worker harness-memory restoration, and durable Worklet recovery without rerunning the
-harness. The S3 suite starts and removes its
-own local MinIO container. These tests make no paid model or cloud calls. Provider unit tests
-exercise sandbox collection contracts; they do not replace live E2B or Modal deployment tests.
-
-#### Live artifact handoffs
-
-For opt-in model-backed artifact handoffs, log in to the local Codex and Claude Code CLIs, then run:
-
-```sh
-pnpm exec tsx --conditions=development scripts/artifact-handoff-live.ts --live --output /tmp/supertag-artifact-handoff
-```
-
-This consumes model usage: Codex uses `gpt-5.6-luna`, and Claude Code uses `haiku`.
-It runs both producer/consumer directions in fresh processes with separate workspaces, a real
-SQLite catalog, and local blob storage. The producer writes a report to its managed output
-directory. After its workspace is removed, the consumer must discover, inspect, and read the
-artifact, derive an answer from its contents, and report its native conversation provenance.
-The consumer receives neither the artifact ID nor the source facts. JSON reports record the
-assertions and HTTP activity. Use a new output directory for each run. To run one direction,
-add `--producer codex --consumer claude-code` or reverse those values. This tests local execution;
-it does not establish hosted sandbox or transcript-retrieval behavior.
-
-### Organization-level Docker test
-
-For an organization-level test with real model-backed Docker Workers, run:
-
-```sh
-pnpm test:artifact-organization:live
-```
-
-This opt-in test consumes Codex `gpt-5.6-luna` usage through your existing subscription
-login. It starts a real Control Plane and two independently enrolled Worker Hosts in
-separate Docker containers, then starts an Objective through the management API. Agents
-delegate the work through coordination tools. Their attempt workspaces are separate;
-they exchange deliverables through the production artifact catalog and blob store.
-The runner checks durable assignments, cross-Worker artifact consumption, native conversation
-provenance, and the resulting deliverable, and preserves evidence while removing its containers
-and staged credentials. It exercises API invocation, not Slack delivery.
-
-Use `--output /tmp/supertag-artifact-org-<unique-name>` to select the evidence directory.
-The default execution bound is ten model Attempts and ten minutes after setup.
-Codex's native sandbox remains enabled. If Docker blocks its namespace setup, append
-`--allow-unconfined-seccomp` for a test-only fallback. A run using that option does not establish
-compatibility with Docker's default seccomp policy. Worker containers remain non-root,
-with capabilities dropped and a read-only container filesystem.
-
-Artifact consumption can use a direct tool read or an attachment materialized into the
-consumer's isolated workspace. Verification follows the exact consumed source through an
-accepted review to a final recommendation, checking file hashes, the source nonce, and native
-conversation IDs. Recheck preserved evidence without more model calls with:
-
-```sh
-pnpm exec tsx --conditions=development scripts/verify-artifact-organization.ts /tmp/supertag-artifact-org-<unique-name>
-```
-
-This writes `verified-report.json` and preserves the original live-run result, including a
-failure if an earlier verifier rejected the run. It verifies recorded execution and cleanup;
-it does not launch containers again or establish recovery after a Control Plane restart.
-
 #### SDK lifecycle and Python tests
 
 `spec/fixtures/harness-lifecycle.json` supplies shared behavioral cases for the
@@ -437,14 +297,9 @@ fresh reviewer environment without model-provider calls. Process tests include
 cancellation of descendants that ignore SIGTERM.
 
 Run Python tests with `sdks/python/.venv/bin/python -m pytest sdks/python/tests`.
-Set `SUPERTAG_PYTHON_BIN` to that interpreter to enable the real Python custom
-Worker interoperability suite in Vitest. That suite exercises legacy protocol 9;
-it does not establish durable protocol 12 conformance.
 
 Live Python Codex tests additionally require `SUPERTAG_LIVE_MODEL_TESTS=1` and
-provider credentials. Selecting a Python interpreter alone only enables the
-deterministic interoperability tests; it must not trigger model usage.
-
+provider credentials.
 
 ## Prepare release notes
 
@@ -453,56 +308,93 @@ Record user-facing changes in `CHANGELOG.md` under `## [Unreleased]`, in the `Ad
 Task or feature branch, so parallel branches don't conflict on the file. Keep each entry to one
 concise bullet.
 
-At release time, rename `[Unreleased]` to the version and date, add an empty `[Unreleased]` above
-it, set the package versions, and run the version tests in the same release commit:
+`workspace.package.version` in `rust/Cargo.toml` is the single source of truth for the release
+version. At release time, rename `[Unreleased]` to the version and date, add an empty
+`[Unreleased]` above it, set the version in `rust/Cargo.toml`, and in the same release commit
+rewrite every other manifest from it, refresh the lockfiles, and run the version checks:
 
 ```sh
+python3 rust/scripts/release_version.py --sync
+(cd rust && cargo metadata --format-version 1 > /dev/null)
+(cd apps/desktop/src-tauri && cargo metadata --format-version 1 > /dev/null)
+(cd sdks/python && uv lock)
+python3 rust/scripts/release_version.py vVERSION
 pnpm exec vitest run tests/release-version.test.ts
 ```
 
-## Test an installable package
+`--sync` rewrites every `package.json`, the Python SDK, and the desktop app. CI runs
+`release_version.py --check` through the `rust/scripts`
+tests on every pull request, so any file that drifts from `rust/Cargo.toml` fails the build. The
+documentation check reads the same version: docs may name only the current release.
 
-Users install the published packages from npm and PyPI (see [Install SuperTag](docs/operations/install.md)).
-To test local changes in the packaged CLI, build the actual package instead of
-creating a shell shim:
+## Test an installable release
 
-```sh
-pnpm install
-pnpm --filter supertag-ai build
-mkdir -p dist
-npm pack ./packages/supertag-ai --ignore-scripts --pack-destination ./dist
-npm install --global --prefix "$HOME/.local" "$PWD"/dist/supertag-ai-*.tgz
-export PATH="$HOME/.local/bin:$PATH"
-supertag --version
-supertag setup surface slack --help
-```
-
-The version must match `packages/supertag-ai/package.json`. Setup help must print readable local
-paths for the guide and manifest. `pnpm --filter supertag-ai test:package` checks these bundled
-resources in addition to the CLI and SDK interfaces. The resulting archive is for local testing;
-building it does not publish a package.
-
-Before updating installation instructions for a release, publish the matching npm and PyPI
-packages and verify clean registry installs, the installer, versioned CLI archives, checksums,
-and documentation. Release tooling in this repository does not mean a release has been published.
-
-The npm release runs the installer check in a separate job. It waits for npm and the CDN
-to serve the release, then checks the CLI and TUI versions in a clean home. To check an
-existing release, dispatch **Verify public installer** with its tag:
+Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
+Release, the Python SDK from PyPI, and the TypeScript SDK, `supertag-ai`, from npm (see
+[Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the terminal UI, the
+shared execution provider, and the Node.js bridges; the
+[native release platform checks](tests/native-release/README.md) build one. To install a local
+build the way users do, put the archive and a `SHA256SUMS` in one directory and point the
+installer at it:
 
 ```sh
-gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.9
+mkdir /tmp/supertag-assets
+cp /tmp/supertag-macos-verification/supertag-*-complete.tar.gz /tmp/supertag-assets/
+(cd /tmp/supertag-assets && shasum -a 256 supertag-*-complete.tar.gz > SHA256SUMS)
+SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.sh
 ```
 
-Select `check_latest` to check the README's installer URL for the current release. When the
-installer check is the only failed job in a release run, **Re-run failed jobs** retries it
-on its own.
+`rust/scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
+with the other `rust/scripts` tests on every pull request.
+`scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
+services with a temporary state directory, lists Tags, and stops them.
 
-### Sign and notarize the macOS terminal UI
+Before updating installation instructions for a release, publish the release and verify the
+installer, checksums, the PyPI package, and documentation. Release tooling in this repository
+does not mean a release has been published.
 
-The release workflow signs the arm64 and amd64 binaries with a Developer ID Application
-certificate and the hardened runtime. It submits both to Apple in a single ZIP and checks
-that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
+The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
+every manifest and lockfile must carry the same version. The release and SDK publish workflows run
+`release_version.py` on the tag before they build or publish anything.
+A release takes three steps, so the README's `releases/latest` installer URL never points at a
+release without its archives:
+
+1. Push the release tag, for example `git push origin v0.3.0-alpha.1`. **Release SuperTag**
+   (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
+   the pinned installer against them, and attaches them with their `SHA256SUMS` and an
+   `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
+   published release.
+2. Review the draft's notes and assets, then publish it. Don't mark an alpha as a prerelease:
+   `releases/latest` skips prereleases.
+3. Publishing runs **Verify public installer** (`verify-installer.yml`), which installs from the
+   README's URL on each platform in a clean home, checks the CLI and terminal UI versions, and
+   starts and stops local services. It also runs **Publish Python SDK** (`publish-python.yml`) and
+   **Publish supertag-ai** (`publish.yml`). Each checks that the release carries every archive
+   before it publishes, because registry versions cannot be replaced.
+
+If a build fails, delete the draft, fix the problem on a new commit, and tag a new version. To
+rebuild the archives for an existing tag without attaching them, dispatch the workflow with that
+tag:
+
+```sh
+gh workflow run release.yml -f release_tag=v0.3.0-alpha.1
+```
+
+Set `upload_assets` to true to replace the assets on that tag's draft release. To check a
+published release, dispatch **Verify public installer** with its tag:
+
+```sh
+gh workflow run verify-installer.yml -f release_tag=v0.3.0-alpha.1
+```
+
+Select `check_latest` to check the README's installer URL for the current release.
+
+### Sign and notarize the macOS binaries
+
+The release workflow signs the `supertag`, `supertag-tui`, and `supertag-shared-execution`
+binaries of each macOS archive with a Developer ID Application certificate and the hardened
+runtime, before the archive records their digests. It submits them to Apple in a single ZIP and
+checks that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
 executables online. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
 
 Set these GitHub Actions secrets on the release repository:
@@ -519,15 +411,10 @@ Create the certificate and Team key under the same Apple Developer team. When al
 secrets are absent, the workflow warns and produces unsigned builds. An incomplete
 configuration or failed notarization stops publication.
 
-To test the current branch's binaries and credentials without publishing, dispatch
-**Release SuperTag CLI installer** with its default inputs:
-
-```sh
-gh workflow run release-cli.yml
-```
-
-The run uploads a workflow artifact for inspection. To replace assets on an existing GitHub
-Release, set `release_tag` to its tag and `upload_assets` to true.
+To test the signing credentials without publishing, dispatch **Release SuperTag** for an
+existing tag with `upload_assets` false; the archives remain workflow artifacts for seven days.
+Only the signing release run passes the Apple secrets to the build; pull request and manual
+checks of `native-release-check.yml` build unsigned archives without them.
 
 ## Live Modal native mounts
 
@@ -573,7 +460,7 @@ adds a layer that sets `SUPERTAG_LIVE_RUN_ID` to its base image, so the image it
 shared with other builds. It tags every sandbox with the same run ID, retries cleanup, and sweeps by
 tag if creation fails after Modal starts a sandbox. A sandbox or image created after cleanup starts
 is removed at once. Snapshot images expire after one hour. The runner reports created, deleted, and remaining IDs on
-success, failure, or signal. It is excluded from `pnpm test`, `pnpm test:verify`, and CI.
+success, failure, or signal. It is excluded from `pnpm test` and CI.
 
 ```sh
 pnpm test:workspace:modal:live
@@ -583,14 +470,3 @@ Set `SUPERTAG_LIVE_MODAL_APP` to use a different existing dedicated Modal app. C
 report and deletion lines before leaving the run. If cleanup reports a failure, remove
 the listed resource in Modal before retrying.
 
-To reproduce the live run without Modal, run the same suite on local Docker. It uses the real Modal
-Workspace provider with `python:3.13-slim` at 0.125 CPU and 128 MiB, a stricter bound than the
-live run's. `docker build` stands in
-for Modal image builds, containers for sandboxes, and `docker commit` for snapshots. It removes
-every container and image it labelled, and is skipped unless enabled:
-
-```sh
-SUPERTAG_DOCKER_MODAL_WORKSPACE=1 pnpm exec vitest run tests/workspace-modal-docker.test.ts
-```
-
-Set `SUPERTAG_DOCKER` when `docker` is not on `PATH`.

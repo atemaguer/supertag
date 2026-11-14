@@ -1004,3 +1004,67 @@ readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.pa
     rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it.each([
+  { admitSearch: true, nativeTool: "webSearch", failure: undefined },
+  { admitSearch: false, nativeTool: "webSearch", failure: "requires mcp only" },
+  { admitSearch: true, nativeTool: "read", failure: "called a built-in tool" },
+])(
+  "keeps native workspace tools blocked with scoped web search ($nativeTool, $admitSearch)",
+  async ({ admitSearch, nativeTool, failure }) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "cursor-web-policy-")));
+    const workspace = join(root, "workspace");
+    const storeDirectory = join(root, "store");
+    mkdirSync(workspace);
+    mkdirSync(storeDirectory);
+    const create = vi.fn(async () => ({
+      agentId: "agent-fixture",
+      async send() {
+        return {
+          id: "run",
+          async *stream() {
+            yield { type: "tool_call", name: nativeTool, call_id: "native", status: "completed" };
+          },
+          async wait() {
+            return { status: "finished", result: "Done" };
+          },
+          async cancel() {},
+        };
+      },
+      async getUsage() {
+        throw new Error("unavailable");
+      },
+      close() {},
+    }));
+    try {
+      const base = request();
+      const execute = executeCursorSdk(
+        {
+          ...base,
+          request: {
+            ...base.request,
+            workspace,
+            storeDirectory,
+            splitTools: [],
+            tools: ["mcp", "webSearch"],
+            disallowedTools: ["read", "edit", "shell", "grep", "glob", "ls", "task"],
+            ...(admitSearch ? { allowNativeWebSearch: true } : {}),
+          },
+        },
+        { create, resume: vi.fn() } as unknown as Pick<typeof Agent, "create" | "resume">,
+        () => ({}) as JsonlLocalAgentStore,
+        () => {},
+      );
+      if (failure) await expect(execute).rejects.toThrow(failure);
+      else {
+        await execute;
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({ tools: ["mcp", "webSearch"] }),
+        );
+      }
+      if (!admitSearch) expect(create).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

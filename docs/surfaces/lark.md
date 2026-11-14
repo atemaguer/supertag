@@ -54,31 +54,11 @@ export LARK_APP_SECRET="..."
 supertag setup surface lark --domain lark
 ```
 
-For Feishu, use `--domain feishu`. The CLI verifies the credentials through `bot/v3/info`, saves the
-App Secret in the Control Plane's secret store, and keeps only the App ID, bot `open_id`, domain, and
-display name as collaboration surface metadata.
-
-### Or declare the app in a manifest
-
-On a shared Control Plane managed from files, declare the app instead of running setup. The App ID
-is not secret; the manifest says where the App Secret comes from, never its value:
-
-```yaml
-apiVersion: supertag/v1
-kind: SurfaceAccount
-metadata:
-  name: acme-lark
-spec:
-  provider: lark
-  configuration:
-    appId: cli_a1b2c3d4e5f6
-    domain: feishu           # or lark, the default
-  secrets:
-    appSecret: { env: LARK_APP_SECRET }
-```
-
-Run `supertag apply -f acme-lark.yaml`. Apply verifies the app through `bot/v3/info`, as setup
-does. See [Declare Surface Accounts](../operations/resources.md#declare-surface-accounts).
+For Feishu, use `--domain feishu`. Setup asks for the tenant key too, or reads `LARK_TENANT_KEY`.
+It verifies the credentials through `bot/v3/info`, saves the App Secret in the credential vault,
+and records the App ID, bot `open_id`, domain, and display name as the Surface Account in the
+Control Plane and in `supertag.yaml`. The local Gateway then opens the long connection; Lark needs
+no public URL.
 
 ## 5. Add a Tag to a chat
 
@@ -86,16 +66,11 @@ Find the stable `chat_id` (`oc_...`) through Lark's API Explorer or the
 `GET /open-apis/im/v1/chats` API, then run:
 
 ```sh
-supertag update tag engineering --add-location lark --chat-id oc_0123456789
+supertag tag update lead --add-location lark --chat-id oc_0123456789
 ```
 
-Use `--account cli_...` when more than one Lark app is connected.
-
-## 6. Start the Control Plane
-
-```sh
-supertag start control-plane
-```
+Add `--account NAME`, the Surface Account name from setup, when more than one Lark app is
+connected.
 
 ## Check that it worked
 
@@ -106,13 +81,12 @@ without another mention.
 
 ## Rules
 
-- The App ID and App Secret authorize only Gateway ingress and replies. They are not copied into
-  the prompts of the **Worker**, the code that completes a Task, or into its **harness**, the
-  connection to an agent system such as Claude Code. See [credential storage](../reference/credential-storage.md).
+- The App ID and App Secret authorize only Gateway ingress and replies. They never reach a
+  Worker Host or the Tag's agent. See [credential storage](../reference/credential-storage.md).
 - Adding a Tag to a chat does not give the harness Lark tools. A **Worker Host**, the machine or
   sandbox that runs the Task, provides them with the `lark` MCP preset, and the Tag's
-  **Permission Sets**, its allowed actions, grant them, optionally per chat as
-  `chat:<chat_id>`. See [Worker-side collaboration surface tools](worker-tools.md#lark--feishu).
+  **Permission Sets**, its allowed actions, grant them. See
+  [MCP tools](worker-tools.md#lark--feishu).
 
 ## If something goes wrong
 
@@ -120,12 +94,10 @@ without another mention.
 - Confirm the app is published, installed, and present in the target group.
 - Confirm `im.message.receive_v1` uses long-connection delivery.
 - Confirm the bound `chat_id` begins with `oc_` and belongs to the connected app's tenant.
-- Check `/readyz` for setup failures and inspect Control Plane logs for long-connection errors.
+- Inspect the Gateway's log, `supertag logs -f gateway`, for long-connection errors.
 
 For general checks, follow the [first-reply checklist](../guides/troubleshooting.md).
 
 ## Next
 
-- [Add your team's chat](../../README.md#next-add-your-teams-chat)
-- [Add another collaboration surface](README.md#add-another-surface)
 - [collaboration surface guides](README.md)

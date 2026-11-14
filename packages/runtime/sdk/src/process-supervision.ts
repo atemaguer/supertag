@@ -235,6 +235,8 @@ export async function spawnOwnedProcess(input: {
   cwd: string;
   environment: Readonly<Record<string, string | undefined>>;
   signal?: AbortSignal;
+  /** An enclosing guardian already owns this process group. */
+  inheritProcessGroup?: boolean;
   maximumOutput: number;
   record(pid: number | undefined): Promise<void>;
 }): Promise<ProcessHandle & { stop(): Promise<void> }> {
@@ -262,7 +264,7 @@ export async function spawnOwnedProcess(input: {
       ...input.spec.environment,
       SUPERTAG_INTERNAL_PROCESS_MARKER: processMarker,
     },
-    detached: true,
+    detached: !input.inheritProcessGroup,
     stdio: ["pipe", "pipe", "pipe"],
   });
   const descendants = child.pid
@@ -310,8 +312,9 @@ export async function spawnOwnedProcess(input: {
     stopped: Promise<void> | undefined,
     failure: unknown;
   let result: ProcessResult | undefined;
-  const groupGone = () => {
+  const processBoundaryGone = () => {
     if (!child.pid) return true;
+    if (input.inheritProcessGroup) return child.exitCode !== null || child.signalCode !== null;
     try {
       process.kill(-child.pid, 0);
       return false;
@@ -321,6 +324,10 @@ export async function spawnOwnedProcess(input: {
   };
   const send = (signal: NodeJS.Signals) => {
     if (!child.pid) return;
+    if (input.inheritProcessGroup) {
+      if (!processBoundaryGone()) child.kill(signal);
+      return;
+    }
     try {
       process.kill(-child.pid, signal);
     } catch (error) {
@@ -330,10 +337,10 @@ export async function spawnOwnedProcess(input: {
   const untilGone = async (ms: number) => {
     const until = Date.now() + ms;
     while (Date.now() < until) {
-      if (groupGone() && (await descendants?.gone()) !== false) return true;
+      if (processBoundaryGone() && (await descendants?.gone()) !== false) return true;
       await delay(20);
     }
-    return groupGone() && (await descendants?.gone()) !== false;
+    return processBoundaryGone() && (await descendants?.gone()) !== false;
   };
   const stop = (): Promise<void> =>
     (stopped ??= (async () => {
@@ -437,7 +444,7 @@ export async function spawnOwnedProcess(input: {
         }),
       ]);
       if (stopped) await stopped;
-      if (!groupGone() || (await descendants?.gone()) === false) await stop();
+      if (!processBoundaryGone() || (await descendants?.gone()) === false) await stop();
       if (failure) throw failure;
       if (!result) {
         // An escaped descendant may still hold an output pipe after its group is gone.

@@ -17,9 +17,8 @@ Tags, and its shared record of posts is its **Workstream**. An **Objective** is 
 owns. A **Mailbox** is a Tag's inbox for messages from other Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
 its record of the work. The **Control Plane** is the service that stores the organization
-and applies its rules. **Worker Hosts** are machines or sandboxes that run the work. On them, a
-**Worker** completes each Task, often through a **harness** that connects it to an agent system such
-as Codex.
+and applies its rules. **Worker Hosts** are machines or sandboxes that run the work. A Worker Host
+runs each Task through a **harness**, an agent system such as Codex.
 
 Agent systems evolve quickly. This comparison describes what each project is mainly built around as
 of September 2026. The links point to the projects' own documentation.
@@ -33,7 +32,7 @@ of September 2026. The links point to the projects' own documentation.
 | [Grok Bot](https://x.ai/news/introducing-grok-bot) | A team of always-on Bots with their own computer, where Bots message each other and one can manage the rest | A team of agents inside one product; SuperTag keeps Teams, authority, and records across different harnesses and hosts |
 | [OpenClaw](https://docs.openclaw.ai/) | A self-hosted personal assistant Gateway with channels, sessions, routing, and [multiple isolated agents](https://docs.openclaw.ai/concepts/multi-agent) | An assistant and agent runtime; SuperTag adds lasting organization records and controls |
 | [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) | A general autonomous agent with persistent memory, specialist Bots, goals, and [multi-agent Kanban coordination](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | An agent runtime and coordination system; SuperTag focuses on organization identity, authority, and work across different harnesses and hosts |
-| [Codex](https://learn.chatgpt.com/docs/codex/cli), [Claude Code](https://code.claude.com/docs/en/overview), and [OpenCode](https://opencode.ai/docs/) | harnesses that execute agentic work in a local or hosted environment | Execution systems a SuperTag Worker can use for one accepted Task |
+| [Codex](https://learn.chatgpt.com/docs/codex/cli), [Claude Code](https://code.claude.com/docs/en/overview), and [OpenCode](https://opencode.ai/docs/) | harnesses that execute agentic work in a local or hosted environment | Execution systems a SuperTag Worker Host can run one accepted Task on |
 | SuperTag | An organizational Control Plane and Worker Hosts | The layer that records who acts, why work exists, how Teams coordinate, and which limits apply |
 
 These categories overlap. Grok Bot coordinates several Bots, and dots plans teams of dots. OpenClaw
@@ -57,7 +56,7 @@ or harness session:
 - **Requester and source rules, budgets, approvals, scoped credentials, and Task policy records**
   prevent execution from silently gaining more authority.
 - **Recovery and audit** preserve accountability when work spans processes, retries, and hosts.
-- **Worker Hosts, Workers, and harnesses** let the same organization use different execution
+- **Worker Hosts and harnesses** let the same organization use different execution
   engines and run across distributed capacity.
 
 Coordination inside a harness stays local to that harness. Its manager and native subagents can use
@@ -93,7 +92,7 @@ application pattern does not claim compatibility with or affiliation to Anthropi
 - Use a coding harness when the main need is agentic software work in a repository or sandbox.
 - Use SuperTag when the durable unit you need to design and operate is an organization: accountable
   actors organized into Teams, pursuing Objectives, coordinating across boundaries, and executing
-  through interchangeable Workers and harnesses.
+  through interchangeable Worker Hosts and harnesses.
 
 Continue to [How SuperTag fits together](how-it-works.md) for the runtime architecture or start with
 [Tags](tags.md), [Roles](roles.md), [Teams](../guides/teams.md), and

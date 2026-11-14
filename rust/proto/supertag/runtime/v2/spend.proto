@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// Operator spend report derived from recorded Attempt evidence. Each Attempt is
+// counted once with its latest native usage and its cumulative reported or
+// estimated cost. Unknown evidence is never treated as an observed zero and
+// separate currencies are never combined.
+service Spend {
+  rpc GetSpend(GetSpendRequest) returns (SpendReport);
+}
+
+enum SpendGrouping {
+  // Treated as SPEND_GROUPING_OBJECTIVE.
+  SPEND_GROUPING_UNSPECIFIED = 0;
+  SPEND_GROUPING_OBJECTIVE = 1;
+  SPEND_GROUPING_TAG = 2;
+  // UTC calendar day on which the Attempt was claimed.
+  SPEND_GROUPING_DAY = 3;
+}
+
+message GetSpendRequest {
+  SpendGrouping by = 1;
+  // Only Attempts claimed at or after this instant. Attempts without a recorded
+  // claim time are excluded when set.
+  optional int64 since_ms = 2;
+}
+
+message SpendAmount {
+  // Three-letter currency code.
+  string currency = 1;
+  uint64 amount_minor = 2;
+}
+
+message SpendUnpricedModel {
+  string model = 1;
+  uint64 attempts = 2;
+}
+
+message SpendBudget {
+  uint64 limit_minor = 1;
+  // Absent for a budget in allocation units.
+  optional string currency = 2;
+}
+
+message SpendGroup {
+  // Objective ID ("unassigned" for Tasks outside an Objective), Tag ID, or
+  // YYYY-MM-DD ("undated" for Attempts claimed before claim times were recorded).
+  string key = 1;
+  // Tag display name for the Tag grouping; otherwise empty.
+  string name = 2;
+  uint64 attempts = 3;
+  // Sorted by currency. Empty when no Attempt reported cost.
+  repeated SpendAmount reported_cost = 4;
+  uint64 unknown_cost_attempts = 5;
+  uint64 estimated_cost_attempts = 6;
+  // Unknown-cost Attempts that reported tokens for a named model, by model.
+  repeated SpendUnpricedModel unpriced_models = 7;
+  // Tokens on unknown-cost Attempts with a named model.
+  uint64 unpriced_tokens = 8;
+  // Absent when no Attempt reported tokens.
+  optional uint64 reported_tokens = 9;
+  uint64 unknown_token_attempts = 10;
+  // Objective grouping only: the Objective's budget, when it has one.
+  optional SpendBudget budget = 11;
+}
+
+message SpendReport {
+  SpendGrouping by = 1;
+  optional int64 since_ms = 2;
+  // Sorted by key.
+  repeated SpendGroup groups = 3;
+}

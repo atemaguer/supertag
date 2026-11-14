@@ -74,3 +74,57 @@ it("marks open output pipes host-unsafe even after the process group and known d
     child.stderr.destroy();
   }
 });
+
+it("stops a child inside the existing guardian group without signaling the group", async () => {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 900_002,
+    exitCode: null,
+    signalCode: null as NodeJS.Signals | null,
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: vi.fn(),
+  });
+  child.kill.mockImplementation((signal: NodeJS.Signals) => {
+    child.signalCode = signal;
+    child.emit("exit", null, signal);
+    child.emit("close", null, signal);
+    return true;
+  });
+  const descendants = {
+    scan: vi.fn(async () => {}),
+    signalKnown: vi.fn(async () => {}),
+    gone: vi.fn(async () => true),
+    close: vi.fn(async () => {}),
+  };
+  vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+  vi.mocked(ProcessDescendants.start).mockReturnValue(descendants as unknown as ProcessDescendants);
+  const signalGroup = vi.spyOn(process, "kill");
+  const cancellation = new AbortController();
+  try {
+    const handle = await spawnOwnedProcess({
+      spec: { command: "fake" },
+      cwd: process.cwd(),
+      environment: {},
+      maximumOutput: 1024,
+      signal: cancellation.signal,
+      inheritProcessGroup: true,
+      record: async () => {},
+    });
+    cancellation.abort(new Error("cancelled"));
+    await expect(handle.wait()).rejects.toThrow("cancelled");
+    expect(spawn).toHaveBeenLastCalledWith(
+      "fake",
+      [],
+      expect.objectContaining({ detached: false }),
+    );
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(descendants.signalKnown).toHaveBeenCalledWith("SIGTERM");
+    expect(descendants.close).toHaveBeenCalledOnce();
+    expect(signalGroup).not.toHaveBeenCalled();
+  } finally {
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+  }
+});

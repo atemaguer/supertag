@@ -7,7 +7,7 @@ trusted commit to choose the sandbox's tools. Use this when the repository needs
 setup steps. Local workspaces ignore the file and use the workspace's `setup` command instead.
 
 SuperTag reads `.devcontainer/devcontainer.json` first, then `.devcontainer.json`. The file may use
-JSON comments and trailing commas. The [Worker](glossary.md#worker) reads it and any Dockerfile as git objects; it does
+JSON comments and trailing commas. The [harness adapter](glossary.md#harness-adapter) reads it and any Dockerfile as git objects; it does
 not check out or execute repository content on the Worker Host. The first matching file is the whole
 definition. SuperTag refuses an unsupported property by name before a provider build begins.
 
@@ -35,6 +35,6 @@ For example, a repository can put this at `.devcontainer/devcontainer.json`:
 }
 ```
 
-The Worker runs those commands in the remote preparation sandbox. Each Task starts in a separate
+The Worker Host runs those commands in the remote preparation sandbox. Each Task starts in a separate
 sandbox created from the resulting image or template. See the [workspace guide](../guides/workspaces.md)
 for repository and delivery setup.

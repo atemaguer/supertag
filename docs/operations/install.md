@@ -1,184 +1,164 @@
 # Install SuperTag
 
-Install SuperTag's CLI from npm to run Tags, persistent AI actors with their own
-responsibilities and permissions, on your repositories. The npm package also provides the
-TypeScript extension SDK. Python applications use the `supertag` SDK from PyPI.
+Install the `supertag` command to run Tags, persistent AI actors with their own responsibilities
+and permissions, on your repositories. One installation holds everything a machine needs:
+
+| Part | What it is |
+| --- | --- |
+| `supertag` | The CLI. It also runs the **Control Plane** (the service that stores your organization and schedules work), the **Gateway** (the service that connects collaboration surfaces such as Slack), and the **Worker Host** (the process that runs work on a machine) |
+| `supertag-tui` | The terminal UI that plain `supertag` opens |
+| `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
+| Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
+
+Codex runs through an adapter built into `supertag`. The installer still checks Node.js and
+tests the Node bridges with it, so every installation needs Node.js.
 
 ## Before you start
 
-Check the [requirements](requirements.md) for Node.js, npm, git, supported platforms, disk
-space, and sign-in for a **harness**, the connection to an agent system such as Claude Code.
-Cursor needs an API key that you generate in Cursor's dashboard; see
-[Cursor setup](requirements.md#cursor-setup-and-limits).
+Check the [requirements](requirements.md) for git, Node.js, supported platforms, and sign-in for
+a **harness**, the connection to an agent system such as Claude Code or Codex. If this machine
+ran the earlier TypeScript runtime, [retire it first](#retire-the-earlier-typescript-runtime).
 
-## 1. Install the CLI with the installer script
+## Retire the earlier TypeScript runtime
 
-The installer script installs SuperTag's npm package into its own directory, without changing
-npm's global prefix. It needs Node.js 22.13.0 or newer and npm, and works on macOS and Linux:
+This SuperTag replaces the earlier TypeScript runtime and starts from fresh state; there is no
+importer. Its installer replaces the earlier `supertag` link in `~/.local/bin`, and its
+`supertag down` does not stop the earlier runtime's services. Do these steps before you install,
+while `supertag` is still the earlier CLI. The earlier CLI stays installed afterwards, at
+`~/.local/share/supertag/versions/VERSION/node_modules/.bin/supertag`.
+
+1. Stop the earlier services and remove their service units:
+
+   ```sh
+   supertag down --remove-services
+   ```
+
+   Check that none remains: `launchctl list | grep ai.supertag` on macOS, or
+   `systemctl --user list-units 'supertag-*'` on Linux, prints nothing.
+2. Archive the earlier state, check the archive, then move the state aside so the new runtime
+   starts empty:
+
+   ```sh
+   tar -czf ~/supertag-typescript-state.tar.gz -C ~ .supertag
+   tar -tzf ~/supertag-typescript-state.tar.gz .supertag/supertag.db
+   mv ~/.supertag ~/.supertag-typescript
+   ```
+
+   The archive holds `supertag.db`, the local database, with the credentials and history. Keep
+   it private.
+3. For a shared deployment on PostgreSQL, stop every earlier service, then dump the earlier
+   database and check that the dump reads back before you point the new Control Plane at a new,
+   empty database:
+
+   ```sh
+   pg_dump --format=custom --file supertag-typescript.dump "$EARLIER_DATABASE_URL"
+   pg_restore --list supertag-typescript.dump > /dev/null
+   ```
+
+Then [install a release archive](#install-a-release-archive) and run `supertag init`.
+
+## Install a release archive
+
+A SuperTag release is one archive per platform: `linux-amd64`, `linux-arm64`, `darwin-amd64`, or
+`darwin-arm64`, attached to its GitHub Release with a `SHA256SUMS` file and an installer script.
+The installer script works on macOS and Linux:
 
 ```sh
-curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
 
-It installs SuperTag under `~/.local/share/supertag`, with the `supertag` command in
-`~/.local/bin`, and removes the Claude Code and Codex CLI copies that the vendor SDKs bundle,
-since SuperTag runs the CLIs you install. Add the `export` line to your shell startup file to use
-the command in new terminals.
+It downloads your platform's archive and checks it against the release's `SHA256SUMS` before
+unpacking it. It checks that `supertag` and the terminal UI report the release's version, then
+installs the release under `~/.local/share/supertag` and links `supertag` into `~/.local/bin`.
+It never starts services or reads existing SuperTag state. Add the `export` line to your shell
+startup file to use the command in new terminals.
 
-The npm release includes the terminal UI for macOS and Linux, on arm64 and amd64. The installer
-checks your platform's binary against the package's `SHA256SUMS` and verifies its version. If the
-terminal UI check fails, the script installs the CLI and explains why it skipped the terminal UI.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from; for example, `0.2.0-alpha.9` installs that release |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0-alpha.1`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
-Applications that embed the SDK still install it from npm or PyPI.
+Installing a newer release keeps the older one beside it and switches the `supertag` link only
+after the new release passes its checks. The script replaces a symbolic link at
+`~/.local/bin/supertag`, such as the earlier runtime's, and refuses to replace any other file
+there.
 
-## Or install the CLI from npm
+### Build an archive from a checkout
 
-```sh
-npm install -g supertag-ai
-supertag --version
-```
-
-The npm package includes the CLI, SDK, and documentation. Releases that ship the installer
-also include the terminal UI, which opens when you run plain `supertag` on a supported platform.
-
-npm also downloads the Claude Code and Codex CLI copies that the vendor SDKs bundle, which
-SuperTag doesn't use; the installer script leaves them out. Ensure npm's global prefix's `bin`
-directory is on your PATH; `npm prefix --global` prints that prefix. If it is not writable, run `npm config set prefix ~/.local` before installing,
-then add `~/.local/bin` to your `PATH` (for example,
-`export PATH="$HOME/.local/bin:$PATH"` in your shell startup file).
-
-To install this exact release on another host:
+To install a commit that has no release, build the archive for your machine from a clean
+checkout. The build needs the Rust toolchain pinned in `rust/rust-toolchain.toml`, Go, Node.js
+with pnpm, Python 3.13, and [uv](https://docs.astral.sh/uv/):
 
 ```sh
-npm install -g supertag-ai@0.2.0-alpha.9
+git clone https://github.com/atemaguer/supertag.git
+cd supertag
+uv run rust/scripts/native_release.py package --repo . --commit "$(git rev-parse HEAD)" \
+  --output "$HOME/supertag-build"
+uv run rust/scripts/install_native_release.py "$HOME"/supertag-build/supertag-*-complete.tar.gz
 ```
 
-## Install the TypeScript SDK
+`install_native_release.py` checks and installs the archive as the installer script does, and
+reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
-Add the package to your application:
+## Build only the CLI
+
+For a server or container that runs only the Control Plane or a Gateway, the CLI alone is
+enough. It also runs Codex Tasks:
+
+```sh
+cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag
+```
+
+Put `rust/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
+Worker Host runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
+with `--harness-entrypoint`. Container images for hosted platforms are described in
+[Self-host SuperTag](../guides/self-hosting.md).
+
+## Client libraries
+
+Applications call the Control Plane's gRPC API. The TypeScript SDK is `supertag-ai` on npm:
 
 ```sh
 npm install supertag-ai
 ```
 
-For a shared deployment, select the same version as the Control Plane:
+The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the version that matches
+your CLI; the explicit version selects this prerelease, which Python spells `0.3.0a1`:
 
 ```sh
-npm install supertag-ai@0.2.0-alpha.9
+python -m pip install 'supertag==0.3.0a1'
 ```
 
-See [Custom Workers](../guides/custom-workers.md) for the public extension interfaces.
-
-## Install the Python SDK from PyPI
-
-Python applications need Python 3.10 or newer. Install the matching SDK:
-
-```sh
-python -m pip install 'supertag==0.2.0a9'
-```
-
-The explicit version selects this prerelease; pip otherwise selects an older stable release.
-Python spells `0.2.0-alpha.9` as `0.2.0a9`. The SDK is a library; use the npm CLI above to
-manage the Control Plane and built-in Workers. See [Build a Python Worker](../guides/python-workers.md)
-for optional Codex and OpenAI Agents integrations.
+Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;
+see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
+TypeScript, and Python bindings live in [`rust/bindings`](../../rust/bindings/README.md). See
+[Control Plane API](../reference/control-plane-api.md) for how to connect.
 
 ## Upgrade
 
-Install the target version with the same npm and pip commands above, or run the installer
-script again. For a Compose deployment,
-follow the [upgrade procedure](control-plane.md#upgrade-a-compose-deployment) to back up state
-and coordinate the connected Worker Hosts. Source contributors can use
-[CONTRIBUTING.md](../../CONTRIBUTING.md) to build and link uncommitted changes.
+Run the installer script again, or install a newer archive the same way. Then restart this machine's services with
+`supertag up`, which waits for running Task Attempts before replacing a service. For a hosted
+deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 
-## Match the CLI and the Control Plane
+## Check the CLI and the local services
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
-in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
-may pursue different goals but share one set of rules and one record of the work. The **Control
-Plane** is the service that stores your organization and accepts work. Your CLI talks to it. A
-shared Control Plane can run a different SuperTag version from your CLI, for example after a
-teammate upgrades one but not the other. Commands can then fail in confusing ways.
-
-Check both versions:
+Your CLI, the terminal UI, the desktop app, and Worker Hosts negotiate a protocol version with
+the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs.
+Check what is running:
 
 ```sh
 supertag version
 ```
 
-```text
-CLI version: 0.2.0-alpha.9
-Control Plane: https://supertag.example.com
-Control Plane version: 0.2.0-alpha.9
-Compatibility: supported (same version)
-```
-
-It reports the Control Plane other commands would use: the selected one, or the local Control
-Plane that `supertag up` runs. Reading the version needs no credential. Add `--output json` for scripts.
-If no Control Plane answers, it still prints the CLI version.
-
-Keep both on the same version when you can. Other commands print one warning to stderr when the
-versions differ. Upgrade the older side; `supertag --version` prints only the CLI version. The
-supported pairs are listed in [CLI and Control Plane versions](../reference/api-stability.md#cli-and-control-plane-versions).
-
-## Optional: find the bundled collaboration surface guides
-
-Collaboration surface setup prints local paths to the package's guides and manifests:
-
-```sh
-supertag setup surface slack --help
-```
-
-Open those files directly. They ship with the CLI and do not require access to a hosted
-documentation site.
-
-## If something goes wrong
-
-- **`supertag` is not found.** After a curl install, add `~/.local/bin` to your `PATH`. After a global
-  npm install, run `npm prefix --global` and add that prefix's `bin` directory to your `PATH`.
-- **Plain `supertag` prints help instead of the terminal UI.** The terminal UI is not installed.
-  Run the installer script again on macOS or Linux; it prints why if it still cannot install it.
-- **`supertag` says the terminal UI and the CLI versions must match.** Run the installer script
-  again, so both come from the same release.
-- **The version or commands differ from these docs.** Run `supertag --version`, then install
-  the version named by these docs. The installed package includes its own guides under `dist/docs/`.
-- **A command warns that the CLI and Control Plane versions differ.** Run `supertag version`, then
-  upgrade the older side. See [Troubleshoot](../guides/troubleshooting.md#the-cli-warns-that-versions-differ).
-
-## Run it in a repository
-
-Follow [Get started](../../README.md#get-started) to set up a repository and get a reply from your
-first Tag. During `supertag init`, enter another number at the `Port` prompt if 3434 is busy. The setup starts a
-local Control Plane and a host service; `supertag ps` lists both, `supertag logs -f` follows
-their logs, `supertag down` stops them, and `supertag up` starts them again.
-[Start in a repository](cli.md#start-in-a-repository) explains what `init` sets up.
+It prints this CLI's version and the versions of the services `supertag up` runs on this machine.
+Upgrade the CLI and the Control Plane together.
 
 ## Next
 
-- [CLI operator guide](cli.md)
-- [Collaboration surface guides](../surfaces/README.md)
-- [Self-host SuperTag](../guides/self-hosting.md)
-
-## Remove the CLI
-
-Stop local services with `supertag down`, then remove the global package:
-
-```sh
-npm uninstall -g supertag-ai
-```
-
-If you used the installer script, remove its files instead:
-
-```sh
-rm -rf ~/.local/share/supertag ~/.local/bin/supertag
-```
-
-Either way, your settings and state remain in `~/.supertag/`.
+- [Run your first Tag](../../README.md#run-your-first-tag)
+- [Use the CLI](cli.md)

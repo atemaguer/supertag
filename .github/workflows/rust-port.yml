@@ -1,0 +1,260 @@
+name: Rust runtime
+
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'docs/reference/cli.md'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'apps/tui/**'
+      - 'apps/desktop/**'
+      - 'sdks/python/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - '.github/workflows/rust-port.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'rust/**'
+      - 'docs/reference/cli.md'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'apps/tui/**'
+      - 'apps/desktop/**'
+      - 'sdks/python/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - '.github/workflows/rust-port.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: supertag_test
+          POSTGRES_USER: supertag
+          POSTGRES_PASSWORD: rust-port-ci-database
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supertag -d supertag_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
+      # Required lane: a missing PostgreSQL, Node, Python agents, or terminal UI fixture fails the
+      # gated test instead of skipping it. Linux-root cases run in the linux-root job below.
+      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: |
+            apps/tui/go.sum
+            rust/bindings/go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install fixture runtime dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          python -m pip install uv==0.9.5
+          pnpm install --frozen-lockfile
+          uv venv "$RUNNER_TEMP/supertag-python-runtime" --python 3.13
+          uv pip install --python "$RUNNER_TEMP/supertag-python-runtime/bin/python" './sdks/python[runtime,agents]'
+          npm install --prefix "$RUNNER_TEMP/supertag-codex-probe" --no-audit --no-fund @openai/codex@0.163.0
+          native_codex="$RUNNER_TEMP/supertag-codex-probe/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+          test -x "$native_codex"
+          env -i PATH=/usr/bin:/bin "$native_codex" --version
+          printf 'SUPERTAG_TEST_CODEX_BINARY=%s\n' "$native_codex" >> "$GITHUB_ENV"
+      - name: Build native harness bridges and version-matched terminal UI
+        working-directory: .
+        run: |
+          pnpm --filter @supertag/worker-claude-code build
+          pnpm --filter @supertag/worker-opencode build
+          pnpm --filter @supertag/worker-cursor build
+          pnpm --filter @supertag/worker-environment-e2b build
+          pnpm --filter @supertag/worker-environment-modal build
+          sh apps/tui/build.sh
+          printf 'SUPERTAG_RUST_TEST_NODE=%s\n' "$(command -v node)" >> "$GITHUB_ENV"
+          printf 'SUPERTAG_RUST_TEST_AGENTS_PYTHON=%s\n' "$RUNNER_TEMP/supertag-python-runtime/bin/python" >> "$GITHUB_ENV"
+          printf 'SUPERTAG_RUST_TEST_TUI=%s\n' "$GITHUB_WORKSPACE/apps/tui/dist/supertag-tui-linux-amd64" >> "$GITHUB_ENV"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Test the Rust runtime with SQLite and PostgreSQL
+        run: |
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
+          printf '%s' "$SUPERTAG_RUST_TEST_DATABASE_URL" > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          # Ignored database/language/tmux fixtures run here; real provider calls stay opt-in.
+          # Split-process tests run as NAME::sqlite and NAME::postgres; each PostgreSQL case
+          # creates and drops its own database through the URL file.
+          # replicas_runtime runs three Control Plane processes on one PostgreSQL database.
+          cargo test --locked --workspace --all-features -- --include-ignored \
+            --skip installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint \
+            --skip installed_native_objective_question_and_pinned_tool_resume
+      - name: Verify the supertag-ai package against the native Control Plane and Worker Host
+        working-directory: .
+        run: |
+          cargo build --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag
+          SUPERTAG_RUST_TEST_CLI="$GITHUB_WORKSPACE/rust/target/debug/supertag" \
+            pnpm --filter supertag-ai test:package
+
+  # Shared execution switches workloads to a distinct UID, so these cases need real root. The
+  # job runs as root inside a disposable container; nothing else on the runner is touched.
+  # Locally: run the same two cargo commands as root in a throwaway Linux VM or container with
+  # SUPERTAG_RUST_TEST_REQUIRE=linux-root,postgres and the variables below.
+  linux-root:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.93.1-bookworm
+      options: --user 0
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: supertag_test
+          POSTGRES_USER: supertag
+          POSTGRES_PASSWORD: rust-port-ci-database
+        options: >-
+          --health-cmd "pg_isready -U supertag -d supertag_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      SUPERTAG_RUST_TEST_REQUIRE: linux-root,postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build the Cursor bridge used by the shared command case
+        working-directory: .
+        run: |
+          apt-get update
+          apt-get install -y util-linux
+          pnpm install --frozen-lockfile
+          pnpm --filter @supertag/worker-cursor build
+      - name: Run the Linux-root shared execution cases on SQLite and PostgreSQL
+        run: |
+          test "$(id -u)" = 0
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
+          printf '%s' 'postgresql://supertag:rust-port-ci-database@postgres:5432/supertag_test' > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          cargo build --locked -p supertag-shared-execution --bin supertag-shared-execution
+          export SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY="$PWD/target/debug/supertag-shared-execution"
+          cargo test --locked -p supertag-shared-execution --test service_contract -- --include-ignored process_contract::
+          cargo test --locked -p supertag-cli --all-features --test cursor_runtime -- --include-ignored shared_command_runtime::
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install Tauri system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+      - run: pnpm install --frozen-lockfile
+      # The Tauri build script embeds the built frontend, so it must exist before cargo runs.
+      - run: pnpm --filter @supertag/desktop build
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+
+  # Small hard-crash lane with production PostgreSQL durability settings. The runtime job's
+  # PostgreSQL proves logical behavior; this job proves the crash matrix with fsync,
+  # synchronous_commit, and full_page_writes on. Run locally with
+  # rust/scripts/durable-postgres-crash-lane.sh.
+  crash-durability:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start PostgreSQL with production durability settings
+        run: |
+          docker run --detach --name supertag-durable-postgres \
+            --env POSTGRES_USER=supertag --env POSTGRES_PASSWORD=rust-port-durable-database \
+            --env POSTGRES_DB=supertag_test --publish 127.0.0.1:5433:5432 \
+            postgres:17-alpine -c fsync=on -c synchronous_commit=on -c full_page_writes=on
+          for attempt in $(seq 1 30); do
+            if docker exec supertag-durable-postgres pg_isready -h 127.0.0.1 -U supertag -d supertag_test; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs supertag-durable-postgres
+          exit 1
+      - name: Run the crash matrix against durable PostgreSQL
+        run: |
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-durable-postgres-url"
+          printf '%s' 'postgresql://supertag:rust-port-durable-database@127.0.0.1:5433/supertag_test' > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          sh scripts/durable-postgres-crash-lane.sh
+
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rust/bindings/go/go.mod
+          cache-dependency-path: rust/bindings/go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install uv==0.9.5
+      - run: pnpm install --frozen-lockfile
+      - run: uv run --python 3.13 --script rust/scripts/generate-bindings.py --check
+      - run: uv run --python 3.13 --script rust/bindings/wire-roundtrip.py
+      - run: go -C rust/bindings/go test ./...

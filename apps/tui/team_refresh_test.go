@@ -10,32 +10,32 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // teamStore is the fake's Teams, which a test edits between steps.
 type teamStore struct {
 	mu    sync.Mutex
-	teams []*operatorv1.Team
+	teams []*views.Team
 }
 
-func (s *teamStore) list() []*operatorv1.Team {
+func (s *teamStore) list() []*views.Team {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.teams)
 }
 
-func (s *teamStore) set(teams ...*operatorv1.Team) {
+func (s *teamStore) set(teams ...*views.Team) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.teams = teams
 }
 
-func openTeam() *operatorv1.Team { return &operatorv1.Team{Id: "team-open", Name: "open", Revision: 1} }
+func openTeam() *views.Team { return &views.Team{Id: "team-open", Name: "open", Revision: 1} }
 
 func teamChange(id string) client.WatchUpdate {
-	return client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{
-		Kind: operatorv1.WatchKind_WATCH_KIND_TEAM, Id: id, TeamId: id}}
+	return client.WatchUpdate{Kind: client.WatchChanged, Change: &views.WatchChange{
+		Kind: views.WatchKind_WATCH_KIND_TEAM, Id: id, TeamId: id}}
 }
 
 func watched(t *testing.T, m model, update client.WatchUpdate) model {
@@ -74,7 +74,7 @@ func copyCounts(in map[string]int) map[string]int {
 }
 
 func TestTheTUIWatchesTeamChanges(t *testing.T) {
-	if !slices.Contains(watchKinds, operatorv1.WatchKind_WATCH_KIND_TEAM) {
+	if !slices.Contains(watchKinds, views.WatchKind_WATCH_KIND_TEAM) {
 		t.Fatal("the TUI does not watch Team changes")
 	}
 }
@@ -82,7 +82,7 @@ func TestTheTUIWatchesTeamChanges(t *testing.T) {
 func TestACreatedTeamJoinsTheListWithoutRereadingTheShownTeam(t *testing.T) {
 	fake, store, m := teamsShown(t)
 	list, gets := fake.teamReadCounts()
-	store.set(billingTeam(), openTeam(), &operatorv1.Team{Id: "team-new", Name: "new", Revision: 1})
+	store.set(billingTeam(), openTeam(), &views.Team{Id: "team-new", Name: "new", Revision: 1})
 	m = watched(t, m, teamChange("team-new"))
 	afterList, afterGets := fake.teamReadCounts()
 	if afterList != list+1 {
@@ -101,7 +101,7 @@ func TestAnUpdatedShownTeamRereadsItsDetails(t *testing.T) {
 	_, gets := fake.teamReadCounts()
 	changed := billingTeam()
 	changed.Name, changed.Revision, changed.MaxConcurrency = "payments", 5, nil
-	changed.Members = []*operatorv1.TeamMember{{TagId: "tag-lead", Tag: "lead"}}
+	changed.Members = []*views.TeamMember{{TagId: "tag-lead", Tag: "lead"}}
 	store.set(changed, openTeam())
 	m = watched(t, m, teamChange("team-billing"))
 	_, after := fake.teamReadCounts()
@@ -123,7 +123,7 @@ func TestAChangeToAnotherTeamRereadsOnlyTheList(t *testing.T) {
 	fake, store, m := teamsShown(t)
 	list, gets := fake.teamReadCounts()
 	open := openTeam()
-	open.Members, open.Revision = []*operatorv1.TeamMember{{TagId: "tag-lead", Tag: "lead"}}, 2
+	open.Members, open.Revision = []*views.TeamMember{{TagId: "tag-lead", Tag: "lead"}}, 2
 	store.set(billingTeam(), open)
 	m = watched(t, m, teamChange("team-open"))
 	afterList, after := fake.teamReadCounts()
@@ -180,7 +180,7 @@ func TestLeavingTheTeamPaneDoesNotStallQueuedRefresh(t *testing.T) {
 func TestDeletionRejectsLateDetailsAndNameFallback(t *testing.T) {
 	_, store, m := teamsShown(t)
 	stale := m.reloadTeam()()
-	alias := &operatorv1.Team{Id: "team-alias", Name: "team-billing", Revision: 99}
+	alias := &views.Team{Id: "team-alias", Name: "team-billing", Revision: 99}
 	store.set(openTeam(), alias)
 	m = watched(t, m, teamChange("team-billing"))
 
@@ -202,7 +202,7 @@ func TestTeamChangesReadOnlyWhatTheCallerMayRead(t *testing.T) {
 	// such as one sent before access narrowed, rereads the list but never reads that Team.
 	store.set(billingTeam(), openTeam())
 	m = watched(t, m, teamChange("team-secret"))
-	m = watched(t, m, client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_TEAM}})
+	m = watched(t, m, client.WatchUpdate{Kind: client.WatchChanged, Change: &views.WatchChange{Kind: views.WatchKind_WATCH_KIND_TEAM}})
 	_, after := fake.teamReadCounts()
 	if after["team-secret"] != 0 || after["team-billing"] != gets["team-billing"] {
 		t.Fatalf("GetTeam reads: %v", after)
@@ -215,12 +215,11 @@ func TestTeamChangesReadOnlyWhatTheCallerMayRead(t *testing.T) {
 func TestReconnectingRereadsTheTeams(t *testing.T) {
 	fake, store, m := teamsShown(t)
 	m = watched(t, m, client.WatchUpdate{Kind: client.WatchLive})
-	next, _ := m.Update(watchMsg{update: client.WatchUpdate{Kind: client.WatchLost}, updates: closedUpdates()})
-	m = next.(model)
+	m = watched(t, m, client.WatchUpdate{Kind: client.WatchLost})
 	// Edits made while the stream was down arrive with no change notice.
 	changed := billingTeam()
-	changed.Revision, changed.Members = 7, []*operatorv1.TeamMember{{TagId: "tag-builder", Tag: "builder"}}
-	store.set(changed, &operatorv1.Team{Id: "team-new", Name: "new", Revision: 1})
+	changed.Revision, changed.Members = 7, []*views.TeamMember{{TagId: "tag-builder", Tag: "builder"}}
+	store.set(changed, &views.Team{Id: "team-new", Name: "new", Revision: 1})
 	list, gets := fake.teamReadCounts()
 	for _, kind := range []client.WatchUpdateKind{client.WatchLive, client.WatchResync} {
 		m = watched(t, m, client.WatchUpdate{Kind: kind})
@@ -241,7 +240,7 @@ func TestAStaleTeamsListIsDropped(t *testing.T) {
 	_, store, m := teamsShown(t)
 	older := m.teamsCmd()
 	msgOld := older()
-	store.set(billingTeam(), openTeam(), &operatorv1.Team{Id: "team-new", Name: "new", Revision: 1})
+	store.set(billingTeam(), openTeam(), &views.Team{Id: "team-new", Name: "new", Revision: 1})
 	newer := m.teamsCmd()
 	msgNew := newer()
 	m = update(t, m, msgNew)

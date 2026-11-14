@@ -27,8 +27,8 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A **Session** groups Tasks from the same conversation.
 - A **Context Set** selects reusable knowledge that may be added to a Task; a **Permission Set**
   selects allowed actions.
-- A **Worker** is the code that completes a Task; a **Worker Profile** is a saved recipe for that
-  execution; a **harness** connects the Worker to an agent system such as Codex, Claude Code, or Cursor.
+- A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor; a
+  **Worker Host** runs it.
 - A **Skill** is a reusable instruction package.
 - The **Control Plane** is the service that stores and coordinates the organization; a
   **collaboration surface** links it to an external work tool such as Slack.
@@ -48,7 +48,7 @@ channels, and platforms. Unrelated conversations still remain separate Sessions.
 | Knowledge | What a Task may know | Session continuity and Context Sets |
 | Permissions | What it may do | Permission Sets and provider-native authorization |
 | Responsibilities | Which enduring duties guide it | Roles listed on the Tag |
-| Way of working | How each Task executes | Task execution requirements, selected Worker Profile, harness, Skills, and environment |
+| Way of working | How each Task executes | Execution settings (harness, models, efforts), Skills, and environment |
 
 ## Where people can call on a Tag
 
@@ -80,7 +80,7 @@ It does not implicitly grant channel history, repository contents, issue creatio
 Before work starts, SuperTag combines the Tag with the current request:
 
 ```text
-Tag + origin + requester + active context + active permissions + Worker policy
+Tag + origin + requester + active context + active permissions + execution settings
   = Task with recorded policy
 ```
 

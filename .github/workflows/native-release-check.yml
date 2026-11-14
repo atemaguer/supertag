@@ -1,0 +1,166 @@
+name: Verify native releases
+
+# Builds and verifies the four native archives. On its own this uploads nothing.
+# release.yml calls it with upload_artifacts and sign_macos to produce the
+# archives it attaches to a GitHub Release.
+on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+      mode:
+        default: package
+        type: string
+      profile:
+        default: release
+        type: string
+      upload_artifacts:
+        default: false
+        type: boolean
+      sign_macos:
+        default: false
+        type: boolean
+    secrets:
+      APPLE_DEVELOPER_ID_P12:
+        required: false
+      APPLE_DEVELOPER_ID_P12_PASSWORD:
+        required: false
+      APPLE_NOTARY_KEY:
+        required: false
+      APPLE_NOTARY_KEY_ID:
+        required: false
+      APPLE_NOTARY_ISSUER_ID:
+        required: false
+  # Adding the release-check label to a pull request runs the full package mode on its head.
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full source commit (leave empty for the selected workflow revision)
+        type: string
+      mode:
+        description: Contract checks, or full four-platform package/extract/install verification
+        type: choice
+        options: [contracts, package]
+        default: contracts
+      profile:
+        description: Release optimization, or faster development verification
+        type: choice
+        options: [release, dev]
+        default: release
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'release-check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+      - run: python -m pip install PyYAML==6.0.3
+      - name: Check archive, installation, and platform boundaries
+        run: python -m unittest discover -s rust/scripts -p 'test_*.py'
+
+  package:
+    if: inputs.mode == 'package' || (github.event_name == 'pull_request' && github.event.label.name == 'release-check')
+    needs: contracts
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-amd64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      SOURCE_COMMIT: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+      BUILD_PLATFORM: ${{ matrix.platform }}
+      BUILD_PROFILE: ${{ inputs.profile || 'release' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+      - name: Install verification tools
+        run: python -m pip install PyYAML==6.0.3 grpcio==1.85.1 grpcio-tools==1.85.1 protobuf==7.36.2
+      - uses: actions/setup-node@v4
+        if: runner.os == 'macOS'
+        with:
+          node-version: '22.13.0'
+      - uses: actions/setup-go@v5
+        if: runner.os == 'macOS'
+        with:
+          go-version: '1.26.1'
+          cache: false
+      - name: Prepare native macOS tools
+        if: runner.os == 'macOS'
+        run: |
+          npm install --global --ignore-scripts --no-audit --no-fund pnpm@11.18.0
+          rustup toolchain install 1.93.1 --profile minimal --no-self-update
+          command -v tmux || brew install tmux
+      - name: Build and execute the Linux archive in Debian 12
+        if: runner.os == 'Linux'
+        run: |
+          python rust/scripts/native_release_docker.py --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release"
+      # Only a release run that signs receives the Apple credentials; pull requests and manual
+      # checks build unsigned archives without them.
+      - name: Build and execute the native macOS archive
+        if: runner.os == 'macOS' && !inputs.sign_macos
+        run: |
+          python rust/scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release" --install-smoke
+      - name: Build, sign, notarize, and execute the native macOS archive
+        if: runner.os == 'macOS' && inputs.sign_macos
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          python rust/scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release" --install-smoke \
+            --sign-command "$GITHUB_WORKSPACE/scripts/notarize-macos-binaries.sh"
+      - name: Record verified local output
+        run: |
+          python - "$RUNNER_TEMP/native-release" <<'PY'
+          import json, pathlib, sys
+          for receipt in sorted(pathlib.Path(sys.argv[1]).glob('*.json')):
+              print(receipt.name)
+              print(json.dumps(json.loads(receipt.read_text()), indent=2, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: inputs.upload_artifacts
+        with:
+          name: supertag-native-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/native-release/*.tar.gz
+            ${{ runner.temp }}/native-release/*.tar.gz.sha256
+            ${{ runner.temp }}/native-release/*.json
+          if-no-files-found: error
+          retention-days: 7

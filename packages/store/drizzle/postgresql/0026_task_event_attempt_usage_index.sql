@@ -1,1 +1,0 @@
-CREATE INDEX "TaskEvent_attemptId_type_sequence_idx" ON "TaskEvent" USING btree ("attemptId","type","sequence");

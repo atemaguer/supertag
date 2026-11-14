@@ -1,5 +1,4 @@
 from .models import (
-    WORKLET_PROTOCOL_VERSION,
     CancellationToken,
     Capability,
     LocalWorklet,
@@ -14,7 +13,6 @@ from .models import (
     task_event,
 )
 from .runtime import WorkerOptions, create_worker
-from .transport import WorkletConnection
 
 __all__ = [
     "CancellationToken",
@@ -25,9 +23,7 @@ __all__ = [
     "WorkerDescriptor",
     "WorkerOptions",
     "Worklet",
-    "WorkletConnection",
     "WorkletDescriptor",
-    "WORKLET_PROTOCOL_VERSION",
     "WorkerProfileRef",
     "default_task_result",
     "event_identity",

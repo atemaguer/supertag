@@ -1,0 +1,36 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+
+// Configured file data sources. Artifact Volumes are managed separately.
+service WorkspaceVolumes {
+  rpc Put(PutWorkspaceVolumeRequest) returns (WorkspaceVolume);
+  rpc Get(GetWorkspaceVolumeRequest) returns (WorkspaceVolume);
+}
+message PutWorkspaceVolumeRequest {
+  string volume_id = 1;
+  string source = 2;
+  // Zero creates the Volume. Updates require its current revision.
+  uint64 expected_revision = 3;
+  // Required for an s3:// source: the credential name Worker Hosts map. Refused for file sources.
+  string credential = 5100;
+}
+message GetWorkspaceVolumeRequest { string volume_id = 1; }
+
+// The Control Plane checks the live Attempt before disclosing
+// file artifact Volume paths to its trusted Worker Host for alias rejection.
+service AttemptWorkspaceMounts {
+  rpc Preflight(InspectAttemptRequest) returns (WorkspaceMountPreflight);
+  // Record what the Attempt's read-write copies wrote back. Idempotent per Attempt.
+  rpc RecordWrites(RecordWorkspaceMountWritesRequest) returns (RecordWorkspaceMountWritesResponse);
+}
+message RecordWorkspaceMountWritesRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  repeated WorkspaceMountWrite writes = 4;
+}
+message RecordWorkspaceMountWritesResponse {}
+message WorkspaceMountPreflight {
+  repeated string protected_file_sources = 1;
+}

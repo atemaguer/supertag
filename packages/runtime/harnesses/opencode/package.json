@@ -1,6 +1,6 @@
 {
   "name": "@supertag/worker-opencode",
-  "version": "0.2.0-alpha.9",
+  "version": "0.3.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -18,6 +18,10 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@supertag/worker-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@connectrpc/connect-node": "2.2.0"
   }
 }

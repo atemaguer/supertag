@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The local SuperTag desktop window.",
+  "windows": ["main"],
+  "permissions": ["control-plane-client"]
+}

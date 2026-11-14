@@ -1,0 +1,650 @@
+//! A stdio MCP server the Worker Host launches for one Task Attempt.
+//!
+//! The process gets a minimal environment plus its catalog `env`, nothing else of the Worker
+//! Host's; its stderr is discarded so server output cannot carry that environment into logs. It
+//! runs in its own process group, which closing terminates: SIGTERM, then SIGKILL.
+//!
+//! A Workspace server of a remote Workspace runs inside the Task's sandbox instead, from the
+//! provider's trusted copy of the base commit. Its stdin and stdout cross the Worker Host's
+//! private provider stream; ending that stream stops the server, never the sandbox.
+
+use std::{collections::BTreeMap, process::Stdio, time::Duration};
+
+use serde_json::{Value, json};
+use supertag_protocol::{
+    MAX_MESSAGE_BYTES, authenticated_request,
+    v2::{
+        RemoteMcpServerInput, RemoteMcpServerStart, remote_mcp_server_input,
+        remote_workspace_provider_client::RemoteWorkspaceProviderClient,
+    },
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    process::{Child, Command},
+    sync::mpsc,
+    task::JoinHandle,
+    time,
+};
+use tokio_stream::wrappers::ReceiverStream;
+
+use super::{
+    Failure, SandboxConnection,
+    catalog::{StdioServer, TRACKED_ENV_VALUE_BYTES},
+    http::{PROTOCOL_VERSION, accepted_version, decode},
+};
+
+type Input = Box<dyn AsyncWrite + Send + Unpin>;
+type Output = BufReader<Box<dyn AsyncRead + Send + Unpin>>;
+
+/// The only Worker Host variables a stdio server inherits, as in the TypeScript Worker.
+const INHERITED: [&str; 11] = [
+    "HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "TMPDIR",
+];
+const MESSAGE_BYTES: usize = 256 * 1024;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+const SANDBOX_CHUNK_BYTES: usize = 64 * 1024;
+
+pub(super) struct Session {
+    child: Option<Child>,
+    /// The server's process ID, which is also its process group ID.
+    pid: Option<libc::pid_t>,
+    /// A sandbox server's stream pump. It ends when the provider call does.
+    sandbox: Option<JoinHandle<()>>,
+    stdin: Option<Input>,
+    stdout: Output,
+    next_id: u64,
+    /// Set once the stream failed or a request went unanswered; nothing more is sent.
+    broken: bool,
+    pub(super) unconfirmed_call: bool,
+    /// Values this launch read from the server's credential files, withheld from Task output.
+    pub(super) secrets: Vec<String>,
+}
+
+/// The base environment every stdio server receives.
+pub(super) fn base_environment() -> impl Iterator<Item = (&'static str, String)> {
+    INHERITED.into_iter().filter_map(|key| {
+        std::env::var(key)
+            .ok()
+            // Exported shell functions are never inherited.
+            .filter(|value| !value.starts_with("()"))
+            .map(|value| (key, value))
+    })
+}
+
+impl Session {
+    /// Starts a host stdio server in its own process group, recorded in `processes` first so a
+    /// restarted host can prove it stopped.
+    pub(super) fn start(
+        server: &StdioServer,
+        processes: Option<&crate::journal::Processes>,
+    ) -> Result<Self, Failure> {
+        // Credential files are read at each launch, so a rotated file takes effect.
+        let mut files = BTreeMap::new();
+        for (variable, file) in &server.env_files {
+            files.insert(variable, file.read().map_err(|_| Failure::Unavailable)?);
+        }
+        let secrets = files
+            .values()
+            .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES)
+            .cloned()
+            .collect();
+        let mut command = Command::new(&server.command[0]);
+        command
+            .args(&server.command[1..])
+            .env_clear()
+            .envs(base_environment())
+            .envs(&server.env)
+            .envs(&files)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .kill_on_drop(true);
+        if let Some(cwd) = &server.cwd {
+            command.current_dir(cwd);
+        }
+        let pending = processes
+            .map(crate::journal::Processes::prepare)
+            .transpose()
+            .map_err(|_| Failure::Unavailable)?;
+        let spawned = command.spawn();
+        if let Some(pending) = pending {
+            pending
+                .record(spawned.as_ref().ok().and_then(Child::id))
+                .map_err(|_| Failure::Unavailable)?;
+        }
+        let mut child = spawned.map_err(|_| Failure::Unavailable)?;
+        let pid = child.id().and_then(|pid| libc::pid_t::try_from(pid).ok());
+        let stdin = child.stdin.take().ok_or(Failure::Unavailable)?;
+        let stdout = child.stdout.take().ok_or(Failure::Unavailable)?;
+        Ok(Self {
+            child: Some(child),
+            pid,
+            sandbox: None,
+            stdin: Some(Box::new(stdin)),
+            stdout: BufReader::new(Box::new(stdout)),
+            next_id: 1,
+            broken: false,
+            unconfirmed_call: false,
+            secrets,
+        })
+    }
+
+    /// Starts `command` inside the Task's sandbox, in the provider's trusted copy, with no
+    /// Worker Host variable. The provider refuses before staging or without a trusted copy.
+    pub(super) fn start_sandbox(
+        connection: &SandboxConnection,
+        name: &str,
+        command: &[String],
+    ) -> Result<Self, Failure> {
+        let (program, args) = command.split_first().ok_or(Failure::Unavailable)?;
+        let (sender, receiver) = mpsc::channel(4);
+        sender
+            .try_send(RemoteMcpServerInput {
+                part: Some(remote_mcp_server_input::Part::Start(RemoteMcpServerStart {
+                    name: name.to_owned(),
+                    command: program.clone(),
+                    args: args.to_vec(),
+                })),
+            })
+            .map_err(|_| Failure::Unavailable)?;
+        let request = authenticated_request(ReceiverStream::new(receiver), &connection.token, None)
+            .map_err(|_| Failure::Unavailable)?;
+        let mut client = RemoteWorkspaceProviderClient::new(connection.channel.clone())
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES);
+        let (input, mut pump_input) = tokio::io::duplex(SANDBOX_CHUNK_BYTES);
+        let (mut pump_output, output) = tokio::io::duplex(MESSAGE_BYTES);
+        let pump = tokio::spawn(async move {
+            // Input ends when the Session closes its stdin; the server then sees end of input.
+            let forward_input = async move {
+                let mut buffer = vec![0; SANDBOX_CHUNK_BYTES];
+                loop {
+                    match pump_input.read(&mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(size) => {
+                            let chunk = RemoteMcpServerInput {
+                                part: Some(remote_mcp_server_input::Part::Stdin(
+                                    buffer[..size].to_vec(),
+                                )),
+                            };
+                            if sender.send(chunk).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            };
+            let forward_output = async move {
+                let Ok(response) = client.run_mcp_server(request).await else {
+                    return;
+                };
+                let mut stream = response.into_inner();
+                while let Ok(Some(message)) = stream.message().await {
+                    if message.stdout.len() > MESSAGE_BYTES
+                        || pump_output.write_all(&message.stdout).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            };
+            // Output ending first means the server or the provider stopped it.
+            tokio::select! {
+                () = forward_output => {}
+                () = async { forward_input.await; std::future::pending::<()>().await } => {}
+            }
+        });
+        Ok(Self {
+            child: None,
+            pid: None,
+            sandbox: Some(pump),
+            stdin: Some(Box::new(input)),
+            stdout: BufReader::new(Box::new(output)),
+            next_id: 1,
+            broken: false,
+            unconfirmed_call: false,
+            secrets: Vec::new(),
+        })
+    }
+
+    pub(super) async fn initialize(&mut self) -> Result<(), Failure> {
+        let initialized = self
+            .rpc(
+                "initialize",
+                json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name":"supertag-worker-host", "version":env!("CARGO_PKG_VERSION")}
+                }),
+            )
+            .await?;
+        accepted_version(&initialized)?;
+        if !initialized
+            .get("capabilities")
+            .and_then(|value| value.get("tools"))
+            .is_some_and(Value::is_object)
+        {
+            return Err(Failure::InvalidResponse);
+        }
+        self.send(&json!({"jsonrpc":"2.0", "method":"notifications/initialized"}))
+            .await
+    }
+
+    async fn send(&mut self, message: &Value) -> Result<(), Failure> {
+        let stdin = self.stdin.as_mut().ok_or(Failure::Unavailable)?;
+        let mut line = message.to_string();
+        line.push('\n');
+        let written = async {
+            stdin.write_all(line.as_bytes()).await?;
+            stdin.flush().await
+        };
+        match time::timeout(REQUEST_TIMEOUT, written).await {
+            Ok(Ok(())) => Ok(()),
+            _ => {
+                self.broken = true;
+                Err(Failure::Unavailable)
+            }
+        }
+    }
+
+    /// One newline-delimited message, bounded so a server cannot exhaust Worker memory.
+    async fn read_message(&mut self) -> Result<Value, Failure> {
+        let mut line = Vec::new();
+        loop {
+            let available = self
+                .stdout
+                .fill_buf()
+                .await
+                .map_err(|_| Failure::Unavailable)?;
+            if available.is_empty() {
+                return Err(Failure::Unavailable);
+            }
+            let end = available.iter().position(|byte| *byte == b'\n');
+            let chunk = &available[..end.unwrap_or(available.len())];
+            if line.len() + chunk.len() > MESSAGE_BYTES {
+                return Err(Failure::ResponseTooLarge);
+            }
+            line.extend_from_slice(chunk);
+            let consumed = end.map_or(chunk.len(), |end| end + 1);
+            self.stdout.consume(consumed);
+            if end.is_none() {
+                continue;
+            }
+            if line.iter().all(u8::is_ascii_whitespace) {
+                line.clear();
+                continue;
+            }
+            return serde_json::from_slice(&line).map_err(|_| Failure::InvalidResponse);
+        }
+    }
+
+    pub(super) async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, Failure> {
+        if self.broken {
+            return Err(Failure::Unavailable);
+        }
+        let id = self.next_id;
+        self.next_id = id.checked_add(1).ok_or(Failure::InvalidResponse)?;
+        self.send(&json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
+            .await?;
+        let result = time::timeout(REQUEST_TIMEOUT, self.response(id)).await;
+        // A malformed, closed, or silent stream cannot carry a later answer reliably, and an
+        // unanswered request may still run: never send another on this stream.
+        let result = result.unwrap_or(Err(Failure::Unavailable));
+        if result.is_err() {
+            self.broken = true;
+        }
+        result
+    }
+
+    async fn response(&mut self, id: u64) -> Result<Value, Failure> {
+        loop {
+            let message = self.read_message().await?;
+            let bytes = serde_json::to_vec(&message).map_err(|_| Failure::InvalidResponse)?;
+            if let (Some(request), Some(method)) = (
+                message
+                    .get("id")
+                    .filter(|_| message.get("method").is_some()),
+                message.get("method").and_then(Value::as_str),
+            ) {
+                // A server request. The Worker offers no client capabilities, so answer each
+                // except ping with method-not-found.
+                let reply = if method == "ping" {
+                    json!({"jsonrpc":"2.0", "id":request, "result":{}})
+                } else {
+                    json!({"jsonrpc":"2.0", "id":request, "error":{"code":-32601, "message":"Method not found"}})
+                };
+                self.send(&reply).await?;
+                continue;
+            }
+            if let Some(result) = decode(&bytes, id)? {
+                return Ok(result);
+            }
+        }
+    }
+
+    /// Ends the server: closes its input, then signals its process group.
+    pub(super) async fn close(&mut self) {
+        self.broken = true;
+        drop(self.stdin.take());
+        if let Some(mut pump) = self.sandbox.take() {
+            // End of input lets the server exit; ending the call makes the provider stop it.
+            if time::timeout(TERMINATE_GRACE, &mut pump).await.is_err() {
+                pump.abort();
+                let _ = pump.await;
+            }
+        }
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let exited = matches!(
+            time::timeout(Duration::from_millis(500), child.wait()).await,
+            Ok(Ok(_))
+        );
+        if !exited {
+            self.signal(libc::SIGTERM);
+            if !matches!(
+                time::timeout(TERMINATE_GRACE, child.wait()).await,
+                Ok(Ok(_))
+            ) {
+                self.signal(libc::SIGKILL);
+                let _ = child.wait().await;
+            }
+        }
+        // Descendants that outlived the leader belong to the same group.
+        self.signal(libc::SIGKILL);
+        self.pid = None;
+    }
+
+    fn signal(&self, signal: libc::c_int) {
+        if let Some(pid) = self.pid {
+            // SAFETY: the group was created for this server by process_group(0).
+            unsafe {
+                libc::killpg(pid, signal);
+            }
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.signal(libc::SIGKILL);
+        if let Some(pump) = self.sandbox.take() {
+            pump.abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, path::PathBuf, time::Instant};
+
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn fixture() -> Option<(PathBuf, PathBuf)> {
+        let node = std::env::var_os("SUPERTAG_RUST_TEST_NODE")?;
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../packages/runtime/harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs",
+        );
+        Some((PathBuf::from(node), script))
+    }
+
+    fn server(journal: &std::path::Path, mode: &str) -> StdioServer {
+        let (node, script) = fixture().expect("SUPERTAG_RUST_TEST_NODE");
+        StdioServer {
+            command: vec![
+                node.display().to_string(),
+                script.display().to_string(),
+                journal.display().to_string(),
+                mode.into(),
+            ],
+            env: BTreeMap::from([("CATALOG_TOKEN".into(), "stdio-secret-value-7f3a".into())]),
+            env_files: BTreeMap::new(),
+            cwd: None,
+            sandboxed: false,
+        }
+    }
+
+    fn launches(journal: &std::path::Path) -> Vec<Value> {
+        let directory = journal.parent().unwrap();
+        let prefix = format!("{}.", journal.file_name().unwrap().to_string_lossy());
+        std::fs::read_dir(directory)
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+                (name.starts_with(&prefix) && name.ends_with(".launch")).then(|| {
+                    serde_json::from_slice(&std::fs::read(directory.join(name)).unwrap()).unwrap()
+                })
+            })
+            .collect()
+    }
+
+    fn alive(pid: i64) -> bool {
+        // SAFETY: signal 0 only checks for the process.
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    fn calls(journal: &std::path::Path) -> usize {
+        std::fs::read_to_string(journal)
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains("\"tool\""))
+            .count()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE"]
+    async fn launches_with_only_its_env_answers_server_requests_and_stops_on_close() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = directory.path().join("calls.jsonl");
+        let mut session = Session::start(&server(&journal, "normal"), None).unwrap();
+        session.initialize().await.unwrap();
+        let tools = session.rpc("tools/list", json!({})).await.unwrap();
+        assert_eq!(tools["tools"].as_array().unwrap().len(), 4);
+        let result = session
+            .rpc(
+                "tools/call",
+                json!({"name":"list_docs","arguments":{"owner":"acme","repo":"docs"}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["content"][0]["text"], "fixture release record");
+        // The server's ping was answered while the call waited.
+        // The fixture creates the file before writing it, so wait for a complete value, not
+        // for the file to exist.
+        let ping_file = directory.path().join("calls.jsonl.ping");
+        let mut ping = None;
+        for _ in 0..250 {
+            if let Some(value) = std::fs::read(&ping_file)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            {
+                ping = Some(value);
+                break;
+            }
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        let ping = ping.expect("the server's ping answer was never recorded");
+        assert_eq!(
+            ping,
+            json!({"jsonrpc":"2.0","id":"server-ping","result":{}})
+        );
+        let [launch] = launches(&journal).try_into().unwrap();
+        let environment = launch["env"].as_object().unwrap();
+        assert_eq!(environment["CATALOG_TOKEN"], "stdio-secret-value-7f3a");
+        // Nothing of the Worker Host's environment beyond the minimal default, such as the
+        // test's own SUPERTAG_RUST_TEST_NODE, reaches the server.
+        for key in environment.keys() {
+            assert!(
+                key == "CATALOG_TOKEN"
+                    || INHERITED.contains(&key.as_str())
+                    || key == "__CF_USER_TEXT_ENCODING",
+                "unexpected variable {key}"
+            );
+        }
+        let pid = launch["pid"].as_i64().unwrap();
+        session.close().await;
+        assert!(!alive(pid));
+        assert!(
+            std::fs::read_to_string(&journal)
+                .unwrap()
+                .contains("{\"closed\":true}")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE"]
+    async fn times_out_a_hung_call_once_and_kills_a_server_that_ignores_sigterm() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = directory.path().join("calls.jsonl");
+        let mut session = Session::start(&server(&journal, "hung"), None).unwrap();
+        session.initialize().await.unwrap();
+        let call = json!({"name":"list_docs","arguments":{"owner":"acme","repo":"docs"}});
+        assert_eq!(
+            session.rpc("tools/call", call.clone()).await,
+            Err(Failure::Unavailable)
+        );
+        // The hung request may still run: nothing more is sent to this server.
+        assert_eq!(
+            session.rpc("tools/call", call).await,
+            Err(Failure::Unavailable)
+        );
+        assert_eq!(calls(&journal), 1);
+        let [launch] = launches(&journal).try_into().unwrap();
+        let pid = launch["pid"].as_i64().unwrap();
+        let started = Instant::now();
+        session.close().await;
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!alive(pid));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE"]
+    async fn fails_a_malformed_or_oversized_stream_without_waiting_for_the_timeout() {
+        for (mode, failure) in [
+            ("garbage", Failure::InvalidResponse),
+            ("oversized", Failure::ResponseTooLarge),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let journal = directory.path().join("calls.jsonl");
+            let started = Instant::now();
+            let mut session = Session::start(&server(&journal, mode), None).unwrap();
+            assert_eq!(session.initialize().await, Err(failure), "{mode}");
+            assert!(started.elapsed() < Duration::from_secs(3), "{mode}");
+            session.close().await;
+        }
+    }
+
+    /// A server that ignores SIGTERM and forks a child that ignores it too and holds its output
+    /// open is stopped with its whole process group within the grace period, on Linux and macOS.
+    #[tokio::test]
+    async fn close_stops_the_process_group_of_a_server_whose_children_ignore_sigterm() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("child.pid");
+        let server = StdioServer {
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"trap '' TERM; sh -c 'trap "" TERM; echo $$ > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60' "$1" & while :; do sleep 1; done"#.into(),
+                "server".into(),
+                pid_file.display().to_string(),
+            ],
+            env: BTreeMap::new(),
+            env_files: BTreeMap::new(),
+            cwd: None,
+            sandboxed: false,
+        };
+        let mut session = Session::start(&server, None).unwrap();
+        let mut child = None;
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse::<i64>()
+            {
+                child = Some(pid);
+                break;
+            }
+            time::sleep(Duration::from_millis(25)).await;
+        }
+        let child = child.expect("the forked child never started");
+        let started = Instant::now();
+        session.close().await;
+        assert!(started.elapsed() < TERMINATE_GRACE + Duration::from_millis(1500));
+        let mut stopped = false;
+        for _ in 0..100 {
+            if !alive(child) {
+                stopped = true;
+                break;
+            }
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(stopped, "the forked child outlived close");
+    }
+
+    #[tokio::test]
+    async fn reads_its_credential_files_again_at_each_launch() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let token = directory.path().join("token");
+        let write = |value: &str| {
+            std::fs::write(&token, value).unwrap();
+            std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        let output = directory.path().join("seen");
+        let server = StdioServer {
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"printf %s "$DB_TOKEN" > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60"#.into(),
+                output.display().to_string(),
+            ],
+            env: BTreeMap::new(),
+            env_files: BTreeMap::from([(
+                "DB_TOKEN".into(),
+                super::super::catalog::CredentialFile::new(&token, 4096, false).unwrap(),
+            )]),
+            cwd: None,
+            sandboxed: false,
+        };
+        for value in ["stdio-file-value-one", "stdio-file-value-two"] {
+            write(&format!("{value}\n"));
+            let _ = std::fs::remove_file(&output);
+            let mut session = Session::start(&server, None).unwrap();
+            // The value this launch read is withheld from Task-visible output.
+            assert_eq!(session.secrets, [value]);
+            let mut seen = None;
+            for _ in 0..200 {
+                if let Ok(text) = std::fs::read_to_string(&output) {
+                    seen = Some(text);
+                    break;
+                }
+                time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(seen.as_deref(), Some(value));
+            session.close().await;
+        }
+        // A file that became shared refuses the launch.
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            Session::start(&server, None),
+            Err(Failure::Unavailable)
+        ));
+    }
+
+    #[tokio::test]
+    async fn reports_a_server_that_cannot_start() {
+        let missing = StdioServer {
+            command: vec!["/nonexistent/supertag-missing-mcp-server".into()],
+            env: BTreeMap::new(),
+            env_files: BTreeMap::new(),
+            cwd: None,
+            sandboxed: false,
+        };
+        assert!(matches!(
+            Session::start(&missing, None),
+            Err(Failure::Unavailable)
+        ));
+    }
+}

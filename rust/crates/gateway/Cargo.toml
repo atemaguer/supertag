@@ -1,0 +1,43 @@
+[package]
+name = "supertag-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = ["supertag-github/test-fixtures"]
+
+[dependencies]
+anyhow.workspace = true
+async-stream = "0.3"
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+hex = "0.4"
+futures-util = { version = "0.3", features = ["sink"] }
+prost.workspace = true
+pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark-to-cmark = "22"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+hmac = "0.12"
+libc.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
+ring = "0.17"
+rustls-pki-types = { version = "1", features = ["std"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+supertag-credential-vault.workspace = true
+supertag-github.workspace = true
+supertag-protocol.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
+tonic.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+supertag-github = { workspace = true, features = ["test-fixtures"] }

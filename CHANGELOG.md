@@ -9,6 +9,49 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- `supertag watch inbox-item` prints the operator inbox items already waiting, then each new one.
+- `supertag delete KIND NAME --dry-run` checks a Team, Permission Set, Context Set, Volume,
+  Workspace, or Surface Location deletion, including whether anything still uses it, without
+  deleting it.
+- Root turns can recall the Tag's other Sessions and its Objectives with `list_sessions`,
+  `search_sessions`, `read_session`, `list_objectives`, and `read_objective`, and see the Tag's
+  open Objectives in their context. A conversation turn that starts with
+  `@SuperTag objective` can create that Objective with `create_objective`.
+
+### Changed
+
+- The Control Plane stores no artifact or Workspace delivery bytes. Worker Hosts keep them in
+  their artifact directory (`--artifact-directory`, which replaces `--artifact-source-directory`)
+  and the Control Plane relays them to readers. Reading them needs the holding Worker Host to be
+  connected, or a Volume copy. The Control Plane's `--transfer-directory` is replaced by
+  `--checkpoint-directory`, which holds Session checkpoints only.
+- `supertag init` binds the lead Tag's Workspace to the current branch instead of a fixed commit.
+  On a detached HEAD it pins the commit.
+- `supertag delete volume` no longer requires `--operation-id`.
+- Every resource manifest and `put --file` specification spells its fields in camelCase, with one
+  name per field. Role, PermissionSet, ContextSet, SurfaceAccount, and SurfaceLocation fields
+  change from snake_case (`approval_required` is now `approvalRequired`, `item_key` is `itemKey`,
+  `connector_account_id` is `connectorAccountId`, and so on). Roles and SurfaceLocations name their
+  sets `permissionSets` and `contextSets`, and an Objective's owner is `ownerTagId`; the other
+  spellings are refused.
+
+## [0.3.0-alpha.1]
+
+### Changed
+
+- The installer script installs the native SuperTag release from GitHub Releases: a
+  checksum-verified archive per platform holding the `supertag` command, the terminal UI, and the
+  Claude Code, Cursor, OpenCode, E2B, and Modal bridges. Install with
+  `curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh`.
+  It no longer needs npm, and Codex Tasks no longer need Node.js. The native release starts with
+  new state and does not import earlier state; move `~/.supertag` aside first, as
+  [Install SuperTag](docs/operations/install.md#upgrade-from-a-release-before-the-native-cli)
+  describes.
+- The `supertag-ai` npm package is the TypeScript SDK. It no longer carries the installer script
+  or the terminal UI; install the CLI with the installer script.
+
 ### Fixed
 
 - Cursor Tags with local command access use the Worker Host's Node and the project's pinned

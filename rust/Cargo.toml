@@ -1,0 +1,44 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.3.0-alpha.1"
+rust-version = "1.93.1"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+hmac = "0.12"
+libc = "0.2"
+prost = "0.14"
+protoc-bin-vendored = "3.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls", "any", "sqlite", "postgres", "migrate", "macros"] }
+subtle = "2.6"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = "0.7"
+tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
+tonic-health = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+uuid = { version = "1", features = ["v4"] }
+supertag-protocol = { path = "crates/protocol" }
+supertag-control-plane = { path = "crates/control-plane" }
+supertag-codex-adapter = { path = "crates/codex-adapter" }
+supertag-api = { path = "crates/api" }
+supertag-credential-vault = { path = "crates/credential-vault" }
+supertag-gateway = { path = "crates/gateway" }
+supertag-github = { path = "crates/github" }
+supertag-transport = { path = "crates/transport" }
+supertag-worker-host = { path = "crates/worker-host" }
+supertag-workspaces = { path = "crates/workspaces" }

@@ -221,36 +221,6 @@ export function sensitiveEnvironmentValues(
   );
 }
 
-/** Only host-resolved runtime credential maps bypass the plausibility filter. */
-export function sensitiveFieldValues(value: unknown): readonly string[] {
-  const values: string[] = [];
-  const pending = [{ value, resolved: false, environment: false }];
-  const visited = new WeakSet<object>();
-  while (pending.length) {
-    const entry = pending.pop();
-    const current = entry?.value;
-    if (!current || typeof current !== "object" || visited.has(current)) continue;
-    visited.add(current);
-    for (const [name, item] of Object.entries(current)) {
-      if (entry?.environment && /^(?:OLD)?PWD$/u.test(name)) continue;
-      if (typeof item === "string") {
-        values.push(
-          ...namedSensitiveValues(name, item).filter(
-            (secret) => entry?.resolved || plausibleSecret(secret),
-          ),
-        );
-      } else {
-        pending.push({
-          value: item,
-          resolved: name === "runtimeEnvironment" || name === "runtimeHeaders",
-          environment: name === "runtimeEnvironment",
-        });
-      }
-    }
-  }
-  return uniqueSensitiveValues(values);
-}
-
 export function uniqueSensitiveValues(values: readonly string[]): readonly string[];
 export function uniqueSensitiveValues(values: readonly SensitiveValue[]): readonly SensitiveValue[];
 export function uniqueSensitiveValues(
@@ -276,19 +246,6 @@ function encodedForms(value: string): string[] {
     Buffer.from(value).toString("base64").replace(/=+$/u, ""),
     Buffer.from(value).toString("base64url"),
   ];
-}
-
-/**
- * The longest text `redactText` matches for a known value. A stream that holds back one fewer
- * character than this, plus its unfinished whitespace-free run (which bounds URL credentials,
- * escaped forms, and word matches), never emits part of a secret its next chunk completes.
- */
-export function redactionSpan(sensitiveValues: readonly SensitiveValue[]): number {
-  let span = 0;
-  for (const value of sensitiveValues)
-    for (const form of typeof value === "string" ? encodedForms(value) : [value.lowConfidence])
-      span = Math.max(span, form.length);
-  return span;
 }
 
 export function redactText(

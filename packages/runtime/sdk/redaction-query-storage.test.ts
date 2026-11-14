@@ -1,16 +1,7 @@
 // Cases from the fu4-redaction-fixes security review (findings F2 and F6), kept on the
 // integrated redaction policy.
 import { expect, it } from "vitest";
-import { redactText, sensitiveEnvironmentValues, sensitiveFieldValues } from "./src/redaction.js";
-
-it("does not let credential storage names exempt resolved or token-shaped values", () => {
-  expect(
-    sensitiveFieldValues({ runtimeEnvironment: { GH_TOKEN_PATH: "ghp_0123456789abcdefghij" } }),
-  ).not.toEqual([]);
-  expect(sensitiveEnvironmentValues({ VAULT_SECRET_STORE: "s.AbCdEf1234567890xyz" })).not.toEqual(
-    [],
-  );
-});
+import { redactText, sensitiveEnvironmentValues } from "./src/redaction.js";
 
 it.each(["_STORE", "_DIR", "_PATH", "_FILE"])(
   "exempts only location and word values of credential storage names ending in %s",
@@ -22,9 +13,6 @@ it.each(["_STORE", "_DIR", "_PATH", "_FILE"])(
     expect(sensitiveEnvironmentValues({ [name]: "/home/user/secrets" })).toEqual([]);
     expect(sensitiveEnvironmentValues({ [name]: "~/.secrets" })).toEqual([]);
     expect(sensitiveEnvironmentValues({ [name]: "filesystem" })).toEqual([]);
-    expect(
-      sensitiveFieldValues({ runtimeEnvironment: { [name]: "s.AbCdEf1234567890xyz" } }),
-    ).toEqual(["s.AbCdEf1234567890xyz"]);
   },
 );
 
@@ -107,7 +95,6 @@ it.each(["FILE", "STORE", "DIR", "PATH"])(
     const name = `SERVICE_TOKEN_${suffix}`;
     const secret = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     expect(sensitiveEnvironmentValues({ [name]: secret })).toContain(secret);
-    expect(sensitiveFieldValues({ runtimeEnvironment: { [name]: secret } })).toContain(secret);
     for (const value of ["filesystem", "keychain", "/home/user/token", "./token", "~/.token"]) {
       expect(sensitiveEnvironmentValues({ [name]: value })).toEqual([]);
     }
@@ -203,7 +190,6 @@ it.each(["TOKEN_FILE", "TOKEN_STORE", "TOKEN_DIR", "TOKEN_PATH"])(
   (name) => {
     const secret = "ZqxKmVwLpRtYbNcD";
     expect(sensitiveEnvironmentValues({ [name]: secret })).toContain(secret);
-    expect(sensitiveFieldValues({ [name]: secret })).toContain(secret);
     expect(sensitiveEnvironmentValues({ [name]: "filesystem" })).toEqual([]);
   },
 );

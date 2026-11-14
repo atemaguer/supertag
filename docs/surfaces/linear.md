@@ -5,14 +5,15 @@ permissions, replies when someone mentions it in an issue or comment. The Linear
 surface uses a personal API key for actions and a signing secret for incoming webhooks.
 
 A **collaboration surface** links SuperTag to an
-external work tool. The **Gateway** is the part of the **Control Plane**, the SuperTag service, that
-receives Linear webhooks. See the [glossary](../reference/glossary.md) for other terms.
+external work tool. The **Gateway** is the SuperTag service that
+receives Linear webhooks and posts replies. See the [glossary](../reference/glossary.md) for other terms.
 
 ## Before you start
 
 - Permission to create API keys and webhooks in Linear.
 - The `supertag` CLI installed.
-- A Gateway that Linear can reach over HTTPS.
+- A public HTTPS URL that forwards to the Gateway's Linear listener, `127.0.0.1:3482` by default:
+  a tunnel on a laptop, or a reverse proxy beside a hosted Gateway.
 
 ## 1. Create a personal API key
 
@@ -24,7 +25,7 @@ teams SuperTag should serve.
 Create a webhook for `Issue` and `Comment` events:
 
 ```text
-https://YOUR_GATEWAY/webhooks/linear
+https://YOUR_GATEWAY/linear/events
 ```
 
 Copy its signing secret.
@@ -35,65 +36,35 @@ Copy its signing secret.
 supertag setup surface linear
 ```
 
-The CLI verifies the key, stores non-secret workspace metadata in the database, and keeps
-credentials behind the Control Plane's secret boundary. For non-interactive setup, provide
+Setup verifies the key with Linear, stores the key and signing secret in the credential vault, and
+records the workspace in `supertag.yaml` with its listener; `--listen` chooses another. For non-interactive setup, provide
 `LINEAR_API_KEY` and `LINEAR_WEBHOOK_SECRET`.
 
-### Or declare the workspace in a manifest
-
-On a shared Control Plane managed from files, declare the workspace instead of running setup. The
-manifest says where each secret comes from, never the value:
-
-```yaml
-apiVersion: supertag/v1
-kind: SurfaceAccount
-metadata:
-  name: acme-linear
-spec:
-  provider: linear
-  secrets:
-    apiKey: { env: LINEAR_API_KEY }
-    webhookSecret: { env: LINEAR_WEBHOOK_SECRET }
-```
-
-Run `supertag apply -f acme-linear.yaml`. Apply verifies the key with Linear, as setup does. See
-[Declare Surface Accounts](../operations/resources.md#declare-surface-accounts).
-
-## 4. Add a team to a Tag and start
+## 4. Add a team to a Tag
 
 ```sh
-supertag create tag engineering
-supertag update tag engineering --add-location linear --team ENG
-supertag start control-plane
+supertag tag update lead --add-location linear --team-id TEAM_UUID
 ```
 
-SuperTag resolves the team key or name to its stable UUID. If you already know it, use
-`--team-id UUID`. If several workspaces are enrolled, add `--account WORKSPACE_ID`.
+Use the team's UUID, which Linear shows in the team's settings and API responses. If several
+workspaces are enrolled, add `--account NAME` with the Surface Account name from setup.
 
 ## Check that it worked
 
 Mention `@supertag` in an issue description or comment in that team. The result appears as an issue
-comment. Personal API key replies are attributed to the key's owner.
-
-## Change the mention trigger
-
-Override the trigger with `--linear-mention @NAME` on `supertag start control-plane` when needed.
-
-### Check that it worked
-
-Mention `@NAME` in an issue in that team. The result appears as an issue comment.
+comment. Personal API key replies are attributed to the key's owner. The trigger is `@supertag`,
+in any letter case.
 
 ## Rules
 
-- Linear credentials stay behind the Control Plane's secret boundary. See
+- Linear credentials stay with the Gateway. See
   [credential storage](../reference/credential-storage.md).
-- OAuth enrollment can later provide a dedicated integration identity without changing Tag routing.
 
 ## If something goes wrong
 
 - **No reply.** Follow the [first-reply checklist](../guides/troubleshooting.md). Confirm that
   Linear reaches the Gateway over HTTPS and that the webhook sends `Issue` and `Comment` events.
-- **The team is not found.** Use `--team-id UUID`, or add `--account WORKSPACE_ID` when several
+- **The location is refused.** Check the team UUID, and add `--account NAME` when several
   workspaces are enrolled. See
   [Check the Tag locations](../guides/troubleshooting.md#3-check-the-tag-locations).
 
@@ -101,5 +72,5 @@ Mention `@NAME` in an issue in that team. The result appears as an issue comment
 
 - [Add your team's chat](../../README.md#next-add-your-teams-chat)
 - [Worker-side collaboration surface tools](worker-tools.md#linear) for permission-scoped Linear tools
-  available to a [harness](../reference/glossary.md#runtime)
+  available to a [harness](../reference/glossary.md#harness)
 - [collaboration surface guides](README.md)

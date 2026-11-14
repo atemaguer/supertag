@@ -1,8 +1,3 @@
-import { execFile } from "node:child_process";
-import { Agent, request as httpRequest } from "node:http";
-import { createConnection, type Socket } from "node:net";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 import type { ProcessHandle } from "./index.js";
 
 export interface EnvironmentGuarantees {
@@ -37,7 +32,6 @@ export interface EnvironmentHttpLimits {
   readonly maxResponseBytes: number;
 }
 export const MAX_ENVIRONMENT_HTTP_BYTES = 32 * 1024 * 1024;
-const exec = promisify(execFile);
 
 /** Provider-side registry: connection authority is an actual live handle, not a PID supplied by a caller. */
 export class EnvironmentConnections {
@@ -127,149 +121,6 @@ export class EnvironmentConnections {
     this.#closed.abort(new Error("Execution Environment closed"));
     await Promise.all([...this.#connections].map((connection) => connection.close()));
   }
-}
-
-/** POSIX listener and established-peer ownership checks fail closed when lsof/ps are unavailable. */
-export class LocalEnvironmentConnections extends EnvironmentConnections {
-  constructor() {
-    super({
-      async verify(process, port, signal) {
-        while (true) {
-          signal.throwIfAborted();
-          try {
-            await assertOwner(process, port, signal);
-            return;
-          } catch (error) {
-            if (!(error instanceof ListenerNotReady)) throw error;
-            await delay(50, undefined, { signal });
-          }
-        }
-      },
-      async request(process, port, request, limits, signal) {
-        const socket = createConnection({ host: "127.0.0.1", port, signal });
-        try {
-          await new Promise<void>((resolve, reject) => {
-            socket.once("connect", resolve);
-            socket.once("error", reject);
-          });
-          // No HTTP bytes are sent until the accepted server-side socket is owned.
-          if (!socket.localPort) throw new Error("Missing local connection identity");
-          await assertOwner(process, port, signal, socket.localPort);
-          signal.throwIfAborted();
-          return await requestSocket(socket, port, request, limits, signal);
-        } finally {
-          socket.destroy();
-        }
-      },
-    });
-  }
-}
-class ListenerNotReady extends Error {}
-async function assertOwner(
-  processHandle: ProcessHandle,
-  port: number,
-  signal: AbortSignal,
-  clientPort?: number,
-): Promise<void> {
-  if (process.platform === "win32" || !processHandle.pid)
-    throw new Error("Scoped local HTTP requires a supervised POSIX process");
-  let stdout: string;
-  try {
-    ({ stdout } = await exec(
-      "lsof",
-      [
-        "-nP",
-        `-iTCP:${port}`,
-        `-sTCP:${clientPort === undefined ? "LISTEN" : "ESTABLISHED"}`,
-        "-Fpn",
-      ],
-      { signal, timeout: 3000, maxBuffer: 65536 },
-    ));
-  } catch (error) {
-    if ((error as { code?: unknown }).code === 1)
-      throw new ListenerNotReady("Supervised server is not listening yet");
-    throw new Error("Scoped local HTTP requires working lsof ownership inspection", {
-      cause: error,
-    });
-  }
-  const pids = new Set<number>();
-  let pid: number | undefined;
-  for (const line of stdout.split("\n")) {
-    if (line.startsWith("p")) pid = Number(line.slice(1));
-    if (
-      pid &&
-      line.startsWith("n") &&
-      (clientPort === undefined || line === `n127.0.0.1:${port}->127.0.0.1:${clientPort}`)
-    )
-      pids.add(pid);
-  }
-  if (!pids.size) throw new ListenerNotReady("Supervised server connection is not visible");
-  for (const pid of pids) {
-    if (pid === processHandle.pid) continue;
-    const group: { stdout: string; stderr: string } = await exec(
-      "ps",
-      ["-o", "pgid=", "-p", String(pid)],
-      {
-        signal,
-        timeout: 3000,
-        maxBuffer: 4096,
-      },
-    );
-    if (Number(group.stdout.trim()) !== processHandle.pid)
-      throw new Error("HTTP listener is not owned by the supervised process group");
-  }
-}
-function requestSocket(
-  socket: Socket,
-  port: number,
-  input: EnvironmentHttpRequest,
-  limits: EnvironmentHttpLimits,
-  signal: AbortSignal,
-): Promise<EnvironmentHttpResponse> {
-  const agent = new Agent({ keepAlive: false });
-  agent.createConnection = () => socket;
-  return new Promise<EnvironmentHttpResponse>((resolve, reject) => {
-    const request = httpRequest(
-      {
-        host: "127.0.0.1",
-        port,
-        method: input.method ?? "GET",
-        path: input.path,
-        headers: { ...input.headers, connection: "close" },
-        signal,
-        agent,
-        maxHeaderSize: 16384,
-      },
-      (response) => {
-        const chunks: Uint8Array[] = [];
-        let length = 0;
-        response.on("data", (chunk: Buffer) => {
-          length += chunk.byteLength;
-          if (length > limits.maxResponseBytes) {
-            const error = new Error("Environment HTTP response exceeded byte bound");
-            reject(error);
-            request.destroy(error);
-            return;
-          }
-          chunks.push(chunk);
-        });
-        response.on("error", reject);
-        response.on("end", () =>
-          resolve({
-            status: response.statusCode ?? 0,
-            headers: Object.fromEntries(
-              Object.entries(response.headers)
-                .filter((entry): entry is [string, string | string[]] => entry[1] !== undefined)
-                .map(([key, value]) => [key, Array.isArray(value) ? value.join(", ") : value]),
-            ),
-            body: new Uint8Array(Buffer.concat(chunks)),
-          }),
-        );
-      },
-    );
-    request.on("error", reject);
-    request.end(input.body);
-  }).finally(() => agent.destroy());
 }
 function connectionLimits(options: EnvironmentConnectionOptions): EnvironmentHttpLimits {
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535)

@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package supertag.environment.v2;
+
+// A standalone owner of one shared root. Accepted operations outlive the RPC that submits them.
+service SharedExecution {
+  rpc Describe(DescribeEnvironmentRequest) returns (EnvironmentInfo);
+  rpc IssueAccess(IssueAccessRequest) returns (AccessReceipt);
+  rpc PrepareCommandLease(PrepareCommandLeaseRequest) returns (CommandLeaseChallenge);
+  rpc RenewCommandLease(RenewCommandLeaseRequest) returns (CommandLeaseReceipt);
+  rpc ReleaseAccess(EndAccessRequest) returns (AccessReceipt);
+  rpc RevokeAccess(EndAccessRequest) returns (AccessReceipt);
+  rpc Execute(ExecuteRequest) returns (OperationReceipt);
+  rpc InspectOperation(InspectOperationRequest) returns (OperationReceipt);
+  rpc WatchProcess(WatchProcessRequest) returns (stream ProcessSnapshot);
+}
+
+message DescribeEnvironmentRequest {}
+message EnvironmentInfo {
+  string environment_id = 1;
+  string incarnation_id = 2;
+  bool file_read = 3;
+  bool file_write = 4;
+  bool lease_bound_commands = 5;
+}
+
+// An admin bearer authorizes issuance. x-supertag-grant-token carries the client-selected access
+// bearer, so an exact retry after response loss can recover the same access without storing secrets.
+message IssueAccessRequest {
+  string environment_id = 1;
+  string access_id = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string tag_id = 5;
+  uint64 ttl_ms = 6;
+  optional string expected_incarnation_id = 7;
+  AccessCommandMode command_mode = 8;
+}
+
+enum AccessCommandMode {
+  // A standalone administrative grant uses its original bounded process deadline.
+  ACCESS_COMMAND_MODE_UNSPECIFIED = 0;
+  ACCESS_COMMAND_MODE_DISABLED = 1;
+  ACCESS_COMMAND_MODE_LEASE_BOUND = 2;
+}
+
+message PrepareCommandLeaseRequest { string access_id = 1; }
+message CommandLeaseChallenge { string access_id = 1; string challenge_id = 2; }
+message RenewCommandLeaseRequest {
+  string access_id = 1;
+  string challenge_id = 2;
+  uint64 valid_for_ms = 3;
+}
+message CommandLeaseReceipt { string access_id = 1; uint64 valid_for_ms = 2; }
+
+enum AccessState {
+  ACCESS_STATE_UNSPECIFIED = 0;
+  ACCESS_STATE_ACTIVE = 1;
+  ACCESS_STATE_RELEASING = 2;
+  ACCESS_STATE_REVOKING = 3;
+  ACCESS_STATE_RELEASED = 4;
+  ACCESS_STATE_REVOKED = 5;
+}
+
+message AccessReceipt {
+  string environment_id = 1;
+  string incarnation_id = 2;
+  string access_id = 3;
+  string task_id = 4;
+  string attempt_id = 5;
+  string tag_id = 6;
+  int64 expires_at_ms = 7;
+  AccessState state = 8;
+  // True only after every operation admitted under this access has settled and every launched
+  // process tree has a verified cleanup receipt.
+  bool cleanup_verified = 9;
+}
+
+message EndAccessRequest { string access_id = 1; }
+
+message ExecuteRequest {
+  string operation_id = 1;
+  oneof operation {
+    ReadFile read_file = 2;
+    WriteFile write_file = 3;
+    WriteFile stage_file = 4;
+    StartProcess start_process = 5;
+    StopProcess stop_process = 6;
+  }
+}
+
+message ReadFile {
+  string path = 1;
+  uint32 maximum_bytes = 2;
+}
+
+message WriteFile {
+  string path = 1;
+  bytes content = 2;
+  bool overwrite = 3;
+}
+
+message StartProcess {
+  string command = 1;
+  repeated string args = 2;
+  string cwd = 3;
+  bytes stdin = 4;
+  uint64 timeout_ms = 5;
+}
+
+message StopProcess { string process_id = 1; }
+message InspectOperationRequest { string operation_id = 1; }
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_ACCEPTED = 1;
+  OPERATION_STATE_RUNNING = 2;
+  OPERATION_STATE_COMPLETED = 3;
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_UNCERTAIN = 5;
+}
+
+message OperationReceipt {
+  string operation_id = 1;
+  OperationState state = 2;
+  optional string process_id = 3;
+  optional string error = 4;
+  oneof result {
+    FileContent file_content = 5;
+    FileWritten file_written = 6;
+    ProcessResult process_result = 7;
+    ProcessStopped process_stopped = 8;
+  }
+  bool cleanup_verified = 9;
+}
+
+message FileContent { bytes content = 1; }
+message FileWritten { uint32 bytes = 1; bool created = 2; }
+message ProcessResult { optional sint32 exit_code = 1; optional sint32 signal = 2; }
+message ProcessStopped { bool stopped = 1; }
+
+message WatchProcessRequest { string process_id = 1; uint64 after_sequence = 2; }
+enum OutputStream {
+  OUTPUT_STREAM_UNSPECIFIED = 0;
+  OUTPUT_STREAM_STDOUT = 1;
+  OUTPUT_STREAM_STDERR = 2;
+}
+message ProcessChunk { uint64 sequence = 1; OutputStream stream = 2; bytes data = 3; }
+message ProcessSnapshot {
+  string process_id = 1;
+  repeated ProcessChunk chunks = 2;
+  uint64 next_cursor = 3;
+  // Present only after all retained output through next_cursor has been delivered.
+  OperationReceipt terminal = 4;
+}

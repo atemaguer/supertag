@@ -10,7 +10,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // teamPosts is how many of the newest Workstream posts the Team view shows.
@@ -18,7 +18,7 @@ const teamPosts = 20
 
 type (
 	teamsMsg struct {
-		teams []*operatorv1.Team
+		teams []*views.Team
 		err   error
 		// read numbers the ListTeams call this answers.
 		read uint64
@@ -86,7 +86,7 @@ func (m model) teamCmd(id string) tea.Cmd {
 // add, rename or remove a row, and the Team's details only when the Team pane shows that Team.
 // The Control Plane sends the change only to a caller that may read
 // Teams, and the rereads go through the same reads, so nothing outside the caller's view is read.
-func (m model) teamChanged(change *operatorv1.WatchChange) tea.Cmd {
+func (m model) teamChanged(change *views.WatchChange) tea.Cmd {
 	id := change.GetTeamId()
 	if id == "" {
 		id = change.GetId()
@@ -189,7 +189,7 @@ func (m *model) teamRead(msg teamMsg) tea.Cmd {
 }
 
 // listedTeam is the listed Team with this ID, or nil.
-func (m model) listedTeam(id string) *operatorv1.Team {
+func (m model) listedTeam(id string) *views.Team {
 	for _, team := range m.teams {
 		if team.GetId() == id {
 			return team
@@ -199,7 +199,7 @@ func (m model) listedTeam(id string) *operatorv1.Team {
 }
 
 // teamState is what the rail shows beside a Team: how many members it has.
-func teamState(team *operatorv1.Team) string {
+func teamState(team *views.Team) string {
 	return plural(len(team.GetMembers()), "member")
 }
 
@@ -288,7 +288,7 @@ func describeTeam(view client.TeamView, posts bool) string {
 			add("    " + body)
 		}
 	}
-	add("", "Change it with supertag update team "+shellWord(team.GetName())+".")
+	add("", "Change it with supertag team update "+shellWord(team.GetId())+" --help.")
 	for i, line := range lines {
 		lines[i] = terminalText(line)
 	}

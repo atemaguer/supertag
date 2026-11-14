@@ -1,0 +1,6 @@
+# Test threads get 8 MiB of stack instead of libtest's 2 MiB default. Debug builds of the
+# Control Plane's largest futures (claims, admission, Objective sweeps, approvals) nest deeper
+# than 2 MiB in contract tests; release builds are far smaller. Cargo finds this file from the
+# repository root and from rust/, so CI and local runs get the same limit.
+[env]
+RUST_MIN_STACK = "8388608"

@@ -33,12 +33,14 @@ func dial(version string) connector {
 // CLI handed over to switch between. Switching ends every stream and call of the one left and
 // starts a fresh model for the next, so no state crosses from one Control Plane to another.
 type app struct {
-	root     context.Context
-	cancel   context.CancelFunc
-	connect  connector
-	contexts []client.Target
-	current  int
-	inner    model
+	root           context.Context
+	cancel         context.CancelFunc
+	connect        connector
+	contexts       []client.Target
+	launchContexts []client.Target
+	current        int
+	hasTarget      bool
+	inner          model
 	// generation counts the models started; what a command of an earlier model delivers is
 	// dropped.
 	generation int
@@ -49,7 +51,11 @@ type app struct {
 	choice    int
 	choiceErr string
 	// palette is the command palette while it shows.
-	palette *palette
+	palette            *palette
+	files              *taskFilesDialog
+	controlPlaneStore  *controlPlaneStore
+	savedControlPlanes []client.Target
+	controlPlaneDialog *controlPlaneDialog
 
 	width, height int
 }
@@ -62,7 +68,12 @@ type scoped struct {
 
 // newApp starts the model for contexts[current].
 func newApp(root context.Context, connect connector, contexts []client.Target, current int) (*app, error) {
-	a := &app{root: root, connect: connect, contexts: contexts, current: current}
+	a := &app{root: root, connect: connect, contexts: contexts, launchContexts: append([]client.Target(nil), contexts...), current: current}
+	if len(contexts) == 0 {
+		a.current = -1
+		a.choosing = true
+		return a, nil
+	}
 	if err := a.start(current); err != nil {
 		return nil, err
 	}
@@ -77,13 +88,17 @@ func (a *app) start(i int) error {
 		cancel()
 		return err
 	}
+	a.closeTaskFiles()
+	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.cancel()
+		a.inner.client.Close()
 	}
 	a.cancel, a.current, a.inner = cancel, i, inner
+	a.hasTarget = true
 	a.generation++
-	a.inner.switchable = len(a.contexts) > 1
-	a.inner.defaultWorkspace = a.contexts[i].Workspace
+	a.inner.switchable = true
+
 	if a.width > 0 {
 		next, _ := a.inner.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 		a.inner = next.(model)
@@ -93,12 +108,20 @@ func (a *app) start(i int) error {
 
 // stop ends the current model's streams and calls.
 func (a *app) stop() {
+	a.closeTaskFiles()
+	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.cancel()
+		a.inner.client.Close()
 	}
 }
 
-func (a *app) Init() tea.Cmd { return a.scope(a.inner.Init()) }
+func (a *app) Init() tea.Cmd {
+	if !a.hasTarget {
+		return nil
+	}
+	return a.scope(a.inner.Init())
+}
 
 func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -109,17 +132,35 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forward(msg.msg)
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
+		if a.controlPlaneDialog != nil {
+			for i := range a.controlPlaneDialog.inputs {
+				a.controlPlaneDialog.inputs[i].SetWidth(max(a.width-6, 10))
+			}
+		}
+		if a.files != nil {
+			a.files.input.SetWidth(max(a.width-6, 10))
+		}
 		if a.palette != nil {
 			a.palette.filter.SetWidth(max(a.width-6, 10))
 		}
 	case tea.KeyPressMsg:
+		if a.controlPlaneDialog != nil {
+			return a, a.controlPlaneKey(msg)
+		}
+		if a.files != nil {
+			return a, a.taskFilesKey(msg)
+		}
 		if a.palette != nil {
 			return a, a.paletteKeyPress(msg)
 		}
 		if a.choosing {
 			return a, a.chooseKey(msg)
 		}
-		if msg.String() == switchKey && len(a.contexts) > 1 {
+		if !a.hasTarget {
+			a.choosing = true
+			return a, a.chooseKey(msg)
+		}
+		if msg.String() == switchKey {
 			a.choosing, a.choice, a.choiceErr = true, a.current, ""
 			return a, nil
 		}
@@ -127,6 +168,27 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.openPalette(msg.String() == "/")
 		}
 	default:
+		if a.controlPlaneDialog != nil {
+			switch msg.(type) {
+			case controlPlaneCheckedMsg, enrolledMsg:
+				return a, a.controlPlaneMessage(msg)
+			}
+			var cmd tea.Cmd
+			d := a.controlPlaneDialog
+			d.inputs[d.field], cmd = d.inputs[d.field].Update(msg)
+			if _, paste := msg.(tea.PasteMsg); paste {
+				return a, cmd
+			}
+			return a, tea.Batch(cmd, a.forward(msg))
+		}
+		if a.files != nil {
+			var cmd tea.Cmd
+			a.files.input, cmd = a.files.input.Update(msg)
+			if _, paste := msg.(tea.PasteMsg); paste {
+				return a, cmd
+			}
+			return a, tea.Batch(cmd, a.forward(msg))
+		}
 		if a.palette != nil {
 			var cmd tea.Cmd
 			a.palette.filter, cmd = a.palette.filter.Update(msg)
@@ -141,6 +203,16 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
+	switch msg.(type) {
+	case controlPlaneCheckedMsg, enrolledMsg:
+		return a.controlPlaneMessage(msg)
+	}
+	if !a.hasTarget {
+		return nil
+	}
+	if a.taskFilesMessage(msg) {
+		return nil
+	}
 	next, cmd := a.inner.Update(msg)
 	a.inner = next.(model)
 	return a.scope(cmd)
@@ -152,14 +224,30 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return tea.Quit
 	case "esc", switchKey:
-		a.choosing = false
+		a.choosing = !a.hasTarget
 	case "up", "k":
 		a.choice = max(a.choice-1, 0)
 	case "down", "j":
-		a.choice = min(a.choice+1, len(a.contexts)-1)
+		a.choice = max(min(a.choice+1, len(a.contexts)-1), 0)
+	case "a":
+		return a.openControlPlaneDialog(false)
+	case "s":
+		return a.openControlPlaneDialog(a.hasTarget)
+	case "e":
+		if len(a.contexts) > 0 {
+			return a.editControlPlane(a.contexts[a.choice])
+		}
+	case "d":
+		if len(a.contexts) > 0 {
+			a.forgetControlPlane()
+		}
 	case "enter":
+		if len(a.contexts) == 0 {
+			return a.openControlPlaneDialog(false)
+		}
 		if a.choice == a.current {
 			a.choosing = false
+			a.rememberControlPlane()
 			return nil
 		}
 		if err := a.start(a.choice); err != nil {
@@ -167,6 +255,8 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		a.choosing = false
+		a.rememberControlPlane()
+		a.refreshControlPlanes(a.contexts[a.current])
 		return a.scope(a.inner.Init())
 	}
 	return nil
@@ -217,14 +307,27 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.controlPlaneDialog == nil) || a.width == 0 {
+		if !a.hasTarget {
+			return tea.NewView("")
+		}
 		return a.inner.View()
 	}
 	shown := a.renderChoices
 	if a.palette != nil {
 		shown = a.renderPalette
 	}
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, shown(), a.inner.renderStatus()))
+	if a.files != nil {
+		shown = a.renderTaskFiles
+	}
+	if a.controlPlaneDialog != nil {
+		shown = a.renderControlPlaneDialog
+	}
+	status := "No Control Plane selected"
+	if a.hasTarget {
+		status = a.inner.renderStatus()
+	}
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, shown(), status))
 	v.AltScreen = true
 	return v
 }
@@ -237,6 +340,9 @@ func (a *app) renderChoices() string {
 	rows := make([]string, 0, len(a.contexts))
 	for i, target := range a.contexts {
 		label := contextLabel(target)
+		if a.isSavedControlPlane(target) {
+			label += "  [saved]"
+		}
 		if i == a.current {
 			label += "  (current)"
 		}
@@ -250,11 +356,15 @@ func (a *app) renderChoices() string {
 	if a.choiceErr != "" {
 		footer = append(footer, errorStyle.Render(truncate(strings.Join(strings.Fields(a.choiceErr), " "), width)))
 	}
-	footer = append(footer, faint.Render(truncate("enter switches · esc goes back", width)))
+	help, title := "enter switches · a add · e edit · s save current · d forget · esc back", "Control Planes"
+	footer = append(footer, faint.Render(truncate(help, width)))
 	shown := max(height-2-len(footer), 1)
 	first := max(a.choice-shown+1, 0)
 	rows = rows[first:min(first+shown, len(rows))]
-	lines := append([]string{headerStyle.Render(truncate("Control Planes", width))}, rows...)
+	if len(a.contexts) == 0 {
+		rows = []string{"Add a Control Plane to see its Tags and conversations.", "Press a or enter to connect."}
+	}
+	lines := append([]string{headerStyle.Render(truncate(title, width))}, rows...)
 	lines = append(append(lines, ""), footer...)
 	return lipgloss.NewStyle().Padding(0, 1).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }

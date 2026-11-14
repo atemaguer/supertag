@@ -1,1 +1,0 @@
-ALTER TABLE `Objective` ADD `pausedAt` text;
