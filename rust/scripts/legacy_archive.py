@@ -9,14 +9,18 @@ both. `verify` re-reads an archive, and with --from also checks it against the s
 the Rust runtime no longer accepts.
 
 Secrets stay out of the archive: credential stores, host credentials, harness sign-ins, .env
-files, and private keys are listed in the manifest by path, size, and SHA-256 only. The archive
-still holds conversation text and Task output that may quote secrets, so keep it private.
+files, and private keys go into FILE.secrets.tar.age, a tar encrypted with age to the recipients
+you name, and the manifest lists them by path, size, and SHA-256. `verify` decrypts that bundle
+with an age identity file and checks every secret against the manifest. Task checkouts
+(workspaces/*/worktrees) are left out; `create` warns about any with uncommitted or unbranched
+work. The archive still holds conversation text and Task output that may quote secrets, so keep
+it private. Keep the renamed state directory, the rollback snapshot, for 30 days.
 """
 from __future__ import annotations
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import fnmatch
 import hashlib
 import io
@@ -34,7 +38,7 @@ import tempfile
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
-FORMAT = "supertag-legacy-archive-v1"
+FORMAT = "supertag-legacy-archive-v2"
 MANIFEST = "manifest.json"
 DATABASE_FILE = "supertag.db"
 # File names left out as secrets, and names that match them but hold no secret. `*credential.json`
@@ -45,6 +49,12 @@ SECRET_RULES = {
               "id_rsa", "id_rsa.*", "id_ecdsa", "id_ecdsa.*", "id_ed25519", "id_ed25519.*"],
     "except": ["*.example", "*.sample", "*.template"],
 }
+# Task checkouts point at their Workspace's repository outside the state directory and can dominate
+# its size, so the archive leaves them out; the rollback snapshot keeps them.
+TASK_CHECKOUTS = "workspaces/*/worktrees"
+SNAPSHOT_KEEP_DAYS = 30
+BUNDLE_SUFFIX = ".secrets.tar.age"
+AGE_MISSING = "age is not installed; install it from https://age-encryption.org (for example `brew install age`)"
 TABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 CHUNK = 1024 * 1024
 
@@ -128,6 +138,116 @@ def require_stopped(source):
         require(not journal.exists() or journal.stat().st_size == 0,
                 f"{journal.name} is not empty: the database was not closed cleanly. Start and stop "
                 "the old Control Plane once, then archive again")
+
+
+def unsaved_checkouts(source):
+    """Task checkouts whose work may live only in the snapshot, by relative path."""
+    found = {}
+    git = shutil.which("git")
+    for checkout in sorted(source.glob(TASK_CHECKOUTS + "/*")):
+        if checkout.is_symlink() or not checkout.is_dir():
+            continue
+        relative = checkout.relative_to(source).as_posix()
+        if git is None:
+            found[relative] = "was not checked because git is not installed"
+            continue
+        # Read-only: no optional index refresh, no fsmonitor hook, and no repository above it.
+        environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_CEILING_DIRECTORIES": str(checkout.parent)}
+
+        def git_output(*arguments):
+            result = subprocess.run([git, "-c", "core.fsmonitor=false", "-C", str(checkout), *arguments],
+                                    env=environment, capture_output=True, text=True)
+            return result.stdout if result.returncode == 0 else None
+
+        status = git_output("status", "--porcelain")
+        if status is None:
+            found[relative] = "is not a readable Git checkout"
+        elif status.strip():
+            found[relative] = "has uncommitted changes"
+        elif not (git_output("for-each-ref", "--contains", "HEAD", "--format=%(refname)",
+                             "refs/heads", "refs/remotes") or "").strip():
+            found[relative] = "has a commit that is on no branch"
+    return found
+
+
+def read_recipients(recipients=(), files=()):
+    """age recipients from --age-recipient values and recipients files (one per line, # comments)."""
+    found = [value.strip() for value in recipients]
+    for path in files:
+        found += [line.strip() for line in Path(path).read_text().splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")]
+    for value in found:
+        require(value and not value.startswith("-") and not any(c.isspace() and c != " " for c in value),
+                f"invalid age recipient {value!r}")
+    return found
+
+
+def age_binary():
+    age = shutil.which("age")
+    require(age, AGE_MISSING)
+    return age
+
+
+def write_secrets_bundle(source, secrets, recipients, bundle):
+    """Encrypt every secret file into one tar for the recipients; plaintext never touches disk."""
+    arguments = [age_binary(), "--encrypt"]
+    for recipient in recipients:
+        arguments += ["-r", recipient]
+    with tempfile.TemporaryFile() as errors, \
+            os.fdopen(os.open(bundle, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as output:
+        encryptor = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=output, stderr=errors)
+        broken = False
+        try:
+            with tarfile.open(fileobj=encryptor.stdin, mode="w|", format=tarfile.PAX_FORMAT) as target:
+                for relative, record in sorted(secrets.items()):
+                    path = source / relative
+                    info = path.lstat()
+                    written = add_file(target, relative, path, stat.S_IMODE(info.st_mode), info.st_mtime)
+                    require({"bytes": written["bytes"], "sha256": written["sha256"]} == record,
+                            f"{relative} changed while it was archived")
+        except BrokenPipeError:
+            broken = True
+        finally:
+            try:
+                encryptor.stdin.close()
+            except BrokenPipeError:
+                broken = True
+            code = encryptor.wait()
+        errors.seek(0)
+        message = errors.read().decode(errors="replace").strip()[-2000:]
+        require(code == 0 and not broken, f"age could not encrypt the secrets bundle: {message or 'no output'}")
+        output.flush()
+        os.fsync(output.fileno())
+    return sha256_file(bundle)
+
+
+def check_secrets_bundle(bundle, expected, identity):
+    """Decrypt the bundle with an age identity file and match every secret with the manifest."""
+    require(Path(identity).is_file(), f"{identity} is not an age identity file")
+    seen, damaged = {}, None
+    with tempfile.TemporaryFile() as errors:
+        decryptor = subprocess.Popen([age_binary(), "--decrypt", "-i", str(identity), str(bundle)],
+                                     stdout=subprocess.PIPE, stderr=errors)
+        try:
+            with tarfile.open(fileobj=decryptor.stdout, mode="r|") as contents:
+                for member in contents:
+                    require(safe_name(member.name) and member.name not in seen and member.isfile(),
+                            f"the secrets bundle holds an invalid entry {member.name!r}")
+                    stream, digest = contents.extractfile(member), hashlib.sha256()
+                    for chunk in iter(lambda: stream.read(CHUNK), b""):
+                        digest.update(chunk)
+                    seen[member.name] = {"bytes": member.size, "sha256": digest.hexdigest()}
+        except (tarfile.TarError, EOFError) as error:
+            damaged = error
+        finally:
+            decryptor.stdout.close()
+            code = decryptor.wait()
+        errors.seek(0)
+        message = errors.read().decode(errors="replace").strip()[-2000:]
+    require(code == 0, f"the secrets bundle does not decrypt with {identity}: {message or 'age failed'}")
+    require(damaged is None, f"the secrets bundle is damaged: {damaged}")
+    differing = sorted(set(seen) ^ set(expected)) or sorted(name for name in seen if seen[name] != expected[name])
+    require(not differing, "the secrets bundle's files differ from the manifest: " + ", ".join(differing[:10]))
 
 
 def postgres_hints(source):
@@ -397,10 +517,15 @@ runtime. Rust starts with fresh state and never reads this archive.
   `objectives.json` (with Mailbox messages, the Team and its Workstream posts, and Task IDs),
   `tasks.json` (with requests, responses, results, and Attempts), and `conversations.json` (Sessions as request and response
   turns with delivered replies, and Mailbox messages between Tags).
-- `manifest.json`: the SHA-256, size, and mode of every entry, the row count of every table, and
-  the secret files that were left out, listed by path, size, and SHA-256 only.
+- `manifest.json`: the SHA-256, size, and mode of every entry, the row count of every table, the
+  secret files by path, size, and SHA-256, and the SHA-256 and age recipients of the secrets bundle.
 
-Verify with `python3 rust/scripts/legacy_archive.py verify ARCHIVE` from a SuperTag checkout.
+Secrets are not in this archive. They are in `ARCHIVE.secrets.tar.age` next to it, a tar
+encrypted with age; restore them with `age -d -i IDENTITY ARCHIVE.secrets.tar.age | tar -xf -`
+inside the restored state directory. Task checkouts (`workspaces/*/worktrees`) are not archived.
+
+Verify with `python3 rust/scripts/legacy_archive.py verify ARCHIVE --age-identity IDENTITY` from a
+SuperTag checkout.
 """
 
 
@@ -427,14 +552,18 @@ def add_file(target, name, path, mode, mtime):
     return {"kind": "file", "mode": mode, "bytes": info.size, "sha256": reader.hash.hexdigest()}
 
 
-def create(source, destination, database_url_file=None, pg_bin=None, patterns=()):
+def create(source, destination, database_url_file=None, pg_bin=None, patterns=(), age_recipients=(),
+           age_identity=None):
     started = time.monotonic()
+    patterns = [TASK_CHECKOUTS, *(pattern for pattern in patterns if pattern != TASK_CHECKOUTS)]
     source, destination = Path(source).resolve(), Path(destination).absolute()
     require(source.is_dir() and not Path(source).is_symlink(), "--from must be a state directory")
     require(not destination.exists(), f"{destination} already exists")
     require(not destination.resolve().is_relative_to(source), "write the archive outside the state directory")
     require(shutil.which("zstd"), "zstd is required")
     require_stopped(source)
+    bundle = destination.with_name(destination.name + BUNDLE_SUFFIX)
+    require(not bundle.exists(), f"{bundle} already exists")
     warnings = [] if database_url_file else [
         f"{hint}; this archive holds {DATABASE_FILE} only. If the old Control Plane used PostgreSQL, "
         "archive again with --database-url-file" for hint in postgres_hints(source)]
@@ -444,12 +573,29 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
     require(database_url_file or sqlite_database.is_file(),
             f"{source} has no {DATABASE_FILE}; name the PostgreSQL database with --database-url-file")
     entries, secrets, skipped = walk(source, patterns)
+    if secrets:
+        require(age_recipients, f"{len(secrets)} secret files need an encrypted bundle; name its age recipients "
+                "with --age-recipient or --age-recipients-file")
+        age_binary()
+    unsaved = unsaved_checkouts(source)
+    for relative, problem in unsaved.items():
+        warning = (f"Task checkout {relative} {problem}; the archive leaves Task checkouts out, so save "
+                   "that work before you delete the snapshot")
+        warnings.append(warning)
+        print(f"warning: {warning}", file=sys.stderr)
+    created_at = datetime.now(timezone.utc)
+    delete_after = (created_at + timedelta(days=SNAPSHOT_KEEP_DAYS)).date().isoformat()
     require(not (database_url_file is None and entries.get(DATABASE_FILE, {}).get("kind") != "file"),
             f"{DATABASE_FILE} must be a regular file")
 
     staging = private_directory(".supertag-legacy-archive-")
-    partial = None
+    partial = partial_bundle = None
     try:
+        secrets_bundle = None
+        if secrets:
+            partial_bundle = bundle.with_name(bundle.name + ".partial")
+            secrets_bundle = {"file": bundle.name, "recipients": list(age_recipients),
+                              "sha256": write_secrets_bundle(source, secrets, age_recipients, partial_bundle)}
         tables_directory, records_directory = staging / "tables", staging / "records"
         tables_directory.mkdir()
         records_directory.mkdir()
@@ -508,15 +654,18 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
                                 f"{DATABASE_FILE} changed while it was archived")
                     manifest = {
                         "format": FORMAT,
-                        "createdAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "createdAt": created_at.isoformat(timespec="seconds"),
                         "tool": {"script": "rust/scripts/legacy_archive.py", "sha256": sha256_file(__file__)},
                         "source": {"path": str(source), "database": database},
                         "entries": archived,
                         "tables": counts,
                         "records": records,
-                        "secretsExcluded": secrets,
+                        "secrets": secrets,
+                        "secretsBundle": secrets_bundle,
                         "secretRules": SECRET_RULES,
                         "excludedPatterns": list(patterns),
+                        "unsavedCheckouts": unsaved,
+                        "snapshot": {"keepDays": SNAPSHOT_KEEP_DAYS, "deleteAfter": delete_after},
                         "skipped": skipped,
                         "warnings": warnings,
                     }
@@ -532,7 +681,11 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
             os.fsync(output.fileno())
         written = time.monotonic()
         digest = sha256_file(partial)
-        report = verify(partial, digest, source=source, database_url_file=database_url_file, pg_bin=pg_bin)
+        report = verify(partial, digest, source=source, database_url_file=database_url_file, pg_bin=pg_bin,
+                        age_identity=age_identity, bundle=partial_bundle, require_decrypted=False)
+        if partial_bundle is not None:
+            os.rename(partial_bundle, bundle)
+            partial_bundle = None
         os.rename(partial, destination)
         partial = None
         sidecar = destination.with_name(destination.name + ".sha256")
@@ -542,8 +695,10 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
             "archive": str(destination), "sha256": digest, "archiveBytes": destination.stat().st_size,
             "stateBytes": sum(item.get("bytes", 0) for name, item in archived.items() if name.startswith("state/")),
             "entries": len(archived), "tables": len(counts), "rows": sum(counts.values()), "records": records,
-            "secretsExcluded": sorted(secrets), "skipped": sorted(skipped), "excludedPatterns": list(patterns),
-            "warnings": warnings,
+            "secrets": sorted(secrets), "secretsBundle": str(bundle) if secrets else None,
+            "secretsDecrypted": report["secretsDecrypted"], "skipped": sorted(skipped),
+            "excludedPatterns": list(patterns), "unsavedCheckouts": unsaved, "warnings": warnings,
+            "snapshotDeleteAfter": delete_after,
             "seconds": {"export": round(exported, 2), "write": round(written - started - exported, 2),
                         "verify": report["seconds"], "total": round(time.monotonic() - started, 2)},
         }
@@ -551,6 +706,8 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
         shutil.rmtree(staging, ignore_errors=True)
         if partial is not None:
             partial.unlink(missing_ok=True)
+        if partial_bundle is not None:
+            partial_bundle.unlink(missing_ok=True)
 
 
 # Verification ------------------------------------------------------------------------------
@@ -560,7 +717,8 @@ def safe_name(name):
             and all(part not in ("", ".", "..") for part in name.split("/")))
 
 
-def verify(archive, expected_sha256=None, source=None, database_url_file=None, pg_bin=None):
+def verify(archive, expected_sha256=None, source=None, database_url_file=None, pg_bin=None, age_identity=None,
+           bundle=None, require_decrypted=True):
     started = time.monotonic()
     archive = Path(archive)
     require(archive.is_file(), f"{archive} is not a file")
@@ -642,13 +800,29 @@ def verify(archive, expected_sha256=None, source=None, database_url_file=None, p
                                     capture_output=True, text=True)
             require(result.returncode == 0, "pg_restore cannot read the archived dump")
 
+        secrets, secrets_bundle, decrypted = manifest["secrets"], manifest["secretsBundle"], False
+        require(bool(secrets) == (secrets_bundle is not None), "the manifest's secrets and secrets bundle disagree")
+        if secrets_bundle is not None:
+            require(safe_name(secrets_bundle["file"]) and "/" not in secrets_bundle["file"], "invalid secrets bundle name")
+            bundle = Path(bundle) if bundle is not None else archive.with_name(secrets_bundle["file"])
+            require(bundle.is_file(), f"{bundle.name} is missing; keep the secrets bundle next to the archive")
+            require(sha256_file(bundle) == secrets_bundle["sha256"],
+                    f"{bundle.name}'s SHA-256 differs from the manifest")
+            if age_identity is not None:
+                check_secrets_bundle(bundle, secrets, age_identity)
+                decrypted = True
+            else:
+                require(not require_decrypted, f"{bundle.name} holds the secrets; pass --age-identity FILE to "
+                        "check that it decrypts")
+
         checked_source = False
         if source is not None:
             check_source(Path(source).resolve(), manifest, database_url_file, pg_bin)
             checked_source = True
         return {"archive": str(archive), "sha256": expected_sha256, "entries": len(entries),
                 "tables": len(counts), "rows": sum(counts.values()), "records": manifest["records"],
-                "secretsExcluded": sorted(manifest["secretsExcluded"]), "checkedAgainstSource": checked_source,
+                "secrets": sorted(secrets), "secretsDecrypted": decrypted,
+                "snapshotDeleteAfter": manifest["snapshot"]["deleteAfter"], "checkedAgainstSource": checked_source,
                 "seconds": round(time.monotonic() - started, 2)}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -667,7 +841,7 @@ def check_source(source, manifest, database_url_file, pg_bin):
         if record["kind"] == "file":
             record = {**record, "sha256": sha256_file(source / relative)}
         require(record == expected, f"{relative} differs between the source and the archive")
-    require(secrets == manifest["secretsExcluded"], "the source's secret files differ from those recorded")
+    require(secrets == manifest["secrets"], "the source's secret files differ from those recorded")
     database = manifest["source"]["database"]
     if database["kind"] == "sqlite":
         scratch = private_directory(".supertag-legacy-source-")
@@ -895,12 +1069,21 @@ def main(argv=None):
     make.add_argument("--database-url-file", type=Path, help="private file holding the PostgreSQL URL, when not SQLite")
     make.add_argument("--pg-bin", type=Path, help="directory of psql, pg_dump, and pg_restore")
     make.add_argument("--exclude", action="append", default=[], metavar="GLOB",
-                      help="leave out matching paths relative to the state directory, such as 'workspaces'")
+                      help=f"also leave out matching paths relative to the state directory ({TASK_CHECKOUTS} "
+                           "is always left out)")
+    make.add_argument("--age-recipient", action="append", default=[], metavar="RECIPIENT",
+                      help="encrypt the secrets bundle to this age or SSH public key; repeat for more")
+    make.add_argument("--age-recipients-file", action="append", default=[], type=Path, metavar="FILE",
+                      help="encrypt the secrets bundle to every recipient in FILE, one per line")
+    make.add_argument("--age-identity", type=Path, metavar="FILE",
+                      help="also check that the secrets bundle decrypts with this age identity file")
     check = commands.add_parser("verify", help="check an archive's checksums and row counts")
     check.add_argument("archive", type=Path)
     check.add_argument("--from", dest="source", type=Path, help="also compare with this state directory")
     check.add_argument("--database-url-file", type=Path)
     check.add_argument("--pg-bin", type=Path)
+    check.add_argument("--age-identity", type=Path, metavar="FILE",
+                       help="age identity file that decrypts the secrets bundle; required when the archive has one")
     config = commands.add_parser("config", help="list TypeScript supertag.yaml keys the Rust runtime rejects")
     config.add_argument("file", type=Path)
     config.add_argument("--to", dest="destination", type=Path, help="write a copy without them")
@@ -911,11 +1094,13 @@ def main(argv=None):
     os.umask(0o077)
     try:
         if arguments.command == "create":
+            recipients = read_recipients(arguments.age_recipient, arguments.age_recipients_file)
             result = create(arguments.source, arguments.destination, arguments.database_url_file,
-                            arguments.pg_bin, arguments.exclude)
+                            arguments.pg_bin, arguments.exclude, recipients, arguments.age_identity)
         elif arguments.command == "verify":
             result = verify(arguments.archive, source=arguments.source,
-                            database_url_file=arguments.database_url_file, pg_bin=arguments.pg_bin)
+                            database_url_file=arguments.database_url_file, pg_bin=arguments.pg_bin,
+                            age_identity=arguments.age_identity)
         elif arguments.command == "config":
             result = translate_config(arguments.file, arguments.destination)
         else:

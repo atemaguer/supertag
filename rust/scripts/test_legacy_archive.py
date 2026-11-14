@@ -6,16 +6,43 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import subprocess
 import tarfile
 import tempfile
 import unittest
 import uuid
+from datetime import datetime, timedelta
 
 import legacy_archive
 from legacy_archive import ArchiveError, create, translate_config, translate_manifests, verify
 
 SECRET = "synthetic-provider-secret-value"
+# A stand-in for age that runs everywhere: it records the recipients and XORs the plaintext, and
+# decrypts only with an identity whose name matches a recipient. The real age is tested below.
+FAKE_AGE = r"""#!/usr/bin/env python3
+import json, sys
+arguments = sys.argv[1:]
+def xor(data):
+    return bytes(byte ^ 0x5A for byte in data)
+if arguments[0] in ("-e", "--encrypt"):
+    recipients = [arguments[index + 1] for index, value in enumerate(arguments) if value == "-r"]
+    if any(not recipient.startswith("fakeage1") for recipient in recipients):
+        sys.stderr.write("age: error: unknown recipient type\n")
+        sys.exit(1)
+    sys.stdout.buffer.write(b"FAKEAGE\n" + json.dumps(recipients).encode() + b"\n" + xor(sys.stdin.buffer.read()))
+elif arguments[0] in ("-d", "--decrypt"):
+    identity = open(arguments[arguments.index("-i") + 1]).read().strip()
+    with open(arguments[-1], "rb") as file:
+        header, recipients, body = file.read().split(b"\n", 2)
+    if header != b"FAKEAGE" or "fakeage1" + identity.removeprefix("FAKE-IDENTITY-") not in json.loads(recipients):
+        sys.stderr.write("age: error: no identity matched any of the recipients\n")
+        sys.exit(1)
+    sys.stdout.buffer.write(xor(body))
+else:
+    sys.stderr.write("age: error: unsupported arguments\n")
+    sys.exit(2)
+"""
 
 
 def legacy_schema(execute):
@@ -106,6 +133,11 @@ def repack(archive, change):
     Path(str(archive) + ".sha256").write_text(f"{hashlib.sha256(compressed).hexdigest()}  {archive.name}\n")
 
 
+def git(*arguments, cwd):
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *arguments], cwd=cwd,
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
 @unittest.skipUnless(shutil.which("zstd"), "zstd is required")
 class LegacyArchiveTests(unittest.TestCase):
     def setUp(self):
@@ -113,19 +145,37 @@ class LegacyArchiveTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.state = make_state(self.root)
         self.archive = self.root / "legacy.tar.zst"
+        self.bundle = self.root / "legacy.tar.zst.secrets.tar.age"
+        tools = self.root / "tools"
+        tools.mkdir()
+        (tools / "age").write_text(FAKE_AGE)
+        (tools / "age").chmod(0o755)
+        self.identity = self.root / "identity.txt"
+        self.identity.write_text("FAKE-IDENTITY-operator\n")
+        self.path = os.environ["PATH"]
+        os.environ["PATH"] = f"{tools}{os.pathsep}{self.path}"
 
     def tearDown(self):
+        os.environ["PATH"] = self.path
         self.temporary.cleanup()
 
+    def create(self, source, archive, **options):
+        options.setdefault("age_recipients", ["fakeage1operator"])
+        return create(source, archive, **options)
+
+    def verify(self, archive, **options):
+        options.setdefault("age_identity", self.identity)
+        return verify(archive, **options)
+
     def test_round_trip_counts_rows_excludes_secrets_and_exports_records(self):
-        report = create(self.state, self.archive)
+        report = self.create(self.state, self.archive)
         self.assertEqual(self.archive.stat().st_mode & 0o777, 0o600)
         self.assertEqual(report["rows"], 14)
         self.assertEqual(report["warnings"], [])
-        self.assertEqual(sorted(report["secretsExcluded"]), [
+        self.assertEqual(sorted(report["secrets"]), [
             ".env", "credentials.json", "hosts/laptop/credential.json", "hosts/laptop/home/.claude/.credentials.json",
             "hosts/laptop/home/.codex/auth.json", "worker-hosts/laptop%20two.credential.json"])
-        self.assertTrue(verify(self.archive, source=self.state)["checkedAgainstSource"])
+        self.assertTrue(self.verify(self.archive, source=self.state)["checkedAgainstSource"])
         tar = tarfile.open(fileobj=io.BytesIO(decompressed(self.archive)))
         names = tar.getnames()
         self.assertEqual(names[-1], "manifest.json")
@@ -134,7 +184,7 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual(tar.getmember("state/workspaces/repo/link").linkname, "../../supertag.yaml")
         manifest = json.load(tar.extractfile("manifest.json"))
         self.assertEqual(manifest["tables"]["Empty"], 0)
-        self.assertEqual(set(manifest["secretsExcluded"]["credentials.json"]), {"bytes", "sha256"})
+        self.assertEqual(set(manifest["secrets"]["credentials.json"]), {"bytes", "sha256"})
         blob = json.loads(tar.extractfile("tables/Blob.jsonl").read())
         self.assertEqual(blob["data"], {"$base64": "AP8="})
         tasks = json.load(tar.extractfile("records/tasks.json"))
@@ -152,28 +202,124 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual([post["body"] for post in objectives[0]["team"]["posts"]], ["First", "Second"])
         self.assertEqual(conversations["tagMessages"][0]["id"], "tm-1")
         self.assertTrue(Path(str(self.archive) + ".sha256").read_text().startswith(report["sha256"]))
+        self.assertEqual(manifest["secretsBundle"]["recipients"], ["fakeage1operator"])
+        self.assertEqual(manifest["secretsBundle"]["sha256"], hashlib.sha256(self.bundle.read_bytes()).hexdigest())
+        self.assertEqual((report["secretsBundle"], report["secretsDecrypted"]), (str(self.bundle), False))
+        self.assertEqual(self.bundle.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(SECRET.encode(), self.bundle.read_bytes())
+        created = datetime.fromisoformat(manifest["createdAt"])
+        self.assertEqual(manifest["snapshot"], {"keepDays": 30,
+                                                "deleteAfter": (created + timedelta(days=30)).date().isoformat()})
+        self.assertEqual(report["snapshotDeleteAfter"], manifest["snapshot"]["deleteAfter"])
+
+    def test_secrets_bundle_decrypts_with_the_identity_and_verify_requires_it(self):
+        report = self.create(self.state, self.archive, age_identity=self.identity)
+        self.assertTrue(report["secretsDecrypted"])
+        self.assertTrue(self.verify(self.archive, source=self.state)["secretsDecrypted"])
+        with self.assertRaisesRegex(ArchiveError, "pass --age-identity"):
+            verify(self.archive)
+        stranger = self.root / "stranger.txt"
+        stranger.write_text("FAKE-IDENTITY-stranger\n")
+        with self.assertRaisesRegex(ArchiveError, "does not decrypt with .*no identity matched"):
+            verify(self.archive, age_identity=stranger)
+        self.assertEqual(legacy_archive.main(["verify", str(self.archive), "--age-identity", str(self.identity)]), 0)
+        self.assertEqual(legacy_archive.main(["verify", str(self.archive)]), 1)
+        original = self.bundle.read_bytes()
+        self.bundle.write_bytes(original + b"x")
+        with self.assertRaisesRegex(ArchiveError, "SHA-256 differs from the manifest"):
+            self.verify(self.archive)
+        self.bundle.unlink()
+        with self.assertRaisesRegex(ArchiveError, "is missing"):
+            self.verify(self.archive)
+
+    def test_verify_matches_each_decrypted_secret_with_the_manifest(self):
+        self.create(self.state, self.archive)
+
+        def forget(name, data):
+            if name == "manifest.json":
+                manifest = json.loads(data)
+                manifest["secrets"][".env"]["sha256"] = "0" * 64
+                return json.dumps(manifest).encode()
+            return data
+
+        repack(self.archive, forget)
+        with self.assertRaisesRegex(ArchiveError, "secrets bundle's files differ from the manifest: .env"):
+            self.verify(self.archive)
+
+    def test_secrets_need_recipients_and_age(self):
+        with self.assertRaisesRegex(ArchiveError, "6 secret files need an encrypted bundle"):
+            self.create(self.state, self.archive, age_recipients=[])
+        with self.assertRaisesRegex(ArchiveError, "could not encrypt the secrets bundle: age: error: unknown"):
+            self.create(self.state, self.archive, age_recipients=["age1notfake"])
+        only_zstd = self.root / "only-zstd"
+        only_zstd.mkdir()
+        (only_zstd / "zstd").symlink_to(shutil.which("zstd"))
+        os.environ["PATH"] = str(only_zstd)
+        with self.assertRaisesRegex(ArchiveError, "age is not installed; install it from https://age-encryption.org"):
+            self.create(self.state, self.archive)
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()),
+                         ["identity.txt", "only-zstd", "state", "tools"])
+
+    def test_state_without_secrets_needs_no_bundle(self):
+        for path in [*self.state.rglob("*credential*.json"), *self.state.rglob("auth.json"), self.state / ".env"]:
+            path.unlink()
+        report = create(self.state, self.archive)
+        self.assertEqual((report["secrets"], report["secretsBundle"]), ([], None))
+        self.assertFalse(self.bundle.exists())
+        self.assertFalse(verify(self.archive, source=self.state)["secretsDecrypted"])
+
+    def test_task_checkouts_are_left_out_and_unsaved_work_is_reported(self):
+        repository = self.root / "repository"
+        repository.mkdir()
+        git("init", "-q", "-b", "main", cwd=repository)
+        (repository / "README.md").write_text("repository\n")
+        git("add", ".", cwd=repository)
+        git("commit", "-q", "-m", "first", cwd=repository)
+        worktrees = self.state / "workspaces/repo/worktrees"
+        for name in ("clean", "dirty", "orphan"):
+            git("worktree", "add", "-q", "--detach", str(worktrees / name), cwd=repository)
+        (worktrees / "dirty/README.md").write_text("unsaved\n")
+        git("commit", "-q", "--allow-empty", "-m", "only here", cwd=worktrees / "orphan")
+        (worktrees / "clean/.env").write_text(f"TOKEN={SECRET}\n")
+        git("add", "-f", ".env", cwd=worktrees / "clean")
+        git("commit", "-q", "-m", "committed secret", cwd=worktrees / "clean")
+        git("branch", "kept", cwd=worktrees / "clean")
+        (worktrees / "broken").mkdir()
+        report = self.create(self.state, self.archive)
+        self.assertEqual(report["unsavedCheckouts"], {
+            "workspaces/repo/worktrees/broken": "is not a readable Git checkout",
+            "workspaces/repo/worktrees/dirty": "has uncommitted changes",
+            "workspaces/repo/worktrees/orphan": "has a commit that is on no branch"})
+        self.assertEqual(len(report["warnings"]), 3)
+        self.assertIn("save that work before you delete the snapshot", report["warnings"][0])
+        self.assertEqual(report["excludedPatterns"], ["workspaces/*/worktrees"])
+        names = tarfile.open(fileobj=io.BytesIO(decompressed(self.archive))).getnames()
+        self.assertFalse([name for name in names if "/worktrees" in name])
+        self.assertNotIn("workspaces/repo/worktrees/clean/.env", report["secrets"])
+        self.assertEqual((worktrees / "dirty/README.md").read_text(), "unsaved\n")
+        self.verify(self.archive, source=self.state)
 
     def test_refuses_running_services_or_an_unclosed_database(self):
         (self.state / "control-plane").mkdir()
         (self.state / "control-plane/pid").write_text(str(os.getpid()))
         with self.assertRaisesRegex(ArchiveError, "is running"):
-            create(self.state, self.archive)
+            self.create(self.state, self.archive)
         (self.state / "control-plane/pid").unlink()
         (self.state / "supertag.db-wal").write_bytes(b"x")
         with self.assertRaisesRegex(ArchiveError, "not closed cleanly"):
-            create(self.state, self.archive)
+            self.create(self.state, self.archive)
         self.assertFalse(self.archive.exists())
         self.assertFalse(Path(str(self.archive) + ".partial").exists())
 
     def test_warns_when_the_state_directory_names_a_postgresql_database(self):
         (self.state / "supertag.yaml").write_text(
             "services:\n  control-plane:\n    type: control-plane\n    database:\n      url: ${DATABASE_URL}\n")
-        report = create(self.state, self.archive)
+        report = self.create(self.state, self.archive)
         self.assertEqual(len(report["warnings"]), 1)
         self.assertIn("--database-url-file", report["warnings"][0])
 
     def test_damaged_archive_fails_without_a_traceback(self):
-        create(self.state, self.archive)
+        self.create(self.state, self.archive)
         data = self.archive.read_bytes()[:-200]
         self.archive.write_bytes(data)
         Path(str(self.archive) + ".sha256").write_text(f"{hashlib.sha256(data).hexdigest()}  {self.archive.name}\n")
@@ -192,33 +338,33 @@ class LegacyArchiveTests(unittest.TestCase):
             legacy_archive.Postgres(url_file)
 
     def test_verify_detects_a_changed_source(self):
-        create(self.state, self.archive)
+        self.create(self.state, self.archive)
         (self.state / "supertag.yaml").write_text("services: {}\n")
         with self.assertRaisesRegex(ArchiveError, "supertag.yaml differs"):
-            verify(self.archive, source=self.state)
+            self.verify(self.archive, source=self.state)
         (self.state / "supertag.yaml").unlink()
         with self.assertRaisesRegex(ArchiveError, "differ from the archive"):
-            verify(self.archive, source=self.state)
+            self.verify(self.archive, source=self.state)
 
     def test_verify_detects_a_changed_source_row_count(self):
-        create(self.state, self.archive)
+        self.create(self.state, self.archive)
         connection = sqlite3.connect(self.state / "supertag.db")
         connection.execute('UPDATE "Tag" SET name = name')
         connection.execute('INSERT INTO "Empty" VALUES (?)', ("new",))
         connection.commit()
         connection.close()
         with self.assertRaisesRegex(ArchiveError, "supertag.db differs"):
-            verify(self.archive, source=self.state)
+            self.verify(self.archive, source=self.state)
 
     def test_verify_detects_corruption_and_rewritten_members(self):
-        create(self.state, self.archive)
+        self.create(self.state, self.archive)
         data = bytearray(self.archive.read_bytes())
         data[len(data) // 2] ^= 1
         corrupt = self.root / "corrupt.tar.zst"
         corrupt.write_bytes(data)
         Path(str(corrupt) + ".sha256").write_text(Path(str(self.archive) + ".sha256").read_text())
         with self.assertRaisesRegex(ArchiveError, "SHA-256 differs"):
-            verify(corrupt)
+            self.verify(corrupt)
         cases = {
             "state/supertag.yaml": (lambda data: data + b"#", "differs from its manifest"),
             "tables/Task.jsonl": (lambda data: b"", "differs from its manifest"),
@@ -229,10 +375,10 @@ class LegacyArchiveTests(unittest.TestCase):
                 shutil.copyfile(self.archive, copy)
                 repack(copy, lambda member, data: edit(data) if member == name else data)
                 with self.assertRaisesRegex(ArchiveError, message):
-                    verify(copy)
+                    self.verify(copy)
 
     def test_verify_checks_row_counts_inside_the_archive(self):
-        create(self.state, self.archive)
+        self.create(self.state, self.archive)
 
         def lie(name, data):
             if name == "manifest.json":
@@ -243,14 +389,14 @@ class LegacyArchiveTests(unittest.TestCase):
 
         repack(self.archive, lie)
         with self.assertRaisesRegex(ArchiveError, "Task.jsonl has 1 rows, manifest says 2"):
-            verify(self.archive)
+            self.verify(self.archive)
 
     def test_exclude_leaves_out_paths_and_verify_honours_it(self):
-        report = create(self.state, self.archive, patterns=["workspaces"])
+        report = self.create(self.state, self.archive, patterns=["workspaces"])
         names = tarfile.open(fileobj=io.BytesIO(decompressed(self.archive))).getnames()
         self.assertFalse([name for name in names if name.startswith("state/workspaces")])
-        self.assertEqual(report["excludedPatterns"], ["workspaces"])
-        verify(self.archive, source=self.state)
+        self.assertEqual(report["excludedPatterns"], ["workspaces/*/worktrees", "workspaces"])
+        self.verify(self.archive, source=self.state)
 
     def test_config_lists_and_removes_keys_the_rust_runtime_rejects(self):
         try:
@@ -329,6 +475,56 @@ class LegacyArchiveTests(unittest.TestCase):
             {"target": "surface", "scope": "C1", "action": "post", "surface_account_id": "slack", "approval_required": True}])
         self.assertEqual(objective["spec"], {"outcome": "Ship it", "ownerTagId": "lead", "budgetLimitMinor": 500,
                                              "budgetCurrency": "USD"})
+
+
+@unittest.skipUnless(shutil.which("zstd"), "zstd is required")
+@unittest.skipUnless(shutil.which("age") and shutil.which("age-keygen"),
+                     "age is not installed, so the real age encryption tests are skipped; install age "
+                     "(https://age-encryption.org) to run them")
+class RealAgeSecretsBundleTests(unittest.TestCase):
+    """The secrets bundle against the real age, with throwaway keys made for each test."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.state = make_state(self.root)
+        self.archive = self.root / "legacy.tar.zst"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def keypair(self, name):
+        identity = self.root / f"{name}.key"
+        subprocess.run(["age-keygen", "-o", str(identity)], check=True, capture_output=True)
+        recipient = subprocess.run(["age-keygen", "-y", str(identity)], check=True, capture_output=True,
+                                   text=True).stdout.strip()
+        return identity, recipient
+
+    def test_bundle_round_trips_through_age(self):
+        identity, recipient = self.keypair("operator")
+        recipients_file = self.root / "recipients.txt"
+        backup_identity, backup_recipient = self.keypair("backup")
+        recipients_file.write_text(f"# backup key\n{backup_recipient}\n")
+        status = legacy_archive.main(["create", "--from", str(self.state), "--to", str(self.archive),
+                                      "--age-recipient", recipient, "--age-recipients-file", str(recipients_file),
+                                      "--age-identity", str(identity)])
+        self.assertEqual(status, 0)
+        bundle = Path(str(self.archive) + ".secrets.tar.age")
+        self.assertNotIn(SECRET.encode(), bundle.read_bytes())
+        self.assertNotIn(SECRET.encode(), decompressed(self.archive))
+        for key in (identity, backup_identity):
+            self.assertTrue(verify(self.archive, source=self.state, age_identity=key)["secretsDecrypted"])
+        stranger, _ = self.keypair("stranger")
+        with self.assertRaisesRegex(ArchiveError, "does not decrypt"):
+            verify(self.archive, age_identity=stranger)
+        restored = self.root / "restored"
+        restored.mkdir()
+        plaintext = subprocess.run(["age", "-d", "-i", str(identity), str(bundle)], check=True,
+                                   capture_output=True).stdout
+        tarfile.open(fileobj=io.BytesIO(plaintext)).extractall(restored, filter="tar")
+        self.assertEqual((restored / ".env").read_text(), (self.state / ".env").read_text())
+        self.assertEqual(stat.S_IMODE((restored / "credentials.json").stat().st_mode),
+                         stat.S_IMODE((self.state / "credentials.json").stat().st_mode))
 
 
 @unittest.skipUnless(shutil.which("zstd") and os.environ.get("SUPERTAG_LEGACY_ARCHIVE_TEST_POSTGRES_URL_FILE"),
