@@ -1732,7 +1732,7 @@ Options:
           Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
 
       --allow-unsandboxed-commands
-          Allow OpenCode or Cursor commands without an operating-system sandbox
+          Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
 
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK
@@ -2164,7 +2164,7 @@ Options:
           Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
 
       --allow-unsandboxed-commands
-          Allow OpenCode or Cursor commands without an operating-system sandbox
+          Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
 
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK

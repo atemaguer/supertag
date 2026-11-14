@@ -785,6 +785,16 @@ async function turn(message) {
       throw new Error("Work Session capability was not required");
   }
   if (prompt === "inspect-skill-package") result = await inspectSkillPackage();
+  if (prompt === "run-command") {
+    // Claude Code's Bash runs as the host user; the fixture runs the admitted command the same way.
+    const command = "echo ran > command-output.txt";
+    if (!arg("--tools")?.split(",").includes("Bash"))
+      throw new Error("Bash was not offered to the native process");
+    if (!(await hook("Bash", { command }))) throw new Error("Admitted Bash was denied");
+    const shell = spawn("/bin/sh", ["-c", command], { cwd, stdio: "ignore" });
+    await new Promise((resolve) => shell.on("exit", resolve));
+    result = "fixture ran an admitted command";
+  }
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {
     if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))

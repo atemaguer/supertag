@@ -71,16 +71,30 @@ function acceptedBudgetUsd(limits: ExecutionLimits | undefined): number | undefi
   return Number(cost.amountMinor) / 100;
 }
 
-export function admittedTools(actions: readonly string[]): string[] {
-  if (actions.includes("commands:execute"))
+/**
+ * Claude Code runs `Bash` as the Worker Host's user, without an operating-system sandbox, and
+ * SuperTag provides none. `commands:execute` therefore needs the host's explicit
+ * allow-unsandboxed-commands opt-in.
+ */
+export function admittedTools(
+  actions: readonly string[],
+  allowUnsandboxedCommands = false,
+): string[] {
+  const commands = actions.includes("commands:execute");
+  if (commands && !allowUnsandboxedCommands)
     throw new UnsupportedPermissionError(
-      "Claude commands:execute is unsupported until its native sandbox policy is verified.",
+      "Claude Code runs commands without a sandbox; add claude-code to allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
     );
-  if (actions.some((action) => !Object.hasOwn(ACTIONS, action)))
+  if (actions.some((action) => action !== "commands:execute" && !Object.hasOwn(ACTIONS, action)))
     throw new UnsupportedPermissionError(
       "Claude does not support one of the accepted allowed actions.",
     );
-  return [...new Set(actions.flatMap((action) => ACTIONS[action] ?? []))];
+  return [
+    ...new Set([
+      ...actions.flatMap((action) => ACTIONS[action] ?? []),
+      ...(commands ? ["Bash"] : []),
+    ]),
+  ];
 }
 
 async function withinRoots(cwd: string, path: unknown, roots: readonly string[]): Promise<boolean> {
@@ -196,6 +210,8 @@ export interface AdapterOptions {
   readonly executable?: string;
   readonly model?: string;
   readonly timeoutMs?: number;
+  /** The Worker Host's allow-unsandboxed-commands opt-in for `commands:execute`. */
+  readonly allowUnsandboxedCommands?: boolean;
   readonly environment?: NodeJS.ProcessEnv;
 }
 
@@ -288,7 +304,10 @@ export async function runAdapter(
         "Claude could not verify a required Context Item or delivered Skill. Native execution did not start.",
       );
     }
-    const tools = admittedTools(task.allowedActions);
+    const tools = admittedTools(
+      task.allowedActions,
+      configuration.allowUnsandboxedCommands ?? false,
+    );
     const model = task.attemptExecution
       ? task.attemptExecution.selection?.model
       : (task.policySnapshot?.execution?.models[0] ?? configuration.model);

@@ -281,7 +281,7 @@ Runtime actions are captured separately from collaboration surface resources in 
 | --- | --- | --- | --- |
 | no write permission | removes `Write` and `Edit` | read-only sandbox | read, grep, glob, ls, and MCP tools only |
 | `files:write` | enables `Write` and `Edit` | workspace-write sandbox | adds edit |
-| `commands:execute` | enables `Bash` | enables shell and unified execution features, and lets commands use loopback sockets | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise refused |
+| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise refused | enables shell and unified execution features, and lets commands use loopback sockets | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise refused |
 | `web:fetch` | enables `WebFetch` | with `files:write`, enables sandbox network access | no native web tool |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | available only through an installed compatible tool | enables supported browser/computer-use features | no native browser tool |

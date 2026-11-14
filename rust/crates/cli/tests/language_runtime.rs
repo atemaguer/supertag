@@ -116,6 +116,9 @@ database_tests! {
     claude_code_sdk_restores_session_on_a_fresh_host;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_captures_selected_workspace_files_for_the_operator;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -935,6 +938,71 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
         assert_eq!(usage["input_tokens"], 15);
         assert_eq!(usage["cached_input_tokens"], 3);
         assert_eq!(usage["output_tokens"], 4);
+    }
+    services.stop().await
+}
+
+/// Claude Code has no command sandbox, so a Task granted `commands:execute` waits for a host
+/// that opted in with `--allow-unsandboxed-commands` and then runs its command as the host user.
+async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "runner",
+            "--instructions",
+            "Run the requested command.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "commands:execute",
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "runner",
+            "--session",
+            "commands",
+            "run-command",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    for (index, opt_in) in [false, true].into_iter().enumerate() {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.path().join(format!("host-{index}")),
+            Path::new(&interpreter),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+        if opt_in {
+            host.arg("--allow-unsandboxed-commands");
+        }
+        success(host).await?;
+        let task = services.operator(&["get", "task", task_id]).await?;
+        if opt_in {
+            assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+            assert_eq!(task["result"], "fixture ran an admitted command", "{task}");
+        } else {
+            assert_eq!(task["state"], "TASK_STATE_QUEUED", "{task}");
+            assert!(task["attempt_id"].is_null(), "{task}");
+        }
     }
     services.stop().await
 }

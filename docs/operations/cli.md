@@ -159,7 +159,7 @@ each default in brackets; press Enter to accept it, or pass `--yes` to accept th
    **Workspace**, a named repository that Tasks work in, named after it, such as `app`. Its origin
    URL is the source and its default branch the base. `init` also asks how finished work comes
    back: as a branch (the default), a patch, or a draft pull request for a GitHub repository.
-   When you choose Claude Code or OpenCode, `init` explains that they run commands as you,
+   When you choose Claude Code, Cursor, or OpenCode, `init` explains that they run commands as you,
    without a sandbox, so their Tags should get only trusted work. It asks whether to allow that,
    defaulting to yes, and writes the answer as `allow-unsandboxed-commands`. `--yes` allows it and
    prints how to undo it. See

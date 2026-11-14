@@ -86,6 +86,7 @@ async function invoke({
   model,
   skill,
   sessionId = "session",
+  allowUnsandboxedCommands = false,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -110,6 +111,7 @@ async function invoke({
   model?: string;
   skill?: { markdown: string; tamper?: boolean };
   sessionId?: string;
+  allowUnsandboxedCommands?: boolean;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -467,6 +469,7 @@ async function invoke({
       "--timeout-seconds",
       "12",
       ...(model ? ["--model", model] : []),
+      ...(allowUnsandboxedCommands ? ["--allow-unsandboxed-commands"] : []),
     ],
     {
       env: {
@@ -669,13 +672,32 @@ it("rejects a damaged checkpoint instead of silently resetting the native Sessio
   await expect(readFile(join(next.workspace, "answer.txt"))).rejects.toThrow();
 }, 30000);
 
-it("refuses unverified command authority and failed session mirroring", async () => {
-  const unsupported = await invoke({ actions: ["commands:execute"] });
-  expect(unsupported.completions[0]?.result).toContain("commands:execute is unsupported");
-  expect(unsupported.completions[0]?.succeeded).toBe(false);
+it("refuses commands without the host's unsandboxed opt-in and failed session mirroring", async () => {
+  const refused = await invoke({ prompt: "run-command", actions: ["commands:execute"] });
+  expect(refused.completions[0]?.result).toBe(
+    "Claude Code runs commands without a sandbox; add claude-code to allow-unsandboxed-commands in the Worker Host's supertag.yaml service to let it run commands. Native execution did not start.",
+  );
+  expect(refused.completions[0]?.succeeded).toBe(false);
+  await expect(readFile(join(refused.workspace, "command-output.txt"))).rejects.toThrow();
   const mirror = await invoke({ prompt: "mirror-failure" });
   expect(mirror.completions[0]?.succeeded).toBe(false);
   expect(mirror.completions[0]?.checkpoint).toBeUndefined();
+}, 30000);
+
+it("runs admitted commands unsandboxed only with the host's explicit opt-in", async () => {
+  const run = await invoke({
+    prompt: "run-command",
+    actions: ["files:read", "commands:execute"],
+    allowUnsandboxedCommands: true,
+  });
+  expect(run.completions[0]?.result, run.completions[0]?.result).toBe(
+    "fixture ran an admitted command",
+  );
+  expect(run.completions[0]?.succeeded).toBe(true);
+  expect(await readFile(join(run.workspace, "command-output.txt"), "utf8")).toBe("ran\n");
+  // The opt-in admits Bash for commands:execute only; without that action Bash stays denied.
+  const denied = await invoke({ allowUnsandboxedCommands: true });
+  expect(denied.completions[0]?.result).toContain("unadmitted tools denied");
 }, 30000);
 
 it("confirms detached native descendant cleanup before reporting a cancelled execution", async () => {

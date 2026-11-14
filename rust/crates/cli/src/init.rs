@@ -563,7 +563,7 @@ fn answers(
         _ => None,
     };
     let unsandboxed = match (harness, ask.as_deref_mut()) {
-        (Found::Opencode | Found::Cursor, Some(prompter)) => {
+        (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
             outln!(
                 "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
@@ -579,7 +579,7 @@ fn answers(
             }
             allowed
         }
-        (Found::Opencode | Found::Cursor, None) => {
+        (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
             outln!(
                 "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
                 harness.harness()

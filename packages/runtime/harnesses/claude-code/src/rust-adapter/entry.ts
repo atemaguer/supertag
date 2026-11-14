@@ -12,6 +12,7 @@ try {
       executable: { type: "string" },
       model: { type: "string" },
       "timeout-seconds": { type: "string" },
+      "allow-unsandboxed-commands": { type: "boolean", default: false },
     },
   });
   const seconds = Number(values["timeout-seconds"] ?? "600");
@@ -21,6 +22,7 @@ try {
   await runAdapter(bootstrap, controller.signal, {
     ...(values.executable ? { executable: values.executable } : {}),
     ...(values.model ? { model: values.model } : {}),
+    allowUnsandboxedCommands: values["allow-unsandboxed-commands"] === true,
     timeoutMs: seconds * 1000,
   });
 } catch {
