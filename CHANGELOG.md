@@ -9,6 +9,28 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- `supertag watch inbox-item` prints the operator inbox items already waiting, then each new one.
+- `supertag delete KIND NAME --dry-run` checks a Team, Permission Set, Context Set, Volume,
+  Workspace, or Surface Location deletion, including whether anything still uses it, without
+  deleting it.
+- Root turns can recall the Tag's other Sessions and its Objectives with `list_sessions`,
+  `search_sessions`, `read_session`, `list_objectives`, and `read_objective`, and see the Tag's
+  open Objectives in their context. A conversation turn that starts with
+  `@SuperTag objective` can create that Objective with `create_objective`.
+
+### Changed
+
+- The Control Plane stores no artifact or Workspace delivery bytes. Worker Hosts keep them in
+  their artifact directory (`--artifact-directory`, which replaces `--artifact-source-directory`)
+  and the Control Plane relays them to readers. Reading them needs the holding Worker Host to be
+  connected, or a Volume copy. The Control Plane's `--transfer-directory` is replaced by
+  `--checkpoint-directory`, which holds Session checkpoints only.
+- `supertag init` binds the lead Tag's Workspace to the current branch instead of a fixed commit.
+  On a detached HEAD it pins the commit.
+- `supertag delete volume` no longer requires `--operation-id`.
+
 ## [0.3.0-alpha.1]
 
 ### Changed
