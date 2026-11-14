@@ -34,9 +34,9 @@ staging tools it uses to rehearse cutovers and rollbacks.
 
 ```sh
 supertag team create service-identity --member lead --member identity --member migration \
-  --member verification --member rollout
-supertag get team
-supertag get team service-identity
+  --member verification --member rollout --state-directory ~/.supertag
+supertag get team --state-directory ~/.supertag
+supertag get team service-identity --state-directory ~/.supertag
 ```
 
 ```text
@@ -72,38 +72,42 @@ Tag runs under its own Roles, narrowed to the Objective's runtime actions, and d
 Objective's budget. A Tag must be active and bound to a Worker Host to take delegated work.
 The operator approves production cutovers and retirement of the shared keys.
 
-A **Workspace** tells SuperTag where repository work belongs. Add `--workspace NAME` for each
-Workspace the Objective needs.
+Repository work runs in each Tag's own **Workspace**, the repository it is bound to; see
+[Work in a repository with Workspaces](workspaces.md).
 
-An Objective manifest can declare the Team instead of naming an existing one:
+Manifests can declare the Team and the Objective together:
 
 ```yaml
+apiVersion: supertag/v1
+kind: Team
+metadata:
+  name: service-identity
+spec:
+  members: [lead, identity, migration, verification, rollout]
+  maxConcurrency: 2
+---
 apiVersion: supertag/v1
 kind: Objective
 metadata:
   name: service-identity-migration
 spec:
-  owner: lead
+  ownerTagId: lead
+  team: service-identity
   outcome: >-
     Move 12 production services to short-lived credentials issued to each service.
     Keep requests working through each rollout wave.
     Done when service checks pass and the old keys are retired.
     Ask me to approve each production cutover and retirement of the shared keys.
-  team:
-    name: Service identity
-    members: [lead, identity, migration, verification, rollout]
-    maxConcurrency: 2
 ```
 
-The declared Team's ID is the Objective's ID. `spec.team` may also be the name of an existing
-Team. Which Team an Objective names is fixed once it exists; a declared Team's name, members, and
-`maxConcurrency` change in place when you apply the file again. See
+A Team's members and `maxConcurrency` change when you apply its manifest again. Which Team an
+Objective names is fixed once it exists. See
 [Declare Objectives](../operations/resources.md#declare-objectives).
 
 ## 4. Delete the Team
 
 ```sh
-supertag delete team service-identity
+supertag delete team service-identity --state-directory ~/.supertag
 ```
 
 Deletion is refused while an open Objective names the Team. Cancel or complete those Objectives
@@ -118,15 +122,14 @@ a free slot. Set a limit only when you want fewer turns running at once, for exa
 rate-limited service:
 
 ```sh
-supertag team update service-identity --max-concurrency 2
+supertag team update service-identity --max-concurrency 2 --state-directory ~/.supertag
 ```
 
 The limit counts turns across every open Objective that names the Team; later turns wait, and a
-waiting turn holds no slot. Remove it again with an empty value, so Worker Host capacity is the
-only limit:
+waiting turn holds no slot. Remove it again, so Worker Host capacity is the only limit:
 
 ```sh
-supertag team update service-identity --max-concurrency ""
+supertag team update service-identity --clear-concurrency --state-directory ~/.supertag
 ```
 
 Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm

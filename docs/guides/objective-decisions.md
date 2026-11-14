@@ -21,7 +21,7 @@ submitted a result for review.
 The operator inbox is one list of everything waiting on a person, across Objectives:
 
 ```sh
-supertag get inbox-item
+supertag get inbox-item --state-directory ~/.supertag
 ```
 
 Each item names its kind, its Objective, and the command that acts on it. Filter with `--kind`:
@@ -30,7 +30,7 @@ Each item names its kind, its Objective, and the command that acts on it. Filter
 To see new items as they arrive, keep this running; press Ctrl-C to stop:
 
 ```sh
-supertag get inbox-item
+supertag get inbox-item --state-directory ~/.supertag
 ```
 
 ```text

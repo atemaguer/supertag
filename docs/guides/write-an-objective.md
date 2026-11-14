@@ -113,8 +113,8 @@ Creating the Objective queues its owner's first turn and refuses a request it ca
 with the reason. Then inspect progress:
 
 ```sh
-supertag watch objective checkout-retries
-supertag describe objective checkout-retries
+supertag watch objective checkout-retries --state-directory ~/.supertag
+supertag describe objective checkout-retries --state-directory ~/.supertag
 ```
 
 The CLI takes the statement as one argument after the ID; there are no separate done-when or

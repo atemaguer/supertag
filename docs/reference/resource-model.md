@@ -123,16 +123,14 @@ spec:
   permissions:
     - target: runtime
       action: commands:execute
-status:
-  phase: active
 ```
 
-Clients declare `spec`; the Control Plane owns generated metadata and `status`. The
-language-neutral envelope is defined in
-[`spec/resource-envelope.schema.json`](../../spec/resource-envelope.schema.json).
+A manifest has exactly `apiVersion`, `kind`, `metadata.name`, and `spec`; any other field, such
+as `status`, is refused. The Control Plane owns everything else it reports, such as revisions and
+phases, and `supertag get KIND NAME` prints it as JSON.
 
 The relationship between Tags and Roles follows that same boundary: `Tag.spec.roles` is desired
-configuration, while `Role.status.assignedTags` is a read-only projection. A Tag's Worker Host
+configuration; `supertag get role-assignment` lists the resulting assignments. A Tag's Worker Host
 bindings are not a manifest field: a host that joins with an Auth Key is bound to each of the key's
 Tags, and a host in the same `supertag.yaml` as its Control Plane may run every Tag. A Tag with no
 bound host waits for one. Storage records used to

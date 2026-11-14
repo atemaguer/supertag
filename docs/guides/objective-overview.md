@@ -20,7 +20,7 @@ The **Control Plane** is the SuperTag service that stores and runs it. See the
 ## 1. Read the overview
 
 ```sh
-supertag describe objective OBJECTIVE_ID
+supertag describe objective OBJECTIVE_ID --state-directory ~/.supertag
 ```
 
 The view leads with what you decide on, then the details:

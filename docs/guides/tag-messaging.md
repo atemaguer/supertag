@@ -46,14 +46,14 @@ Two Tags in the same Team may message each other with no further configuration. 
 Team when they work together:
 
 ```sh
-supertag team create billing --member support --member backend
+supertag team create billing --member support --member backend --state-directory ~/.supertag
 ```
 
 For a route between Tags that share no Team, grant it explicitly:
 
 ```sh
-supertag mailbox-grant allow support backend
-supertag get mailbox-grant --tag backend
+supertag mailbox-grant allow support backend --state-directory ~/.supertag
+supertag get mailbox-grant --tag backend --state-directory ~/.supertag
 ```
 
 ```text
