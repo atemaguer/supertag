@@ -90,7 +90,9 @@ async function runFixture() {
     assert.equal(request.model, "fixture-model");
     assert.ok(!request.prompt.includes(key));
     const current = request.prompt.replace(/<supertag-history>[\s\S]*?<\/supertag-history>/gu, "");
-    const mode = /fixture:([a-z-]+)/u.exec(current)?.[1];
+    // The Task prompt comes last; the SuperTag context before it can name Objective outcomes
+    // that are themselves fixture prompts.
+    const mode = [...current.matchAll(/fixture:([a-z-]+)/gu)].at(-1)?.[1];
     assert.ok(
       [
         "first",

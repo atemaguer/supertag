@@ -158,21 +158,19 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     let session = objective["session_id"]
         .as_str()
         .context("Objective Session")?;
-    let worker = |endpoint: &str| {
+    let artifacts = crate::holding_host::artifact_directory(root.path());
+    let host = |endpoint: &str, state: &str| {
         let mut host = command(&[
             "worker-host",
             "--control-plane",
             endpoint,
-            "--once",
             "--harness",
             "claude-code",
         ]);
-        host.arg("--workspace-id")
-            .arg("evidence")
-            .arg("--workspace-source")
-            .arg(&source)
-            .arg("--state-directory")
-            .arg(root.path().join("claude-producer"))
+        host.arg("--state-directory")
+            .arg(root.path().join(state))
+            .arg("--artifact-directory")
+            .arg(&artifacts)
             .arg("--harness-runtime")
             .arg(&node)
             .arg("--harness-entrypoint")
@@ -183,7 +181,21 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
             .env("ANTHROPIC_API_KEY", "fixture-provider-key");
         host
     };
-    success(worker(&services.public)).await?;
+    // A host's state directory carries its incarnation, which the holder below replaces, so the
+    // producing runs and the consuming run use separate ones.
+    let mapped = |endpoint: &str, state: &str| {
+        let mut worker = host(endpoint, state);
+        worker
+            .arg("--once")
+            .arg("--workspace-id")
+            .arg("evidence")
+            .arg("--workspace-source")
+            .arg(&source);
+        worker
+    };
+    let producer = |endpoint: &str| mapped(endpoint, "claude-first");
+    let worker = |endpoint: &str| mapped(endpoint, "claude-producer");
+    success(producer(&services.public)).await?;
     let accepted = services
         .operator(&[
             "task",
@@ -197,7 +209,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
             "Submit evidence for a subsequent Task.",
         ])
         .await?;
-    success(worker(&services.public)).await?;
+    success(producer(&services.public)).await?;
     let produced = services
         .operator(&["get", "task", accepted["task_id"].as_str().unwrap()])
         .await?;
@@ -242,6 +254,9 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
             "register-inputs-volume",
         ])
         .await?;
+    // The producing `--once` host exited; a host with no Workspace mapping, which claims no
+    // Task, relays the held bytes for the copy.
+    let holding = crate::holding_host::serve(host(&services.public, "claude-holder")).await?;
     let copy = services
         .operator(&[
             "volume",
@@ -259,7 +274,11 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     let digest = copy["file"]["blob"]["sha256"]
         .as_str()
         .context("verified Volume copy digest")?;
-    std::fs::remove_file(root.path().join("blobs").join(digest))?;
+    drop(holding);
+    // The Control Plane stores no artifact bytes. Removing the Worker Host's held copy leaves the
+    // verified Volume copy as the only source of the input.
+    let held = held_blob(&artifacts, digest)?;
+    std::fs::remove_file(&held)?;
     // The accepted Objective Session's harness remains pinned. Verify delivery from
     // Claude's actual manager with the input path supplied before native launch.
     let attempt = interrupt_input_receipt(&services, root.path(), worker).await?;
@@ -271,6 +290,24 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     assert_eq!(result["result"], "verified supplied Task artifact input");
     assert_eq!(result["workspace_delivery"]["changed_files"], 0);
     assert!(!source.join("inputs").exists());
-    assert!(!root.path().join("blobs").join(digest).exists());
+    assert!(!held.exists());
     services.stop().await
+}
+
+/// The one file the Worker Host's artifact storage holds for `digest`.
+fn held_blob(artifacts: &Path, digest: &str) -> Result<std::path::PathBuf> {
+    let mut pending = vec![artifacts.to_path_buf()];
+    let mut found = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                pending.push(entry.path());
+            } else if entry.file_name() == digest {
+                found.push(entry.path());
+            }
+        }
+    }
+    ensure!(found.len() == 1, "held copies of {digest}: {found:?}");
+    Ok(found.remove(0))
 }

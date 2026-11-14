@@ -879,42 +879,55 @@ async fn verify_github_output(
     ]))
     .await?;
     let task_id = field(&task, "task_id")?;
-    let mut worker = Command::new(BINARY);
-    worker
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("SUPERTAG_HOST_TOKEN", host_token)
-        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", host_token)
-        .env("ANTHROPIC_API_KEY", "synthetic-model-token")
-        .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .args([
-            "worker-host",
-            "--control-plane",
-            public,
-            "--once",
-            "--harness",
-            "claude-code",
-            "--harness-model",
-            "fixture-model",
-            "--workspace-id",
-            "project",
-            "--workspace-from-control-plane",
-            "--harness-runtime",
-        ])
-        .arg(node)
-        .arg("--harness-entrypoint")
-        .arg(harness.join("dist/rust-adapter/entry.js"))
-        .arg("--claude-path")
-        .arg(native)
-        .arg("--state-directory")
-        .arg(root.join("git-output-host"));
+    // Every host process presents the same credential, so they share one artifact directory.
+    let host = |state: &str, once: bool| {
+        let mut host = Command::new(BINARY);
+        host.env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("SUPERTAG_HOST_TOKEN", host_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", host_token)
+            .env("ANTHROPIC_API_KEY", "synthetic-model-token")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .args([
+                "worker-host",
+                "--control-plane",
+                public,
+                "--harness",
+                "claude-code",
+                "--harness-model",
+                "fixture-model",
+                "--harness-runtime",
+            ])
+            .arg(&node)
+            .arg("--harness-entrypoint")
+            .arg(harness.join("dist/rust-adapter/entry.js"))
+            .arg("--claude-path")
+            .arg(&native)
+            .arg("--state-directory")
+            .arg(root.join(state))
+            .arg("--artifact-directory")
+            .arg(holding_host::artifact_directory(root));
+        if once {
+            host.args([
+                "--once",
+                "--workspace-id",
+                "project",
+                "--workspace-from-control-plane",
+            ]);
+        }
+        host
+    };
+    let worker = host("git-output-host", true);
     success(worker).await?;
     let completed = json(cli(&["get", "task", task_id])).await?;
     assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
     let selection = &completed["artifacts"][0];
     assert_eq!(selection["paths"], json!(["supertag-git-output.json"]));
     let path = root.join("downloaded-git-output.json");
+    // The producing `--once` host exited; an unmapped host, which claims no Task, relays its
+    // artifact.
+    let _holding = holding_host::serve(host("git-output-holder", false)).await?;
     json(cli(&[
         "artifact",
         "download",

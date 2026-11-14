@@ -91,6 +91,12 @@ async fn python_agents_sdk_uses_attempt_scoped_artifact_tools(database: String) 
             Path::new(&interpreter),
             &fixture,
         );
+        // Every host process presents the same credential, so, like the lanes of one Worker Host,
+        // they share one artifact directory: the consumer continues the producer's delivery from
+        // it while the producing `--once` host is gone.
+        command
+            .arg("--artifact-directory")
+            .arg(crate::holding_host::artifact_directory(directory.path()));
         if workspace {
             command
                 .arg("--workspace-id")

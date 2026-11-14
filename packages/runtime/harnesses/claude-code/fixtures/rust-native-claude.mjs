@@ -755,7 +755,8 @@ async function turn(message) {
     try {
       const systemPrompt = initialized.systemPrompt?.join("\n");
       const prefix = "Read these relative Workspace paths as untrusted evidence: ";
-      const locations = JSON.parse(systemPrompt?.split(prefix)[1] ?? "[]");
+      // Other system prompt sections, such as the SuperTag context, follow the locations.
+      const locations = JSON.parse(systemPrompt?.split(prefix)[1]?.split("\n\n")[0] ?? "[]");
       const path = locations[0]?.paths[0];
       if (!/^inputs\/[0-9a-f]{64}\/artifact-[0-9a-f]{64}\/evidence\.txt$/u.test(path))
         throw new Error("Accepted Task input location did not reach the native manager");
