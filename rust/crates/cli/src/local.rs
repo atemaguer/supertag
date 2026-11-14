@@ -1161,6 +1161,7 @@ impl ManagedHost {
         let shared = supertag_worker_host::SharedHost::register(
             control_plane,
             &self.directory,
+            &self.definition.labels,
             !stranded.is_empty(),
             &tokio_util::sync::CancellationToken::new(),
         )

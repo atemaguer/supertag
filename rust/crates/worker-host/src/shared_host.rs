@@ -53,16 +53,18 @@ impl SharedHost {
     /// `replace` starts a new incarnation instead of replaying the persisted one, so the
     /// Control Plane fences every Attempt held under the previous generation. A supervisor
     /// does this when Attempt journals exist that no configured lane will read.
+    ///
+    /// `labels` are the host service's declared placement labels. The Host adds its operating
+    /// system and architecture; the Control Plane derives harness and Workspace labels.
     pub async fn register(
         control_plane: Target,
         state_directory: &Path,
+        labels: &[String],
         replace: bool,
         shutdown: &CancellationToken,
     ) -> Result<Option<Self>> {
+        let labels = host_labels(labels)?;
         let journal = Journal::open(state_directory)?;
-        // Lanes take no declared labels, so the Host reports its operating system and
-        // architecture; the Control Plane derives harness and Workspace labels.
-        let labels = host_labels(&[])?;
         let token = enrollment::host_token(&journal, &control_plane)?;
         let incarnation_id = if replace {
             journal.replace_incarnation()?
