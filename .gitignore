@@ -46,3 +46,6 @@ assets/images/*
 !assets/images/supertag-shared-control-plane.png
 !assets/images/supertag-team-migration.png
 !assets/images/supertag-work-sessions.png
+
+# The roadmap lives in the internal notes (contributing/roadmap.md)
+ROADMAP.md

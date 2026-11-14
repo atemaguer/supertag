@@ -258,5 +258,3 @@ semantic pass over the long reference pages.
   under `rust/crates`) were left unchanged to keep this branch mergeable with concurrent
   Rust work.
 - `CHANGELOG.md` gets its entry at integration, per `AGENTS.md`.
-- `ROADMAP.md` still links the removed Fly.io guide; it was left alone because it has
-  uncommitted operator edits elsewhere.
