@@ -112,7 +112,7 @@ Choose the tool your team already uses:
 - [Render](guides/deploy-render.md) — Blueprint-managed native Control Plane, optional Gateway, and PostgreSQL
 - [Modal](guides/deploy-modal.md) — always-on native Control Plane behind a web endpoint, with external PostgreSQL and Vault
 - [Cloudflare](guides/deploy-cloudflare.md) — native Control Plane in a Container behind a Worker, with external PostgreSQL and Vault
-- [Deployment setup](guides/deployment-setup.md) — shared configuration and verification for Railway and Fly.io
+- [Deployment definitions](../deploy/native/README.md) — configuration, checks, and verification for Docker Compose, Fly.io, Railway, Render, Cloudflare, and Modal
 - [Control Plane operations](operations/control-plane.md) — health, persistence, deployment, and databases
 - [Operator notifications](guides/notifications.md) — alert the operator about inbox items
 - [Manage resources](operations/resources.md) — get, describe, diff, apply, delete, watch, and cancel

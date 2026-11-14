@@ -7,22 +7,35 @@ import { describe, expect, it } from "vitest";
 /**
  * The capability ledger is frozen at the last commit that contained the TypeScript runtime.
  * Its Rust citations must keep naming Rust tests that exist, so renamed or deleted Rust evidence
- * fails here. Its TypeScript citations are historical: each must name a file at the freeze
- * commit, and every TypeScript, Go, and Python test file at that commit must be cited.
+ * fails here. Every other cited path must exist now, unless the cutover removed it: TypeScript
+ * citations are historical. Every TypeScript, Go, and Python test file at the freeze commit must
+ * be cited. Both lists below are committed, so the check needs no Git history; when the freeze
+ * commit is present, the last test confirms the lists against it.
  */
 const root = resolve(import.meta.dirname, "../..");
 const ledger = await readFile(join(root, "rust/docs/rust-port-capability-ledger.md"), "utf8");
 const FROZEN_AT = "6c934be8c25a60226fa43c7bdc87d312bae495a7";
 
-/** Files at the freeze commit. CI must check out full history for this commit to be present. */
-function frozenFiles(): string[] {
+const list = async (name: string) =>
+  (await readFile(join(import.meta.dirname, name), "utf8")).split("\n").filter(Boolean);
+/** Tracked files at the freeze commit that the cutover removed. */
+const removedAtCutover = await list("removed-at-cutover.txt");
+/** TypeScript, Go, and Python test files at the freeze commit. */
+const frozenTestFiles = await list("frozen-test-files.txt");
+const isTestFile = (path: string) =>
+  /\.test\.ts$/u.test(path) ||
+  /_test\.go$/u.test(path) ||
+  /^sdks\/python\/tests\/test_[^/]*\.py$/u.test(path);
+
+/** Files at the freeze commit, or undefined when this checkout lacks that commit. */
+function filesAtFreeze(): string[] | undefined {
   try {
     execFileSync("git", ["cat-file", "-e", `${FROZEN_AT}^{commit}`], {
       cwd: root,
       stdio: "ignore",
     });
   } catch {
-    throw new Error(`Freeze commit ${FROZEN_AT} is missing; fetch the full Git history`);
+    return undefined;
   }
   return execFileSync("git", ["ls-tree", "-r", "--name-only", FROZEN_AT], {
     cwd: root,
@@ -168,22 +181,24 @@ describe("Rust port capability ledger", () => {
     expect(missing).toEqual([]);
   });
 
-  it("cites only paths that exist now or existed at the freeze commit", () => {
+  it("cites only paths that exist now or that the cutover removed", () => {
     const paths = cited.filter(
       (text) =>
         /^[\w.-]+(?:\/[\w.-]+)+\/?$/u.test(text) &&
         !text.includes("*") &&
         (/\.(?:ts|rs|py|go|mjs|md|json)$/u.test(text) || text.endsWith("/")),
     );
-    const frozen = frozenFiles();
-    const existedAtFreeze = (path: string) =>
-      path.endsWith("/") ? frozen.some((file) => file.startsWith(path)) : frozen.includes(path);
+    const removed = new Set(removedAtCutover);
+    const removedByCutover = (path: string) =>
+      path.endsWith("/")
+        ? removedAtCutover.some((file) => file.startsWith(path))
+        : removed.has(path);
     const missing = paths.filter(
       (path) =>
         !existsSync(join(root, path)) &&
         !existsSync(join(root, "rust/crates", path)) &&
         !existsSync(join(root, "rust/crates/cli/tests", path)) &&
-        !existedAtFreeze(path),
+        !removedByCutover(path),
     );
     // Design documents live in the gitignored contributing/ directory.
     expect(
@@ -201,15 +216,18 @@ describe("Rust port capability ledger", () => {
     const patterns = citations
       .filter((text) => /[*{…]/u.test(text) || text.endsWith("/"))
       .map(pattern);
-    const tests = frozenFiles().filter(
-      (path) =>
-        /\.test\.ts$/u.test(path) ||
-        /_test\.go$/u.test(path) ||
-        /^sdks\/python\/tests\/test_[^/]*\.py$/u.test(path),
-    );
+    const tests = frozenTestFiles;
     expect(tests.length).toBeGreaterThan(300);
     expect(
       tests.filter((path) => !exact.has(path) && !patterns.some((glob) => glob.test(path))),
     ).toEqual([]);
+  });
+
+  it.skipIf(filesAtFreeze() === undefined)("lists match the freeze commit", () => {
+    const frozen = filesAtFreeze() ?? [];
+    expect(frozenTestFiles).toEqual(frozen.filter(isTestFile).sort());
+    const atFreeze = new Set(frozen);
+    expect(removedAtCutover.filter((path) => !atFreeze.has(path))).toEqual([]);
+    expect(removedAtCutover.filter((path) => existsSync(join(root, path)))).toEqual([]);
   });
 });

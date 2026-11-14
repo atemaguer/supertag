@@ -76,7 +76,7 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 
 | Path | Decision | Evidence |
 | --- | --- | --- |
-| `scripts/check-docs*.mjs`, `docs-*.mjs`, `check-install-docs.test.mjs` | Keep, updated | `pnpm docs:check`; now checks commands against `rust/docs/cli-reference.md` |
+| `scripts/check-docs*.mjs`, `docs-*.mjs`, `*.test.mjs` | Keep, updated | `pnpm docs:check`; now checks commands against `rust/docs/cli-reference.md`. The install, first-run, and freed-page tests now require the native install and refuse `supertag-ai`. The `typescript` CI job runs `node --test scripts/*.test.mjs`, which no job ran before |
 | `scripts/check-proto-generation.mjs`, `check-proto-breaking.mjs`, `protoc-gen-manifest-schema.mjs`, `protoc-gen-operator-docs.mjs` | Keep | `pnpm proto:check` and `proto:breaking` over `spec/proto`, which still generates the TUI's Go types, `spec/manifests`, and `docs/reference/operator-api` |
 | `scripts/install-harness-clis.mjs` | Keep, reduced | Installs Claude Code for the kept harness tests; the Codex part read the removed Codex package |
 | `scripts/with-test-postgres*.mjs`, `test-verify*.mjs`, `check-migration-journals*.mjs` | Remove | Served the TypeScript store and its PostgreSQL suites |
@@ -91,10 +91,11 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 
 | Workflow | Decision | Change |
 | --- | --- | --- |
-| `ci.yml` | Keep, updated | Dropped the TypeScript `verify` job (store migrations, `pnpm test` over the TypeScript runtime, `supertag-ai` packaging, CLI deployment check) and `compatibility`. Added `typescript` (Node 22.13.0 and 24: install, Claude Code CLI, `pnpm check`, `pnpm build`, `pnpm test`, with full history for the ledger check). `protocol-conformance` keeps `proto:check`, `proto:breaking --self-test`, and the operator API Go module, and drops the TypeScript-Worklet Python and Go conformance runs. `rust-harness-interop`, `python-sdk`, and `tui` are unchanged |
+| `ci.yml` | Keep, updated | Dropped the TypeScript `verify` job (store migrations, `pnpm test` over the TypeScript runtime, `supertag-ai` packaging, CLI deployment check) and `compatibility`. Added `typescript` (Node 22.13.0 and 24: install, Claude Code CLI, `pnpm check`, `pnpm build`, `pnpm test`, and `node --test scripts/*.test.mjs`, with full history so the ledger check can confirm its committed lists). `protocol-conformance` keeps `proto:check`, `proto:breaking --self-test`, and the operator API Go module, and drops the TypeScript-Worklet Python and Go conformance runs. `rust-harness-interop`, `python-sdk`, and `tui` are unchanged |
 | `rust-port.yml` | Keep | Builds the five bridges and the TUI and runs the Rust, Linux-root, desktop, crash-durability, and bindings jobs; unchanged |
-| `native-release-check.yml` | Keep | Native archives; unchanged |
-| `publish-python.yml`, `publish-worker-base.yml` | Keep | Python SDK and Workspace base image; unchanged |
+| `native-release-check.yml` | Keep | Native archives; header comment no longer names the removed workflows |
+| `publish-python.yml` | Keep, manual only | No longer runs on `release: published`: with the npm workflows removed, a GitHub Release would otherwise publish only the Python SDK. See decision 4 |
+| `publish-worker-base.yml` | Keep | Workspace base image; unchanged |
 | `publish.yml`, `release-cli.yml`, `verify-installer.yml` | Remove | Published `supertag-ai` to npm, uploaded `install.sh`, and verified the npm installer |
 
 ## Root configuration
@@ -115,22 +116,33 @@ exist, and required every tracked TypeScript test file to be cited. The ledger i
 
 - still checks every cited Rust test name against the current Rust sources, so renaming or
   deleting Rust evidence fails;
-- accepts a cited path that exists now or existed at `6c934be8`;
-- checks the test-file assignment against the files at `6c934be8`.
+- requires every other cited path (Rust, Go, Python, scripts, and docs included) to exist now,
+  unless it is in `tests/rust-port-baseline/removed-at-cutover.txt`, the 1,081 tracked files at
+  `6c934be8` that this removal deleted. A later deletion of a cited file therefore fails;
+- checks the test-file assignment against `frozen-test-files.txt`, the 591 TypeScript, Go, and
+  Python test files at `6c934be8`.
 
-It reads the freeze commit from Git history, so the `typescript` CI job checks out with
-`fetch-depth: 0`. Converting it to a Rust test was rejected: it would duplicate the Markdown
-parser in Rust for a frozen document, and Vitest still runs for the kept packages.
+Both lists are committed, so `pnpm test` passes in a shallow clone or a source archive. When the
+freeze commit is present, one more test confirms the lists against it; the `typescript` CI job
+checks out full history so that test runs. Converting the check to a Rust test was rejected: it
+would duplicate the Markdown parser in Rust for a frozen document, and Vitest still runs for the
+kept packages.
 
 ## Documentation
 
 `scripts/check-docs.mjs` previously read command help from the built TypeScript CLI. It now checks
-every page against `rust/docs/cli-reference.md`. 67 of 96 checked pages still document the
-TypeScript CLI's commands; they are listed in `scripts/docs-pending-cli.txt`, and their commands
-are not checked until rewritten. Links, vocabulary, and the other documentation rules still apply
-to them. Links to removed files were repaired, and the guides for the removed TypeScript Fly.io
-and Railway definitions were removed in favor of `deploy/native/README.md`. The ledger row
-"Documentation describes the shipped product" records this as the deferred cutover step.
+every page against `rust/docs/cli-reference.md`, including plain `supertag`, which opens the
+terminal UI. The entry points were rewritten against the Rust CLI: `README.md`'s first run and
+SDK section, `docs/operations/install.md` (build a native archive from a clean commit with
+`rust/scripts/native_release.py` and install it with `rust/scripts/install_native_release.py`),
+the build tools in `docs/operations/requirements.md`, and `docs/guides/self-hosting.md` (per-role
+`supertag setup|check|verify deployment`, `deploy/native`, `supertag connect`, host Auth Keys, and
+`supertag host enroll`). `docs/guides/deployment-setup.md`, which taught the TypeScript
+`setup deployment --platform` flow, was removed in favor of `deploy/native/README.md`. 63 of 95
+checked pages still document the TypeScript CLI's commands; they are listed in
+`scripts/docs-pending-cli.txt`, and their commands are not checked until rewritten. Links,
+vocabulary, and the other documentation rules still apply to them. The ledger row "Documentation
+describes the shipped product" records this as the deferred cutover step.
 
 ## Decisions for the operator
 
@@ -139,24 +151,56 @@ and Railway definitions were removed in favor of `deploy/native/README.md`. The 
    adapter entry points and, if retained, a native CLI launcher. No such package exists yet, and no
    workflow publishes native archives. Choose the native distribution channel (GitHub Release
    assets with a new curl installer, an npm launcher, or both) before the next release.
-2. **Proposed drop.** The ledger row "TypeScript operator commands without a Rust command" is still
-   a proposed drop awaiting approval. Removing the TypeScript CLI makes it effective in this
-   checkout; the code remains at `6c934be8`.
-3. **User documentation rewrite.** 67 pages still describe the TypeScript CLI, npm installation,
-   `supertag-ai` custom Workers, Docker Compose with `deploy/compose.yaml`, and the TypeScript
-   deployment setup. Approve rewriting them against the Rust CLI, which removes the pending list.
+2. **Ledger rows this removal puts into effect.** Removing the TypeScript code makes each row
+   below final in this checkout, though the ledger still records it as awaiting approval. Approve
+   them, or keep the code, before the removal merges. The code remains at `6c934be8`.
+   - Proposed drops:
+     - `{ secretRef: NAME }` stdio MCP environment references ("stdio MCP servers and MCP
+       credential redirect protection").
+     - The metrics inbox section, native subagent figures, reservations, reply retries, RPC
+       counters, and separate placement latency ("Workstream post store, coordination metrics,
+       spend aggregation").
+     - The `task.worker-host-removed` Task event ("Auth Keys, enrollment, revoke, drain/resume
+       hosts").
+     - The TypeScript operator commands without a Rust command: `message tag`,
+       `message objective`, `watch inbox`, `--output yaml`, `worker-profile`, `delete --dry-run`,
+       `delete surface`, `enroll worker-host --out`, `create objective --workspace|--dry-run`, and
+       `list objective --owner`.
+   - Changes not yet approved:
+     - JSON written with `\u` escapes for unsafe characters, and exit code 2 for usage errors
+       ("CLI help, plain language, terminal safety").
+     - The audit sink is off unless configured, where TypeScript wrote to standard error.
+     - Revoking a removed host stays an explicit `supertag host revoke`.
+     - No Workspace write-back after a failed Task Attempt, and no whole-bucket S3 sources.
+   - Open: redacting host-supplied uncertainty reasons, marked "to port in the final cleanup
+     pass". After the removal its TypeScript reference exists only at `6c934be8`.
+   - Partial: the 53 Partial rows keep their recorded gaps; their TypeScript reference
+     implementation now exists only at `6c934be8`.
+3. **User documentation rewrite.** 63 pages still describe the TypeScript CLI, npm installation,
+   `supertag-ai` custom Workers, and Docker Compose with the removed `deploy/compose.yaml`
+   (`docs/operations/control-plane.md`, `skills/deploy-supertag`). Approve rewriting them against
+   the Rust CLI, which removes the pending list.
 4. **Legacy protocol definitions.** `spec/proto` still holds `supertag.worklet.v1`,
    `environment.v1`, `session.v1`, `artifact.v1`, and `coordination.v1`, which no kept code uses,
    and `supertag.operator.v1`, which only the terminal UI uses for its view types. The
    `spec/*.schema.json` wire schemas, `docs/reference/operator-api`, and the Python SDK's
    `supertag/operator/v1` bindings come from the same era. Decide whether to delete them (an
    accepted breaking change for `proto:breaking`) and move the TUI to the `runtime.v2` Go bindings.
+   No file under `rust/crates` serves `supertag.operator.v1`, so the Python SDK's operator client
+   cannot reach a Rust Control Plane. `publish-python.yml` is therefore manual only; decide what the
+   next Python SDK release contains before running it.
 5. **Pruning inside kept packages.** `@supertag/worker-sdk` and the Claude Code, Cursor, OpenCode,
    E2B, and Modal packages still contain the TypeScript Worker runtime (Worklets, durable journals,
    harness classes) beside the Rust bridges, and their tests still cover it. Decide whether to prune
    them to the bridge entry points.
 6. **Existing npm installations.** `rust/scripts/install_native_release.py` recognizes the npm
    `install.sh` layout so a native install can replace it. Keep or remove that recognition.
+7. **Version numbering.** The root `package.json` and the Python SDK say `0.2.0-alpha.9`, which
+   mirrored the removed `supertag-ai`; `scripts/check-docs.mjs` and the Python pin test read
+   "the release" from the root `package.json`. The Rust workspace, the native archive, and the
+   terminal UI build say `0.1.0` (`rust/Cargo.toml`). Choose the next release's version and its
+   single source. Picking a release number is a release decision, so it was not done on this
+   branch.
 
 ## Follow-ups not done here
 
@@ -166,5 +210,3 @@ and Railway definitions were removed in favor of `deploy/native/README.md`. The 
 - `CHANGELOG.md` gets its entry at integration, per `AGENTS.md`.
 - `ROADMAP.md` still links the removed Fly.io guide; it was left alone because it has
   uncommitted operator edits elsewhere.
-- `SECURITY.md` still names the latest published `supertag-ai` version as supported.
-- `scripts/docs-first-run.test.mjs` already failed at `6c934be8` and is not run by any check.

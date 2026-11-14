@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The capability ledger check reads its freeze commit from history.
+          # The capability ledger check confirms its committed lists against the freeze commit.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
@@ -121,6 +121,8 @@ jobs:
       - run: pnpm check
       - run: pnpm build
       - run: pnpm test
+      # Documentation and script checks under scripts/, which Vitest does not collect.
+      - run: node --test scripts/*.test.mjs
 
   tui:
     runs-on: ${{ matrix.os }}

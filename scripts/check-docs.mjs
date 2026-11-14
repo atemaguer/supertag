@@ -88,10 +88,11 @@ const nativeCommands = new Map(); // "host enroll" -> Set of flags its help list
 for (const section of readFileSync(join(root, "rust/docs/cli-reference.md"), "utf8")
   .split(/^## /mu)
   .slice(1)) {
-  const heading = section.match(/^`supertag ([^`]+)`/u);
+  // The top-level `supertag` section is the command with no subcommand: the terminal UI.
+  const heading = section.match(/^`supertag(?: ([^`]+))?`/u);
   if (heading)
     nativeCommands.set(
-      heading[1],
+      heading[1] ?? "",
       new Set([...section.matchAll(/--[a-z][a-z0-9-]*/gu)].map(([flag]) => flag)),
     );
 }
@@ -107,11 +108,11 @@ function checkCommand({ command }) {
     path.push(word);
   }
   let key;
-  for (let length = path.length; length > 0 && !key; length--) {
+  for (let length = path.length; length >= 0 && key === undefined; length--) {
     const candidate = path.slice(0, length).join(" ");
-    if (nativeCommands.has(candidate)) key = candidate;
+    if (nativeCommands.has(candidate) && (length > 0 || path.length === 0)) key = candidate;
   }
-  if (!key)
+  if (key === undefined)
     return `\`supertag ${path.slice(0, 2).join(" ")}\` is not in rust/docs/cli-reference.md`;
   const unknown = words
     .filter((word) => /^--[a-z]/u.test(word))

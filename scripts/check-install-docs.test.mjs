@@ -4,30 +4,37 @@ import { test } from "node:test";
 import { pythonVersion } from "./docs-versions.mjs";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-const files = [
+const entryPoints = [
   "README.md",
   "docs/operations/install.md",
   "skills/SKILLS.md",
   "skills/install-and-first-reply/SKILL.md",
   "skills/deploy-supertag/SKILL.md",
 ];
-for (const file of files) {
-  test(`${file} uses published CLI installation`, () => {
+for (const file of entryPoints) {
+  test(`${file} sends readers to the native install`, () => {
     const text = read(file).split("## Contributing")[0];
-    assert.doesNotMatch(text, /pnpm install:cli|git clone|npm and PyPI packages come later/u);
-    assert.match(text, /npm install -g supertag-ai|\]\([^)]*operations\/install\.md/iu);
+    assert.match(text, /\]\([^)]*operations\/install\.md|native_release\.py package/u);
   });
 }
 
-test("application guides install the published TypeScript SDK", () => {
-  for (const file of [
-    "README.md",
-    "docs/guides/custom-workers.md",
-    "docs/guides/modal-workers.md",
-  ]) {
-    assert.match(read(file), /npm install supertag-ai\b/u);
-    assert.doesNotMatch(read(file), /npm install \/absolute\/path\/to\/supertag/u);
-  }
+// The npm package and its installer were removed with the TypeScript runtime.
+for (const file of ["README.md", "docs/operations/install.md", "docs/operations/requirements.md"]) {
+  test(`${file} does not install the removed npm package`, () => {
+    assert.doesNotMatch(
+      read(file),
+      /supertag-ai|unpkg\.com|npm (?:install|uninstall) -g supertag/u,
+    );
+  });
+}
+
+test("the install guide builds and installs a native archive from a clean commit", () => {
+  const install = read("docs/operations/install.md");
+  assert.match(
+    install,
+    /uv run rust\/scripts\/native_release\.py package --commit "\$\(git rev-parse HEAD\)"/u,
+  );
+  assert.match(install, /uv run rust\/scripts\/install_native_release\.py "\$archive"/u);
 });
 
 test("Python installation pins the matching PyPI prerelease", () => {
@@ -50,6 +57,6 @@ test("Python installation pins the matching PyPI prerelease", () => {
 });
 
 test("the user install guide keeps source-development scripts in CONTRIBUTING.md", () => {
-  assert.doesNotMatch(read("docs/operations/install.md"), /\bpnpm\s/u);
+  assert.doesNotMatch(read("docs/operations/install.md"), /^\s*pnpm\s/mu);
   assert.match(read("CONTRIBUTING.md"), /pnpm supertag/u);
 });

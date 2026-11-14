@@ -1,9 +1,9 @@
 name: Publish Python SDK
 
+# Manual only. A GitHub Release no longer publishes anything on its own: the npm
+# release workflows were removed with the TypeScript runtime, and the native
+# distribution channel is not chosen yet (rust/docs/typescript-removal-inventory.md).
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       release_tag:
@@ -33,7 +33,7 @@ jobs:
       - run: python -m pip install --upgrade build packaging twine
       - name: Verify release tag
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           python - <<'PY'
           import os

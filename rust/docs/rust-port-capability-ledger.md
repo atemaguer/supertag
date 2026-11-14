@@ -17,10 +17,14 @@ runtime. The cutover branch removed the TypeScript Control Plane, Gateway, CLI, 
 Worklet transport, Codex harness, shared-execution package, and the portable baseline drivers (see
 `rust/docs/typescript-removal-inventory.md`). TypeScript test citations below name files as they
 were at `6c934be8`; read them with `git show 6c934be8:PATH`. Wording such as "TypeScript code is
-kept" describes the state at the freeze. The removal does not approve any row that is still a
-proposed drop. `tests/rust-port-baseline/capability-ledger.test.ts` now checks that Rust citations
-still name existing Rust tests, and that TypeScript citations and test-file assignments match the
-freeze commit.
+kept" describes the state at the freeze. Removing the TypeScript code puts every row still
+marked a proposed drop, a change not yet approved, or Open into effect in the checkout, and leaves
+Partial rows without their TypeScript reference implementation outside `6c934be8`; the inventory's
+"Decisions for the operator" lists each one for approval before the removal merges.
+`tests/rust-port-baseline/capability-ledger.test.ts` now checks that Rust citations still name
+existing Rust tests, that every other cited path exists or was removed by the cutover
+(`removed-at-cutover.txt`), and that test-file assignments match the freeze commit
+(`frozen-test-files.txt`).
 
 ## How to read this ledger
 

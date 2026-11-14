@@ -11,19 +11,18 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer.** The `engines.node` field in the root
-  [package.json](../../package.json) defines the supported runtime.
-- **npm**, included with Node.js, to install the published CLI and SDK. Source-development
-  tools are listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Node.js 22.13.0 or a later 22.x release.** SuperTag runs its Claude Code, Cursor,
+  OpenCode, Modal, and E2B helpers with the Node.js on `PATH`.
+- **Build tools** for [installing from this repository](install.md): the Rust toolchain that
+  [`rust/rust-toolchain.toml`](../../rust/rust-toolchain.toml) pins, Go,
+  [uv](https://docs.astral.sh/uv/) to run the build and install scripts, and the version of pnpm
+  named by the `packageManager` field of the root [package.json](../../package.json).
 - **git**, available on `PATH`, and a repository for your first Task.
 - **macOS or Linux.** Restarting background services uses launchd on macOS and systemd user
   services on Linux. Native Windows is not a supported alpha installation target; in particular,
   SuperTag does not implement a Windows service manager. Use a Linux host for that workflow.
-- **Disk space for dependencies and your work.** Allow about 1 GB for the installed package, plus
-  space for repositories, Task outputs, and logs. With `npm install -g`, npm also downloads the
-  Claude Code and Codex CLI copies that the vendor SDKs bundle, about 520 MB more on macOS arm64.
-  SuperTag doesn't use them, and the [installer script](install.md#1-install-the-cli-with-the-installer-script)
-  removes them.
+- **Disk space for the build and your work.** Allow several GB for the archive build, which uses a
+  temporary directory, plus space for repositories, Task outputs, and logs.
 
 The small bridge that runs MCP tools inside a sandbox has a separate runtime minimum, enforced
 when SuperTag prepares that sandbox. See [MCP tools](../guides/mcp-tools.md#5-connect-from-the-execution-environment-when-the-server-lives-there).

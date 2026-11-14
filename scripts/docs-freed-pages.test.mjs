@@ -17,9 +17,3 @@ test("newly freed pages use the public vocabulary", () => {
   ])
     assert.deepEqual(checkVocabulary(path, read(path)), []);
 });
-
-test("Modal Workers install the published SDK", () => {
-  const modal = read("docs/guides/modal-workers.md");
-  assert.match(modal, /npm install supertag-ai/u);
-  assert.doesNotMatch(modal, /install and build the checkout|npm install \/absolute/u);
-});

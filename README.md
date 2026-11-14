@@ -79,14 +79,14 @@ thread, and the same Tag keeps the responsibilities you assigned it. [Connect a 
 
 ## Run your first Tag
 
-On macOS or Linux, install Node.js and Git, then set up a [supported coding agent](#works-with).
-[Check requirements and sign-in](docs/operations/requirements.md)
+On macOS or Linux, install the build tools and Git, then set up a
+[supported coding agent](#works-with). SuperTag has no published release yet, so you build and
+install it from this repository.
+[Check requirements and sign-in](docs/operations/requirements.md) · [Install SuperTag](docs/operations/install.md)
 
-Run this from an existing Git repository with at least one commit:
+After installing, run this from an existing Git repository with at least one commit:
 
 ```sh
-curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
 supertag init
 supertag
 ```
@@ -160,15 +160,9 @@ application create and direct Tags, send them work, and inspect their progress. 
 could connect a dependency scanner to a maintenance Tag and show its branches and test results in
 your own review interface. [Explore the API](docs/reference/control-plane-api.md)
 
-To bring your own execution system, use the public SDK. A **Worker** runs a turn of work for a Tag.
-A **harness** connects a Worker to a coding agent or another execution system. You can implement
-either to fit your application.
-
-```sh
-npm install supertag-ai
-```
-
-For Python applications, install the SDK version that matches your Control Plane:
+To bring your own execution system, use the Python SDK. A **Worker** runs a turn of work for a
+Tag. A **harness** connects a Worker to a coding agent or another execution system. You can
+implement either to fit your application. Install the SDK version that matches your Control Plane:
 
 ```sh
 python -m pip install 'supertag==0.2.0a9'

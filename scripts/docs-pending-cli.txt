@@ -6,7 +6,6 @@ docs/concepts/tasks.md
 docs/guides/coding-agent-operator.md
 docs/guides/custom-context.md
 docs/guides/custom-workers.md
-docs/guides/deployment-setup.md
 docs/guides/first-team.md
 docs/guides/harness-runtime.md
 docs/guides/mcp-tools.md
@@ -17,7 +16,6 @@ docs/guides/objective-overview.md
 docs/guides/objectives.md
 docs/guides/ongoing-responsibilities.md
 docs/guides/python-workers.md
-docs/guides/self-hosting.md
 docs/guides/tag-messaging.md
 docs/guides/talk-to-a-tag.md
 docs/guides/teams.md
@@ -28,7 +26,6 @@ docs/guides/workstreams.md
 docs/guides/write-an-objective.md
 docs/operations/cli.md
 docs/operations/control-plane.md
-docs/operations/install.md
 docs/operations/resources.md
 docs/reference/api-stability.md
 docs/reference/artifacts.md
@@ -58,7 +55,6 @@ docs/surfaces/linear.md
 docs/surfaces/README.md
 docs/surfaces/slack.md
 docs/surfaces/teams.md
-README.md
 skills/configure-tags/SKILL.md
 skills/connect-a-surface/SKILL.md
 skills/deploy-supertag/SKILL.md

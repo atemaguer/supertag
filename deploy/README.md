@@ -3,7 +3,7 @@
 This directory owns the container images and platform definitions for SuperTag's native
 services: a Control Plane, an optional Gateway for collaboration surfaces, and Worker Hosts. It
 also owns the base image for Workspace sandboxes.
-Follow the [deployment setup guide](../docs/guides/deployment-setup.md) for the shared CLI workflow.
+Follow [Configure, check, and verify](native/README.md#configure-check-and-verify) for the shared CLI workflow.
 
 ```text
 deploy/
