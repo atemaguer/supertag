@@ -377,4 +377,4 @@ reason.
 - [Organize Tags into Teams](teams.md)
 - [Share a Team's Workstream](workstreams.md)
 - [Objective coordination reference](../reference/coordination.md)
-- [Objective HTTP contract](../../spec/objectives.md)
+- [Control Plane API](../reference/control-plane-api.md)

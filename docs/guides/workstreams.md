@@ -103,4 +103,4 @@ The first command lists the post in sequence order. The second shows the same po
 - [Organize Tags into Teams](teams.md)
 - [Send messages between Tags](tag-messaging.md)
 - [Define and complete an Objective](objectives.md)
-- [Workstream HTTP contract](../../spec/workstreams.md)
+- [Control Plane API](../reference/control-plane-api.md)

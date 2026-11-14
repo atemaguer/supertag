@@ -386,6 +386,5 @@ Team membership permits reading and posting to the Team's Workstream. This does 
 Context Set access, native provider permissions, or messaging grants, and a post carries no
 authority. See [Workstream](coordination.md#workstream).
 
-Objectives use the experimental [Objective API](../../spec/objectives.md). A Tag reads the
-Objectives it owns and those whose Team it belongs to; only the owner or an operator changes an
-Objective's status. See [Objectives](coordination.md#objectives).
+Only an Objective's owner, through its turns' results, or an operator changes an Objective's
+status. See [Objectives](coordination.md#objectives).
