@@ -292,7 +292,7 @@ language. A host carries three kinds of label:
 | Declared | Any label, such as `gpu` | `supertag worker-host --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
-`status.labels` on a Worker Host lists all of its labels. `status.grantedLabels` lists those its
+`labels` in `supertag get host ID` lists all of a Worker Host's labels. `granted_labels` lists those its
 Auth Key granted. Automatic and declared labels come from the host's latest connection and are
 self-reported: a host can claim any label. Labels therefore decide placement only. They never grant
 access, and a Tag's bindings stay the only way to let a host run its Tasks.
@@ -351,7 +351,7 @@ default. Starting low keeps routine work cheap; the actors raise effort when wor
 the default and allowed range for its Tags. A Tag's own `spec.execution` overrides its Roles' field
 by field, so the Tag wins. When several Roles set a field, the first Role by name wins. A Role's
 models apply only to its own harness: a Tag that switches to another harness does not inherit them.
-`status.execution` on a Tag shows the resulting range, and `supertag describe tag` prints it.
+`supertag describe tag` prints the resulting range.
 
 Each harness maps effort to its own option. Codex receives it as `model_reasoning_effort`, and
 Claude Code receives it as its effort option. OpenCode has no effort option, so it ignores effort
