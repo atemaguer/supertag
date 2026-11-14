@@ -531,11 +531,6 @@ async function terminateProcess(sandbox: SandboxInstance, process: SandboxProces
   }
 }
 
-/** Terminates a sandbox, waiting at most 5 seconds for confirmation. */
-export async function terminateSandbox(sandbox: SandboxInstance): Promise<void> {
-  return terminate(sandbox);
-}
-
 async function terminate(sandbox: SandboxInstance): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

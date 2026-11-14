@@ -19,9 +19,6 @@
     "supertag": "cargo run --quiet --manifest-path rust/Cargo.toml --locked -p supertag-cli --bin supertag --",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:cursor:live": "SUPERTAG_LIVE_CURSOR=1 vitest run packages/runtime/harnesses/cursor/cursor-live.test.ts",
-    "test:volumes:modal:live": "SUPERTAG_LIVE_MODAL=1 vitest run packages/runtime/environments/modal/modal-volumes-live.test.ts",
-    "test:workspace:modal:live": "SUPERTAG_LIVE_MODAL=1 node --import tsx --conditions=development packages/runtime/environments/modal/modal-workspace-conformance-live.ts",
     "typecheck": "tsc --build --pretty false"
   },
   "devDependencies": {
@@ -32,7 +29,6 @@
     "@connectrpc/connect": "2.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "26.1.2",
-    "better-sqlite3": "12.11.1",
     "tsx": "4.23.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
