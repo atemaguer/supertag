@@ -34,8 +34,12 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
    do.
 5. While the agent works, the adapter sends progress text with `Publish`, token usage with
    `ReportUsage`, and the limits it enforces with `ConfirmExecutionLimits`.
-6. `Complete` ends the Task Attempt with the result text, whether it succeeded, and a new Session
-   checkpoint so the next turn can resume.
+6. A message that arrives while the Task runs can be taken with `TakeLiveInput` and settled with
+   `SettleLiveInput`; the adapter must handle accepted input before it completes.
+7. `Complete` ends the Task Attempt with the result text, whether it succeeded, a new Session
+   checkpoint so the next turn can resume, and, on an Objective owner's turn, an Objective signal:
+   `progress`, `ready_for_review`, `completed`, or `blocked`. The built-in adapters always report
+   `progress`.
 
 The Worker Host supervises the adapter's process group. It stops the adapter when the Task is
 cancelled or reaches its time limit, and it cleans up processes the adapter leaves behind.

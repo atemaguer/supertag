@@ -35,6 +35,6 @@ For example, a repository can put this at `.devcontainer/devcontainer.json`:
 }
 ```
 
-The Worker runs those commands in the remote preparation sandbox. Each Task starts in a separate
+The Worker Host runs those commands in the remote preparation sandbox. Each Task starts in a separate
 sandbox created from the resulting image or template. See the [workspace guide](../guides/workspaces.md)
 for repository and delivery setup.
