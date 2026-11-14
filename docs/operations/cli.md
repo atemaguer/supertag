@@ -45,8 +45,8 @@ Worker Host will have, and asks for a Control Plane port, a harness, and the Tag
   ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace.
 
-New Sessions of `lead` start from that commit. To move them to a newer one, put the binding again
-with `supertag tag put lead --workspace-id ID --workspace-base COMMIT`; see
+New Sessions of `lead` start from that commit. To move them to a newer one, apply a Tag manifest
+with a new `workspace.baseCommit`; see
 [Work in a repository with Workspaces](../guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 `supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
